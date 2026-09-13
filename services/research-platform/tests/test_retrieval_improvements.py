@@ -80,6 +80,9 @@ def test_hybrid_retrieval_widens_candidates_but_bounds_reranking(monkeypatch):
     assert sizes == [12]
     assert all(c["size"] == 50 for c in calls)
     assert result
+    metrics = {}
+    assert search.search('运输', rerank_limit=12, min_rerank_score=100, metrics=metrics) == []
+    assert metrics['relevance_rejected'] == 12
 
 
 def test_offline_unreviewed_sample_is_rejected_before_storage_or_inference():
@@ -100,3 +103,76 @@ def test_embedding_windows_reserve_linked_footnote_budget():
     assert len(with_notes) > 1
     assert all("不包括乙地" in h["retrieval_text"] for h in with_notes)
     assert all(len(h["retrieval_text"]) <= 100 for h in hits)
+
+
+def test_budget_rejection_refills_from_later_candidates():
+    sources = [chapter('长' * 150), chapter('短证据甲。'), chapter('短证据乙。')]
+    hits = [{**next(retrieval_chunks(c, '书')), 'score': 3-i} for i,c in enumerate(sources)]
+    metrics = {}
+    result = expand_hits(hits, {c['id']:c for c in sources}.__getitem__, limit=2,
+                         context_chars=100, total_chars=100, metrics=metrics)
+    assert [h['text'] for h in result] == ['短证据甲。', '短证据乙。']
+    assert metrics['budget_rejected'] == 1
+
+
+def test_diversity_does_not_promote_a_remote_weak_chapter():
+    hits = [{'chapter_id':'a', 'score':i} for i in range(20, 0, -1)] + [{'chapter_id':'b', 'score':-100}]
+    assert all(h['chapter_id'] == 'a' for h in diverse_order(hits, relevance_window=8)[:8])
+
+
+def test_candidate_reservation_keeps_single_lane_evidence_and_budget():
+    from hrs_platform.retrieval_ranking import candidates_for_rerank
+    def row(i):
+        return {'_id':i, '_source':{'id':i}}
+    lanes = [[row('lexical'), row('shared1'), row('shared2')],
+             [row('dense'), row('shared1'), row('shared2')]]
+    result = candidates_for_rerank(lanes, 2, lane_quota=1)
+    assert {r['id'] for r in result} == {'lexical', 'dense'}
+
+
+def test_structured_table_windows_preserve_rowspans_and_long_notes_keep_owner():
+    from hrs_platform.retrieval_inputs import bounded_chunks
+    tokenizer = SimpleNamespace(encode=lambda text: SimpleNamespace(ids=list(text)))
+    text = '<table><tr><th>地</th><th>量</th></tr>' + ''.join(
+        '<tr><td rowspan="2">甲</td><td>120</td></tr><tr><td>130</td></tr>' for _ in range(8)) + '</table>'
+    source = chapter(text)
+    rows = list(bounded_chunks(source, retrieval_chunks(source, '书'), tokenizer, limit=160))
+    assert len(rows) > 1
+    assert all(r['text'].count('<tr>') == r['text'].count('</tr>') for r in rows)
+    assert all('rowspan' not in r['text'] or '<tr><td>130</td></tr>' in r['text'] for r in rows)
+    assert all(len(r['retrieval_text']) <= 160 for r in rows)
+    source = chapter('正文[^a]。\n\n[^a]: 第一段的说明。\n\n    第二段的说明。\n\n    第三段的说明。\n')
+    notes = [r for r in bounded_chunks(source, retrieval_chunks(source, '书'), tokenizer, limit=40)
+             if r['kind'] == 'note']
+    assert notes and all(any(c['role'] == 'note_owner' for c in r['context']) for r in notes)
+
+
+def test_no_answer_thresholds_are_diagnostics_not_probabilities():
+    from hrs_platform.retrieval_evaluation import threshold_diagnostics
+    result = threshold_diagnostics([
+        {'unanswerable':False, 'timing':{'top_rerank_score':3}},
+        {'unanswerable':True, 'timing':{'top_rerank_score':1}},
+    ])
+    assert result[-2] == {'threshold':3, 'answerable_retention':1, 'unanswerable_rejection':1}
+    assert result[-1]['answerable_retention'] == 0 and result[-1]['unanswerable_rejection'] == 1
+    assert threshold_diagnostics([{'unanswerable':False, 'timing':{}}]) == []
+
+
+def test_year_boost_recognizes_year_next_to_chinese_characters():
+    clauses = lexical_query('查询1939年运输', [])['bool']['should']
+    assert any(c.get('match_phrase', {}).get('text_search', {}).get('query') == '1939' for c in clauses)
+
+
+def test_synthetic_benchmark_is_reproducible_and_never_self_approved():
+    import runpy
+    from pathlib import Path
+    build = runpy.run_path(str(Path(__file__).resolve().parents[3] / 'scripts/build_retrieval_benchmark.py'))['build']
+    data = build()
+    assert data == build()
+    assert len(data['cases']) == 100 and len(data['chapters']) == 40
+    assert sum(not c['expected'] for c in data['cases']) == 20
+    assert all(c['development_review'] == {} for c in data['chapters'])
+    chapters = {c['id']:c for c in data['chapters']}
+    for case in data['cases']:
+        for part in case['expected']:
+            assert 0 <= part['start'] < part['end'] <= len(chapters[part['chapter_id']]['text'])

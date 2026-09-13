@@ -107,7 +107,9 @@ class LocalModels:
         self._models[model_name] = model
         return model
 
-    def _batched(self, values, batch_size, operation):
+    def _batched(self, values, batch_size, operation, lengths=None):
+        order = sorted(range(len(values)), key=lambda i: lengths[i]) if lengths is not None else list(range(len(values)))
+        values = [values[i] for i in order]
         output, offset = [], 0
         self.last_batches = []
         while offset < len(values):
@@ -129,9 +131,13 @@ class LocalModels:
                         retryable=True,
                     ) from None
                 batch_size = max(1, size // 2)
-        return output
+        restored = [None] * len(output)
+        for original, value in zip(order, output, strict=True):
+            restored[original] = value
+        return restored
 
     def _check(self, tokenizer, values, limit, *, pairs=False, special=True):
+        lengths = []
         for value in values:
             encoded = (
                 tokenizer(*value, add_special_tokens=special, truncation=False)
@@ -145,6 +151,8 @@ class LocalModels:
                     status=422,
                     errors=[{"actual_tokens": len(encoded["input_ids"]), "maximum_tokens": limit}],
                 )
+            lengths.append(len(encoded["input_ids"]))
+        return lengths
 
     def embed(self, texts, *, query=False):
         name = self.settings.embedding_model
@@ -153,7 +161,7 @@ class LocalModels:
             f"Instruct: {QWEN_INSTRUCTION}\nQuery:{value}" if query and name.startswith("Qwen/") else value
             for value in texts
         ]
-        self._check(tokenizer, values, 32768 if name.startswith("Qwen/") else 8192)
+        lengths = self._check(tokenizer, values, 32768 if name.startswith("Qwen/") else 8192)
         with self._lock:
             model = self._load("embedding")
             tokenizer.padding_side = "left" if name.startswith("Qwen/") else "right"
@@ -166,7 +174,7 @@ class LocalModels:
                 pooled = hidden[:, -1] if name.startswith("Qwen/") else hidden[:, 0]
                 return torch.nn.functional.normalize(pooled.float(), p=2, dim=1).cpu().numpy().tolist()
 
-            vectors = self._batched(values, self.settings.embedding_batch, infer)
+            vectors = self._batched(values, self.settings.embedding_batch, infer, lengths)
         array = np.asarray(vectors, dtype=np.float32)
         if (
             array.shape != (len(values), 1024)
@@ -195,7 +203,7 @@ class LocalModels:
             if qwen
             else [(query, value) for value in texts]
         )
-        self._check(tokenizer, values, 32768 if qwen else 8192, pairs=not qwen, special=not qwen)
+        lengths = self._check(tokenizer, values, 32768 if qwen else 8192, pairs=not qwen, special=not qwen)
         with self._lock:
             model = self._load("reranking")
             tokenizer.padding_side = "left" if qwen else "right"
@@ -219,7 +227,7 @@ class LocalModels:
                     scores = logits.view(-1).float()
                 return scores.cpu().tolist()
 
-            scores = self._batched(values, self.settings.reranking_batch, infer)
+            scores = self._batched(values, self.settings.reranking_batch, infer, lengths)
         if not np.isfinite(scores).all():
             raise Problem(
                 "reranker_invalid",

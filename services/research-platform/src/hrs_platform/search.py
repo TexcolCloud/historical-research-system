@@ -19,7 +19,7 @@ from .library import Library
 from .outputs import Outputs, fingerprint
 from .retrieval_chunks import CHUNK_RULE, expand_hits, retrieval_chunks, source_excerpt
 from .retrieval_inputs import INPUT_RULE, bounded_chunks, ranking_windows, tokenizer_for
-from .retrieval_ranking import fuse, lexical_query
+from .retrieval_ranking import candidates_for_rerank, fuse, lexical_query
 
 logger = logging.getLogger(__name__)
 EMBEDDING_BATCH = 8
@@ -130,6 +130,9 @@ class Search:
         metrics["reused_vectors"] = len(cached)
         metrics["computed_vectors"] = 0
         missing = [key for key in wanted if key not in cached]
+        if missing:
+            tokenizer = self.tokenizer("BAAI/bge-m3")
+            missing.sort(key=lambda key: len(tokenizer.encode(wanted[key]).ids))
         for offset in range(0, len(missing), EMBEDDING_BATCH):
             keys = missing[offset : offset + EMBEDDING_BATCH]
             with measured(metrics, "embedding_ms"):
@@ -372,17 +375,19 @@ class Search:
         rerank_limit=30,
         diverse=False,
         fusion=True,
+        lane_quota=0,
+        min_rerank_score=None,
     ):
         metrics = metrics if metrics is not None else {}
         try:
             with measured(metrics, "total_ms"):
                 return self._search(
-                    query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion
+                    query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion, lane_quota, min_rerank_score
                 )
         finally:
             logger.info("retrieval.search %s", json.dumps(metrics))
 
-    def _search(self, query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion):
+    def _search(self, query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion, lane_quota, min_rerank_score):
         name = self.settings.opensearch_index
         if not self.client.indices.exists(index=name):
             return []
@@ -425,6 +430,8 @@ class Search:
                     union.setdefault(row['_id'], {**row['_source'], 'score': row['_score']})
                 rows = list(union.values())
             metrics['fused_candidates'] = len(rows)
+            if fusion and lane_quota:
+                rows = candidates_for_rerank([result['hits']['hits'], more['hits']['hits']], max(limit, rerank_limit), lane_quota)
             rows = rows[:max(limit, rerank_limit)]
             if rows:
                 with measured(metrics, "rerank_ms"):
@@ -437,10 +444,13 @@ class Search:
                     scores = [float("-inf")] * len(rows)
                     for owner, score in zip(owners, window_scores, strict=True):
                         scores[owner] = max(scores[owner], score)
-                found = {row["id"]: {**row, "score": score} for row, score in zip(rows, scores, strict=True)}
+                metrics['top_rerank_score'] = max(scores)
+                found = {row["id"]: {**row, "score": score} for row, score in zip(rows, scores, strict=True)
+                         if min_rerank_score is None or score >= min_rerank_score}
+                metrics['relevance_rejected'] = len(rows) - len(found)
         with measured(metrics, "context_ms"):
             result = expand_hits(
-                list(found.values()), self.library.chapter, limit, context_chars, total_chars, diverse=diverse
+                list(found.values()), self.library.chapter, limit, context_chars, total_chars, diverse=diverse, metrics=metrics
             )
         metrics.update(candidates=len(found), results=len(result))
         return result

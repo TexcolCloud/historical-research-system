@@ -125,7 +125,14 @@ output/refactor-v2 保存 Tus/S3 续传、幂等入站、Temporal 人工等待�
 研究检索默认关键词与向量各召回 50 条，RRF 融合后最多重排 30 条，返回 8 组证据。
 `semantic=false` 为快速查词，`diverse=true` 用于跨章节综合；这些是可调起始值。
 必要脚注、表头、表注先于低排名结果分配预算。无法完整容纳必要信息的证据组不返回，
-不会将删掉限定条件的数字当作完整证据。
+继续检查后续候选补足结果，并记录 `budget_rejected`；不会将删掉限定条件的数字当作完整证据。
+跨章节综合只在重排前 `2 * limit` 条中轮转，防止远端弱相关章节被优先提升。
+
+超长表格按完整行及 rowspan 组限制输入。单个不可分割行组仍超限时，保持完整原文范围，
+只将模型使用的文本视图拆成有独立索引 ID 的窗口；`atomic_source_oversized` 标明这种情况。
+这类完整证据若超过返回预算仍会被明确淘汰，不冒充完整且可容纳的片段。
+长脚注优先按段落拆分，保留正文归属。输入规则版本变化会触发可恢复的重新索引，不重做 OCR。
+嵌入检查点按 token 长度排序组批；模型适配器按真实 token 长度组批并恢复输入顺序，OOM 缩批策略保留。
 
 `PLATFORM_RETRIEVAL_DEVICE=cuda` 通过主机现有 GPU broker 运行嵌入和重排。
 `PLATFORM_RETRIEVAL_ENDPOINT` 默认 `http://127.0.0.1:18160/retrieval`，容器使用
@@ -135,12 +142,24 @@ output/refactor-v2 保存 Tus/S3 续传、幂等入站、Temporal 人工等待�
 下一次 OCR 或视觉请求先释放检索进程。错误及超时释放该进程，返回可重试错误。
 CPU 运行必须显式设置 `PLATFORM_RETRIEVAL_DEVICE=cpu`，不会静默回退。
 当前长时间机审结束后重启主机 broker，才启用新调度代码。
+模型冷启动默认允许 600 秒，可用 `HRS_VISION_START_TIMEOUT` 调整（30–900 秒）。
+`vision_loading` 事件记录本次上限，超过上限仍返回可恢复错误，不把启动失败当成内容审核通过。
 
 `hrs-platform evaluate-offline --cases dataset.json` 使用独立 `hrs-offline-*` 临时索引，
-对比关键词、旧候选策略（每路 20 条直接重排）、新融合策略，不写入文献库或改变审核状态。
+对比关键词、旧候选策略（每路 20 条直接重排）、新融合策略、50 条重排及每路保留 3 条候选，
+不写入文献库或改变审核状态。
 JSON 包含 `title`、`chapters`、`cases`。章节沿用原文及来源映射，并带有
 `development_review`：`text_sha256`、`image_sha256`、`original_first=true`、
 `human_review=false`。问题包含 `query` 和 `expected`（chapter_id/start/end）；空 expected
 表示无答案，报告其返回候选数量，不将候选视为确认答案。标准输出为评测报告。
-三组共享当前分块及上下文规则，比较的是候选策略，不是完整历史实现。
+各组共享当前分块及上下文规则，比较的是候选策略，不是完整历史实现。
+可用 `variants: [["名称", true, {"rerank_limit": 50, "lane_quota": 3}]]` 指定对照；
+`min_rerank_score` 仅供内部检索/离线标定试验，默认不启用，不暴露为用户百分比置信度。
+报告提供分类召回率和 `threshold_diagnostics`（有答案保留率/无答案拒绝率），
+需在独立数据上验证后才可启用阈值；诊断本身不会改变正式问答策略。
+
+运行 `python scripts/build_retrieval_benchmark.py --output output/retrieval-fixtures.json`，
+可生成 40 个合成章节、100 个问题（80 个可回答、20 个无答案），包含表格、脚注、
+跨章节、相近年份/地点/军用运输干扰项。生成器不附带机器批准，需先核对原件并补齐上述证据。
+合成回归与真实书籍评测分开报告，不能把模板题的高召回当作真实书籍准确率。
 开发样本不构成生产放行；需要保留未参与调参的书籍才能判断泛化收益。

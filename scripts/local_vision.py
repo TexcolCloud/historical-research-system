@@ -168,7 +168,9 @@ class Vision:
         self.log = (self.folder / 'llama.log').open('ab')
         self.process = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        deadline = time.monotonic() + 180
+        startup_timeout = max(30, min(900, float(os.getenv('HRS_VISION_START_TIMEOUT', '600'))))
+        self.event({'event': 'vision_loading', 'timeout_seconds': startup_timeout})
+        deadline = time.monotonic() + startup_timeout
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 raise RuntimeError('local_vision_start_failed')

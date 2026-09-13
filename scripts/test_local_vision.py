@@ -15,6 +15,21 @@ from hrs_runtime import local_vision as client
 
 class SchedulingTests(unittest.TestCase):
 
+    def test_cold_vision_load_can_exceed_previous_three_minute_deadline(self):
+        vision = broker.Vision()
+        process = Mock()
+        process.poll.return_value = None
+        response = nullcontext(SimpleNamespace(status=200))
+        with patch.object(vision, 'unload'), patch.object(vision, 'unload_retrieval'), patch.object(vision, 'event') as event, \
+             patch.object(broker, 'free_gib', return_value=16), patch.object(broker.socket, 'socket'), \
+             patch.object(broker.Path, 'read_text', return_value='{"executable":"owned-llama"}'), \
+             patch.object(broker.Path, 'open'), patch.object(broker.subprocess, 'Popen', return_value=process), \
+             patch.object(broker.time, 'monotonic', side_effect=[0, 240]), \
+             patch.dict(broker.os.environ, {'HRS_VISION_START_TIMEOUT':'600'}), \
+             patch.object(broker.urllib.request, 'urlopen', return_value=response):
+            vision.start()
+            assert any(c.args[0]['event'] == 'vision_loaded' for c in event.call_args_list)
+
     def test_retrieval_uses_shared_lease_and_unloads_vision_once_per_entry(self):
         vision = broker.Vision()
         vision.retrieval_process = Mock()

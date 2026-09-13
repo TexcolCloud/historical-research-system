@@ -1,7 +1,7 @@
 """Independent synthetic input-budget and restart checks; no model downloads."""
 
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import insert, select
@@ -32,7 +32,12 @@ def test_long_table_input_has_complete_source_coverage_and_bounded_projection():
     assert len(original) == 1
     chunks = list(bounded_chunks(chapter, original, CharacterTokens(), limit=120))
     assert len(chunks) > 1
-    assert "".join(row["text"] for row in chunks) == text
+    assert all(row['text'] == text[row['start']:row['end']] for row in chunks)
+    assert min(row['start'] for row in chunks) == 0 and max(row['end'] for row in chunks) == len(text)
+    assert all(row['text'].count('<tr>') == row['text'].count('</tr>') for row in chunks)
+    assert len({row['id'] for row in chunks}) == len(chunks)
+    assert all(UUID(row['id']) for row in chunks)
+    assert any(row['atomic_source_oversized'] for row in chunks)
     assert all(len(CharacterTokens().encode(row["retrieval_text"]).ids) <= 120 for row in chunks)
     assert all(row["sources"][0]["start"] == 7 + row["start"] and row["pages"] == [3] for row in chunks)
 
@@ -68,6 +73,7 @@ def test_rerank_accounts_for_query_and_retains_every_document_character():
 def test_failed_embedding_resumes_completed_batches_and_only_recomputes_changed_text(platform, monkeypatch):
     settings, engine = platform
     search = Search(settings, engine)
+    search.tokenizer = lambda _: CharacterTokens()
     book, run = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
         connection.execute(insert(db.books).values(id=book, title="向量恢复技术样本", state="ready"))

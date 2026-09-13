@@ -1,6 +1,6 @@
 """Small, explicit source-range evaluations over published books."""
 
-from math import ceil
+from math import ceil, inf, nextafter
 from statistics import mean, median
 
 from .outputs import fingerprint
@@ -89,6 +89,7 @@ def evaluate_cases(
         rows.append(
             {
                 "query": case["query"],
+                "category": case.get('category', 'unspecified'),
                 "evidence_recall": found / len(case["expected"]) if case["expected"] else None,
                 "unanswerable": not case["expected"],
                 "unanswerable_returned_candidates": len(hits) if not case["expected"] else None,
@@ -109,8 +110,32 @@ def evaluate_cases(
         if any(r["evidence_recall"] is not None for r in rows)
         else None,
         "mean_reciprocal_rank": mean(row["reciprocal_rank"] for row in rows),
+        "complete_evidence_rate": mean(r['evidence_recall'] == 1 for r in rows if not r['unanswerable'])
+        if any(not r['unanswerable'] for r in rows) else None,
         "p50_ms": median(durations),
         "p95_ms": durations[ceil(len(durations) * 0.95) - 1],
         "cases": rows,
+        "categories": {
+            category: {
+                'cases': sum(r['category'] == category for r in rows),
+                'evidence_recall': mean(values) if (values := [r['evidence_recall'] for r in rows
+                     if r['category'] == category and r['evidence_recall'] is not None]) else None,
+            } for category in sorted({r['category'] for r in rows})
+        },
+        "threshold_diagnostics": threshold_diagnostics(rows),
         "limitation": "Measures supplied source-range labels and provenance integrity, not historical truth or human approval.",
     }
+
+
+def threshold_diagnostics(rows):
+    """Development operating points, never an automatically adopted threshold."""
+    scored = [r for r in rows if 'top_rerank_score' in r['timing']]
+    if not scored or not any(r['unanswerable'] for r in scored) or all(r['unanswerable'] for r in scored):
+        return []
+    thresholds = sorted({r['timing']['top_rerank_score'] for r in scored})
+    thresholds.append(nextafter(thresholds[-1], inf))
+    return [{
+        'threshold': threshold,
+        'answerable_retention': mean(r['timing']['top_rerank_score'] >= threshold for r in scored if not r['unanswerable']),
+        'unanswerable_rejection': mean(r['timing']['top_rerank_score'] < threshold for r in scored if r['unanswerable']),
+    } for threshold in thresholds]

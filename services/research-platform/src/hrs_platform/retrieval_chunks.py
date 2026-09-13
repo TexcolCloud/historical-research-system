@@ -282,16 +282,19 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
             }
 
 
-def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24000, *, diverse=False):
+def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24000, *, diverse=False, metrics=None):
     """Merge intersecting evidence and spend a separate, bounded context budget."""
     from .retrieval_ranking import diverse_order
 
+    metrics = metrics if metrics is not None else {}
+    metrics.update(budget_rejected=0, duplicate_rejected=0)
     selected, chapters, structures = [], {}, {}
     duplicates = set()
-    ordered = diverse_order(hits) if diverse else sorted(hits, key=lambda h: h["score"], reverse=True)
+    ordered = diverse_order(hits, relevance_window=limit * 2) if diverse else sorted(hits, key=lambda h: h["score"], reverse=True)
     for hit in ordered:
         duplicate = (hit["chapter_id"], hit["text"], tuple((c["start"], c["end"], c["role"]) for c in hit.get("context", [])))
         if duplicate in duplicates:
+            metrics['duplicate_rejected'] += 1
             continue
         duplicates.add(duplicate)
         chapter_id = hit["chapter_id"]
@@ -307,7 +310,10 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
         if overlaps:
             start = min(hit["start"], *(h["start"] for h in overlaps))
             end = max(hit["end"], *(h["end"] for h in overlaps))
-            if end - start <= context_chars:
+            supplements = {(c['start'], c['end']): c for h in [hit, *overlaps] for c in h.get('context', [])
+                           if c['role'] != 'neighbor' and not start <= c['start'] < c['end'] <= end}
+            merged_size = end - start + sum(len(c['text']) for c in supplements.values())
+            if merged_size <= min(context_chars, total_chars):
                 overlap = overlaps[0]
                 overlap.update(source_excerpt(chapter, start, end))
                 overlap["context"].extend(hit.get("context", []))
@@ -317,10 +323,11 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
                 continue
             if any(h["start"] <= hit["start"] < hit["end"] <= h["end"] for h in overlaps):
                 continue
-        if len(selected) < limit:
-            selected.append({**hit, "context": list(hit.get("context", []))})
+        selected.append({**hit, "context": list(hit.get("context", []))})
     retained, remaining = [], total_chars
     for hit in selected:
+        if len(retained) >= limit:
+            break
         # Reserve source-linked constraints before spending on another primary hit.
         mandatory = {}
         for extra in hit['context']:
@@ -330,6 +337,8 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
         if needed <= remaining and needed <= context_chars:
             retained.append((hit, needed - len(hit['text'])))
             remaining -= needed
+        else:
+            metrics['budget_rejected'] += 1
     output = []
     for hit, reserved in retained:
         available = min(max(0, context_chars - len(hit["text"])), remaining + reserved)

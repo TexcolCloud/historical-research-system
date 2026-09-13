@@ -1,13 +1,16 @@
 """Token-bounded retrieval windows; canonical chapter content stays untouched."""
 
 from functools import lru_cache
+from hashlib import sha256
+from html.parser import HTMLParser
+from uuid import UUID, uuid5
 
 from tokenizers import Tokenizer
 
 from .domain.settings import MODEL_REVISIONS
-from .retrieval_chunks import source_excerpt, table_groups
+from .retrieval_chunks import blocks, source_excerpt, table_groups
 
-INPUT_RULE = "bge-projection-6144-essential-context-v2"
+INPUT_RULE = "bge-projection-6144-atomic-tables-notes-v3"
 INPUT_TOKENS = 6144
 
 
@@ -51,6 +54,57 @@ def windows(text, count, limit, max_chars=None):
         start = end
 
 
+class CellText(HTMLParser):
+    """Model-only text view; immutable HTML evidence is never rewritten."""
+
+    def __init__(self, text):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.feed(text)
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+    def handle_endtag(self, tag):
+        if tag in {'td', 'th', 'tr', 'p', 'br'}:
+            self.parts.append('\n')
+
+
+def structural_windows(chapter, chunk, count, limit):
+    """Keep rows/rowspans atomic; split only the model view of an oversized row."""
+    text = chunk['text']
+    if chunk['kind'] not in {'table', 'html_table', 'note'}:
+        for a, b in windows(text, count, limit, max_chars=6000):
+            yield a, b, text[a:b], False
+        return
+    if chunk['kind'] == 'note':
+        boundaries = [0]
+        import re
+        boundaries.extend(m.end() for m in re.finditer(r'\n\s*\n', text))
+        boundaries.append(len(text))
+        units = list(zip(boundaries, boundaries[1:]))
+    else:
+        container = next(b for b in blocks(chapter['text']) if b['start'] <= chunk['start'] < b['end'])
+        groups, _ = table_groups(chapter['text'], container, 1)
+        units = [(max(a, chunk['start']) - chunk['start'], min(b, chunk['end']) - chunk['start'])
+                 for a, b in groups if a < chunk['end'] and b > chunk['start']]
+    for a, b in units:
+        raw = text[a:b]
+        if not raw:
+            continue
+        if count(raw) <= limit and len(raw) <= 6000:
+            yield a, b, raw, False
+        elif chunk['kind'] == 'note':
+            for x, y in windows(raw, count, limit, max_chars=6000):
+                yield a + x, a + y, raw[x:y], False
+        else:
+            # An indivisible cell/rowspan can exceed the model limit. Keep its
+            # complete source range; only the non-authoritative model view splits.
+            view = ''.join(CellText(raw).parts) if chunk['kind'] == 'html_table' else raw
+            for x, y in windows(view or raw, count, limit, max_chars=6000):
+                yield a, b, (view or raw)[x:y], True
+
+
 def bounded_chunks(chapter, chunks, tokenizer, limit=INPUT_TOKENS):
     count = lambda text: len(tokenizer.encode(text).ids)
     for chunk in chunks:
@@ -76,11 +130,12 @@ def bounded_chunks(chapter, chunks, tokenizer, limit=INPUT_TOKENS):
             if extra['role'] in {'footnote', 'table_note'} and count(prefix + extra['text']) <= limit * 3 // 4:
                 prefix += extra['text'] + '\n'
                 reserved.add((extra['start'], extra['end'], extra['role']))
-        for start, end in windows(
-            chunk["text"], lambda text, prefix=prefix: count(prefix + text), limit, max_chars=6000
+        emitted = set()
+        for start, end, model_text, atomic in structural_windows(
+            chapter, chunk, lambda text, prefix=prefix: count(prefix + text), limit
         ):
             item = {**chunk, **source_excerpt(chapter, chunk["start"] + start, chunk["start"] + end)}
-            projection = prefix + item["text"]
+            projection = prefix + model_text
             omitted = False
             for extra in context:
                 if (extra['start'], extra['end'], extra['role']) in reserved:
@@ -92,11 +147,17 @@ def bounded_chunks(chapter, chunks, tokenizer, limit=INPUT_TOKENS):
                     projection = extended
                 else:
                     omitted = True
+            identity = str(uuid5(UUID(item['id']), sha256(projection.encode()).hexdigest())) if atomic else item['id']
+            if identity in emitted:
+                continue
+            emitted.add(identity)
             # Full supplements remain source-mapped in context and in the reader.
             yield {
                 **item,
+                'id': identity,
                 "context": context,
                 "retrieval_text": projection,
+                "atomic_source_oversized": atomic,
                 "projection_context_omitted": omitted,
             }
 
