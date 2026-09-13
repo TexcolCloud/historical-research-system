@@ -45,3 +45,15 @@ class IndependentSourceTests(unittest.TestCase):
         self.assertTrue(table_number_conflict(draft, {'tables': ['| 1239 | 5.6 |']}))
         self.assertTrue(table_number_conflict(draft, {'tables': ['| 1234 |']}))
         self.assertTrue(table_number_conflict(draft, {'tables': []}))
+
+    def test_cell_boundaries_and_outside_page_numbers_do_not_create_conflicts(self):
+        from document_extraction.visual_source import table_number_conflict
+        draft = '<table><tr><td>1,234</td><td>5.6</td><td>125</td></tr></table>'
+        for table in (
+            '表9\n| 收入 | 比率 | 数量 |\n|---|---|---|\n|1234|5.6|125|\n\n125',
+            '125\n<table><tr><td>1234</td><td>5.6</td><td>125</td></tr></table>\n125',
+        ):
+            self.assertEqual(table_number_conflict(draft, {'tables': [table]}), '')
+        # A real cell equal to the printed folio must never disappear from comparison.
+        self.assertTrue(table_number_conflict(draft, {'tables': ['|1234|5.6|']}))
+        self.assertTrue(table_number_conflict(draft, {'tables': ['|1234|5.6|126|\n125']}))

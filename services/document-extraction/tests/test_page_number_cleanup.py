@@ -5,6 +5,41 @@ from hashlib import sha256
 from document_extraction.artifacts import write_outputs
 
 
+def test_pipeline_cleans_folios_before_visual_review_but_keeps_table_values(tmp_path):
+    from types import SimpleNamespace
+    from document_extraction.pipeline import run_document
+    from test_review_scope_repairs import verdict
+
+    source = tmp_path / 'source.pdf'
+    source.write_bytes(b'synthetic-pdf')
+    (tmp_path / 'output').mkdir()
+    image = tmp_path / 'output/page.png'
+    image.write_bytes(b'synthetic-image')
+    original = '12\n\n<table><tr><td>数量</td><td>12</td></tr></table>\n\n正文1939年。\n\n13'
+    backend = SimpleNamespace(name='fixture', convert_document=lambda *_: (
+        [dict(page=1, image_path=image, text=original)], {}))
+    seen = []
+
+    def reviewer(packet, *_):
+        seen.append(packet['target']['text'])
+        assert not packet['target']['text'].startswith('12\n')
+        assert not packet['target']['text'].endswith('\n13')
+        assert '<td>12</td>' in packet['target']['text']
+        assert '1939年' in packet['target']['text']
+        return verdict()
+
+    run_document(source, tmp_path / 'output', SimpleNamespace(
+        vision_review=SimpleNamespace(review_mode='full'),
+        risk=SimpleNamespace(enabled=True, auto_accept=True)), backend,
+        SimpleNamespace(report=lambda: {}), reviewer=reviewer)
+    assert len(seen) == 1
+    result = json.loads((tmp_path / 'output/semantic-acceptance.json').read_text('utf-8'))
+    page = result['pages'][0]
+    assert page['text'] == seen[0] and page['verified']
+    assert page['layout_cleanup']['original_text'] == original
+    assert page['receipts'][0]['target_sha256'] == sha256(page['text'].encode()).hexdigest()
+
+
 def test_conversion_removes_page_numbers_before_blocks_and_retains_original(tmp_path):
     source = tmp_path / 'source.pdf'
     source.write_bytes(b'engineering-fixture-not-a-real-pdf')

@@ -4,7 +4,7 @@ from pathlib import Path
 import time
 
 from .accelerator import detect
-from .artifacts import write_outputs
+from .artifacts import clean_page_numbers, write_outputs
 from .docling_conversion import DoclingConverter
 from .semantic_completion import complete_document
 from .settings import Settings
@@ -95,6 +95,8 @@ def run_document(source, output, settings, backend, accelerator, *, reviewer=Non
     (output / "manifest.json").unlink(missing_ok=True)
     started = time.monotonic()
     pages, timings = backend.convert_document(source, output)
+    # Review the same canonical text later exported; retain reversible OCR cleanup evidence.
+    pages = [clean_page_numbers(page) for page in pages]
     review_start = time.monotonic()
     completion = complete_document(
         pages, settings.vision_review, output, reviewer=reviewer

@@ -28,10 +28,12 @@ from .utils import sha256, write_json
 from .visual_source import POLICY as SOURCE_POLICY
 from .visual_source import source_reading, table_number_conflict
 
-POLICY = "docling-single-draft-semantic-v6-rechecked-machine-corrections"
+POLICY = "docling-single-draft-semantic-v7-folio-independent-review"
 INSTRUCTION = """你是历史文献的原图校读员。任务是让完整正文可用于理解、检索和研究卡，避免严重语义分歧。
 先看标有 TARGET 的目标页原图，再对照目标页底稿；相邻页图和文字只用于跨页语境。
 只报告目标物理页的问题和结构，不能把相邻页的参考文献、摘要或文章结束算到目标页。返回 target_page 必须等于目标页码。
+TARGET/target_page/page/image_order 是 PDF 文件的物理页序，仅用于定位图片，不是原书印刷页码，也不是正文或表格数据。二者不同是正常情况，不得据此报告识别错误、改写表格或推断日期。
+底稿已剔除可确认的独立页码；原图仍保留印刷页码作为证据。页眉/页脚页码不属于表格，不能要求补回正文，也不能计入表格数字差异。仅因页码不一致或缺失不产生 concern。表内序号、年份、数量、页次索引及实质脚注仍是内容，不得按数字相同误删。
 必须从页首到页尾检查两栏/多栏、正文、注释、参考文献和图说，发现共同漏句、串栏和重复追加。
 不要求逐字同印刷拼写。繁简、标点、空格、的/地、生僻词的保义规范化、轻微不影响理解的错字均接受，勿为这些提出修正。
 严重问题指重要论断遗漏或改动，事件主语对象/关键时间数量错误，否定因果颠倒，作者或引语归属错误，文章混合或阅读顺序破坏。
