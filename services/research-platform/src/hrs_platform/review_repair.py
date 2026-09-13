@@ -5,7 +5,7 @@ from collections import defaultdict
 from uuid import UUID, uuid5
 
 from fastapi import HTTPException
-from hrs_runtime.review_scope import figure_page, locate
+from hrs_runtime.review_scope import concern_ranges, figure_page, locate, split_change
 from sqlalchemy import func, insert, select, update
 
 from . import schema as db
@@ -197,13 +197,21 @@ def apply_verified_page(review, issues, page, boundary, evidence):
     """Adopt only verified edits wholly owned by still-pending, unchanged scopes."""
     if not page.get("verified"):
         return 0
-    changes = page.get("changes", [])
+    changes = [edit for change in page.get("changes", []) for edit in split_change(change)]
     approved = 0
     for issue in issues:
         start, end = issue["start"] - boundary["start"], issue["end"] - boundary["start"]
-        overlap = [c for c in changes if c["start_before"] < end and c["end_before"] > start]
+        overlap = [
+            c
+            for c in changes
+            if c["start_before"] <= end
+            and c["end_before"] >= start
+            and (c["start_before"] == c["end_before"] or c["start_before"] < end and c["end_before"] > start)
+        ]
         if any(c["start_before"] < start or c["end_before"] > end for c in overlap):
             continue
+        if any(c["start_before"] == c["end_before"] and c["start_before"] in {start, end} for c in overlap):
+            continue  # Boundary insertion has no unique owner; do not duplicate it into adjacent issues.
         value = issue["text"]
         # Immutable conversion offsets, not offsets after earlier replacements.
         for change in sorted(overlap, key=lambda c: c["start_before"], reverse=True):
@@ -221,9 +229,10 @@ def refresh_unresolved(review, issues, page, boundary, evidence):
     if not page["receipts"] or page["receipts"][0]["verdict"].get("review_state") != "completed":
         return 0
     concerns = [c for c in page["concerns"] if c["kind"] not in {"citation", "normalization"}]
-    localized = [(locate(page["text"], c.get("excerpt", "")), c) for c in concerns]
-    if not localized or any(scope is None for scope, _ in localized):
+    groups = [(concern_ranges(page["text"], c), c) for c in concerns]
+    if not groups or any(scopes is None for scopes, _ in groups):
         return 0
+    localized = [(scope, c) for scopes, c in groups for scope in scopes]
     approved = 0
     for issue in issues:
         start, end = issue["start"] - boundary["start"], issue["end"] - boundary["start"]

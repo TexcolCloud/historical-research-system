@@ -62,3 +62,23 @@ def test_map_carrier_is_not_plain_body_text():
     assert figure_page("Image\n\n北\n\n![Image](docling-assets/map.png)\n\n图1 行动图\n1937年")
     assert not figure_page("正文。" * 1000 + "![照片](photo.png)")
     assert not figure_page("这是一段需要核验的短正文，记载实际事件。\n\n![照片](photo.png)")
+
+
+def test_failed_broad_proposal_does_not_hold_unchanged_paragraphs(tmp_path):
+    import json
+    from document_extraction.artifacts import write_outputs
+
+    source = tmp_path / 'source.pdf'
+    source.write_bytes(b'synthetic-source')
+    image = tmp_path / 'original.png'
+    image.write_bytes(b'synthetic-image')
+    original = '敌方损失：\n\n遗产10具。\n\n后续段落无误。'
+    proposal = dict(before=original, after=original.replace('遗产', '遗尸'),
+        source_reading='遗尸10具。', location='第二段', kind='claim', explanation='第二段错字')
+    result = complete_document([dict(page=1, text=original, image_path=image)], None, tmp_path,
+        reviewer=lambda *_: verdict([proposal]))
+    assert not result['pages'][0]['verified']
+    write_outputs(source, tmp_path, result, ['fixture'], {})
+    cards = json.loads((tmp_path / 'review-cards.json').read_text('utf-8'))['cards']
+    assert len(cards) == 1
+    assert cards[0]['region']['text'] == '遗产10具。'

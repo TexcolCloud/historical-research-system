@@ -145,3 +145,24 @@ def test_new_concern_updates_only_affected_paragraph_and_unknown_location_stays_
     assert refresh_unresolved(review, issues, page, {"start": 0}, {"kind": "test"}) == 1
     assert review.get(ids[1])["reasons"] == ["乙段数字无法辨认"]
     assert review.get(ids[1])["state"] == "pending"
+
+
+def test_verified_broad_proposal_applies_only_actual_local_edits(platform):
+    original = "敌方损失：\n\n遗产10具。"
+    review, run, ids = prepared(platform, original, ["敌方损失：", "遗产10具。"], [])
+    page = {
+        "verified": True,
+        "changes": [
+            {
+                "start_before": 0,
+                "end_before": len(original),
+                "before": original,
+                "after": original.replace("遗产", "遗尸"),
+            }
+        ],
+    }
+    assert (
+        apply_verified_page(review, [review.get(i) for i in ids], page, {"start": 0}, {"kind": "test"}) == 2
+    )
+    assert review.get(ids[0])["replacement"] is None
+    assert review.objects.read_bytes(review.get(ids[1])["replacement"]).decode() == "遗尸10具。"

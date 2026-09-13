@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from difflib import SequenceMatcher
 
 
 def normalized(value):
@@ -31,6 +32,32 @@ def locate(text, excerpt):
         return None
     start = value.index(needle)
     return offsets[start][0], offsets[start + len(needle) - 1][1]
+
+
+def split_change(change):
+    """Separate actual inline edits from unchanged context; keep paragraph restructuring atomic."""
+    before, after = change['before'], change['after']
+    edits = [(a, b, c, d) for tag, a, b, c, d in
+             SequenceMatcher(None, before, after, autojunk=False).get_opcodes() if tag != 'equal']
+    if any('\n' in before[a:b] or '\n' in after[c:d] for a, b, c, d in edits):
+        return [change]
+    base = change.get('start_before', 0)
+    return [{**change, 'before':before[a:b], 'after':after[c:d],
+             'start_before':base+a, 'end_before':base+b} for a, b, c, d in edits]
+
+
+def concern_ranges(text, concern):
+    """Use exact proposal diffs when available; a context quote alone is not an edit range."""
+    proposal = concern.get('proposed_change')
+    if proposal and proposal.get('before') and text.count(proposal['before']) == 1:
+        base = text.index(proposal['before'])
+        edits = split_change({**proposal, 'start_before':base})
+        if edits:
+            return [(max(0, c['start_before']-1), min(len(text), c['end_before']+1))
+                    if c['start_before'] == c['end_before'] else (c['start_before'], c['end_before'])
+                    for c in edits]
+    scope = locate(text, concern.get('excerpt', ''))
+    return [scope] if scope else None
 
 
 def figure_page(text):

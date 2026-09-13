@@ -5,7 +5,7 @@ from pathlib import Path
 
 from hrs_runtime.page_layout import RULE_VERSION as LAYOUT_POLICY
 from hrs_runtime.page_layout import page_layout_exclusions
-from hrs_runtime.review_scope import figure_page, locate
+from hrs_runtime.review_scope import concern_ranges, figure_page, locate
 
 from .content_readiness import _blocks
 from .models import PageResult
@@ -199,11 +199,9 @@ def write_outputs(
                     )
                 ):
                     continue
-                location = _issue_range(page, concern)
-                left, right = location if location else (0, len(page['text']))
-                left += page_offsets[number]
-                right += page_offsets[number]
-                if left < block["end"] and right > block["start"]:
+                locations = concern_ranges(page['text'], concern) or [(0, len(page['text']))]
+                if any(left + page_offsets[number] < block['end'] and
+                       right + page_offsets[number] > block['start'] for left, right in locations):
                     warning = concern["kind"] in {"citation", "normalization"}
                     block["risks"].append(
                         {
