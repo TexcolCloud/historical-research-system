@@ -2,14 +2,17 @@
 
 from functools import lru_cache
 from pathlib import Path
-from uuid import UUID, uuid5
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from opensearchpy import OpenSearch, RequestError, helpers
+from sqlalchemy import select, update
 
+from . import schema as db
 from .books import get_run
+from .domain.settings import MODEL_REVISIONS
 from .library import Library
-from .outputs import Outputs
+from .outputs import Outputs, fingerprint
+from .retrieval_chunks import CHUNK_RULE, expand_hits, retrieval_chunks, source_excerpt
 
 
 @lru_cache(maxsize=1)
@@ -46,34 +49,7 @@ def chapter_chunks(chapter, size=1400, overlap=160):
         end = start + len(item.page_content)
         if start < 0 or chapter["text"][start:end] != item.page_content:
             raise ValueError("The chunk could not be located in its immutable chapter.")
-        offset, sources = 0, []
-        for part in chapter["parts"]:
-            part_end = offset + len(part["text"])
-            if offset < end and part_end > start:
-                sources.append(
-                    {
-                        "span_id": part["span_id"],
-                        "start": part["start"] + max(0, start - offset),
-                        "end": part["start"] + min(len(part["text"]), end - offset),
-                        "pages": part["source"]["pages"],
-                        "unit_start": max(offset, start) - start,
-                        "unit_end": min(part_end, end) - start,
-                        "source_record": part["source"],
-                    }
-                )
-            offset = part_end
-        yield {
-            "id": str(uuid5(UUID(chapter["id"]), f"{start}:{end}")),
-            "book_id": chapter["book_id"],
-            "chapter_id": chapter["id"],
-            "run_id": chapter["run_id"],
-            "title": chapter["title"],
-            "text": item.page_content,
-            "start": start,
-            "end": end,
-            "sources": sources,
-            "pages": sorted({page for source in sources for page in source["pages"]}),
-        }
+        yield source_excerpt(chapter, start, end)
 
 
 class Search:
@@ -95,16 +71,37 @@ class Search:
 
     def index(self, run_id):
         run = get_run(self.engine, run_id)
+        if run["kind"] != "book" or not (run["result"] or {}).get("published"):
+            raise ValueError("Only published book runs can be indexed.")
         chapters = self.library.chapters(run["book_id"])
         if not chapters:
             raise ValueError("Only published chapters can be indexed.")
-        saved = self.outputs.get(run_id, "retrieval-chunks")
+        with self.engine.connect() as connection:
+            book_title = connection.scalar(select(db.books.c.title).where(db.books.c.id == run["book_id"]))
+        dependency = {
+            "book_id": run["book_id"],
+            "book_title": book_title,
+            "chapters": [
+                {"id": row["id"], "title": row["title"], "sha256": row["content"]["sha256"]}
+                for row in chapters
+            ],
+            "chunk_rule": CHUNK_RULE,
+            "embedding": MODEL_REVISIONS["BAAI/bge-m3"],
+            "embedding_adapter": "bge-cls-l2-float32-v1",
+        }
+        generation = fingerprint(dependency)
+        step = "retrieval-chunks:" + generation
+        saved = self.outputs.get(run_id, step, dependency)
         if saved is None:
-            chunks = [chunk for row in chapters for chunk in chapter_chunks(self.library.chapter(row["id"]))]
-            result = self.compute("embed", [chunk["text"] for chunk in chunks])
+            chunks = [
+                chunk
+                for row in chapters
+                for chunk in retrieval_chunks(self.library.chapter(row["id"]), book_title)
+            ]
+            result = self.compute("embed", [chunk["retrieval_text"] for chunk in chunks])
             saved = self.outputs.put(
                 run_id,
-                "retrieval-chunks",
+                step,
                 {
                     "chunks": [
                         {**chunk, "vector": vector}
@@ -112,10 +109,7 @@ class Search:
                     ],
                     "model": result["identity"],
                 },
-                {
-                    "chapters": [row["content"]["sha256"] for row in chapters],
-                    "chunk_rule": "recursive-1400-160-v1",
-                },
+                dependency,
             )
         name = self.settings.opensearch_index
         if not self.client.indices.exists(index=name):
@@ -129,6 +123,9 @@ class Search:
                                 "book_id": {"type": "keyword"},
                                 "chapter_id": {"type": "keyword"},
                                 "run_id": {"type": "keyword"},
+                                "generation": {"type": "keyword"},
+                                "retrieval_text": {"type": "text", "index": False},
+                                "context": {"type": "object", "enabled": False},
                                 "text": {"type": "text", "index": False},
                                 "title": {"type": "text", "index": False},
                                 "text_search": {"type": "text", "analyzer": "cjk"},
@@ -150,15 +147,27 @@ class Search:
             except RequestError as error:
                 if error.error != "resource_already_exists_exception":
                     raise
+        # Add mappings explicitly when upgrading an already populated v1 index.
+        self.client.indices.put_mapping(
+            index=name,
+            body={
+                "properties": {
+                    "generation": {"type": "keyword"},
+                    "retrieval_text": {"type": "text", "index": False},
+                    "context": {"type": "object", "enabled": False},
+                }
+            },
+        )
         helpers.bulk(
             self.client,
             (
                 {
                     "_index": name,
-                    "_id": row["id"],
+                    "_id": generation + ":" + row["id"],
                     "_source": {
                         **row,
-                        "text_search": normalizer().convert(row["text"]),
+                        "generation": generation,
+                        "text_search": normalizer().convert(row["retrieval_text"]),
                         "title_search": normalizer().convert(row["title"]),
                     },
                 }
@@ -167,13 +176,85 @@ class Search:
             chunk_size=100,
             refresh="wait_for",
         )
-        return {"run_id": run_id, "chunks": len(saved["chunks"])}
+        # Readers select only the SQL-committed generation. Failed bulk writes stay invisible.
+        from .deletion import require_active
 
-    def search(self, query, book_id=None, semantic=False, limit=20):
+        with self.engine.begin() as connection:
+            require_active(connection, run["book_id"])
+            current = connection.scalar(
+                select(db.runs.c.result).where(db.runs.c.id == run_id).with_for_update()
+            )
+            connection.execute(
+                update(db.runs)
+                .where(db.runs.c.id == run_id)
+                .values(result={**(current or {}), "retrieval_generation": generation})
+            )
+        self.client.delete_by_query(
+            index=name,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": [{"term": {"book_id": run["book_id"]}}],
+                        "must_not": [{"term": {"generation": generation}}],
+                    }
+                }
+            },
+            refresh=True,
+            conflicts="proceed",
+        )
+        return {"run_id": run_id, "chunks": len(saved["chunks"]), "generation": generation}
+
+    def active_scope(self, book_id):
+        with self.engine.connect() as connection:
+            rows = connection.execute(
+                select(db.runs.c.book_id, db.runs.c.result)
+                .join(db.books, db.books.c.id == db.runs.c.book_id)
+                .where(
+                    db.runs.c.kind == "book",
+                    db.books.c.state.not_in(["deleting", "delete_failed", "deleted"]),
+                    *([db.runs.c.book_id == str(book_id)] if book_id else []),
+                )
+            ).all()
+        published = [
+            (book, result.get("retrieval_generation"))
+            for book, result in rows
+            if result and result.get("published")
+        ]
+        active = [generation for _, generation in published if generation]
+        legacy = [book for book, generation in published if not generation]
+        return [
+            {"terms": {"book_id": [book for book, _ in published]}},
+            {
+                "bool": {
+                    "should": [
+                        {"terms": {"generation": active}},
+                        {
+                            "bool": {
+                                "filter": [{"terms": {"book_id": legacy}}],
+                                "must_not": [{"exists": {"field": "generation"}}],
+                            }
+                        },
+                    ],
+                    "minimum_should_match": 1,
+                }
+            },
+        ]
+
+    def search(
+        self,
+        query,
+        book_id=None,
+        semantic=False,
+        limit=20,
+        candidate_limit=20,
+        context_chars=6000,
+        total_chars=24000,
+    ):
         name = self.settings.opensearch_index
         if not self.client.indices.exists(index=name):
             return []
-        scope = [{"term": {"book_id": str(book_id)}}] if book_id else []
+        scope = self.active_scope(book_id)
+        candidates = max(limit, candidate_limit)
         lexical = {
             "bool": {
                 "must": [
@@ -188,20 +269,30 @@ class Search:
             }
         }
         result = self.client.search(
-            index=name, body={"size": limit, "query": lexical, "_source": {"excludes": ["vector"]}}
+            index=name, body={"size": candidates, "query": lexical, "_source": {"excludes": ["vector"]}}
         )
         found = {row["_id"]: dict(row["_source"], score=row["_score"]) for row in result["hits"]["hits"]}
         if semantic:
             vector = self.compute("embed", [query], query=True)["vectors"][0]
-            knn = {"vector": vector, "k": limit, **({"filter": {"bool": {"filter": scope}}} if scope else {})}
+            knn = {
+                "vector": vector,
+                "k": candidates,
+                **({"filter": {"bool": {"filter": scope}}} if scope else {}),
+            }
             more = self.client.search(
                 index=name,
-                body={"size": limit, "query": {"knn": {"vector": knn}}, "_source": {"excludes": ["vector"]}},
+                body={
+                    "size": candidates,
+                    "query": {"knn": {"vector": knn}},
+                    "_source": {"excludes": ["vector"]},
+                },
             )
             for row in more["hits"]["hits"]:
                 found.setdefault(row["_id"], dict(row["_source"], score=row["_score"]))
             rows = list(found.values())
             if rows:
-                scores = self.compute("rerank", [row["text"] for row in rows], query=query)["scores"]
+                scores = self.compute(
+                    "rerank", [row.get("retrieval_text", row["text"]) for row in rows], query=query
+                )["scores"]
                 found = {row["id"]: {**row, "score": score} for row, score in zip(rows, scores, strict=True)}
-        return sorted(found.values(), key=lambda row: row["score"], reverse=True)[:limit]
+        return expand_hits(list(found.values()), self.library.chapter, limit, context_chars, total_chars)

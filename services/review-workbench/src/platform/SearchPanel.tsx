@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -61,7 +62,33 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
       {results.data?.map((hit) => (
         <article key={hit.id}>
           <h2>{hit.title}</h2>
-          <p>{hit.text}</p>
+          {(hit.section_path?.length ?? 0) > 1 && (
+            <p>{hit.section_path?.join(" / ")}</p>
+          )}
+          <p style={{ whiteSpace: "pre-wrap" }}>{hit.text}</p>
+          {(hit.context?.length ?? 0) > 0 && (
+            <details>
+              <summary>查看相关上下文、表头与注释</summary>
+              {hit.context?.map((part) => (
+                <div key={`${part.start}:${part.end}`}>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{part.text}</p>
+                  <a
+                    target="_blank"
+                    rel="noreferrer"
+                    href={`/api/v2/runs/${hit.run_id}/artifacts/original.pdf#page=${part.pages[0]}`}
+                  >
+                    查看原件第 {part.pages.join("、")} 页
+                  </a>
+                </div>
+              ))}
+            </details>
+          )}
+          {hit.context_truncated && <p>部分上下文较长，请打开章节继续阅读。</p>}
+          <Link
+            to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}`}
+          >
+            阅读所在章节
+          </Link>
           <a
             target="_blank"
             rel="noreferrer"

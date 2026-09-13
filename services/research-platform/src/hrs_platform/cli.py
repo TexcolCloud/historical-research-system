@@ -8,15 +8,45 @@ def main():
     parser = argparse.ArgumentParser(description="Unified historical research platform")
     parser.add_argument(
         "command",
-        choices=["migrate", "api", "namespace", "worker", "gpu-worker", "doctor", "backup", "restore"],
+        choices=[
+            "migrate",
+            "api",
+            "namespace",
+            "worker",
+            "gpu-worker",
+            "doctor",
+            "backup",
+            "restore",
+            "reindex",
+        ],
     )
     parser.add_argument(
         "--manifest-reference", help="JSON S3 reference returned by backup; contains no credentials"
     )
     parser.add_argument("--restore-suffix", help="New isolated destination database suffix")
+    parser.add_argument("--run-id", help="Published book run to reindex without repeating OCR")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=18170, type=int)
     args = parser.parse_args()
+    if args.command == "reindex":
+        import json
+        from uuid import UUID
+
+        from .search import Search
+
+        if not args.run_id:
+            parser.error("reindex requires --run-id")
+        try:
+            run_id = str(UUID(args.run_id))
+        except ValueError:
+            parser.error("--run-id must be a UUID")
+        settings = Settings.load()
+        engine = engine_for(settings)
+        try:
+            print(json.dumps(Search(settings, engine).index(run_id), ensure_ascii=False, indent=2))
+        finally:
+            engine.dispose()
+        return
     if args.command in {"backup", "restore"}:
         import json
 
