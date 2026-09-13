@@ -124,6 +124,7 @@ def create_app(settings=None, engine=None):
 
     @app.get("/api/v2/search", response_model=list[SearchHit])
     def search(
+        response: Response,
         q: str = Query(min_length=1, max_length=1000),
         book_id: UUID | None = None,
         semantic: bool = False,
@@ -132,9 +133,16 @@ def create_app(settings=None, engine=None):
         context_chars: int = Query(default=6000, ge=1400, le=12000),
         total_chars: int = Query(default=24000, ge=1400, le=60000),
     ):
-        return Search(settings, engine).search(
-            q, book_id, semantic, limit, candidate_limit, context_chars, total_chars
+        metrics = {}
+        result = Search(settings, engine).search(
+            q, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics=metrics
         )
+        response.headers["Server-Timing"] = ", ".join(
+            f"{name.removesuffix('_ms')};dur={value:.3f}"
+            for name, value in metrics.items()
+            if name.endswith("_ms")
+        )
+        return result
 
     @app.get("/api/v2/books/{book_id}/chapters", response_model=list[ChapterSummary])
     def chapters(book_id: UUID):
