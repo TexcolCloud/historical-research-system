@@ -18,6 +18,8 @@ env:
   PLATFORM_S3_BUCKET: platform-ci
   PLATFORM_S3_ACCESS_KEY: engineering-only
   PLATFORM_S3_SECRET_KEY: engineering-only-secret
+  PLATFORM_OPENSEARCH_URL: http://127.0.0.1:19269
+  PLATFORM_OPENSEARCH_INDEX: platform-ci-chunks
 jobs:
   platform:
     runs-on: ubuntu-latest
@@ -43,7 +45,7 @@ jobs:
       - run: .cache/engineering-envs/research-platform/bin/python scripts/platform_test_infra.py
       - run: .cache/engineering-envs/research-platform/bin/python -m ruff check services/research-platform/src scripts/hrs_v2.py
       - run: npm --prefix services/review-workbench run contracts
-      - run: .cache/engineering-envs/research-platform/bin/python -m pytest services/research-platform/tests services/runtime-support/tests --basetemp .scratch/platform-ci --junitxml=reports/platform.xml
+      - run: .cache/engineering-envs/research-platform/bin/python -m pytest services/research-platform/tests services/runtime-support/tests --basetemp "${{ runner.temp }}/platform-ci" --junitxml=reports/platform.xml
       - run: npm --prefix services/review-workbench test
       - run: npm --prefix services/review-workbench run check-unused
       - run: npm --prefix services/review-workbench run build
