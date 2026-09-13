@@ -53,6 +53,7 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         return {"scores": [1.0] * len(texts)}
 
     monkeypatch.setattr(search, "compute", compute)
+    monkeypatch.setattr(module, "query_vector", lambda *_: [1.0] + [0.0] * 1023)
     tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
     monkeypatch.setattr(search, "tokenizer", lambda _: tokenizer)
@@ -95,7 +96,7 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         assert report["cases"][1]["returned"] == 0
         assert report["cases_sha256"] and report["p95_ms"] >= report["p50_ms"]
         with TestClient(create_app(settings, engine)) as client:
-            response = client.get("/api/v2/search", params={"q": "粮食", "book_id": book})
+            response = client.get("/api/v2/search", params={"q": "粮食", "book_id": book, "semantic": False})
             assert response.status_code == 200 and response.json()
             assert "lexical;dur=" in response.headers["Server-Timing"]
             assert "total;dur=" in response.headers["Server-Timing"]

@@ -7,7 +7,7 @@ from tokenizers import Tokenizer
 from .domain.settings import MODEL_REVISIONS
 from .retrieval_chunks import source_excerpt, table_groups
 
-INPUT_RULE = "bge-projection-6144-v1"
+INPUT_RULE = "bge-projection-6144-essential-context-v2"
 INPUT_TOKENS = 6144
 
 
@@ -71,6 +71,11 @@ def bounded_chunks(chapter, chunks, tokenizer, limit=INPUT_TOKENS):
             prefix += header + "\n"
         else:
             header = ""
+        reserved = set()
+        for extra in context:
+            if extra['role'] in {'footnote', 'table_note'} and count(prefix + extra['text']) <= limit * 3 // 4:
+                prefix += extra['text'] + '\n'
+                reserved.add((extra['start'], extra['end'], extra['role']))
         for start, end in windows(
             chunk["text"], lambda text, prefix=prefix: count(prefix + text), limit, max_chars=6000
         ):
@@ -78,6 +83,8 @@ def bounded_chunks(chapter, chunks, tokenizer, limit=INPUT_TOKENS):
             projection = prefix + item["text"]
             omitted = False
             for extra in context:
+                if (extra['start'], extra['end'], extra['role']) in reserved:
+                    continue
                 if header and extra["role"] == "table_header":
                     continue
                 extended = projection + "\n" + extra["text"]

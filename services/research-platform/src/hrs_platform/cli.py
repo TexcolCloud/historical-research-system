@@ -19,6 +19,7 @@ def main():
             "restore",
             "reindex",
             "evaluate",
+            "evaluate-offline",
         ],
     )
     parser.add_argument(
@@ -32,6 +33,20 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=18170, type=int)
     args = parser.parse_args()
+    if args.command == 'evaluate-offline':
+        import json
+        from pathlib import Path
+
+        from .retrieval_offline import evaluate_offline
+        if not args.cases:
+            parser.error('evaluate-offline requires --cases dataset.json')
+        settings = Settings.load()
+        engine = engine_for(settings)
+        try:
+            print(json.dumps(evaluate_offline(settings, engine, json.loads(Path(args.cases).read_text('utf-8-sig'))), ensure_ascii=False, indent=2))
+        finally:
+            engine.dispose()
+        return
     if args.command in {"reindex", "evaluate"}:
         import json
         from uuid import UUID

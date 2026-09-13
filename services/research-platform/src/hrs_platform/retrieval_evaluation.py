@@ -24,14 +24,22 @@ def evaluate(search, run_id, cases, *, semantic=False, limit=10):
     run = get_run(search.engine, run_id)
     if run["kind"] != "book" or not (run["result"] or {}).get("published"):
         raise ValueError("Evaluation requires a published, reviewed book run.")
+    return evaluate_cases(
+        search, run_id, run["book_id"], cases, search.library.chapter, semantic=semantic, limit=limit
+    )
+
+
+def evaluate_cases(
+    search, run_id, book_id, cases, load_chapter, *, semantic=False, limit=10, search_options=None
+):
     if not isinstance(cases, list) or not cases or not 1 <= limit <= 50:
         raise ValueError("Provide nonempty evaluation cases and a result limit between 1 and 50.")
     chapters = {}
 
     def chapter(identity):
         if identity not in chapters:
-            value = search.library.chapter(identity)
-            if str(value["book_id"]) != str(run["book_id"]):
+            value = load_chapter(identity)
+            if str(value["book_id"]) != str(book_id):
                 raise ValueError("Evaluation evidence belongs to a different book.")
             chapters[identity] = value
         return chapters[identity]
@@ -41,7 +49,7 @@ def evaluate(search, run_id, cases, *, semantic=False, limit=10):
         if (
             not isinstance(case.get("query"), str)
             or not 1 <= len(case["query"].strip()) <= 1000
-            or not case.get("expected")
+            or not isinstance(case.get("expected"), list)
         ):
             raise ValueError("Every case needs a query and expected chapter character ranges.")
         for expected in case["expected"]:
@@ -49,7 +57,9 @@ def evaluate(search, run_id, cases, *, semantic=False, limit=10):
     rows = []
     for case in cases:
         metrics = {}
-        hits = search.search(case["query"], run["book_id"], semantic=semantic, limit=limit, metrics=metrics)
+        hits = search.search(
+            case["query"], book_id, semantic=semantic, limit=limit, metrics=metrics, **(search_options or {})
+        )
         evidence = [
             (str(hit["chapter_id"]), part, rank)
             for rank, hit in enumerate(hits, 1)
@@ -79,7 +89,9 @@ def evaluate(search, run_id, cases, *, semantic=False, limit=10):
         rows.append(
             {
                 "query": case["query"],
-                "evidence_recall": found / len(case["expected"]),
+                "evidence_recall": found / len(case["expected"]) if case["expected"] else None,
+                "unanswerable": not case["expected"],
+                "unanswerable_returned_candidates": len(hits) if not case["expected"] else None,
                 "reciprocal_rank": 1 / first_rank if first_rank else 0,
                 "source_integrity": valid / len(evidence) if evidence else None,
                 "returned": len(hits),
@@ -93,7 +105,9 @@ def evaluate(search, run_id, cases, *, semantic=False, limit=10):
         "limit": limit,
         "cases_sha256": fingerprint(cases),
         "sources_sha256": {identity: fingerprint(value["text"]) for identity, value in chapters.items()},
-        "evidence_recall": mean(row["evidence_recall"] for row in rows),
+        "evidence_recall": mean(row["evidence_recall"] for row in rows if row["evidence_recall"] is not None)
+        if any(r["evidence_recall"] is not None for r in rows)
+        else None,
         "mean_reciprocal_rank": mean(row["reciprocal_rank"] for row in rows),
         "p50_ms": median(durations),
         "p95_ms": durations[ceil(len(durations) * 0.95) - 1],

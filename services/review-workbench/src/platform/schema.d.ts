@@ -1374,6 +1374,8 @@ export interface operations {
                 semantic?: boolean;
                 limit?: number;
                 candidate_limit?: number;
+                rerank_limit?: number;
+                diverse?: boolean;
                 context_chars?: number;
                 total_chars?: number;
             };

@@ -11,7 +11,7 @@ MODEL_REVISIONS = {
 
 class RetrievalSettings(BaseModel):
     models_root: Path
-    device: Literal["cpu"] = "cpu"
+    device: Literal["cpu", "cuda"] = "cpu"
     embedding_model: Literal["BAAI/bge-m3"] = "BAAI/bge-m3"
     reranking_model: Literal["BAAI/bge-reranker-v2-m3"] = "BAAI/bge-reranker-v2-m3"
     embedding_batch: int = 8

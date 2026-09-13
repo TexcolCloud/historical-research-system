@@ -2,6 +2,7 @@
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -18,6 +19,7 @@ from .library import Library
 from .outputs import Outputs, fingerprint
 from .retrieval_chunks import CHUNK_RULE, expand_hits, retrieval_chunks, source_excerpt
 from .retrieval_inputs import INPUT_RULE, bounded_chunks, ranking_windows, tokenizer_for
+from .retrieval_ranking import fuse, lexical_query
 
 logger = logging.getLogger(__name__)
 EMBEDDING_BATCH = 8
@@ -53,6 +55,34 @@ def local_models(root):
     return LocalModels(RetrievalSettings(models_root=Path(root), device="cpu"))
 
 
+@lru_cache(maxsize=256)
+def query_vector(root, device, endpoint, identity, query):
+    if device == 'cuda':
+        return remote_compute(endpoint, 'embed', [query], query=True)['vectors'][0]
+    return local_models(root).embed([query], query=True)[0]
+
+
+def remote_compute(endpoint, operation, texts, **options):
+    import httpx
+
+    from .domain.errors import Problem
+    result = {'vectors': [], 'scores': []}
+    for offset in range(0, len(texts), 32):
+        try:
+            response = httpx.post(endpoint, json={'operation': operation, 'texts': texts[offset:offset + 32], **options}, timeout=1800)
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise Problem('retrieval_unavailable', '本地 GPU 检索服务暂不可用，请确认主机运行服务已启动后重试。', status=503, retryable=True) from error
+        value = response.json()
+        key = 'vectors' if operation == 'embed' else 'scores'
+        if len(value[key]) != len(texts[offset:offset + 32]):
+            raise ValueError('Retrieval response count differs from request')
+        result[key].extend(value[key])
+        if 'identity' in value:
+            result['identity'] = value['identity']
+    return result
+
+
 def chapter_chunks(chapter, size=1400, overlap=160):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=size,
@@ -80,7 +110,8 @@ class Search:
         return tokenizer_for(self.settings.project_root / "models/document-retrieval", model)
 
     def embed_cached(self, run_id, chunks, metrics):
-        prefix = "retrieval-embeddings:" + fingerprint(EMBEDDING_IDENTITY) + ":"
+        identity = {**EMBEDDING_IDENTITY, 'device': self.settings.retrieval_device}
+        prefix = "retrieval-embeddings:" + fingerprint(identity) + ":"
         wanted = {fingerprint(row["retrieval_text"]): row["retrieval_text"] for row in chunks}
         cached = {}
         model = None
@@ -104,7 +135,7 @@ class Search:
             with measured(metrics, "embedding_ms"):
                 result = self.compute("embed", [wanted[key] for key in keys])
             vectors = dict(zip(keys, result["vectors"], strict=True))
-            dependency = {"embedding": EMBEDDING_IDENTITY, "texts": keys}
+            dependency = {"embedding": identity, "texts": keys}
             with measured(metrics, "checkpoint_ms"):
                 self.outputs.put(
                     run_id,
@@ -121,6 +152,8 @@ class Search:
         }
 
     def compute(self, operation, texts, **options):
+        if self.settings.retrieval_device == 'cuda':
+            return remote_compute(self.settings.retrieval_endpoint, operation, texts, **options)
         models = local_models(str(self.settings.project_root / "models/document-retrieval"))
         if operation == "embed":
             return {
@@ -172,7 +205,7 @@ class Search:
             ],
             "chunk_rule": CHUNK_RULE,
             "input_rule": INPUT_RULE,
-            "embedding": EMBEDDING_IDENTITY,
+            "embedding": {**EMBEDDING_IDENTITY, 'device': self.settings.retrieval_device},
         }
         generation = fingerprint(dependency)
         step = "retrieval-chunks:" + generation
@@ -196,6 +229,53 @@ class Search:
 
     def publish_index(self, run_id, run, generation, saved):
         name = self.settings.opensearch_index
+        self.ensure_index(name)
+        helpers.bulk(
+            self.client,
+            (
+                {
+                    "_index": name,
+                    "_id": generation + ":" + row["id"],
+                    "_source": {
+                        **row,
+                        "generation": generation,
+                        "text_search": normalizer().convert(row["retrieval_text"]),
+                        "title_search": normalizer().convert(row["title"]),
+                    },
+                }
+                for row in saved["chunks"]
+            ),
+            chunk_size=100,
+            refresh="wait_for",
+        )
+        # Readers select only the SQL-committed generation. Failed bulk writes stay invisible.
+        from .deletion import require_active
+
+        with self.engine.begin() as connection:
+            require_active(connection, run["book_id"])
+            current = connection.scalar(
+                select(db.runs.c.result).where(db.runs.c.id == run_id).with_for_update()
+            )
+            connection.execute(
+                update(db.runs)
+                .where(db.runs.c.id == run_id)
+                .values(result={**(current or {}), "retrieval_generation": generation})
+            )
+        self.client.delete_by_query(
+            index=name,
+            body={
+                "query": {
+                    "bool": {
+                        "filter": [{"term": {"book_id": run["book_id"]}}],
+                        "must_not": [{"term": {"generation": generation}}],
+                    }
+                }
+            },
+            refresh=True,
+            conflicts="proceed",
+        )
+
+    def ensure_index(self, name):
         if not self.client.indices.exists(index=name):
             try:
                 self.client.indices.create(
@@ -242,50 +322,6 @@ class Search:
                 }
             },
         )
-        helpers.bulk(
-            self.client,
-            (
-                {
-                    "_index": name,
-                    "_id": generation + ":" + row["id"],
-                    "_source": {
-                        **row,
-                        "generation": generation,
-                        "text_search": normalizer().convert(row["retrieval_text"]),
-                        "title_search": normalizer().convert(row["title"]),
-                    },
-                }
-                for row in saved["chunks"]
-            ),
-            chunk_size=100,
-            refresh="wait_for",
-        )
-        # Readers select only the SQL-committed generation. Failed bulk writes stay invisible.
-        from .deletion import require_active
-
-        with self.engine.begin() as connection:
-            require_active(connection, run["book_id"])
-            current = connection.scalar(
-                select(db.runs.c.result).where(db.runs.c.id == run_id).with_for_update()
-            )
-            connection.execute(
-                update(db.runs)
-                .where(db.runs.c.id == run_id)
-                .values(result={**(current or {}), "retrieval_generation": generation})
-            )
-        self.client.delete_by_query(
-            index=name,
-            body={
-                "query": {
-                    "bool": {
-                        "filter": [{"term": {"book_id": run["book_id"]}}],
-                        "must_not": [{"term": {"generation": generation}}],
-                    }
-                }
-            },
-            refresh=True,
-            conflicts="proceed",
-        )
 
     def active_scope(self, book_id):
         with self.engine.connect() as connection:
@@ -327,49 +363,47 @@ class Search:
         self,
         query,
         book_id=None,
-        semantic=False,
-        limit=20,
-        candidate_limit=20,
+        semantic=True,
+        limit=8,
+        candidate_limit=50,
         context_chars=6000,
         total_chars=24000,
         metrics=None,
+        rerank_limit=30,
+        diverse=False,
+        fusion=True,
     ):
         metrics = metrics if metrics is not None else {}
         try:
             with measured(metrics, "total_ms"):
                 return self._search(
-                    query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics
+                    query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion
                 )
         finally:
             logger.info("retrieval.search %s", json.dumps(metrics))
 
-    def _search(self, query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics):
+    def _search(self, query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion):
         name = self.settings.opensearch_index
         if not self.client.indices.exists(index=name):
             return []
         scope = self.active_scope(book_id)
         candidates = max(limit, candidate_limit)
-        lexical = {
-            "bool": {
-                "must": [
-                    {
-                        "multi_match": {
-                            "query": normalizer().convert(query),
-                            "fields": ["title_search^2", "text_search"],
-                        }
-                    }
-                ],
-                "filter": scope,
-            }
-        }
-        with measured(metrics, "lexical_ms"):
-            result = self.client.search(
-                index=name, body={"size": candidates, "query": lexical, "_source": {"excludes": ["vector"]}}
-            )
+        lexical = lexical_query(normalizer().convert(query), scope)
+        def fetch_lexical():
+            with measured(metrics, 'lexical_ms'):
+                return self.client.search(index=name, body={'size': candidates, 'query': lexical, '_source': {'excludes': ['vector']}})
+        if semantic:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                lexical_future = pool.submit(fetch_lexical)
+                with measured(metrics, 'query_embedding_ms'):
+                    vector = query_vector(str(self.settings.project_root / 'models/document-retrieval'),
+                                          self.settings.retrieval_device, self.settings.retrieval_endpoint,
+                                          fingerprint(EMBEDDING_IDENTITY), query)
+                result = lexical_future.result()
+        else:
+            result = fetch_lexical()
         found = {row["_id"]: dict(row["_source"], score=row["_score"]) for row in result["hits"]["hits"]}
         if semantic:
-            with measured(metrics, "query_embedding_ms"):
-                vector = self.compute("embed", [query], query=True)["vectors"][0]
             knn = {
                 "vector": vector,
                 "k": candidates,
@@ -384,9 +418,14 @@ class Search:
                         "_source": {"excludes": ["vector"]},
                     },
                 )
-            for row in more["hits"]["hits"]:
-                found.setdefault(row["_id"], dict(row["_source"], score=row["_score"]))
-            rows = list(found.values())
+            rows = fuse(result['hits']['hits'], more['hits']['hits'])
+            if not fusion:
+                union = {r['_id']: {**r['_source'], 'score': r['_score']} for r in result['hits']['hits']}
+                for row in more['hits']['hits']:
+                    union.setdefault(row['_id'], {**row['_source'], 'score': row['_score']})
+                rows = list(union.values())
+            metrics['fused_candidates'] = len(rows)
+            rows = rows[:max(limit, rerank_limit)]
             if rows:
                 with measured(metrics, "rerank_ms"):
                     texts, owners = ranking_windows(
@@ -401,7 +440,7 @@ class Search:
                 found = {row["id"]: {**row, "score": score} for row, score in zip(rows, scores, strict=True)}
         with measured(metrics, "context_ms"):
             result = expand_hits(
-                list(found.values()), self.library.chapter, limit, context_chars, total_chars
+                list(found.values()), self.library.chapter, limit, context_chars, total_chars, diverse=diverse
             )
         metrics.update(candidates=len(found), results=len(result))
         return result

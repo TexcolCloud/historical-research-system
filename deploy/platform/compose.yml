@@ -86,6 +86,8 @@ services:
       PLATFORM_DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       PLATFORM_REASONING_MODEL: ${CARDS_REASONING_MODEL:-deepseek-v4-pro}
       PLATFORM_READING_MODEL: ${CARDS_READING_MODEL:-deepseek-flash}
+      PLATFORM_RETRIEVAL_DEVICE: ${PLATFORM_RETRIEVAL_DEVICE:-cuda}
+      PLATFORM_RETRIEVAL_ENDPOINT: http://host.docker.internal:18160/retrieval
     ports: ['127.0.0.1:${PLATFORM_API_PORT:-18170}:18170']
     volumes: ['../../models/document-retrieval:/app/models/document-retrieval:ro', 'compute-cache:/tmp/hrs-compute']
     tmpfs: ['/tmp:size=1g,uid=10001,gid=10001']

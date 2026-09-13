@@ -119,3 +119,28 @@ output/refactor-v2 保存 Tus/S3 续传、幂等入站、Temporal 人工等待�
 现行进度及运行故障修复证据统一见 [V2 当前记录](../../docs/refactor-delivery-status-20260913.md)。真实书籍可在处理进展页查看初轮有效核验页数；不可用响应不计入该数字，机器结果仍不等于人工通过。
 
 书籍任务删除使用 `DELETE /api/v2/books/{book_id}` 和现有 Temporal 工作进程。先停止执行再清理，失败保留回执并允许重试；不删除其他书籍仍引用的对象。实施与验证见 [删除说明](../../docs/book-task-deletion-20260913.md)。
+
+### GPU 检索与独立评测（2026-09-14）
+
+研究检索默认关键词与向量各召回 50 条，RRF 融合后最多重排 30 条，返回 8 组证据。
+`semantic=false` 为快速查词，`diverse=true` 用于跨章节综合；这些是可调起始值。
+必要脚注、表头、表注先于低排名结果分配预算。无法完整容纳必要信息的证据组不返回，
+不会将删掉限定条件的数字当作完整证据。
+
+`PLATFORM_RETRIEVAL_DEVICE=cuda` 通过主机现有 GPU broker 运行嵌入和重排。
+`PLATFORM_RETRIEVAL_ENDPOINT` 默认 `http://127.0.0.1:18160/retrieval`，容器使用
+`host.docker.internal`。主机需要安装 research-platform 的 `retrieval` extra CUDA 环境；
+不可使用仅供测试的轻量 CPU 环境启动生产 broker。
+请求取得共享 GPU 锁后卸载视觉模型，使用一个自有检索子进程。两个检索模型可连续驻留；
+下一次 OCR 或视觉请求先释放检索进程。错误及超时释放该进程，返回可重试错误。
+CPU 运行必须显式设置 `PLATFORM_RETRIEVAL_DEVICE=cpu`，不会静默回退。
+当前长时间机审结束后重启主机 broker，才启用新调度代码。
+
+`hrs-platform evaluate-offline --cases dataset.json` 使用独立 `hrs-offline-*` 临时索引，
+对比关键词、旧候选策略（每路 20 条直接重排）、新融合策略，不写入文献库或改变审核状态。
+JSON 包含 `title`、`chapters`、`cases`。章节沿用原文及来源映射，并带有
+`development_review`：`text_sha256`、`image_sha256`、`original_first=true`、
+`human_review=false`。问题包含 `query` 和 `expected`（chapter_id/start/end）；空 expected
+表示无答案，报告其返回候选数量，不将候选视为确认答案。标准输出为评测报告。
+三组共享当前分块及上下文规则，比较的是候选策略，不是完整历史实现。
+开发样本不构成生产放行；需要保留未参与调参的书籍才能判断泛化收益。
