@@ -18,6 +18,8 @@ def main():
             "backup",
             "restore",
             "reindex",
+            "evaluate",
+            "evaluate-offline",
         ],
     )
     parser.add_argument(
@@ -25,17 +27,36 @@ def main():
     )
     parser.add_argument("--restore-suffix", help="New isolated destination database suffix")
     parser.add_argument("--run-id", help="Published book run to reindex without repeating OCR")
+    parser.add_argument("--cases", help="Evaluation JSON: query and expected chapter_id/start/end ranges")
+    parser.add_argument("--semantic", action="store_true", help="Evaluate semantic retrieval and reranking")
+    parser.add_argument("--limit", default=10, type=int, help="Evaluation result limit")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=18170, type=int)
     args = parser.parse_args()
-    if args.command == "reindex":
+    if args.command == 'evaluate-offline':
+        import json
+        from pathlib import Path
+
+        from .retrieval_offline import evaluate_offline
+        if not args.cases:
+            parser.error('evaluate-offline requires --cases dataset.json')
+        settings = Settings.load()
+        engine = engine_for(settings)
+        try:
+            print(json.dumps(evaluate_offline(settings, engine, json.loads(Path(args.cases).read_text('utf-8-sig'))), ensure_ascii=False, indent=2))
+        finally:
+            engine.dispose()
+        return
+    if args.command in {"reindex", "evaluate"}:
         import json
         from uuid import UUID
 
         from .search import Search
 
         if not args.run_id:
-            parser.error("reindex requires --run-id")
+            parser.error(f"{args.command} requires --run-id")
+        if args.command == "evaluate" and not args.cases:
+            parser.error("evaluate requires --cases")
         try:
             run_id = str(UUID(args.run_id))
         except ValueError:
@@ -43,7 +64,22 @@ def main():
         settings = Settings.load()
         engine = engine_for(settings)
         try:
-            print(json.dumps(Search(settings, engine).index(run_id), ensure_ascii=False, indent=2))
+            search = Search(settings, engine)
+            if args.command == "evaluate":
+                from pathlib import Path
+
+                from .retrieval_evaluation import evaluate
+
+                result = evaluate(
+                    search,
+                    run_id,
+                    json.loads(Path(args.cases).read_text(encoding="utf-8-sig")),
+                    semantic=args.semantic,
+                    limit=args.limit,
+                )
+            else:
+                result = search.index(run_id)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         finally:
             engine.dispose()
         return

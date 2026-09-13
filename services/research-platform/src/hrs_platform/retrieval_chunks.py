@@ -282,10 +282,18 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
             }
 
 
-def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24000):
+def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24000, *, diverse=False):
     """Merge intersecting evidence and spend a separate, bounded context budget."""
+    from .retrieval_ranking import diverse_order
+
     selected, chapters, structures = [], {}, {}
-    for hit in sorted(hits, key=lambda h: h["score"], reverse=True):
+    duplicates = set()
+    ordered = diverse_order(hits) if diverse else sorted(hits, key=lambda h: h["score"], reverse=True)
+    for hit in ordered:
+        duplicate = (hit["chapter_id"], hit["text"], tuple((c["start"], c["end"], c["role"]) for c in hit.get("context", [])))
+        if duplicate in duplicates:
+            continue
+        duplicates.add(duplicate)
         chapter_id = hit["chapter_id"]
         if chapter_id not in chapters:
             chapters[chapter_id] = load_chapter(chapter_id)
@@ -313,12 +321,19 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
             selected.append({**hit, "context": list(hit.get("context", []))})
     retained, remaining = [], total_chars
     for hit in selected:
-        if len(hit["text"]) <= remaining:
-            retained.append(hit)
-            remaining -= len(hit["text"])
+        # Reserve source-linked constraints before spending on another primary hit.
+        mandatory = {}
+        for extra in hit['context']:
+            if extra['role'] != 'neighbor' and not hit['start'] <= extra['start'] < extra['end'] <= hit['end']:
+                mandatory[(extra['start'], extra['end'])] = extra
+        needed = len(hit['text']) + sum(len(c['text']) for c in mandatory.values())
+        if needed <= remaining and needed <= context_chars:
+            retained.append((hit, needed - len(hit['text'])))
+            remaining -= needed
     output = []
-    for hit in retained:
-        available = min(max(0, context_chars - len(hit["text"])), remaining)
+    for hit, reserved in retained:
+        available = min(max(0, context_chars - len(hit["text"])), remaining + reserved)
+        remaining += reserved
         structure, chapter = structures[hit["chapter_id"]], chapters[hit["chapter_id"]]
         indexes = [i for i, b in enumerate(structure) if b["start"] < hit["end"] and hit["start"] < b["end"]]
         additions = list(hit["context"])

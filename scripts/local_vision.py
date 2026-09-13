@@ -2,6 +2,7 @@
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import signal
@@ -16,6 +17,31 @@ from uuid import UUID
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'services/runtime-support/src'))
 from hrs_runtime.local_vision import MODEL, POLICY, free_gib, gpu_lease
+
+
+def retrieval_worker(connection):
+    """One owned CUDA process; embeddings and reranker stay resident between requests."""
+    sys.path.insert(0, str(ROOT / 'services/research-platform/src'))
+    from hrs_platform.domain.retrieval_models import LocalModels
+    from hrs_platform.domain.settings import RetrievalSettings
+    models = LocalModels(RetrievalSettings(models_root=ROOT / 'models/document-retrieval', device='cuda'))
+    try:
+        while True:
+            body = connection.recv()
+            started = time.monotonic()
+            try:
+                if body['operation'] == 'embed':
+                    value = {'vectors': models.embed(body['texts'], query=body.get('query', False)), 'identity': models.identity()}
+                else:
+                    value = {'scores': models.rerank(body['query'], body['texts'])}
+                connection.send({'result': value, 'seconds': time.monotonic() - started})
+            except Exception as error:
+                connection.send({'error': type(error).__name__})
+    except EOFError:
+        pass
+    finally:
+        models.unload()
+        connection.close()
 
 
 class Vision:
@@ -33,6 +59,56 @@ class Vision:
         self.active_task = None
         self.last_task = None
         self.cancelled_tasks = set()
+        self.retrieval_process = None
+        self.retrieval_pipe = None
+
+    def unload_retrieval(self):
+        process, self.retrieval_process = self.retrieval_process, None
+        pipe, self.retrieval_pipe = self.retrieval_pipe, None
+        if process is not None:
+            process.terminate()
+            process.join(timeout=20)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=10)
+            if process.is_alive():
+                raise RuntimeError('retrieval_process_did_not_release_gpu')
+            process.close()
+            self.event({'event': 'retrieval_unloaded'})
+        if pipe is not None:
+            pipe.close()
+
+    def retrieve(self, body):
+        operation, texts = body.get('operation'), body.get('texts')
+        if operation not in {'embed', 'rerank'} or not isinstance(texts, list) or not 1 <= len(texts) <= 64 or any(not isinstance(t, str) or len(t) > 40000 for t in texts):
+            raise ValueError('Invalid retrieval request')
+        if operation == 'rerank' and (not isinstance(body.get('query'), str) or not 1 <= len(body['query']) <= 1000):
+            raise ValueError('Invalid rerank query')
+        with gpu_lease():
+            if self.closing.is_set():
+                raise RuntimeError('local_runtime_stopping')
+            self.unload()
+            if self.retrieval_process is None or not self.retrieval_process.is_alive():
+                self.unload_retrieval()
+                if free_gib() < float(os.getenv('HRS_RETRIEVAL_PEAK_GIB', '6')) + self.reserve:
+                    raise RuntimeError('gpu_memory_unavailable_for_retrieval')
+                context = multiprocessing.get_context('spawn')
+                self.retrieval_pipe, child = context.Pipe()
+                self.retrieval_process = context.Process(target=retrieval_worker, args=(child,), daemon=True)
+                self.retrieval_process.start()
+                child.close()
+            try:
+                self.retrieval_pipe.send(body)
+                if not self.retrieval_pipe.poll(900):
+                    raise TimeoutError('retrieval_timeout')
+                response = self.retrieval_pipe.recv()
+                if 'error' in response:
+                    raise RuntimeError('retrieval_failed:' + response['error'])
+                self.event({'event': 'retrieval_completed', 'operation': operation, 'items': len(texts), 'seconds': response['seconds']})
+                return response['result']
+            except Exception:
+                self.unload_retrieval()
+                raise
 
     def cancel_tasks(self, task_ids):
         identities = {str(UUID(value)) for value in task_ids}
@@ -60,6 +136,7 @@ class Vision:
             self.event({'event': 'vision_unloaded'})
 
     def prepare_ocr(self):
+        self.unload_retrieval()
         available = free_gib()
         if available < self.ocr_peak + self.reserve:
             self.unload()
@@ -71,6 +148,7 @@ class Vision:
         return result
 
     def start(self):
+        self.unload_retrieval()
         if self.process is not None and self.process.poll() is None:
             return
         self.unload()
@@ -181,6 +259,8 @@ def main():
                     value = vision.prepare_ocr()
                 elif self.path == '/v1/chat/completions':
                     value = vision.complete(body)
+                elif self.path == '/retrieval':
+                    value = vision.retrieve(body)
                 elif self.path == '/cancel-tasks':
                     value = vision.cancel_tasks(body['task_ids'])
                 else:
@@ -210,6 +290,7 @@ def main():
     finally:
         vision.closing.set()
         vision.unload()
+        vision.unload_retrieval()
         server.server_close()
 
 

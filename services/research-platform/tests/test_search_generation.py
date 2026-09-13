@@ -4,10 +4,14 @@ import json
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import insert, update
+from fastapi.testclient import TestClient
+from sqlalchemy import insert, select, update
+from tokenizers import Tokenizer, models, pre_tokenizers
 
 from hrs_platform import schema as db
 from hrs_platform import search as module
+from hrs_platform.api import create_app
+from hrs_platform.retrieval_evaluation import evaluate
 from hrs_platform.search import Search
 
 
@@ -49,6 +53,10 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         return {"scores": [1.0] * len(texts)}
 
     monkeypatch.setattr(search, "compute", compute)
+    monkeypatch.setattr(module, "query_vector", lambda *_: [1.0] + [0.0] * 1023)
+    tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
+    tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+    monkeypatch.setattr(search, "tokenizer", lambda _: tokenizer)
     bulk = module.helpers.bulk
     try:
         with engine.begin() as connection:
@@ -68,6 +76,30 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         assert hits and all(h["generation"] == first["generation"] for h in hits)
         assert search.search("粮食", str(uuid4())) == []
         assert search.search("粮食", book, semantic=True)
+        evidence = original.index("120吨")
+        report = evaluate(
+            search,
+            run,
+            [
+                {
+                    "query": "糧食",
+                    "expected": [{"chapter_id": chapter, "start": evidence, "end": evidence + 4}],
+                },
+                {
+                    "query": "zxqvuniquemissingterm",
+                    "expected": [{"chapter_id": chapter, "start": evidence, "end": evidence + 4}],
+                },
+            ],
+        )
+        assert report["evidence_recall"] == 0.5
+        assert report["cases"][0]["source_integrity"] == 1
+        assert report["cases"][1]["returned"] == 0
+        assert report["cases_sha256"] and report["p95_ms"] >= report["p50_ms"]
+        with TestClient(create_app(settings, engine)) as client:
+            response = client.get("/api/v2/search", params={"q": "粮食", "book_id": book, "semantic": False})
+            assert response.status_code == 200 and response.json()
+            assert "lexical;dur=" in response.headers["Server-Timing"]
+            assert "total;dur=" in response.headers["Server-Timing"]
         count_before_rebuild = len(embeddings)
         monkeypatch.setattr(module, "CHUNK_RULE", module.CHUNK_RULE + "-test-new-version")
 
@@ -78,15 +110,20 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         monkeypatch.setattr(module.helpers, "bulk", partial)
         with pytest.raises(OSError, match="partial index"):
             search.index(run)
+        with engine.connect() as connection:
+            metrics = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == run))[
+                "retrieval_metrics"
+            ]
+            assert metrics["status"] == "failed" and metrics["total_ms"] > 0
         assert all(h["generation"] == first["generation"] for h in search.search("粮食", book))
         monkeypatch.setattr(module.helpers, "bulk", bulk)
         second = search.index(run)
         assert second["generation"] != first["generation"]
-        assert len(embeddings) == count_before_rebuild + 1
+        assert len(embeddings) == count_before_rebuild
         assert all(h["generation"] == second["generation"] for h in search.search("粮食", book))
         assert search.client.count(index=settings.opensearch_index)["count"] == second["chunks"]
         search.client.indices.delete(index=settings.opensearch_index)
         assert search.index(run) == second
-        assert len(embeddings) == count_before_rebuild + 1
+        assert len(embeddings) == count_before_rebuild
     finally:
         search.client.indices.delete(index=settings.opensearch_index, ignore=[404])

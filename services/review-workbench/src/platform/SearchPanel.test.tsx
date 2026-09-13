@@ -13,31 +13,35 @@ afterEach(() => {
 });
 
 test("search preserves the hit and exposes separately cited context and its chapter link", async () => {
-  respondWith(() => [
-    {
-      id: "hit",
-      book_id: "book",
-      run_id: "run",
-      chapter_id: "chapter2",
-      title: "运输",
-      text: "登记120吨",
-      pages: [8],
-      start: 30,
-      end: 36,
-      score: 1,
-      section_path: ["运输", "甲地"],
-      context_truncated: true,
-      context: [
-        {
-          start: 100,
-          end: 108,
-          text: "不包括乙地",
-          pages: [9],
-          role: "footnote",
-        },
-      ],
-    },
-  ]);
+  let requested = "";
+  respondWith((request) => {
+    requested = request.url;
+    return [
+      {
+        id: "hit",
+        book_id: "book",
+        run_id: "run",
+        chapter_id: "chapter2",
+        title: "运输",
+        text: "登记120吨",
+        pages: [8],
+        start: 30,
+        end: 36,
+        score: 1,
+        section_path: ["运输", "甲地"],
+        context_truncated: true,
+        context: [
+          {
+            start: 100,
+            end: 108,
+            text: "不包括乙地",
+            pages: [9],
+            role: "footnote",
+          },
+        ],
+      },
+    ];
+  });
   render(
     <MemoryRouter>
       <QueryClientProvider client={new QueryClient()}>
@@ -48,6 +52,14 @@ test("search preserves the hit and exposes separately cited context and its chap
   await userEvent.type(screen.getByLabelText("检索本书正文"), "粮食");
   await userEvent.click(screen.getByRole("button", { name: "查找" }));
   await screen.findByText("登记120吨");
+  expect(new URL(requested).searchParams.get("semantic")).toBe("true");
+  await userEvent.click(screen.getByLabelText("研究检索（关闭后快速查词）"));
+  await userEvent.click(screen.getByLabelText("跨章节综合"));
+  await userEvent.click(screen.getByRole("button", { name: "查找" }));
+  await vi.waitFor(() =>
+    expect(new URL(requested).searchParams.get("semantic")).toBe("false"),
+  );
+  expect(new URL(requested).searchParams.get("diverse")).toBe("true");
   await userEvent.click(screen.getByText("查看相关上下文、表头与注释"));
   expect(
     screen.getByRole("link", { name: "查看原件第 9 页" }).getAttribute("href"),

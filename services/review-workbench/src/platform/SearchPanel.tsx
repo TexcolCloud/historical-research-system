@@ -6,8 +6,9 @@ import { Input } from "../components/ui/input";
 import { client } from "./client";
 export default function SearchPanel({ bookId }: { bookId: string }) {
   const [text, setText] = useState(""),
-    [request, setRequest] = useState({ q: "", semantic: false }),
-    [semantic, setSemantic] = useState(false);
+    [request, setRequest] = useState({ q: "", semantic: true, diverse: false }),
+    [semantic, setSemantic] = useState(true),
+    [diverse, setDiverse] = useState(false);
   const results = useQuery({
     queryKey: ["platform", "search", bookId, request],
     placeholderData: keepPreviousData,
@@ -26,7 +27,7 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (text.trim()) setRequest({ q: text.trim(), semantic });
+          if (text.trim()) setRequest({ q: text.trim(), semantic, diverse });
         }}
       >
         <Input
@@ -42,7 +43,15 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
             checked={semantic}
             onChange={(e) => setSemantic(e.target.checked)}
           />
-          语义检索与重排
+          研究检索（关闭后快速查词）
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={diverse}
+            onChange={(e) => setDiverse(e.target.checked)}
+          />
+          跨章节综合
         </label>
       </form>
       {results.isFetching && (

@@ -368,7 +368,7 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "default": false,
+              "default": true,
               "title": "Semantic"
             }
           },
@@ -380,7 +380,7 @@
               "type": "integer",
               "maximum": 50,
               "minimum": 1,
-              "default": 20,
+              "default": 8,
               "title": "Limit"
             }
           },
@@ -392,8 +392,30 @@
               "type": "integer",
               "maximum": 100,
               "minimum": 1,
-              "default": 20,
+              "default": 50,
               "title": "Candidate Limit"
+            }
+          },
+          {
+            "name": "rerank_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Rerank Limit"
+            }
+          },
+          {
+            "name": "diverse",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Diverse"
             }
           },
           {

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Literal
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -33,6 +34,8 @@ class Settings(BaseModel):
     reasoning_max_output: int = 32000
     opensearch_url: str = "http://127.0.0.1:19260"
     opensearch_index: str = "hrs-platform-v2-chunks"
+    retrieval_device: Literal["cpu", "cuda"] = "cuda"
+    retrieval_endpoint: str = "http://127.0.0.1:18160/retrieval"
 
     @classmethod
     def load(cls, root=None):

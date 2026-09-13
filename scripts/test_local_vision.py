@@ -15,6 +15,32 @@ from hrs_runtime import local_vision as client
 
 class SchedulingTests(unittest.TestCase):
 
+    def test_retrieval_uses_shared_lease_and_unloads_vision_once_per_entry(self):
+        vision = broker.Vision()
+        vision.retrieval_process = Mock()
+        vision.retrieval_process.is_alive.return_value = True
+        vision.retrieval_pipe = Mock()
+        vision.retrieval_pipe.poll.return_value = True
+        vision.retrieval_pipe.recv.return_value = {'result': {'vectors': [[1]]}, 'seconds': 1}
+        with patch.object(broker, 'gpu_lease', return_value=nullcontext()) as lease, patch.object(vision, 'unload') as unload, patch.object(vision, 'event'):
+            self.assertEqual(vision.retrieve({'operation': 'embed', 'texts': ['样本']}), {'vectors': [[1]]})
+            lease.assert_called_once()
+            unload.assert_called_once()
+        with patch.object(vision, 'unload_retrieval') as release, patch.object(broker, 'free_gib', return_value=12), patch.object(vision, 'event'):
+            vision.prepare_ocr()
+            release.assert_called_once()
+
+    def test_failed_retrieval_releases_owned_gpu_process(self):
+        vision = broker.Vision()
+        vision.retrieval_process = Mock()
+        vision.retrieval_process.is_alive.return_value = True
+        vision.retrieval_pipe = Mock()
+        vision.retrieval_pipe.poll.return_value = False
+        with patch.object(broker, 'gpu_lease', return_value=nullcontext()), patch.object(vision, 'unload'), patch.object(vision, 'unload_retrieval') as release:
+            with self.assertRaises(TimeoutError):
+                vision.retrieve({'operation': 'embed', 'texts': ['样本']})
+            release.assert_called_once()
+
     def test_gpu_lease_blocks_a_second_owner_and_releases_after_exception(self):
         import os
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'HRS_GPU_LOCK': str(Path(directory) / 'gpu.lock')}):
