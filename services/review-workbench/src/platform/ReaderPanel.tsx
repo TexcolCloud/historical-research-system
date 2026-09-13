@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { RenderedMarkdown } from "../editor/RenderedMarkdown";
@@ -19,6 +20,7 @@ const chapterOptions = (id: string) =>
   });
 export default function ReaderPanel({ bookId }: { bookId: string }) {
   const query = useQueryClient();
+  const [params] = useSearchParams();
   const [selected, setSelected] = useState(""),
     [original, setOriginal] = useState(false),
     [page, setPage] = useState<number | null>(null);
@@ -33,7 +35,11 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       return data;
     },
   });
-  const id = selected || chapters.data?.[0]?.id || "";
+  const requested = selected || params.get("chapter");
+  const id =
+    chapters.data?.find((item) => item.id === requested)?.id ||
+    chapters.data?.[0]?.id ||
+    "";
   const chapter = useQuery({ ...chapterOptions(id), enabled: Boolean(id) });
   const index = chapters.data?.findIndex((item) => item.id === id) ?? -1;
   const next = chapters.data?.[index + 1],

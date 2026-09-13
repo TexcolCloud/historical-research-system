@@ -188,6 +188,15 @@ class CardDetail(CardSummary):
     verdict: dict
 
 
+class SearchContext(BaseModel):
+    start: int
+    end: int
+    text: str
+    pages: list[int]
+    role: str
+    sources: list[dict] = Field(default_factory=list)
+
+
 class SearchHit(BaseModel):
     id: UUID
     book_id: UUID
@@ -199,6 +208,12 @@ class SearchHit(BaseModel):
     start: int
     end: int
     score: float
+    book_title: str = ""
+    section_path: list[str] = Field(default_factory=list)
+    sources: list[dict] = Field(default_factory=list)
+    context: list[SearchContext] = Field(default_factory=list)
+    context_truncated: bool = False
+    oversized: bool = False
 
 
 class RecoveryRequest(BaseModel):

@@ -987,6 +987,23 @@ export interface components {
             kind: string;
             progress?: components["schemas"]["RunProgress"] | null;
         };
+        /** SearchContext */
+        SearchContext: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+            /** Pages */
+            pages: number[];
+            /** Role */
+            role: string;
+            /** Sources */
+            sources?: {
+                [key: string]: unknown;
+            }[];
+        };
         /** SearchHit */
         SearchHit: {
             /**
@@ -1021,6 +1038,29 @@ export interface components {
             end: number;
             /** Score */
             score: number;
+            /**
+             * Book Title
+             * @default
+             */
+            book_title: string;
+            /** Section Path */
+            section_path?: string[];
+            /** Sources */
+            sources?: {
+                [key: string]: unknown;
+            }[];
+            /** Context */
+            context?: components["schemas"]["SearchContext"][];
+            /**
+             * Context Truncated
+             * @default false
+             */
+            context_truncated: boolean;
+            /**
+             * Oversized
+             * @default false
+             */
+            oversized: boolean;
         };
         /** UploadRequest */
         UploadRequest: {
@@ -1302,6 +1342,10 @@ export interface operations {
                 q: string;
                 book_id?: string | null;
                 semantic?: boolean;
+                limit?: number;
+                candidate_limit?: number;
+                context_chars?: number;
+                total_chars?: number;
             };
             header?: never;
             path?: never;

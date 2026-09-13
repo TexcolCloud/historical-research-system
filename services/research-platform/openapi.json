@@ -371,6 +371,54 @@
               "default": false,
               "title": "Semantic"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "candidate_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Candidate Limit"
+            }
+          },
+          {
+            "name": "context_chars",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 12000,
+              "minimum": 1400,
+              "default": 6000,
+              "title": "Context Chars"
+            }
+          },
+          {
+            "name": "total_chars",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 60000,
+              "minimum": 1400,
+              "default": 24000,
+              "title": "Total Chars"
+            }
           }
         ],
         "responses": {
@@ -2462,6 +2510,50 @@
         ],
         "title": "RunSummary"
       },
+      "SearchContext": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Pages"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "text",
+          "pages",
+          "role"
+        ],
+        "title": "SearchContext"
+      },
       "SearchHit": {
         "properties": {
           "id": {
@@ -2510,6 +2602,43 @@
           "score": {
             "type": "number",
             "title": "Score"
+          },
+          "book_title": {
+            "type": "string",
+            "title": "Book Title",
+            "default": ""
+          },
+          "section_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Section Path"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "context": {
+            "items": {
+              "$ref": "#/components/schemas/SearchContext"
+            },
+            "type": "array",
+            "title": "Context"
+          },
+          "context_truncated": {
+            "type": "boolean",
+            "title": "Context Truncated",
+            "default": false
+          },
+          "oversized": {
+            "type": "boolean",
+            "title": "Oversized",
+            "default": false
           }
         },
         "type": "object",
