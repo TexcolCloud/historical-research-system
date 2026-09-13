@@ -142,6 +142,8 @@ output/refactor-v2 保存 Tus/S3 续传、幂等入站、Temporal 人工等待�
 下一次 OCR 或视觉请求先释放检索进程。错误及超时释放该进程，返回可重试错误。
 CPU 运行必须显式设置 `PLATFORM_RETRIEVAL_DEVICE=cpu`，不会静默回退。
 当前长时间机审结束后重启主机 broker，才启用新调度代码。
+模型冷启动默认允许 600 秒，可用 `HRS_VISION_START_TIMEOUT` 调整（30–900 秒）。
+`vision_loading` 事件记录本次上限，超过上限仍返回可恢复错误，不把启动失败当成内容审核通过。
 
 `hrs-platform evaluate-offline --cases dataset.json` 使用独立 `hrs-offline-*` 临时索引，
 对比关键词、旧候选策略（每路 20 条直接重排）、新融合策略、50 条重排及每路保留 3 条候选，
