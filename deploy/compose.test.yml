@@ -1,0 +1,34 @@
+# Isolated engineering infrastructure. No production volumes or model credentials.
+name: hrs-engineering-tests
+services:
+  postgres:
+    image: postgres:18.6-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+    environment:
+      POSTGRES_USER: hrs_test
+      POSTGRES_PASSWORD: engineering-only
+      POSTGRES_DB: ingestion_test
+    ports:
+      - "127.0.0.1:55437:5432"
+    volumes:
+      - ./test-init.sql:/docker-entrypoint-initdb.d/10-test.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hrs_test -d ingestion_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  opensearch:
+    image: opensearchproject/opensearch:3.8.0@sha256:bcc1797519726ceb6d651d4a3e60b7c30da91793914a8dfe75fd441d4f641509
+    environment:
+      discovery.type: single-node
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      path.repo: /tmp
+    ports:
+      - "127.0.0.1:19261:9200"
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60

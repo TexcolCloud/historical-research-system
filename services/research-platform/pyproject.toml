@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hrs-platform"
+version = "0.1.0"
+description = "Book-centred research application and durable workflow workers"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "fastapi>=0.141.1,<0.142", "pydantic>=2.13.5,<3", "uvicorn>=0.35,<1",
+  "SQLAlchemy>=2.0.52,<2.1", "psycopg[binary]>=3.3.5,<4", "alembic>=1.19.2,<2",
+  "python-dotenv>=1,<2", "temporalio>=1.16,<2", "httpx>=0.28,<1", "hrs-runtime==0.1.0",
+  "pypdf>=6,<7", "filelock>=3.32,<4", "psutil>=7.2,<8",
+  "openai-agents>=0.22.1,<0.23", "Pillow>=11,<13", "tokenizers>=0.22,<0.23",
+  "opensearch-py>=3,<4", "langchain-text-splitters>=0.3,<2",
+]
+
+[project.optional-dependencies]
+retrieval = ["torch>=2.9,<3", "transformers==4.57.6", "numpy>=2,<3", "OpenCC>=1.1,<2"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1"]
+
+[project.scripts]
+hrs-platform = "hrs_platform.cli:main"
+
+[tool.uv.sources]
+hrs-runtime = { path = "../runtime-support", editable = true }
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'win32'" },
+  { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hrs_platform = ["migrations/*.py", "migrations/versions/*.py", "domain/data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+extend = "../../ruff.toml"
+target-version = "py311"
+line-length = 110

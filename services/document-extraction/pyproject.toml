@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "historical-document-extraction-service"
+version = "0.1.0"
+description = "Docling PDF/image conversion with one recognizer and semantic review"
+requires-python = ">=3.11,<3.12"
+dependencies = ["docling==2.123.0", "Pillow>=10", "hrs-runtime==0.1.0"]
+
+[project.optional-dependencies]
+paddle = [
+    "paddleocr>=3.4",
+    "paddlex[ocr]>=3.7,<3.8",
+    "opencv-python-headless>=4.10",
+]
+paddle-cpu = ["paddlepaddle>=3.2,<4"]
+paddle-gpu-cu129 = [
+    "paddlepaddle-gpu==3.3.0; sys_platform == 'win32'",
+    "nvidia-nvjitlink-cu12>=12.9,<13; sys_platform == 'win32'",
+]
+gpu-cu129 = ["torch==2.8.0", "torchvision==0.23.0"]
+
+[project.scripts]
+history-extract = "document_extraction.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.uv]
+environments = ["sys_platform == 'win32'"]
+
+[tool.uv.sources]
+hrs-runtime = { path = "../runtime-support", editable = true }
+torch = { index = "pytorch-cu129" }
+torchvision = { index = "pytorch-cu129" }
+paddlepaddle-gpu = { url = "https://paddle-whl.bj.bcebos.com/stable/cu129/paddlepaddle-gpu/paddlepaddle_gpu-3.3.0-cp311-cp311-win_amd64.whl" }
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true

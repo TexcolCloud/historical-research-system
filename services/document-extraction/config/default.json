@@ -1,0 +1,34 @@
+{
+  "render_dpi": 300,
+  "ocr_backends": [
+    {
+      "name": "paddleocr-vl",
+      "kind": "paddleocr-vl",
+      "pipeline_version": "v1.6",
+      "engine": "transformers"
+    }
+  ],
+  "vision_review": {
+    "review_mode": "full",
+    "confidence_threshold": 0.98,
+    "timeout_seconds": 1800,
+    "cache_enabled": true,
+    "enabled": true,
+    "cache_path": "state/vision-review-cache"
+  },
+  "risk": {
+    "auto_accept": true,
+    "enabled": true
+  },
+  "acceleration": {
+    "device": "auto",
+    "device_id": 0,
+    "dtype": "float16",
+    "attention": "auto",
+    "fast_min_vram_gb": 12,
+    "enforce_vram_limit": true,
+    "max_vram_gb": 15.0,
+    "cpu_threads": 8,
+    "cpu_fallback": true
+  }
+}

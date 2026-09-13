@@ -1,0 +1,63 @@
+name: Platform V2 checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: platform-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  PYTHONUTF8: '1'
+  UV_LINK_MODE: copy
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.cache/engineering-envs/research-platform
+  PLATFORM_DATABASE_URL: postgresql+psycopg://hrs_test:engineering-only@127.0.0.1:55439/historical_research_v2_test
+  PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://hrs_test:engineering-only@127.0.0.1:55439/historical_research_v2_test
+  PLATFORM_S3_ENDPOINT: http://127.0.0.1:58339
+  PLATFORM_S3_BUCKET: platform-ci
+  PLATFORM_S3_ACCESS_KEY: engineering-only
+  PLATFORM_S3_SECRET_KEY: engineering-only-secret
+jobs:
+  platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: services/review-workbench/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.6'
+          enable-cache: true
+      - run: uv sync --project services/research-platform --locked --group dev
+      - run: npm --prefix services/review-workbench ci
+      - run: npm --prefix services/review-workbench/tooling/openapi ci
+      - run: docker compose -f deploy/platform/compose.test.yml up -d --wait
+      - run: .cache/engineering-envs/research-platform/bin/python scripts/platform_test_infra.py
+      - run: .cache/engineering-envs/research-platform/bin/python -m ruff check services/research-platform/src scripts/hrs_v2.py
+      - run: npm --prefix services/review-workbench run contracts
+      - run: .cache/engineering-envs/research-platform/bin/python -m pytest services/research-platform/tests services/runtime-support/tests --basetemp .scratch/platform-ci --junitxml=reports/platform.xml
+      - run: npm --prefix services/review-workbench test
+      - run: npm --prefix services/review-workbench run check-unused
+      - run: npm --prefix services/review-workbench run build
+      - name: Build production images
+        run: |
+          docker build -f deploy/platform/Dockerfile -t hrs-platform:ci .
+          docker build -f deploy/platform/Dockerfile.web -t hrs-platform-web:ci .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: platform-checks
+          path: |
+            reports/platform.xml
+            services/review-workbench/dist/
+          retention-days: 14
+      - if: always()
+        run: docker compose -f deploy/platform/compose.test.yml down

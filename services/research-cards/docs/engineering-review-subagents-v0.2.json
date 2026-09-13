@@ -1,0 +1,254 @@
+{
+  "review_id": "research-cards-subagents-engineering-0.2.0",
+  "reviewed_at": "2026-09-09T13:20:55.130621+00:00",
+  "reviewer": {
+    "kind": "machine",
+    "model": "active Codex GPT vision",
+    "human_review": false,
+    "sealed_gold": false
+  },
+  "verdict": "machine_approved_for_subagent_engineering_initial_delivery",
+  "original_first": {
+    "review_order": [
+      "User requirements and fixed delivery scope",
+      "Synthetic original source text",
+      "Actual persisted delegation inputs and outputs",
+      "Runtime recovery implementation and validation evidence"
+    ],
+    "source_kind": "explicitly synthetic engineering fixtures, not historical evidence",
+    "sources": [
+      {
+        "text": "工程夹具：仅在先核实后，才可拨付十元。",
+        "sha256": "3192039198abf4a2b11a5f6e81cd1b48b7d6b645c9a74bcd7803cd312718aef9",
+        "kind": "synthetic_engineering_fixture"
+      },
+      {
+        "text": "工程补充：十元须经甲负责人核实后才能拨付。",
+        "sha256": "9bced72d2abfd99fb46e74fd70948e767d0ef1519ad5ae058bb6e50b470f5edf",
+        "kind": "synthetic_engineering_fixture"
+      }
+    ]
+  },
+  "requirements": {
+    "main_model": "deepseek-v4-pro",
+    "subagent_model": "deepseek-v4-flash",
+    "context_system_decision": "deferred; explicit versioned task packet only",
+    "delivery": "engineering initial; full quality evaluation deferred"
+  },
+  "findings": [
+    {
+      "id": "SAG-01",
+      "state": "verified",
+      "result": "Pro issues an actual SDK function call; Flash executes a bounded reading; Pro receives the persisted result and records follow-up points."
+    },
+    {
+      "id": "SAG-02",
+      "state": "resolved",
+      "result": "After a manager tool callback persists its request, recover that manager round before dispatching the child. Both manager-side and child-side process-loss cases now pass without repeated inference."
+    },
+    {
+      "id": "SAG-03",
+      "state": "verified",
+      "result": "Incorrect source IDs cannot spawn a reading child; every admitted batch unit remains required exactly once. Conditional wording and ten-unit quantity survive the controlled child return."
+    },
+    {
+      "id": "SAG-04",
+      "state": "verified",
+      "result": "Manager and child use the existing shared call budget. The child stops before sending when the allowance is exhausted; explicit extension preserves prior usage."
+    },
+    {
+      "id": "SAG-05",
+      "state": "verified",
+      "result": "Pro selects supplementary questions; a Flash worker uses existing search/read tools and returns a cited unit. This RAG transport/model test is controlled, not a live retrieval quality test."
+    },
+    {
+      "id": "SAG-06",
+      "state": "verified",
+      "result": "Context data and artifact/source references are explicit and hashed. Parent conversation is not automatically copied into the child. No long-term memory scheme has been selected."
+    }
+  ],
+  "validation": {
+    "service_version": "0.2.0",
+    "contracts_verified": 57,
+    "wheel": {
+      "path": "dist\\historical_research_cards_service-0.2.0-py3-none-any.whl",
+      "sha256": "599837dc99572c764a00eb58d7ab639e3186833c02f1c9a9472752e8778127df",
+      "bytes": 2035133,
+      "source_members_verified": 37
+    },
+    "original_package_retained": true,
+    "documentation_links_verified": true,
+    "full_regression": {
+      "passed": 40,
+      "warnings": 1,
+      "seconds": 44.27,
+      "scope": "Before final manager-turn recovery fix"
+    },
+    "final_targeted_regression": {
+      "passed": 3,
+      "seconds": 8.4,
+      "scope": "After final manager-turn recovery fix"
+    },
+    "new_paid_model_calls": 0
+  },
+  "limitations": [
+    "Sequential child execution; no recursive delegation.",
+    "Normal fresh reading batches add two Pro calls; no measured cost or quality gain claimed.",
+    "No new real DeepSeek historical samples or full quality acceptance run.",
+    "Existing service processes were not restarted and old calibration tasks were not resumed.",
+    "Project-wide boundary hardening and Linux validation remain deferred."
+  ],
+  "production_original_review_model": "deepseek-v4-flash-vision-exp (existing configured model)",
+  "persisted_delegation_artifacts_reviewed": 8,
+  "evidence": [
+    {
+      "path": "src/research_cards/subagents.py",
+      "sha256": "9d1c36c08ab844ee475d26044e5ee5c88aa66e1e28f29790347bfbdce38b8cc3"
+    },
+    {
+      "path": "src/research_cards/generation.py",
+      "sha256": "00678d5468467730fb871b1d7721e2bcac97d4671d142add6b6a6623a3ab64f4"
+    },
+    {
+      "path": "src/research_cards/settings.py",
+      "sha256": "7185f54d316dae85283c26e91646e63765e9d41e36a85deccd62c51b839cda22"
+    },
+    {
+      "path": "src/research_cards/supplement.py",
+      "sha256": "b257d839e928766e44a7b17001782047ee6521f2091cf6bc8ecf7aa1542c0188"
+    },
+    {
+      "path": "src/research_cards/prompts.py",
+      "sha256": "58c6703be187aed73e80ae8400f9cb627080cd209bfcd1e5a36c44755fbdaf34"
+    },
+    {
+      "path": "src/research_cards/models.py",
+      "sha256": "552b334d62ae6a72c80b5c2c26f03b9293459ebed781481e13b911ef28be6e19"
+    },
+    {
+      "path": "src/research_cards/metering.py",
+      "sha256": "8884833eb654d9f75447602d7e9b2171ed9b7b780974d8a4f33e7fb347f7321c"
+    },
+    {
+      "path": "src/research_cards/queue.py",
+      "sha256": "433b4596da5614e760d349be990bd2142681c1cfc8d6a537781d718d054231c4"
+    },
+    {
+      "path": "src/research_cards/worker.py",
+      "sha256": "9372b3bd5854703477b928f9c7024e0824d6030dc2023d798d8301c2990d6f99"
+    },
+    {
+      "path": "src/research_cards/store.py",
+      "sha256": "98af6757d794d9faade995bed6cd12547198a389c60379b1cc18f237472c0dae"
+    },
+    {
+      "path": "src/research_cards/api.py",
+      "sha256": "f028e32c3a32d63b795afedd1e6e6c6cae7d0485604a8fe9e835845cbb6e01eb"
+    },
+    {
+      "path": "src/research_cards/cli.py",
+      "sha256": "27171a1befc6025a0032d764161b9c500dc2a643f077c5ddca5fde4505dbcc20"
+    },
+    {
+      "path": "src/research_cards/__init__.py",
+      "sha256": "c9df204ad9f0fb8ef1edeb1b65a4807461dca03e031d89050180f851b2a2393e"
+    },
+    {
+      "path": "tests/test_subagents.py",
+      "sha256": "4f36d8432843c6bcb69dee17f19b2634dda9388b55248b87d41e2e8effc6d2ab"
+    },
+    {
+      "path": "tests/test_reading_contract_recovery.py",
+      "sha256": "a6811a69b455df13c1eb85c1bebf30b0d399d750071c6b3c3d8b4af9cb4bd9a8"
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "3709bd6b8ffcfd1303647c110cfb24443b4cae61d5413e2ec68ec649ac0d47d1"
+    },
+    {
+      "path": "uv.lock",
+      "sha256": "b24f37a9aed6a1848dcbd235c0488b5c4234d5c916724411d29e57d31fda2161"
+    },
+    {
+      "path": "README.md",
+      "sha256": "d6b91e83e229e98697a06aaf3d77bb3325c29774f68e2a1dccb5f04486df669d"
+    },
+    {
+      "path": "docs/subagents.md",
+      "sha256": "7510daecc2e9294a713031548b9d1cf630ca4ecb33e568d65ecc2dfe0870ec08"
+    },
+    {
+      "path": "docs/operations.md",
+      "sha256": "a55c7767614a3fc608cce9da711a19f41676cd1e170db2288b82f2f37ebb24e8"
+    },
+    {
+      "path": "docs/implementation-status.md",
+      "sha256": "27df7ccb9e4ca1067c1f6fea79934391c66dc71fd09ef05f158f28fc8e2b2899"
+    },
+    {
+      "path": "docs/contracts/manifest.json",
+      "sha256": "17c8d94a6255f0c32214fda358a767ab211c3df032cb1e933009cca1dced7265"
+    },
+    {
+      "path": "docs/contracts/subagents-DelegationContext.schema.json",
+      "sha256": "c06179748f563cfa66b07d7ab7531afd01ec31e0661eb3a048752236097c6c09"
+    },
+    {
+      "path": "docs/contracts/subagents-ReadingAssignment.schema.json",
+      "sha256": "5958c45c04210c5c52a622f4051722ba8b41f91cc04ba1d4b54147b4603c8358"
+    },
+    {
+      "path": "docs/contracts/subagents-ReadingReceipt.schema.json",
+      "sha256": "c8a8df93c3c97db1df3dc34f6e0479e8e28e746e3ff70ea21268f96ec28e5f9d"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/engineering-tests.txt",
+      "sha256": "a2e8feb602dbd37493b03a6718c4d25649c935d855739c2bcdfaf4bf52080038"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/fixture-artifact-index.json",
+      "sha256": "751a8a62e29d7d32891c8614f6e9cefd62468cf1535f85d46f5c1e9d6a6703f8"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/original-fixture-sources.json",
+      "sha256": "050c9bd5965022192f105173f849a86277e94349ea9959a46b160df27ea7eb01"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/verification.json",
+      "sha256": "ea3842b3a229193ceec94ff6475925211f33dd945fc3dc69f2e21371a16aba6d"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/artifacts/05db2db7ae4db08c62621b97f694b1c63d9e242e02f25f52508385e7c0fe4cb3.json",
+      "sha256": "205aa731dcd488185b047d65c407852f10b89189ac536cc3daeea52808458a90"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/artifacts/0ca035d608769765df99140f9b55ea694f464603c01864ec0d0af6efac342e95.json",
+      "sha256": "19e1d2352f1618d3cd7cce7b3986cc0090e36b2635a5503a4f4afdb8b86c52bb"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/artifacts/2fe71600b358a7e19e400da1e48dee5a047cdc2e37a00ce56edb17c68da97e03.json",
+      "sha256": "b2cd06f2a28f7919375625a23e2bd00dd3e2f6517113f36d6172336672ae6ba2"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/artifacts/37cc2282109f791abf0ab16bdf9c78547c1e875540dc83c26564a0b0553278c5.json",
+      "sha256": "fbad7cb16f26b65401768e5625de3bff885ab5c6b4b6aeeed5508f9c629064a3"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/artifacts/a51f69b10b53bb11585d7adbacfc5c5f8d032bd0132b19ff4f196f9b93d4c2e9.json",
+      "sha256": "36ac12b5b7e2e19fd0c139fc58c37927f113c8717227ec16fa498ad765e4b35d"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/artifacts/b312b13ad59d3d31ad985028d188d3027d7b2639cbcbdddedca89139ffed17aa.json",
+      "sha256": "8d75006b8ba0771d9a3a1f39bc5a31254cd4896d5092efb8485f239d40d48d42"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/artifacts/ddd1d31b3ee38c7faa031e4c7f553422e9d0cc7f3445a398467490f743c51220.json",
+      "sha256": "68a59be94484832e73e3d72b4aa10dfd0a7d6d12f07095a3f5d17e680f5b1000"
+    },
+    {
+      "path": "evaluation/development/subagents-v1/artifacts/e06112601646c6ed7435ede02da10cf0826c1bb8117c5bdb17e33cccbb50faa8.json",
+      "sha256": "3b119a80d4bace6c0d7d3880387155bcfac25c9cda78ba9960b88bb08e51ed61"
+    }
+  ],
+  "quality_acceptance": false
+}

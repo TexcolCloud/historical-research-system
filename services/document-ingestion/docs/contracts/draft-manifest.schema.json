@@ -1,0 +1,2919 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "AddBibliographicAssertion": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "add_bibliographic_assertion",
+          "title": "Op",
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "field": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Field",
+          "type": "string"
+        },
+        "semantic": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Semantic",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "state": {
+          "enum": [
+            "unknown",
+            "inferred",
+            "confirmed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "subject",
+        "field",
+        "semantic",
+        "value",
+        "state",
+        "evidence"
+      ],
+      "title": "AddBibliographicAssertion",
+      "type": "object"
+    },
+    "ArticleConfirmation": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Sha256",
+          "type": "string"
+        },
+        "confirmation_kind": {
+          "const": "manager_decision",
+          "default": "manager_decision",
+          "title": "Confirmation Kind",
+          "type": "string"
+        },
+        "original_first": {
+          "const": true,
+          "title": "Original First",
+          "type": "boolean"
+        },
+        "original_assets": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "maxItems": 1000,
+          "minItems": 1,
+          "title": "Original Assets",
+          "type": "array"
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_sha256",
+        "original_first",
+        "original_assets",
+        "reason"
+      ],
+      "title": "ArticleConfirmation",
+      "type": "object"
+    },
+    "ArticleFragment": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "body",
+            "title",
+            "footnote",
+            "references",
+            "caption",
+            "page_header",
+            "page_footer",
+            "page_number",
+            "undetermined"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "join": {
+          "default": "undetermined",
+          "enum": [
+            "same_paragraph",
+            "new_paragraph",
+            "new_section",
+            "undetermined"
+          ],
+          "title": "Join",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "printed_page": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Printed Page"
+        },
+        "column": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Column"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "reason"
+      ],
+      "title": "ArticleFragment",
+      "type": "object"
+    },
+    "ArticleNote": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "fragments": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Fragments",
+          "type": "array"
+        },
+        "body_fragment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Body Fragment"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "kind": {
+          "default": "footnote",
+          "enum": [
+            "footnote",
+            "article_endnote",
+            "chapter_endnote",
+            "book_endnote"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "raw_marker": {
+          "default": "",
+          "title": "Raw Marker",
+          "type": "string"
+        },
+        "numbering_rule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Numbering Rule"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/NotePart"
+          },
+          "title": "Parts",
+          "type": "array"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/NoteReference"
+          },
+          "title": "Targets",
+          "type": "array"
+        },
+        "target_kind": {
+          "default": "reference",
+          "enum": [
+            "reference",
+            "title",
+            "article",
+            "unresolved"
+          ],
+          "title": "Target Kind",
+          "type": "string"
+        },
+        "adoptions": {
+          "items": {
+            "$ref": "#/$defs/NoteAdoption"
+          },
+          "title": "Adoptions",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "candidate",
+          "enum": [
+            "candidate",
+            "pending"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "fragments",
+        "reason",
+        "evidence"
+      ],
+      "title": "ArticleNote",
+      "type": "object"
+    },
+    "ArticleStructure": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "items": {
+            "$ref": "#/$defs/SourceAnchor"
+          },
+          "maxItems": 10000,
+          "minItems": 1,
+          "title": "Coverage",
+          "type": "array"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/ArticleNote"
+          },
+          "maxItems": 10000,
+          "title": "Notes",
+          "type": "array"
+        },
+        "numbering_rules": {
+          "items": {
+            "$ref": "#/$defs/NoteNumberingRule"
+          },
+          "maxItems": 10000,
+          "title": "Numbering Rules",
+          "type": "array"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/NoteReference"
+          },
+          "maxItems": 10000,
+          "title": "References",
+          "type": "array"
+        },
+        "severity_overrides": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "maxItems": 1000,
+          "title": "Severity Overrides",
+          "type": "array"
+        },
+        "confirmation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArticleConfirmation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "coverage"
+      ],
+      "title": "ArticleStructure",
+      "type": "object"
+    },
+    "AssertionSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "adopted": {
+          "title": "Adopted",
+          "type": "boolean"
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "assertion",
+        "adopted",
+        "reason"
+      ],
+      "title": "AssertionSelection",
+      "type": "object"
+    },
+    "AssignAttachment": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "op": {
+          "const": "assign_attachment",
+          "title": "Op",
+          "type": "string"
+        },
+        "organization": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "attachment": {
+          "$ref": "#/$defs/AttachmentRef"
+        },
+        "state": {
+          "enum": [
+            "unresolved",
+            "confirmed",
+            "explicit_shared"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "owners": {
+          "items": {
+            "$ref": "#/$defs/EntityRef"
+          },
+          "title": "Owners",
+          "type": "array"
+        },
+        "affected_occurrences": {
+          "items": {
+            "$ref": "#/$defs/EntityRef"
+          },
+          "title": "Affected Occurrences",
+          "type": "array"
+        },
+        "restricted_uses": {
+          "items": {
+            "enum": [
+              "source_reading",
+              "index_input",
+              "card_input"
+            ],
+            "type": "string"
+          },
+          "title": "Restricted Uses",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "op",
+        "organization",
+        "attachment",
+        "state",
+        "owners",
+        "evidence"
+      ],
+      "title": "AssignAttachment",
+      "type": "object"
+    },
+    "AttachmentRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "source_span",
+            "image_occurrence"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "AttachmentRef",
+      "type": "object"
+    },
+    "CatalogueScope": {
+      "additionalProperties": false,
+      "properties": {
+        "target_type": {
+          "const": "catalogue",
+          "title": "Target Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_type"
+      ],
+      "title": "CatalogueScope",
+      "type": "object"
+    },
+    "CreateDocument": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "create_document",
+          "title": "Op",
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "display_name"
+      ],
+      "title": "CreateDocument",
+      "type": "object"
+    },
+    "CreateEdition": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "create_edition",
+          "title": "Op",
+          "type": "string"
+        },
+        "document": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "document"
+      ],
+      "title": "CreateEdition",
+      "type": "object"
+    },
+    "CreateGap": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "create_gap",
+          "title": "Op",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/ReadingTargetRef"
+        },
+        "description": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "target",
+        "description",
+        "evidence"
+      ],
+      "title": "CreateGap",
+      "type": "object"
+    },
+    "CreateNode": {
+      "additionalProperties": false,
+      "properties": {
+        "organization": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "position": {
+          "minimum": 0,
+          "title": "Position",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "series",
+            "book",
+            "volume",
+            "chapter",
+            "item",
+            "attachment",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "navigation",
+            "research_item",
+            "attachment",
+            "undetermined"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "occurrence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label_origin": {
+          "default": "manager_supplied",
+          "enum": [
+            "manager_supplied",
+            "source_heading",
+            "provisional"
+          ],
+          "title": "Label Origin",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "create_node",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "organization",
+        "position",
+        "kind",
+        "label",
+        "role",
+        "op_id",
+        "client_ref",
+        "op"
+      ],
+      "title": "CreateNode",
+      "type": "object"
+    },
+    "CreateOccurrence": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "create_occurrence",
+          "title": "Op",
+          "type": "string"
+        },
+        "edition": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "context_edition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "context_occurrence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "context_note": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Note"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "edition"
+      ],
+      "title": "CreateOccurrence",
+      "type": "object"
+    },
+    "CreateOrganization": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "create_organization",
+          "title": "Op",
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "display_name"
+      ],
+      "title": "CreateOrganization",
+      "type": "object"
+    },
+    "DraftRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "catalogue",
+            "organization"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/CatalogueScope"
+        },
+        "base_snapshot_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Base Snapshot Ids",
+          "type": "array"
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "add_bibliographic_assertion": "#/$defs/AddBibliographicAssertion",
+                "assign_attachment": "#/$defs/AssignAttachment",
+                "create_document": "#/$defs/CreateDocument",
+                "create_edition": "#/$defs/CreateEdition",
+                "create_gap": "#/$defs/CreateGap",
+                "create_node": "#/$defs/CreateNode",
+                "create_occurrence": "#/$defs/CreateOccurrence",
+                "create_organization": "#/$defs/CreateOrganization",
+                "qualify_source": "#/$defs/QualifySource",
+                "relate_documents": "#/$defs/RelateDocuments",
+                "relate_editions": "#/$defs/RelateEditions",
+                "remove_node": "#/$defs/RemoveNode",
+                "restore_source_restriction": "#/$defs/RestoreSourceRestriction",
+                "restrict_source": "#/$defs/RestrictSource",
+                "retract_document_relation": "#/$defs/RetractDocumentRelation",
+                "revise_document": "#/$defs/ReviseDocument",
+                "revise_node": "#/$defs/ReviseNode",
+                "revoke_source_qualification": "#/$defs/RevokeSourceQualification",
+                "select_bibliography": "#/$defs/SelectBibliography",
+                "set_reading": "#/$defs/SetReading"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/CreateDocument"
+              },
+              {
+                "$ref": "#/$defs/ReviseDocument"
+              },
+              {
+                "$ref": "#/$defs/CreateEdition"
+              },
+              {
+                "$ref": "#/$defs/CreateOccurrence"
+              },
+              {
+                "$ref": "#/$defs/RelateEditions"
+              },
+              {
+                "$ref": "#/$defs/RelateDocuments"
+              },
+              {
+                "$ref": "#/$defs/RetractDocumentRelation"
+              },
+              {
+                "$ref": "#/$defs/AddBibliographicAssertion"
+              },
+              {
+                "$ref": "#/$defs/SelectBibliography"
+              },
+              {
+                "$ref": "#/$defs/CreateOrganization"
+              },
+              {
+                "$ref": "#/$defs/CreateGap"
+              },
+              {
+                "$ref": "#/$defs/CreateNode"
+              },
+              {
+                "$ref": "#/$defs/ReviseNode"
+              },
+              {
+                "$ref": "#/$defs/RemoveNode"
+              },
+              {
+                "$ref": "#/$defs/SetReading"
+              },
+              {
+                "$ref": "#/$defs/AssignAttachment"
+              },
+              {
+                "$ref": "#/$defs/RestrictSource"
+              },
+              {
+                "$ref": "#/$defs/RestoreSourceRestriction"
+              },
+              {
+                "$ref": "#/$defs/QualifySource"
+              },
+              {
+                "$ref": "#/$defs/RevokeSourceQualification"
+              }
+            ]
+          },
+          "maxItems": 1000,
+          "minItems": 1,
+          "title": "Operations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "scope",
+        "base_snapshot_ids",
+        "reason",
+        "operations"
+      ],
+      "title": "DraftRequest",
+      "type": "object"
+    },
+    "EntityRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "client_ref": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Ref"
+        }
+      },
+      "title": "EntityRef",
+      "type": "object"
+    },
+    "GapReadingRange": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "gap",
+          "title": "Kind",
+          "type": "string"
+        },
+        "gap": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "gap",
+        "evidence"
+      ],
+      "title": "GapReadingRange",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "NoteAdoption": {
+      "additionalProperties": false,
+      "properties": {
+        "reference_id": {
+          "title": "Reference Id",
+          "type": "string"
+        },
+        "input_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Input Sha256",
+          "type": "string"
+        },
+        "kind": {
+          "const": "human_confirmation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "original_assets": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Original Assets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "reference_id",
+        "input_sha256",
+        "kind",
+        "reason",
+        "original_assets"
+      ],
+      "title": "NoteAdoption",
+      "type": "object"
+    },
+    "NoteNumberingRule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "page",
+            "article",
+            "chapter",
+            "book"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "body_fragments": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Body Fragments",
+          "type": "array"
+        },
+        "note_fragments": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Note Fragments",
+          "type": "array"
+        },
+        "source_state": {
+          "default": "not_processed",
+          "enum": [
+            "not_processed",
+            "partial",
+            "complete"
+          ],
+          "title": "Source State",
+          "type": "string"
+        },
+        "group_heading": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "printed_page_range": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Printed Page Range",
+          "type": "array"
+        },
+        "marker_aliases": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Marker Aliases",
+          "type": "object"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "body_fragments",
+        "evidence"
+      ],
+      "title": "NoteNumberingRule",
+      "type": "object"
+    },
+    "NotePart": {
+      "additionalProperties": false,
+      "properties": {
+        "fragment": {
+          "title": "Fragment",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "continuation_evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Continuation Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fragment",
+        "source"
+      ],
+      "title": "NotePart",
+      "type": "object"
+    },
+    "NoteReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "body_fragment": {
+          "title": "Body Fragment",
+          "type": "string"
+        },
+        "anchor": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "raw_marker": {
+          "default": "",
+          "title": "Raw Marker",
+          "type": "string"
+        },
+        "numbering_rule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Numbering Rule"
+        }
+      },
+      "required": [
+        "id",
+        "body_fragment",
+        "anchor"
+      ],
+      "title": "NoteReference",
+      "type": "object"
+    },
+    "ObservedOriginalAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "format": "uuid",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "asset_id",
+        "sha256"
+      ],
+      "title": "ObservedOriginalAsset",
+      "type": "object"
+    },
+    "OriginalFirstMachineReview": {
+      "additionalProperties": false,
+      "properties": {
+        "reviewer": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Reviewer",
+          "type": "string"
+        },
+        "original_first": {
+          "const": true,
+          "title": "Original First",
+          "type": "boolean"
+        },
+        "verdict": {
+          "const": "verified",
+          "title": "Verdict",
+          "type": "string"
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "observations": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Observations",
+          "type": "array"
+        },
+        "original_assets": {
+          "items": {
+            "$ref": "#/$defs/ObservedOriginalAsset"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Original Assets",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "unresolved_items": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 0,
+          "title": "Unresolved Items",
+          "type": "array"
+        },
+        "human_review": {
+          "const": false,
+          "default": false,
+          "title": "Human Review",
+          "type": "boolean"
+        },
+        "sealed_gold": {
+          "const": false,
+          "default": false,
+          "title": "Sealed Gold",
+          "type": "boolean"
+        },
+        "historical_truth_approved": {
+          "const": false,
+          "default": false,
+          "title": "Historical Truth Approved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reviewer",
+        "original_first",
+        "verdict",
+        "confidence",
+        "observations",
+        "original_assets",
+        "evidence"
+      ],
+      "title": "OriginalFirstMachineReview",
+      "type": "object"
+    },
+    "QualifySource": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "qualify_source",
+          "title": "Op",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "context_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Context Sha256",
+          "type": "string"
+        },
+        "purposes": {
+          "items": {
+            "enum": [
+              "source_reading",
+              "index_input",
+              "card_input"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Purposes",
+          "type": "array"
+        },
+        "verified_fields": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Verified Fields",
+          "type": "array"
+        },
+        "review": {
+          "$ref": "#/$defs/OriginalFirstMachineReview"
+        },
+        "confirmation_kind": {
+          "const": "machine_review",
+          "default": "machine_review",
+          "title": "Confirmation Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "source",
+        "context_sha256",
+        "purposes",
+        "verified_fields",
+        "review"
+      ],
+      "title": "QualifySource",
+      "type": "object"
+    },
+    "ReadingTargetRef": {
+      "additionalProperties": false,
+      "properties": {
+        "target_type": {
+          "enum": [
+            "carrier",
+            "occurrence",
+            "organization"
+          ],
+          "title": "Target Type",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/EntityRef"
+        }
+      },
+      "required": [
+        "target_type",
+        "target"
+      ],
+      "title": "ReadingTargetRef",
+      "type": "object"
+    },
+    "RelateDocuments": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "relate_documents",
+          "title": "Op",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "target": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "relation_kind": {
+          "enum": [
+            "merged_into",
+            "split_into"
+          ],
+          "title": "Relation Kind",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "source",
+        "target",
+        "relation_kind",
+        "evidence"
+      ],
+      "title": "RelateDocuments",
+      "type": "object"
+    },
+    "RelateEditions": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "relate_editions",
+          "title": "Op",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "target": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "relation_kind": {
+          "enum": [
+            "translated_from",
+            "revised_from",
+            "excerpted_from",
+            "reprinted_from",
+            "related"
+          ],
+          "title": "Relation Kind",
+          "type": "string"
+        },
+        "state": {
+          "default": "candidate",
+          "enum": [
+            "candidate",
+            "confirmed",
+            "rejected",
+            "retracted"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "source",
+        "target",
+        "relation_kind",
+        "evidence"
+      ],
+      "title": "RelateEditions",
+      "type": "object"
+    },
+    "RemoveNode": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "op": {
+          "const": "remove_node",
+          "title": "Op",
+          "type": "string"
+        },
+        "organization": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "node": {
+          "$ref": "#/$defs/EntityRef"
+        }
+      },
+      "required": [
+        "op_id",
+        "op",
+        "organization",
+        "node"
+      ],
+      "title": "RemoveNode",
+      "type": "object"
+    },
+    "RestoreSourceRestriction": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "restore_source_restriction",
+          "title": "Op",
+          "type": "string"
+        },
+        "restriction": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "confirmation_kind": {
+          "enum": [
+            "manager_decision",
+            "machine_review"
+          ],
+          "title": "Confirmation Kind",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "restriction",
+        "source",
+        "confirmation_kind",
+        "evidence"
+      ],
+      "title": "RestoreSourceRestriction",
+      "type": "object"
+    },
+    "RestrictSource": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "restrict_source",
+          "title": "Op",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "purposes": {
+          "items": {
+            "enum": [
+              "source_reading",
+              "index_input",
+              "card_input"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Purposes",
+          "type": "array"
+        },
+        "restricted_fields": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Restricted Fields",
+          "type": "array"
+        },
+        "effect": {
+          "default": "blocked",
+          "enum": [
+            "blocked",
+            "limited"
+          ],
+          "title": "Effect",
+          "type": "string"
+        },
+        "confirmation_kind": {
+          "enum": [
+            "manager_decision",
+            "machine_review"
+          ],
+          "title": "Confirmation Kind",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "source",
+        "purposes",
+        "confirmation_kind",
+        "evidence"
+      ],
+      "title": "RestrictSource",
+      "type": "object"
+    },
+    "RetractDocumentRelation": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "retract_document_relation",
+          "title": "Op",
+          "type": "string"
+        },
+        "relation": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "relation",
+        "evidence"
+      ],
+      "title": "RetractDocumentRelation",
+      "type": "object"
+    },
+    "ReviseDocument": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "op": {
+          "const": "revise_document",
+          "title": "Op",
+          "type": "string"
+        },
+        "document": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "display_name": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "name_origin": {
+          "enum": [
+            "provisional",
+            "manager_supplied",
+            "source_supported"
+          ],
+          "title": "Name Origin",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "provisional",
+            "confirmed",
+            "retired"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op_id",
+        "op",
+        "document",
+        "display_name",
+        "name_origin",
+        "state"
+      ],
+      "title": "ReviseDocument",
+      "type": "object"
+    },
+    "ReviseNode": {
+      "additionalProperties": false,
+      "properties": {
+        "organization": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "position": {
+          "minimum": 0,
+          "title": "Position",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "series",
+            "book",
+            "volume",
+            "chapter",
+            "item",
+            "attachment",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "navigation",
+            "research_item",
+            "attachment",
+            "undetermined"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "occurrence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "label_origin": {
+          "default": "manager_supplied",
+          "enum": [
+            "manager_supplied",
+            "source_heading",
+            "provisional"
+          ],
+          "title": "Label Origin",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "op": {
+          "const": "revise_node",
+          "title": "Op",
+          "type": "string"
+        },
+        "node": {
+          "$ref": "#/$defs/EntityRef"
+        }
+      },
+      "required": [
+        "organization",
+        "position",
+        "kind",
+        "label",
+        "role",
+        "op_id",
+        "op",
+        "node"
+      ],
+      "title": "ReviseNode",
+      "type": "object"
+    },
+    "RevokeSourceQualification": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "client_ref": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Client Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "revoke_source_qualification",
+          "title": "Op",
+          "type": "string"
+        },
+        "qualification": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "confirmation_kind": {
+          "const": "machine_review",
+          "default": "machine_review",
+          "title": "Confirmation Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op_id",
+        "client_ref",
+        "op",
+        "qualification",
+        "evidence"
+      ],
+      "title": "RevokeSourceQualification",
+      "type": "object"
+    },
+    "SelectBibliography": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "op": {
+          "const": "select_bibliography",
+          "title": "Op",
+          "type": "string"
+        },
+        "subject": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "selections": {
+          "items": {
+            "$ref": "#/$defs/AssertionSelection"
+          },
+          "minItems": 1,
+          "title": "Selections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "op",
+        "subject",
+        "selections"
+      ],
+      "title": "SelectBibliography",
+      "type": "object"
+    },
+    "SetReading": {
+      "additionalProperties": false,
+      "properties": {
+        "op_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Op Id",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "disposition": {
+          "default": "propose",
+          "enum": [
+            "propose",
+            "hold",
+            "reject"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "disposition_reason": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Reason"
+        },
+        "op": {
+          "const": "set_reading",
+          "title": "Op",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/ReadingTargetRef"
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "structure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArticleStructure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "segments": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "gap": "#/$defs/GapReadingRange",
+                "source": "#/$defs/SourceReadingRange"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/SourceReadingRange"
+              },
+              {
+                "$ref": "#/$defs/GapReadingRange"
+              }
+            ]
+          },
+          "maxItems": 10000,
+          "minItems": 1,
+          "title": "Segments",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op_id",
+        "op",
+        "target",
+        "segments"
+      ],
+      "title": "SetReading",
+      "type": "object"
+    },
+    "SourceAnchor": {
+      "additionalProperties": false,
+      "properties": {
+        "snapshot_id": {
+          "format": "uuid",
+          "title": "Snapshot Id",
+          "type": "string"
+        },
+        "source_span_ref": {
+          "format": "uuid",
+          "title": "Source Span Ref",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "expected_text_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Text Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "snapshot_id",
+        "source_span_ref",
+        "start",
+        "end",
+        "expected_text_sha256"
+      ],
+      "title": "SourceAnchor",
+      "type": "object"
+    },
+    "SourceReadingRange": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "source",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceAnchor"
+        },
+        "usage_kind": {
+          "enum": [
+            "primary",
+            "continuation",
+            "alternative",
+            "supplement"
+          ],
+          "title": "Usage Kind",
+          "type": "string"
+        },
+        "source_edition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "replaces_segment_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replaces Segment Id"
+        },
+        "fragment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArticleFragment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "source",
+        "usage_kind",
+        "evidence"
+      ],
+      "title": "SourceReadingRange",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "source_draft_id": {
+      "format": "uuid",
+      "title": "Source Draft Id",
+      "type": "string"
+    },
+    "source_revision_id": {
+      "format": "uuid",
+      "title": "Source Revision Id",
+      "type": "string"
+    },
+    "source_revision_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Revision Fingerprint",
+      "type": "string"
+    },
+    "body": {
+      "$ref": "#/$defs/DraftRequest"
+    },
+    "qualification": {
+      "const": "editable_candidate_not_approved",
+      "default": "editable_candidate_not_approved",
+      "title": "Qualification",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source_draft_id",
+    "source_revision_id",
+    "source_revision_fingerprint",
+    "body"
+  ],
+  "title": "DraftManifest",
+  "type": "object"
+}

@@ -1,0 +1,1 @@
+{"additionalProperties":false,"properties":{"description":{"default":"","title":"Description","type":"string"},"research_question":{"minLength":1,"title":"Research Question","type":"string"},"title":{"minLength":1,"title":"Title","type":"string"}},"required":["title","research_question"],"title":"TopicContent","type":"object"}

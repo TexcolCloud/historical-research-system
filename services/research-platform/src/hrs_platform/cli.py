@@ -1,0 +1,79 @@
+import argparse
+
+from .database import engine_for, migrate
+from .settings import Settings
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Unified historical research platform")
+    parser.add_argument(
+        "command",
+        choices=["migrate", "api", "namespace", "worker", "gpu-worker", "doctor", "backup", "restore"],
+    )
+    parser.add_argument(
+        "--manifest-reference", help="JSON S3 reference returned by backup; contains no credentials"
+    )
+    parser.add_argument("--restore-suffix", help="New isolated destination database suffix")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", default=18170, type=int)
+    args = parser.parse_args()
+    if args.command in {"backup", "restore"}:
+        import json
+
+        from .backups import backup, restore
+
+        if args.command == "restore" and (not args.manifest_reference or not args.restore_suffix):
+            parser.error("restore requires --manifest-reference and --restore-suffix")
+        result = (
+            backup(Settings.load())
+            if args.command == "backup"
+            else restore(Settings.load(), json.loads(args.manifest_reference), args.restore_suffix)
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    if args.command == "doctor":
+        from .doctor import run
+
+        raise SystemExit(run(Settings.load()))
+    if args.command == "migrate":
+        engine = engine_for(Settings.load())
+        try:
+            migrate(engine)
+        finally:
+            engine.dispose()
+    elif args.command == "api":
+        import uvicorn
+
+        uvicorn.run(
+            "hrs_platform.api:create_app",
+            factory=True,
+            host=args.host,
+            port=args.port,
+            timeout_graceful_shutdown=10,
+        )
+    else:
+        import asyncio
+
+        from .worker import register_namespace, run_worker
+
+        settings = Settings.load()
+        import signal
+
+        def interrupt(*_):
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, interrupt)
+        if hasattr(signal, "SIGBREAK"):
+            signal.signal(signal.SIGBREAK, interrupt)
+        try:
+            asyncio.run(
+                register_namespace(settings)
+                if args.command == "namespace"
+                else run_worker(settings, gpu=args.command == "gpu-worker")
+            )
+        except KeyboardInterrupt:
+            return
+
+
+if __name__ == "__main__":
+    main()

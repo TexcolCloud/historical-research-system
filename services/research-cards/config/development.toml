@@ -1,0 +1,9 @@
+state_root = "../state/development-v1"
+host = "127.0.0.1"
+port = 18140
+workers = 2
+auto_sync = false
+index_prefix = "history-cards"
+ingestion_url = "http://127.0.0.1:18125"
+retrieval_url = "http://127.0.0.1:18130"
+opensearch_url = "http://127.0.0.1:19260"

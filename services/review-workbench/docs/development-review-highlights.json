@@ -1,0 +1,109 @@
+{
+  "reviewed_at": "2026-09-10 06:18:17 UTC",
+  "reviewer": "active Codex GPT vision model",
+  "approval_type": "machine_development_review",
+  "verdict": "pass_for_demo_highlight_workflow",
+  "human_review": false,
+  "sealed_gold_approval": false,
+  "production_release_approval": false,
+  "user_final_acceptance": "pending",
+  "original_first": {
+    "original": "output/playwright/hrs-workbench/highlight-original.png",
+    "candidate": "output/playwright/hrs-workbench/highlight-1366.png",
+    "source_type": "Hand-authored SVG demonstration, not historical evidence or a PDF scan.",
+    "visual_findings": [
+      "Reference inspected without overlay first. Original values and merged headers match the fixture.",
+      "Candidate frames the missing remarks column on the source reference and the relevant entire table in Markdown.",
+      "Amber frame plus textual labels make selection identifiable without relying on color alone.",
+      "No text repair was attempted; incomplete original demo table remains a pending issue, not a content approval."
+    ]
+  },
+  "implementation_scope": [
+    "Explicit issue bodyAnchor bound to revision and exact unique Markdown quote.",
+    "Image-relative normalized sourceRegions linked via evidenceId.",
+    "Toggle, previous/next unresolved issue, image zoom alignment, hiding fixed issues.",
+    "Overlay elements excluded from editor serialization; original assets remain unchanged.",
+    "Old demo draft metadata upgraded without replacing saved Markdown or decisions."
+  ],
+  "verification": {
+    "unit_tests": 10,
+    "result": "passed",
+    "typecheck_and_build": "passed; existing large bundle warning remains",
+    "generated_contract": "passed",
+    "highlight_browser_scenarios": 11,
+    "baseline_browser_assertions": 17,
+    "viewport": "1366x900",
+    "red_green": [
+      "New anchor and normalized rectangle schema test failed before schema fields existed, then passed.",
+      "Unique same-revision quote lookup test failed against stub, then passed.",
+      "Browser highlighter test failed at missing control before UI implementation, then passed.",
+      "Old demo draft migration test failed at absent sourceRegions, then passed with contents preserved."
+    ]
+  },
+  "limits": [
+    "Real PDF page/crop images and trustworthy coordinates still need backend integration.",
+    "Frontend does not detect historical errors or invent coordinates.",
+    "Markdown highlight is block-level, not character-level. Stale/missing/ambiguous body anchors do not highlight.",
+    "PDF-only links cannot receive an overlay; image evidence is required.",
+    "Demo SVG reference is visually distinct from historical source evidence."
+  ],
+  "backend_changes": [],
+  "evidence": [
+    {
+      "path": "services/review-workbench/public/demo/table-reference.svg",
+      "sha256": "1d26ea573ef18b7b9d82b15717a963f2650394ff67274978b23b687702fc896e"
+    },
+    {
+      "path": "services/review-workbench/public/demo/text-reference.svg",
+      "sha256": "4cce3b8163b200b5b113b3ba90afbb29a8d71386ef84c02ae535568c82e2fdcf"
+    },
+    {
+      "path": "services/review-workbench/src/api/spec.ts",
+      "sha256": "4170d2b08f87b5905fc9cce41b2f47075861e9b33959146b0742c4ee599319a7"
+    },
+    {
+      "path": "services/review-workbench/src/api/mock.ts",
+      "sha256": "9f046894c606b1136605571263a99ec47e1653e1366541750ec2e380459323e7"
+    },
+    {
+      "path": "services/review-workbench/src/App.tsx",
+      "sha256": "6e38e49b95f0a6bfa841f096b795157cdddae1f03c0c5abb0dd87095de526205"
+    },
+    {
+      "path": "services/review-workbench/src/editor/EvidenceView.tsx",
+      "sha256": "6b54517f69c966048f8f23c43833e7c76ad2aa6b187e1e35b2c547c0be70bdfe"
+    },
+    {
+      "path": "services/review-workbench/src/editor/MarkdownEditor.tsx",
+      "sha256": "549c1615bdbb1418683a784dd1eb2b7a796d6876f9db7333d51985dc582e8f09"
+    },
+    {
+      "path": "services/review-workbench/src/editor/highlights.ts",
+      "sha256": "d64c44f64e0d036941e990f1f571705c02cd05d47bf20c1dfaccb7d6a2eaa856"
+    },
+    {
+      "path": "services/review-workbench/docs/contracts.json",
+      "sha256": "514ba6cf8c7f71057610618d94130f1553391023177927022d0577bfc9fcf6e1"
+    },
+    {
+      "path": "output/playwright/hrs-workbench/highlight-original.png",
+      "sha256": "b14b93220c00f5e819de318af9096d263e596ce4802c0c1eb7f6778692b65328"
+    },
+    {
+      "path": "output/playwright/hrs-workbench/highlight-1366.png",
+      "sha256": "7acc019b0243b6cce81fcc6f9c9687c1c1ad00618530525cfcaf7bc308d102b2"
+    },
+    {
+      "path": "output/playwright/hrs-workbench/highlights.cjs",
+      "sha256": "e7b5a3fd3ed6875158232a93a5b1e686bd9763b612532f329f2ff443b5c0c4dc"
+    },
+    {
+      "path": "output/playwright/hrs-workbench/highlight-navigation.cjs",
+      "sha256": "c9e0ffc0181da59097e6b7b31763c3c40ba55370fa81cdb72cf46da3960a4cca"
+    },
+    {
+      "path": "output/playwright/hrs-workbench/highlight-regression/workflow.cjs",
+      "sha256": "753cf67225420479bd1818f64a6055d507dd57f928aef11b1f7377133752894e"
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+name: hrs-platform
+services:
+  temporal-schema:
+    image: temporalio/admin-tools:1.31.0@sha256:3e68adcd54195a7c1222e99f2dbc32a4fdbf44ad69e3bb48e21e85c4bf417c2e
+    profiles: [setup]
+    environment:
+      SQL_HOST: host.docker.internal
+      SQL_PORT: ${INGEST_DEV_DB_PORT:-55436}
+      SQL_USER: ingestion_owner
+      SQL_PASSWORD: ${INGEST_DEV_DB_PASSWORD:?Database password required}
+      SQL_PLUGIN: postgres12
+    volumes:
+      - ./setup-temporal.sh:/scripts/setup-temporal.sh:ro
+    entrypoint: [/bin/sh, /scripts/setup-temporal.sh]
+  temporal:
+    image: temporalio/server:1.31.0@sha256:b021b3b58c3f169634cdbb0451fcc0e69e8190b40454323362c7c52bbd4ff7b9
+    restart: unless-stopped
+    environment:
+      TEMPORAL_SERVER_CONFIG_FILE_PATH: /etc/temporal/server.yaml
+      TEMPORAL_ALLOW_NO_AUTH: 'true'
+      DB: postgres12
+      DBNAME: hrs_temporal_v2
+      VISIBILITY_DBNAME: hrs_temporal_visibility_v2
+      POSTGRES_SEEDS: host.docker.internal
+      DB_PORT: ${INGEST_DEV_DB_PORT:-55436}
+      VISIBILITY_DB_PORT: ${INGEST_DEV_DB_PORT:-55436}
+      POSTGRES_USER: ingestion_owner
+      POSTGRES_PWD: ${INGEST_DEV_DB_PASSWORD:?Database password required}
+      BIND_ON_IP: 0.0.0.0
+      LOG_LEVEL: warn
+    volumes:
+      - ./vendor/temporal-docker.yaml:/etc/temporal/server.yaml:ro
+      - ./dynamicconfig.yaml:/etc/temporal/config/dynamicconfig/docker.yaml:ro
+    ports:
+      - '127.0.0.1:17233:7233'
+    healthcheck:
+      test: [CMD, nc, -z, localhost, '7233']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 45s
+  tusd:
+    image: tusproject/tusd:v2.9.2@sha256:9c61565fccd2689b052aa78e52d9558f309e98f6320960746f225d2fd73a35e3
+    restart: unless-stopped
+    environment:
+      AWS_ACCESS_KEY_ID: ${INGEST_S3_ACCESS_KEY:?S3 access key required}
+      AWS_SECRET_ACCESS_KEY: ${INGEST_S3_SECRET_KEY:?S3 secret required}
+      AWS_REGION: ${INGEST_S3_REGION:-us-east-1}
+    command:
+      - '-host=0.0.0.0'
+      - '-base-path=/uploads/'
+      - '-behind-proxy'
+      - '-disable-download'
+      - '-max-size=268435456'
+      - '-s3-bucket=${INGEST_S3_BUCKET:?S3 bucket required}'
+      - '-s3-endpoint=http://host.docker.internal:58333'
+      - '-s3-object-prefix=hrs/v2/uploads/'
+      - '-s3-part-size=8388608'
+      - '-s3-concurrent-part-uploads=2'
+      - '-hooks-http=${PLATFORM_TUS_HOOK_URL:-http://host.docker.internal:18170/internal/tus}'
+      - '-hooks-http-forward-headers=Authorization'
+      - '-hooks-enabled-events=pre-create,post-create,post-receive,post-finish'
+    ports:
+      - '127.0.0.1:18171:8080'
+    tmpfs:
+      - /tmp:size=128m
+    stop_grace_period: 30s
+  api:
+    profiles: [application]
+    image: hrs-platform:v2
+    build:
+      context: ../..
+      dockerfile: deploy/platform/Dockerfile
+    restart: unless-stopped
+    environment: &application-environment
+      PLATFORM_DATABASE_URL: ${PLATFORM_DOCKER_DATABASE_URL:?Set the V2 container database URL}
+      PLATFORM_S3_ENDPOINT: http://host.docker.internal:58333
+      PLATFORM_S3_BUCKET: ${INGEST_S3_BUCKET}
+      PLATFORM_S3_ACCESS_KEY: ${INGEST_S3_ACCESS_KEY}
+      PLATFORM_S3_SECRET_KEY: ${INGEST_S3_SECRET_KEY}
+      PLATFORM_S3_REGION: ${INGEST_S3_REGION:-us-east-1}
+      PLATFORM_TEMPORAL_ADDRESS: temporal:7233
+      PLATFORM_TUS_CONTROL_URL: http://tusd:8080/uploads/
+      PLATFORM_OPENSEARCH_URL: http://host.docker.internal:19260
+      PLATFORM_DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      PLATFORM_DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      PLATFORM_REASONING_MODEL: ${CARDS_REASONING_MODEL:-deepseek-v4-pro}
+      PLATFORM_READING_MODEL: ${CARDS_READING_MODEL:-deepseek-flash}
+    ports: ['127.0.0.1:${PLATFORM_API_PORT:-18170}:18170']
+    volumes: ['../../models/document-retrieval:/app/models/document-retrieval:ro', 'compute-cache:/tmp/hrs-compute']
+    tmpfs: ['/tmp:size=1g,uid=10001,gid=10001']
+    read_only: true
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18170/health/ready',timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 8
+    depends_on:
+      temporal: {condition: service_healthy}
+    stop_grace_period: 30s
+  cpu-worker:
+    profiles: [application]
+    image: hrs-platform:v2
+    restart: unless-stopped
+    command: [worker]
+    environment: *application-environment
+    volumes: ['../../models/document-retrieval:/app/models/document-retrieval:ro', 'compute-cache:/tmp/hrs-compute']
+    tmpfs: ['/tmp:size=1g,uid=10001,gid=10001']
+    read_only: true
+    depends_on:
+      api: {condition: service_healthy}
+    stop_grace_period: 60s
+  web:
+    profiles: [application]
+    image: hrs-platform-web:v2
+    build:
+      context: ../..
+      dockerfile: deploy/platform/Dockerfile.web
+    restart: unless-stopped
+    ports: ['127.0.0.1:${PLATFORM_WEB_PORT:-18156}:8080']
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/health/live']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+volumes:
+  compute-cache:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1g,uid=10001,gid=10001,mode=0700

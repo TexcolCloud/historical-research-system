@@ -1,0 +1,7 @@
+{
+  "name": "hrs-openapi-codegen",
+  "private": true,
+  "type": "module",
+  "description": "Keep the OpenAPI generator's TypeScript 5 peer isolated from the TypeScript 7 application.",
+  "dependencies": {"openapi-typescript": "7.13.0", "typescript": "5.9.3"}
+}

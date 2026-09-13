@@ -1,0 +1,12 @@
+target-version = "py311"
+line-length = 100
+extend-exclude = [".cache", ".scratch", ".cleanup-quarantine", "models", "output", "reports", "state"]
+
+[lint]
+select = ["E4", "E9", "F", "I", "B", "UP", "PLW1510", "BLE", "YTT"]
+# Keep the initial gate focused on defects and import hygiene. Existing loop labels,
+# deliberate exception envelopes and ordinary zip truncation are not bulk-rewritten.
+ignore = ["B007", "B904", "B905"]
+
+[lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Header", "fastapi.Query", "fastapi.Depends", "fastapi.Body", "fastapi.Path", "fastapi.File", "fastapi.Form"]

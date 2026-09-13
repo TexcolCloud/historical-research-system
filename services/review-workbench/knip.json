@@ -1,0 +1,8 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/platform/main.tsx!"],
+  "project": ["src/**/*.{ts,tsx}!", "!src/**/*.test.{ts,tsx}!"],
+  "vite": false,
+  "ignoreDependencies": ["tw-animate-css"],
+  "ignore": ["src/platform/schema.d.ts", "src/platform/test-responses.ts"]
+}

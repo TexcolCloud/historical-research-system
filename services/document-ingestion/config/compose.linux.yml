@@ -1,0 +1,33 @@
+name: historical-ingestion-acceptance
+
+x-local-env: &local-env
+  INGEST_DATABASE_URL: ${INGEST_LINUX_DATABASE_URL:?Set an isolated Linux acceptance database URL}
+  INGEST_STORAGE_BACKEND: ${INGEST_LINUX_STORAGE_BACKEND:-local}
+  INGEST_STORAGE_PROFILE_ID: ${INGEST_LINUX_STORAGE_PROFILE:-linux-local}
+  INGEST_STORAGE_ROOT: /data/assets
+  INGEST_RECEIVE_ROOT: /data/receiving
+  INGEST_S3_ENDPOINT_URL: http://s3:8333
+  INGEST_S3_BUCKET: ${INGEST_S3_BUCKET:-ingestion-acceptance}
+  INGEST_S3_ACCESS_KEY: ${INGEST_S3_ACCESS_KEY:?Set the acceptance access key}
+  INGEST_S3_SECRET_KEY: ${INGEST_S3_SECRET_KEY:?Set the acceptance secret}
+
+services:
+  linux-api:
+    image: historical-document-ingestion:acceptance-v1
+    build:
+      context: ../../..
+      dockerfile: services/document-ingestion/config/Dockerfile
+    environment: *local-env
+    ports:
+      - "127.0.0.1:58766:8766"
+    volumes:
+      - linux-data:/data
+  linux-worker:
+    image: historical-document-ingestion:acceptance-v1
+    command: ["worker"]
+    environment: *local-env
+    volumes:
+      - linux-data:/data
+
+volumes:
+  linux-data:

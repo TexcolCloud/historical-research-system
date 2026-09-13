@@ -1,0 +1,6 @@
+{
+  "name": "document-ingestion-acceptance-tools",
+  "private": true,
+  "description": "Independent tus interoperability tools, excluded from production dependencies",
+  "dependencies": {"tus-js-client": "4.3.1"}
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "file": "temporal-docker.yaml",
+    "source": "https://raw.githubusercontent.com/temporalio/temporal/v1.31.0/config/docker.yaml",
+    "sha256": "81fde509f35f96ca16e3c04cb557c246fa0133816464ee40d88a041e3f5ea006"
+  },
+  {
+    "file": "temporal-LICENSE",
+    "source": "https://raw.githubusercontent.com/temporalio/temporal/v1.31.0/LICENSE",
+    "sha256": "6aab9afd99ceb1dcaf6a0d91386b46baef9bce17ae4006044e0f231e31430b69"
+  }
+]

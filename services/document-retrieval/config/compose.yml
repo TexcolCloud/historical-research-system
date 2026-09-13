@@ -1,0 +1,43 @@
+name: historical-retrieval
+
+services:
+  initialize-recovery:
+    image: opensearchproject/opensearch:3.8.0@sha256:bcc1797519726ceb6d651d4a3e60b7c30da91793914a8dfe75fd441d4f641509
+    user: "0:0"
+    entrypoint: ["chown", "1000:1000", "/recovery"]
+    volumes:
+      - index-recovery:/recovery
+  opensearch:
+    image: opensearchproject/opensearch:3.8.0@sha256:bcc1797519726ceb6d651d4a3e60b7c30da91793914a8dfe75fd441d4f641509
+    depends_on:
+      initialize-recovery:
+        condition: service_completed_successfully
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g"
+      path.repo: /usr/share/opensearch/recovery
+    ports:
+      - "127.0.0.1:19260:9200"
+    mem_limit: 8g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - index-data:/usr/share/opensearch/data
+      - index-recovery:/usr/share/opensearch/recovery
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  index-data:
+  index-recovery:

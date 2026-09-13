@@ -1,0 +1,16 @@
+# Paths are relative to the process working directory (run from this module).
+# Credentials belong in the shared, ignored project-root .env (CLI: --env ../../.env).
+storage_root = ".cache/assets"
+receive_root = ".cache/receiving"
+storage_profile_id = "local-default"
+io_chunk_bytes = 1048576
+job_lease_seconds = 60
+worker_poll_seconds = 0.5
+deepseek_timeout_seconds = 60
+deepseek_max_input_codepoints = 20000
+deepseek_max_output_tokens = 1200
+deepseek_max_calls_per_package = 20
+deepseek_max_package_input_codepoints = 200000
+max_manifest_bytes = 8388608
+max_input_files = 10000
+max_input_bytes = 8589934592
