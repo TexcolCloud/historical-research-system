@@ -58,8 +58,8 @@ def evaluate_offline(settings, engine, dataset):
                             **c,
                             "vector": v,
                             "title": chapters[c["chapter_id"]]["title"],
-                            "title_search": normalizer().convert(" / ".join(c["section_path"])),
-                            "text_search": normalizer().convert(c["text"]),
+                            "title_search": normalizer().convert(c["title"]),
+                            "text_search": normalizer().convert(c["retrieval_text"]),
                         },
                     }
                     for c, v in zip(batch, vectors, strict=True)
@@ -67,11 +67,14 @@ def evaluate_offline(settings, engine, dataset):
                 refresh=True,
             )
         results = {}
-        for name, semantic, options in [
+        variants = dataset.get('variants') or [
             ("lexical", False, {}),
             ("previous_hybrid", True, {"fusion": False, "candidate_limit": 20, "rerank_limit": 40}),
             ("hybrid", True, {}),
-        ]:
+            ("hybrid_50", True, {"rerank_limit": 50}),
+            ("hybrid_reserved", True, {"lane_quota": 3}),
+        ]
+        for name, semantic, options in variants:
             query_vector.cache_clear()
             results[name] = evaluate_cases(
                 search,
