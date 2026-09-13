@@ -104,6 +104,8 @@ export default function ConversionReader({ runId }: { runId: string }) {
             <article>
               <RenderedMarkdown
                 markdown={data.text || "（本页没有可显示的识别文字）"}
+                footnotes={data.footnotes}
+                assetBaseUrl={`/api/v2/runs/${runId}/artifacts`}
               />
             </article>
             <aside>

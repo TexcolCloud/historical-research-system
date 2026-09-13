@@ -19,6 +19,7 @@ from .domain.book_structure import (
     validate_outline,
     validate_outline_boundaries,
 )
+from .footnotes import resolve_footnotes
 from .outputs import Outputs
 from .review import Review, digest
 
@@ -105,7 +106,8 @@ def reviewed_spans(markdown, pages, corrections, run_id):
                     "pages": original_pages,
                     "original_start": start,
                     "original_end": end,
-                    "human_decision_id": edit.get("decision_id") if edit else None,
+                    "human_decision_id": edit.get("decision_id") if edit and edit.get("reviewer", "human-ui") == "human-ui" else None,
+                    "machine_decision_id": edit.get("decision_id") if edit and edit.get("reviewer", "human-ui") != "human-ui" else None,
                 },
             }
         )
@@ -140,7 +142,7 @@ class Library:
         with self.engine.connect() as connection:
             rows = (
                 connection.execute(
-                    select(db.review_issues, db.review_decisions.c.id.label("decision_id"))
+                    select(db.review_issues, db.review_decisions.c.id.label("decision_id"), db.review_decisions.c.receipt.label("decision_receipt"))
                     .join(db.review_decisions, db.review_decisions.c.issue_id == db.review_issues.c.id)
                     .where(db.review_issues.c.run_id == run_id, db.review_issues.c.replacement.is_not(None))
                 )
@@ -155,6 +157,7 @@ class Library:
                     "start": body["start"],
                     "end": body["end"],
                     "decision_id": row["decision_id"],
+                    "reviewer": row["decision_receipt"].get("reviewer", "human-ui"),
                     "text": self.review.objects.read_bytes(row["replacement"]).decode("utf-8"),
                 }
             )
@@ -330,4 +333,5 @@ class Library:
         if not row:
             raise HTTPException(404, "章节尚未发布。")
         body = self.review.read_json(row["content"])
-        return {**row, "parts": body["parts"], "text": "".join(part["text"] for part in body["parts"])}
+        text = "".join(part["text"] for part in body["parts"])
+        return {**row, "parts": body["parts"], "text": text, 'footnotes':resolve_footnotes(text,body['parts'])}

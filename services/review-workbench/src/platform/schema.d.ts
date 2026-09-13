@@ -600,6 +600,8 @@ export interface components {
             parts: {
                 [key: string]: unknown;
             }[];
+            /** Footnotes */
+            footnotes?: components["schemas"]["FootnoteLink"][];
         };
         /** ChapterSummary */
         ChapterSummary: {
@@ -641,6 +643,8 @@ export interface components {
             image: string;
             /** Machine Status */
             machine_status: string;
+            /** Footnotes */
+            footnotes?: components["schemas"]["FootnoteLink"][];
         };
         /** DeletionReceipt */
         DeletionReceipt: {
@@ -779,6 +783,32 @@ export interface components {
             started_at: string;
             /** Finished At */
             finished_at: string | null;
+        };
+        /** FootnoteDefinition */
+        FootnoteDefinition: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Marker End */
+            marker_end: number;
+        };
+        /** FootnoteLink */
+        FootnoteLink: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            note: components["schemas"]["FootnoteDefinition"];
+            /** References */
+            references: components["schemas"]["FootnoteSpan"][];
+        };
+        /** FootnoteSpan */
+        FootnoteSpan: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

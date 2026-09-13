@@ -12,9 +12,10 @@ from uuid import UUID, uuid5
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from markdown_it import MarkdownIt
 
-CHUNK_RULE = "structure-1400-160-v2"
+from .footnotes import resolve_footnotes
+
+CHUNK_RULE = "structure-1400-160-v3-page-scoped-footnotes"
 NOTE = re.compile(r"(?m)^ {0,3}\[\^([^\]\n]+)\]:")
-REFERENCE = re.compile(r"\[\^([^\]\n]+)\](?!:)")
 
 
 def source_excerpt(chapter, start, end):
@@ -177,6 +178,15 @@ def table_groups(text, block, size):
 
 def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
     text, structure = chapter["text"], blocks(chapter["text"])
+    notes = resolve_footnotes(text, chapter['parts'])
+    split_structure = []
+    for block in structure:
+        cuts = sorted({block['start'],block['end'], *(point for n in notes for point in
+                       (n['note']['start'], n['note']['end']) if block['start'] < point < block['end'])})
+        for start,end in zip(cuts,cuts[1:]):
+            note = next((n for n in notes if n['note']['start'] <= start < n['note']['end']),None)
+            split_structure.append({**block,'start':start,'end':end, **({'kind':'note'} if note else {})})
+    structure = split_structure
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=size,
         chunk_overlap=overlap,
@@ -246,15 +256,17 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
         for start, end in ranges:
             hit = source_excerpt(chapter, start, end)
             additions = list(support)
-            refs = set(REFERENCE.findall(hit["text"]))
-            for b in structure:
-                if b.get("note") in refs:
-                    additions.append((b["start"], b["end"], "footnote"))
-                if block.get("note") and block["note"] in REFERENCE.findall(text[b["start"] : b["end"]]):
-                    additions.append((b["start"], b["end"], "note_owner"))
+            for note in notes:
+                a,b = note['note']['start'], note['note']['end']
+                if any(start <= ref['start'] < end for ref in note['references']):
+                    additions.append((a,b,'footnote'))
+                if start < b and end > a:
+                    for owner in structure:
+                        if any(owner['start'] <= ref['start'] < owner['end'] for ref in note['references']):
+                            additions.append((owner['start'], owner['end'], 'note_owner'))
             context = [
                 dict(source_excerpt(chapter, a, b), role=role)
-                for a, b, role in additions
+                for a, b, role in dict.fromkeys(additions)
                 if not start <= a < b <= end
             ]
             path = list(dict.fromkeys([chapter["title"], *block["path"]]))

@@ -15,7 +15,7 @@ def test_clean_conversion_pages_remain_readable_while_the_book_awaits_review(pla
     settings = settings.model_copy(update={"cache_root": tmp_path})
     run, _ = seed(engine)
     objects = objects_for(settings)
-    raw = "待核对页。正常正文页。"
+    raw = "待核对页。正常正文页①。\n\n① 不包括其它地区。"
     files = {
         "candidate.md": objects.put_bytes(raw.encode()),
         "pages.json": objects.put_bytes(
@@ -39,7 +39,10 @@ def test_clean_conversion_pages_remain_readable_while_the_book_awaits_review(pla
     with TestClient(create_app(settings, engine)) as client:
         response = client.get(f"/api/v2/runs/{run}/review-pages/2")
         assert response.status_code == 200
-        assert response.json()["text"] == "正常正文页。"
+        assert response.json()["text"] == "正常正文页①。\n\n① 不包括其它地区。"
+        links = response.json()['footnotes']
+        assert len(links)==1 and len(links[0]['references'])==1
+        assert links[0]['references'][0]=={'start':5,'end':6}
         assert response.json()["machine_status"] == "release-accepted"
         assert client.get(f"/api/v2/runs/{run}/review-pages/3").status_code == 404
     with engine.connect() as connection:

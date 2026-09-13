@@ -46,6 +46,17 @@ jobs:
       - run: .cache/engineering-envs/research-platform/bin/python -m ruff check services/research-platform/src scripts/hrs_v2.py
       - run: npm --prefix services/review-workbench run contracts
       - run: .cache/engineering-envs/research-platform/bin/python -m pytest services/research-platform/tests services/runtime-support/tests --basetemp "${{ runner.temp }}/platform-ci" --junitxml=reports/platform.xml
+      - name: Check conversion review policy without OCR model weights
+        env:
+          PYTHONPATH: services/document-extraction/src
+        run: >-
+          .cache/engineering-envs/research-platform/bin/python -m pytest
+          services/document-extraction/tests/test_review_scope_repairs.py
+          services/document-extraction/tests/test_single_ocr_completion.py
+          services/document-extraction/tests/test_review_routing.py
+          services/document-extraction/tests/test_review_transport.py
+          services/document-extraction/tests/test_visual_source.py
+          --basetemp "${{ runner.temp }}/conversion-review" --junitxml=reports/conversion-review.xml
       - run: npm --prefix services/review-workbench test
       - run: npm --prefix services/review-workbench run check-unused
       - run: npm --prefix services/review-workbench run build
@@ -59,6 +70,7 @@ jobs:
           name: platform-checks
           path: |
             reports/platform.xml
+            reports/conversion-review.xml
             services/review-workbench/dist/
           retention-days: 14
       - if: always()

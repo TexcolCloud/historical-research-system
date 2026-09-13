@@ -50,7 +50,9 @@ export default function ReviewPanel({
     queryKey: issuesKey(runId),
     queryFn: ({ signal }) => readReviewIssues(runId, signal),
   });
-  const currentId = selected ?? issues.data?.[0]?.id ?? "";
+  const currentId = issues.data?.some((issue) => issue.id === selected)
+    ? selected!
+    : (issues.data?.[0]?.id ?? "");
   const current = useQuery({
     ...issueOptions(currentId),
     enabled: Boolean(currentId),
@@ -135,7 +137,7 @@ export default function ReviewPanel({
             </p>
           ) : current.data ? (
             <IssueEditor
-              key={current.data.id}
+              key={`${current.data.id}:${current.data.revision}`}
               issue={current.data}
               onSaved={saved}
             />
@@ -261,9 +263,19 @@ function IssueEditor({
         {draft.isSuccess && <p role="status">草稿已保存，尚未确认放行。</p>}
         <ul className="platform-review-reasons">
           {issue.reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
+            <li key={reason}>{reviewReason(reason)}</li>
           ))}
         </ul>
+        {issue.kind === "figure" && (
+          <p className="platform-inline-status">
+            本项为插图或地图，请核对右侧原图及下方图说。图内标签保留在图片中；阅读视图隐藏了导出占位标记，编辑时仍保留完整底稿。
+          </p>
+        )}
+        {issue.kind === "page" && (
+          <p className="platform-inline-status">
+            本项按整页展示，因为尚未完成核验或无法可靠定位到具体段落；并不表示页面中的每一段都有错误。
+          </p>
+        )}
         <div inert={mutation.isPending || draft.isPending}>
           {editing ? (
             <MarkdownEditor
@@ -275,7 +287,10 @@ function IssueEditor({
               }}
             />
           ) : (
-            <RenderedMarkdown markdown={text} />
+            <RenderedMarkdown
+              assetBaseUrl={`/api/v2/runs/${issue.run_id}/artifacts`}
+              markdown={issue.kind === "figure" ? figurePreview(text) : text}
+            />
           )}
         </div>
       </article>
@@ -295,4 +310,20 @@ function IssueEditor({
       </aside>
     </div>
   );
+}
+
+function reviewReason(reason: string) {
+  return reason
+    .replaceAll("deepseek-review-incomplete", "本地视觉核验未完成")
+    .replaceAll(
+      "independent-source-reading-failed",
+      "原图独立初读未获得有效结果",
+    )
+    .replaceAll("review-failed", "核验未获得有效结果");
+}
+
+function figurePreview(text: string) {
+  return text
+    .replace(/^\s*Image\s*$/gm, "")
+    .replace(/!\[[^\]]*\]\([^\n]*\)/g, "\n> 插图见右侧原书对照。\n");
 }

@@ -1,6 +1,6 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from document_extraction.semantic_completion import complete_document
 
@@ -35,7 +35,7 @@ class CompletionTests(unittest.TestCase):
             result = complete_document(pages, None, Path(directory), reviewer=reviewer)
         return result, calls
 
-    def test_known_omission_is_proposed_for_human_review_without_rewriting(self):
+    def test_known_omission_is_written_after_clean_machine_recheck(self):
         before = "史书也有败笔、“赝[4]。"
         after = "史书也有败笔、“赝品”，用笔述顶替口述。[4]。"
         repair = verdict(
@@ -51,11 +51,11 @@ class CompletionTests(unittest.TestCase):
             ]
         )
         result, calls = self.run_completion(before, [repair, verdict()])
-        self.assertEqual(result["pages"][0]["text"], before)
-        self.assertFalse(result["pages"][0]["verified"])
-        self.assertEqual(result["pages"][0]["concerns"][0]['proposed_change']['after'], after)
-        self.assertEqual(result["pages"][0]["changes"], [])
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["pages"][0]["text"], after)
+        self.assertTrue(result["pages"][0]["verified"])
+        self.assertEqual(result["pages"][0]["concerns"], [])
+        self.assertFalse(result["pages"][0]["changes"][0]['human_review'])
+        self.assertEqual(len(calls), 2)
         reviewed, _ = self.run_completion(after, [verdict()])
         self.assertTrue(reviewed['pages'][0]['verified'])
 

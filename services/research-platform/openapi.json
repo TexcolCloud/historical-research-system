@@ -1613,6 +1613,13 @@
             },
             "type": "array",
             "title": "Parts"
+          },
+          "footnotes": {
+            "items": {
+              "$ref": "#/components/schemas/FootnoteLink"
+            },
+            "type": "array",
+            "title": "Footnotes"
           }
         },
         "type": "object",
@@ -1705,6 +1712,13 @@
           "machine_status": {
             "type": "string",
             "title": "Machine Status"
+          },
+          "footnotes": {
+            "items": {
+              "$ref": "#/components/schemas/FootnoteLink"
+            },
+            "type": "array",
+            "title": "Footnotes"
           }
         },
         "type": "object",
@@ -2044,6 +2058,77 @@
           "finished_at"
         ],
         "title": "ExecutionNode"
+      },
+      "FootnoteDefinition": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          },
+          "marker_end": {
+            "type": "integer",
+            "title": "Marker End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "marker_end"
+        ],
+        "title": "FootnoteDefinition"
+      },
+      "FootnoteLink": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "note": {
+            "$ref": "#/components/schemas/FootnoteDefinition"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/FootnoteSpan"
+            },
+            "type": "array",
+            "title": "References"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "note",
+          "references"
+        ],
+        "title": "FootnoteLink"
+      },
+      "FootnoteSpan": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "FootnoteSpan"
       },
       "HTTPValidationError": {
         "properties": {
