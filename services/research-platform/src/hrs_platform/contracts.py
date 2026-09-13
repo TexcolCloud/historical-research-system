@@ -126,12 +126,29 @@ class ReviewIssue(ReviewIssueSummary):
     images: list[str]
 
 
+class FootnoteSpan(BaseModel):
+    start: int
+    end: int
+
+
+class FootnoteDefinition(FootnoteSpan):
+    marker_end: int
+
+
+class FootnoteLink(BaseModel):
+    id: str
+    label: str
+    note: FootnoteDefinition
+    references: list[FootnoteSpan]
+
+
 class ConversionPage(BaseModel):
     page: int
     page_count: int
     text: str
     image: str
     machine_status: str
+    footnotes: list[FootnoteLink] = Field(default_factory=list)
 
 
 class ChapterSummary(BaseModel):
@@ -148,6 +165,7 @@ class ChapterSummary(BaseModel):
 class Chapter(ChapterSummary):
     text: str
     parts: list[dict]
+    footnotes: list[FootnoteLink] = Field(default_factory=list)
 
 
 class ExecutionNode(BaseModel):

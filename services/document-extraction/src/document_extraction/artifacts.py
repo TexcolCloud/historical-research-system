@@ -2,13 +2,17 @@
 
 from dataclasses import asdict
 from pathlib import Path
-from hrs_runtime.page_layout import page_layout_exclusions, RULE_VERSION as LAYOUT_POLICY
+
+from hrs_runtime.page_layout import RULE_VERSION as LAYOUT_POLICY
+from hrs_runtime.page_layout import page_layout_exclusions
+from hrs_runtime.review_scope import concern_ranges, figure_page, locate
 
 from .content_readiness import _blocks
 from .models import PageResult
 from .provenance import MappedText, source_map, text_hash
+from .review_routing import ARCHIVE_POLICY, conversion_deferred, rule_passed
+from .review_routing import RELEASE_POLICY as ROUTED_RELEASE_POLICY
 from .semantic_completion import POLICY
-from .review_routing import rule_passed, conversion_deferred, ARCHIVE_POLICY, RELEASE_POLICY as ROUTED_RELEASE_POLICY
 from .utils import sha256, write_json
 
 RELEASE_POLICY = 'deepseek-errors-only-block-v1'
@@ -29,11 +33,7 @@ def block_text_hints(page):
 
 
 def _issue_range(page, concern):
-    text, excerpt = page["text"], concern.get("excerpt", "")
-    if excerpt and text.count(excerpt) == 1:
-        start = text.index(excerpt)
-        return start, start + len(excerpt)
-    return 0, len(text)
+    return locate(page["text"], concern.get("excerpt", ""))
 
 
 def clean_page_numbers(page):
@@ -199,10 +199,9 @@ def write_outputs(
                     )
                 ):
                     continue
-                left, right = _issue_range(page, concern)
-                left += page_offsets[number]
-                right += page_offsets[number]
-                if left < block["end"] and right > block["start"]:
+                locations = concern_ranges(page['text'], concern) or [(0, len(page['text']))]
+                if any(left + page_offsets[number] < block['end'] and
+                       right + page_offsets[number] > block['start'] for left, right in locations):
                     warning = concern["kind"] in {"citation", "normalization"}
                     block["risks"].append(
                         {
@@ -315,24 +314,32 @@ def write_outputs(
             assessment.update(eligible=False, decision='NOT_REVIEWED')
         write_json(output / "reviews" / f"page-{result.page:03d}.json", asdict(result))
     pending = [asdict(r) for r in results if r.status not in {"release-accepted", "conversion-completed"}]
+    page_holds = {p['page'] for p in completion['pages'] if figure_page(p['text']) or any(
+        c['kind'] not in {'citation', 'normalization'} and _issue_range(p, c) is None for c in p['concerns'])}
     cards = [
         {
             "page": r.page,
             "page_image": r.image,
             "decision": "PAGE_REVIEW",
+            "reviewer_required": "human",
             "reasons": r.processing["risk_assessment"]["reasons"],
             "region": {
-                "kind": "page",
+                "kind": "figure" if figure_page(by_page[r.page]['text']) else "page",
                 "page": r.page,
                 "issues": r.processing["risk_assessment"]["regions"],
+                "start": page_offsets[r.page],
+                "end": page_offsets[r.page] + len(by_page[r.page]['text']),
+                "text": by_page[r.page]['text'],
             },
         }
         for r in results
         if r.status not in {"release-accepted", "conversion-completed"}
-        and not any(r.page in b["pages"] for b in blocks)
+        and (r.page in page_holds or not any(r.page in b["pages"] for b in blocks))
     ]
     for block in held_blocks:
         for number in block["pages"]:
+            if number in page_holds:
+                continue
             result = next(r for r in results if r.page == number)
             cards.append(
                 {

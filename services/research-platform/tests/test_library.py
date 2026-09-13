@@ -31,3 +31,11 @@ def test_existing_chapter_rule_rejects_a_subsection_as_new_logical_page():
     with pytest.raises(ValueError):
         validate_outline_boundaries(outline, previous, [{"kind": "article", "title": "一、行政组织"}])
     validate_outline_boundaries(outline, previous, [])
+
+
+def test_machine_correction_provenance_is_never_labeled_human():
+    rows = reviewed_spans('原文。', [{'page':1,'start':0,'end':3}],
+                          [{'start':0,'end':3,'text':'修正。','decision_id':'machine-id','reviewer':'local-qwen-machine'}], str(uuid4()))
+    record = rows[0]['source_record']
+    assert record['machine_decision_id']=='machine-id'
+    assert record['human_decision_id'] is None

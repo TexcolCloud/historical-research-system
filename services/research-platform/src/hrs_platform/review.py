@@ -9,6 +9,7 @@ from sqlalchemy import func, insert, select, update
 
 from . import schema as db
 from .activities import objects_for
+from .footnotes import resolve_footnotes
 
 
 def digest(value):
@@ -59,6 +60,7 @@ class Review:
                 "text": original["text"],
                 "image": f"/api/v2/runs/{run_id}/artifacts/{original['image_path']}",
                 "machine_status": "unreviewed-source",
+                "footnotes": resolve_footnotes(original['text'], [{'text':original['text'], 'source':{'pages':[page]}}]),
             }
 
         read = self.read_cached
@@ -79,6 +81,8 @@ class Review:
             "text": text[boundary["start"] : boundary["end"]],
             "image": f"/api/v2/runs/{run_id}/artifacts/{original['image']}",
             "machine_status": original["status"],
+            "footnotes": resolve_footnotes(text[boundary['start']:boundary['end']],
+                                            [{'text':text[boundary['start']:boundary['end']], 'source':{'pages':[page]}}]),
         }
 
     def initialize(self, run_id):
@@ -267,6 +271,9 @@ class Review:
         return {"revision": revision, "draft_text": request.text}
 
     def decide(self, issue_id, request):
+        return self._decide(issue_id, request)
+
+    def _decide(self, issue_id, request, *, machine_evidence=None):
         issue_id = str(issue_id)
         request_hash = digest(json.dumps(request.model_dump(mode="json"), sort_keys=True, ensure_ascii=False))
         if (request.action == "correct") != (request.text is not None):
@@ -313,6 +320,7 @@ class Review:
                 issue["state"] != "pending"
                 or issue["revision"] != request.expected_revision
                 or issue["text_sha256"] != request.expected_text_sha256
+                or (machine_evidence is not None and issue["draft"] is not None)
             ):
                 # An exact retransmission can have waited for the first transaction's parent lock.
                 repeated = (
@@ -363,7 +371,8 @@ class Review:
                     id=str(request.decision_id),
                     issue_id=issue_id,
                     request_sha256=request_hash,
-                    receipt={**receipt, "reviewer": "human-ui", "action": request.action},
+                    receipt={**receipt, "reviewer": "local-qwen-machine" if machine_evidence else "human-ui", "action": request.action,
+                             **({"machine_review": True, "human_review": False, "evidence": machine_evidence} if machine_evidence else {})},
                 )
             )
             connection.execute(

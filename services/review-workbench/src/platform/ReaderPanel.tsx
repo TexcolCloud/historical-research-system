@@ -130,7 +130,11 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
             {chapter.data ? (
               <>
                 <h1>{chapter.data.title}</h1>
-                <RenderedMarkdown markdown={chapter.data.text} />
+                <RenderedMarkdown
+                  markdown={chapter.data.text}
+                  footnotes={chapter.data.footnotes}
+                  assetBaseUrl={`/api/v2/runs/${chapter.data.run_id}/artifacts`}
+                />
               </>
             ) : (
               <p role="status">正在读取章节…</p>

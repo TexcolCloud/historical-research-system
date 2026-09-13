@@ -94,3 +94,40 @@ test("confirmation uses the returned next issue immediately without a whole-page
   expect(screen.queryByText("第一页正文")).toBeNull();
   vi.restoreAllMocks();
 });
+
+test("map review explains the image carrier without rendering local file URLs as broken images", async () => {
+  const issue = {
+    id: "map",
+    run_id: "run",
+    page: 54,
+    pages: [54],
+    revision: 1,
+    state: "pending",
+    text_sha256: "b".repeat(64),
+    kind: "figure",
+    text: "Image\n\n![Image](D:/private cache/map.png)\n\n图1 行动图",
+    images: ["/api/v2/runs/run/artifacts/pages/54.png"],
+    reasons: [
+      "deepseek-review-incomplete",
+      "independent-source-reading-failed",
+    ],
+  };
+  respondWith((request) =>
+    new URL(request.url).pathname === "/api/v2/reviews" ? [issue] : issue,
+  );
+  const query = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={query}>
+      <ReviewPanel runId="run" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("图1 行动图");
+  expect(screen.getByText("本地视觉核验未完成")).toBeDefined();
+  expect(screen.getByText(/本项为插图或地图/)).toBeDefined();
+  expect(screen.queryByAltText("Image")).toBeNull();
+  expect(screen.getByAltText("原书第 54 页").getAttribute("src")).toBe(
+    issue.images[0],
+  );
+});

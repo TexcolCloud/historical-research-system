@@ -1,19 +1,18 @@
 """Public single-OCR flow: recoverable pages and exact downstream evidence."""
 
 import json
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest.mock import Mock, patch
 
-from PIL import Image
-
 from document_extraction import artifacts, ocr, pipeline
-from document_extraction.docling_conversion import DoclingConverter, export_markdown
 from document_extraction.content_readiness import verify_quote
+from document_extraction.docling_conversion import DoclingConverter, export_markdown
 from document_extraction.models import OcrResult
 from document_extraction.semantic_completion import complete_document
+from PIL import Image
 from test_single_ocr_completion import verdict
 
 
@@ -98,8 +97,8 @@ class SinglePipelineTests(unittest.TestCase):
                     )["cards"]
                     self.assertEqual(len(cards), 1)
                     self.assertEqual(cards[0]["reviewer_required"], "human")
-                    self.assertEqual(cards[0]["region"]["kind"], "table")
-                    self.assertEqual(cards[0]["region"]["text"], table)
+                    self.assertEqual(cards[0]["region"]["kind"], "page" if label == "unlocated-table" else "table")
+                    self.assertEqual(cards[0]["region"]["text"], text if label == "unlocated-table" else table)
                     self.assertTrue((folder / cards[0]["page_image"]).is_file())
 
     def test_paddle_keeps_notes_and_reads_text_inside_figures(self):
@@ -119,7 +118,7 @@ class SinglePipelineTests(unittest.TestCase):
         self.assertTrue(options['format_block_content'])
 
     def test_docling_preserves_merged_table_cells_in_final_markdown(self):
-        from docling_core.types.doc import DoclingDocument, TableData, TableCell
+        from docling_core.types.doc import DoclingDocument, TableCell, TableData
 
         doc = DoclingDocument(name="table")
         doc.add_table(
