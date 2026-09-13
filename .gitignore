@@ -16,6 +16,8 @@ node_modules/
 # Local agent instructions (all filename case variants).
 [Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
 [Aa][Gg][Ee][Nn][Tt].[Mm][Dd]
+[Cc][Oo][Nn][Tt][Ee][Xx][Tt].[Mm][Dd]
+/GITHUB_PREPARATION.md
 /docs/
 /文档提取管道调优文档案/
 /文档提取管道调优档案/
