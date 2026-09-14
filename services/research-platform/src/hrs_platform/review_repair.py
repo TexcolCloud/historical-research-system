@@ -226,7 +226,8 @@ def apply_verified_page(review, issues, page, boundary, evidence):
 
 def refresh_unresolved(review, issues, page, boundary, evidence):
     """Keep current model concerns attached to their actual paragraphs."""
-    if not page["receipts"] or page["receipts"][0]["verdict"].get("review_state") != "completed":
+    initial_checks = [r for r in page['receipts'] if r.get('phase', 'initial') in {'initial', 'repair-review'}]
+    if not initial_checks or initial_checks[-1]['verdict'].get('review_state') != 'completed':
         return 0
     concerns = [c for c in page["concerns"] if c["kind"] not in {"citation", "normalization"}]
     groups = [(concern_ranges(page["text"], c), c) for c in concerns]
@@ -298,6 +299,9 @@ def recheck_pending(review, run_id, settings, output, *, pages=None, progress=pr
         ]
         if not issues:
             continue
+        target = next(p for p in source_pages if p['page'] == number)
+        target['review_scope'] = [{'text': i['text'], 'reasons': review.read_json(i['content']).get('reasons', [])}
+                                  for i in issues]
         for p in source_pages:
             if abs(p["page"] - number) <= 1:
                 review.objects.materialize(bundle["files"][p["image"]], p["image_path"])
@@ -305,6 +309,9 @@ def recheck_pending(review, run_id, settings, output, *, pages=None, progress=pr
             source_pages, settings, output / f"page-{number:03d}", target_pages={number}
         )
         page = next(p for p in checked["pages"] if p["page"] == number)
+        current = get_run(review.engine, run_id)
+        if current['conversion'] != run['conversion']:
+            raise ValueError('The formal conversion changed during review; retained results were not applied.')
         receipt = {
             "page": number,
             "conversion_sha256": run["conversion"]["sha256"],
