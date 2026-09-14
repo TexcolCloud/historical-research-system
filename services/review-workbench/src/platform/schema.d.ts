@@ -1098,6 +1098,10 @@ export interface components {
             book_title: string;
             /** Section Path */
             section_path?: string[];
+            /** Table Scopes */
+            table_scopes?: {
+                [key: string]: unknown;
+            }[];
             /** Sources */
             sources?: {
                 [key: string]: unknown;

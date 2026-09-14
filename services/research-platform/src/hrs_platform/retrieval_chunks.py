@@ -7,6 +7,7 @@ this splitter.
 
 import re
 from functools import lru_cache
+from html import unescape
 from html.parser import HTMLParser
 from uuid import UUID, uuid5
 
@@ -15,7 +16,7 @@ from markdown_it import MarkdownIt
 
 from .footnotes import resolve_footnotes
 
-CHUNK_RULE = "structure-1400-160-v5-heading-note-units"
+CHUNK_RULE = "structure-1400-160-v6-evidence-scopes"
 NOTE = re.compile(r"(?m)^ {0,3}\[\^([^\]\n]+)\]:")
 IMAGE = re.compile(r'!\[([^\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\n]|\([^()\n]*\))*)\)')
 
@@ -67,7 +68,7 @@ class TableRows(HTMLParser):
         for line in text.splitlines(keepends=True):
             self.lines.append(self.lines[-1] + len(line))
         self.depth, self.start, self.rowspan, self.header = 0, None, 1, False
-        self.rows = []
+        self.rows, self.cells, self.cell = [], [], None
         self.feed(text)
 
     def position(self):
@@ -88,8 +89,25 @@ class TableRows(HTMLParser):
                 self.rowspan, int(value) if value and value.isdigit() and int(value) else 10**9
             )
             self.header |= tag == "th"
+            colspan = dict(attrs).get('colspan') or '1'
+            self.cell = {'row': len(self.rows), 'rowspan': int(value) if value and value.isdigit() and int(value) else 10**9,
+                         'colspan': int(colspan) if colspan.isdigit() and int(colspan) else 1,
+                         'text': '', 'start': self.position()}
+
+    def handle_data(self, data):
+        if self.cell is not None:
+            self.cell['text'] += data
+
+    def handle_entityref(self, name):
+        self.handle_data(unescape('&' + name + ';'))
+
+    def handle_charref(self, name):
+        self.handle_data(unescape('&#' + name + ';'))
 
     def handle_endtag(self, tag):
+        if tag in {'td', 'th'} and self.cell is not None and self.depth == 1:
+            self.cells.append({**self.cell, 'end': self.text.index('>', self.position()) + 1})
+            self.cell = None
         if tag == "tr" and self.depth == 1 and self.start is not None:
             self.rows.append(
                 (self.start, self.text.index(">", self.position()) + 1, self.rowspan, self.header)
@@ -235,10 +253,7 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
             ranges, header = table_groups(text, block, size)
             support.append((*header, "table_header"))
             i = next(i for i, b in enumerate(structure) if b["start"] == block["start"])
-            for b in structure[max(0, i - 2) : i] + structure[i + 1 : i + 3]:
-                raw = text[b["start"] : b["end"]].strip()
-                if re.match(r"^(?:表\s*[\d一二三四五六七八九十]+|单位[：:]|注[：:]|说明[：:])", raw):
-                    support.append((b["start"], b["end"], "table_note"))
+            support.extend(table_support(text, structure, i))
         elif block["kind"] in {"bullet_list", "ordered_list"} and block["end"] - block["start"] > size:
             raw = text[block["start"] : block["end"]]
             offsets = [0]
@@ -297,9 +312,7 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
                     for m in relation['members']:
                         index = next((i for i, b in enumerate(structure) if b['start'] == m['start']), None)
                         if index is not None:
-                            for b in structure[max(0, index - 2):index] + structure[index + 1:index + 3]:
-                                if re.match(r'^(?:表\s*[\d一二三四五六七八九十]+|单位[：:]|注[：:]|说明[：:])', text[b['start']:b['end']].strip()):
-                                    additions.append((b['start'], b['end'], 'table_note'))
+                            additions.extend(table_support(text, structure, index))
             context = [
                 dict(source_excerpt(chapter, a, b), role=role)
                 for a, b, role in dict.fromkeys(additions)
@@ -324,13 +337,80 @@ def context_blocks(text):
     return blocks(text)
 
 
+def table_support(text, structure, index):
+    """Retain captions, event introductions and notes as immutable source ranges."""
+    result = []
+    for i in range(max(0, index - 2), min(len(structure), index + 3)):
+        b = structure[i]
+        if b['kind'] != 'paragraph':
+            continue
+        raw = text[b['start']:b['end']].strip()
+        note = re.match(r'^(?:表\s*[\d一二三四五六七八九十]+|单位[：:]|注[：:]|说明[：:])', raw)
+        introduction = i == index - 1 and re.search(r'如下|下表|列于下|见表', raw)
+        if note or introduction:
+            result.append((b['start'], b['end'], 'table_note' if note else 'table_intro'))
+    return result
+
+
+def section_introductions(text, structure):
+    """Carry an explicit list introduction across its numbered sibling headings."""
+    result, active = {}, None
+    for i, b in enumerate(structure):
+        if b['kind'] != 'heading':
+            continue
+        title = b['path'][-1] if b['path'] else ''
+        numbered = re.match(r'([一二三四五六七八九十]+|\d+)[、.．]\s*', title)
+        parent = b['path'][:-1]
+        before = structure[max(0, i - 2):i]
+        if before and before[-1]['kind'] == 'paragraph' and re.search(
+            r'(?:如下|下列|以下)[。:：\s]*$', text[before[-1]['start']:before[-1]['end']]
+        ):
+            paragraphs = [before[-1]]
+            if len(before) == 2 and before[0]['kind'] == 'paragraph':
+                paragraphs.insert(0, before[0])
+            active = None
+            if sum(p['end']-p['start'] for p in paragraphs) <= 1200:
+                active = (parent, [(p['start'], p['end'], 'section_intro') for p in paragraphs])
+                result[b['section']] = active[1]
+        elif active and numbered and numbered[1] not in {'一', '1'} and parent == active[0]:
+            result[b['section']] = active[1]
+        else:
+            active = None
+    return result
+
+
+def shared_table_scopes(text, structure, start, end):
+    """Describe shared cells without assigning a group value to individual rows."""
+    scopes = []
+    for block in structure:
+        if block['kind'] != 'html_table' or not (block['start'] < end and block['end'] > start):
+            continue
+        table = TableRows(text[block['start']:block['end']])
+        occupied = set()
+        for cell in table.cells:
+            rows = list(range(cell['row'], min(len(table.rows), cell['row'] + cell['rowspan'])))
+            column = 0
+            while (cell['row'], column) in occupied:
+                column += 1
+            columns = list(range(column, column + cell['colspan']))
+            occupied.update((r,c) for r in rows for c in columns)
+            if cell['rowspan'] <= 1 and cell['colspan'] <= 1:
+                continue
+            scopes.append({'value': cell['text'].strip(), 'row_numbers': [r+1 for r in rows],
+                'column_numbers': [c+1 for c in columns],
+                'row_labels': [[c['text'].strip() for c in table.cells if c['row'] == r and c != cell] for r in rows],
+                'start': block['start'] + cell['start'], 'end': block['start'] + cell['end'],
+                'rule': '该单元格跨越所列行列；共享统计量不能拆分或当作任一单行、单列的独立数值。'})
+    return scopes
+
+
 def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24000, *, diverse=False, metrics=None):
     """Merge intersecting evidence and spend a separate, bounded context budget."""
     from .retrieval_ranking import diverse_order
 
     metrics = metrics if metrics is not None else {}
     metrics.update(budget_rejected=0, duplicate_rejected=0)
-    selected, chapters, structures = [], {}, {}
+    selected, chapters, structures, introductions = [], {}, {}, {}
     duplicates = set()
     ordered = diverse_order(hits, relevance_window=limit * 2) if diverse else sorted(hits, key=lambda h: h["score"], reverse=True)
     for hit in ordered:
@@ -344,7 +424,25 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
             chapters[chapter_id] = load_chapter(chapter_id)
             text = chapters[chapter_id]['text']
             structures[chapter_id] = context_blocks(text) if len(text) <= 1_000_000 else blocks(text)
+            introductions[chapter_id] = section_introductions(text, structures[chapter_id])
         chapter = chapters[chapter_id]
+        hit = {**hit, 'context': list(hit.get('context', []))}
+        structure, text = structures[chapter_id], chapter['text']
+        additions = []
+        for i, b in enumerate(structure):
+            if b['start'] < hit['end'] and b['end'] > hit['start']:
+                additions.extend(introductions[chapter_id].get(b['section'], []))
+                if b['kind'] in {'table', 'html_table'}:
+                    additions.extend(table_support(text, structure, i))
+        for relation in chapter.get('structure', []):
+            if relation['kind'] == 'table' and relation['status'] == 'ready' and any(
+                m['start'] < hit['end'] and m['end'] > hit['start'] for m in relation['members']
+            ):
+                first = relation['members'][0]
+                index = next((i for i,b in enumerate(structure) if b['start'] == first['start']), None)
+                if index is not None:
+                    additions.extend(table_support(text, structure, index))
+        hit['context'].extend(dict(source_excerpt(chapter, a, b), role=role) for a,b,role in dict.fromkeys(additions))
         overlaps = [
             h
             for h in selected
@@ -388,14 +486,17 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
         remaining += reserved
         structure, chapter = structures[hit["chapter_id"]], chapters[hit["chapter_id"]]
         indexes = [i for i, b in enumerate(structure) if b["start"] < hit["end"] and hit["start"] < b["end"]]
-        additions = list(hit["context"])
+        # Neighbor expansions are recomputed from current boundaries, never accumulated on a second pass.
+        additions = [c for c in hit["context"] if c['role'] != 'neighbor']
         if indexes and hit.get("kind") not in {"table", "html_table"}:
             first, last = indexes[0], indexes[-1]
             for i in range(max(0, first - 1), min(len(structure), last + 2)):
                 b = structure[i]
-                if (i < first and b["section"] != structure[first]["section"]) or (
-                    i > last and b["section"] != structure[last]["section"]
-                ):
+                # Complete cut paragraphs; intact paragraphs rely on explicit semantic supplements.
+                if i < first or (i > last and structure[last]['kind'] != 'heading'
+                                 and not hit['text'].rstrip().endswith((':', '：'))):
+                    continue
+                if i > last and b["section"] != structure[last]["section"]:
                     continue
                 # Complete a split paragraph before considering adjoining paragraphs.
                 for start, end in [
@@ -433,5 +534,6 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
                 occupied.append((a, b))
             available -= needed
             remaining -= needed
-        output.append({**hit, "context": context, "context_truncated": truncated})
+        output.append({**hit, "context": context, "context_truncated": truncated,
+                       'table_scopes': shared_table_scopes(chapter['text'], structure, hit['start'], hit['end'])})
     return output

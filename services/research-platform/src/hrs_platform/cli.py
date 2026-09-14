@@ -18,6 +18,7 @@ def main():
             "backup",
             "restore",
             "reindex",
+            "amend-library",
             "evaluate",
             "evaluate-offline",
         ],
@@ -28,11 +29,29 @@ def main():
     parser.add_argument("--restore-suffix", help="New isolated destination database suffix")
     parser.add_argument("--run-id", help="Published book run to reindex without repeating OCR")
     parser.add_argument("--cases", help="Evaluation JSON: query and expected chapter_id/start/end ranges")
+    parser.add_argument('--amendments', help='JSON list of located, same-length published-source errata')
     parser.add_argument("--semantic", action="store_true", help="Evaluate semantic retrieval and reranking")
     parser.add_argument("--limit", default=10, type=int, help="Evaluation result limit")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=18170, type=int)
     args = parser.parse_args()
+    if args.command == 'amend-library':
+        import json
+        from pathlib import Path
+        from uuid import UUID
+
+        from .library import Library
+        if not args.run_id or not args.amendments:
+            parser.error('amend-library requires --run-id and --amendments')
+        settings = Settings.load()
+        engine = engine_for(settings)
+        try:
+            result = Library(settings, engine).amend(str(UUID(args.run_id)),
+                json.loads(Path(args.amendments).read_text('utf-8-sig')))
+            print(json.dumps(result, ensure_ascii=False, default=str))
+        finally:
+            engine.dispose()
+        return
     if args.command == 'evaluate-offline':
         import json
         from pathlib import Path

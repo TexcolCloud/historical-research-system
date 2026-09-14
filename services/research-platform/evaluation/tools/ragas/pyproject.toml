@@ -1,0 +1,13 @@
+[project]
+name = "hrs-ragas-evaluation"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "ragas==0.4.3", "hrs-platform==0.1.0",
+  # Ragas 0.4.3 imports the legacy Vertex adapter removed in community 0.4.
+  "langchain-community<0.4",
+]
+
+[tool.uv.sources]
+hrs-platform = { path = "../../..", editable = true }
+hrs-runtime = { path = "../../../../../runtime-support", editable = true }

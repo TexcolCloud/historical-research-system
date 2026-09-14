@@ -377,6 +377,142 @@ class Library:
                 ).mappings()
             )
 
+    def amend(self, run_id, amendments):
+        """Apply located, same-length errata after local original-image verification.
+
+        This narrow operation preserves all existing coordinates and human decisions.
+        Larger edits require a new source revision and repartitioning, not offset guessing.
+        """
+        import os
+        import subprocess
+
+        run = get_run(self.engine, run_id)
+        if not run['result'].get('published') or run['pending_count']:
+            raise ValueError('Errata require a published book with no pending review.')
+        dependency = {'amendments': amendments, 'conversion': run['conversion']}
+        step = 'library-amendment:' + fingerprint(dependency)
+        prior = self.outputs.get(run_id, step, dependency)
+        if prior:
+            return prior
+        chapters = [self.chapter(r['id']) for r in self.chapters(run['book_id'])]
+        bodies, originals, scopes = {}, {}, {}
+        for request in amendments:
+            if request['chapter_id'] in bodies:
+                raise ValueError('Combine errata for the same chapter in one request.')
+            chapter = next(c for c in chapters if str(c['id']) == request['chapter_id'])
+            if chapter['content']['sha256'] != request['expected_content_sha256']:
+                raise ValueError('Chapter changed before errata verification.')
+            body = self.review.read_json(chapter['content'])
+            seen = set()
+            for edit in request['changes']:
+                start, before, after = edit['start'], edit['before'], edit['after']
+                end = start + len(before)
+                if start < 0 or not before or len(before) != len(after) or chapter['text'][start:end] != before:
+                    raise ValueError('Errata must match a nonempty same-length source range.')
+                if seen.intersection(range(start, end)):
+                    raise ValueError('Overlapping errata.')
+                seen.update(range(start, end))
+                offset = 0
+                for part in body['parts']:
+                    stop = offset + len(part['text'])
+                    if offset <= start < end <= stop:
+                        pages = part['source']['pages']
+                        if len(pages) != 1 or part['source'].get('human_decision_id'):
+                            raise ValueError('Errata cannot overwrite an explicit human edit or an ambiguous page range.')
+                        page = pages[0]
+                        part['text'] = part['text'][:start-offset] + after + part['text'][end-offset:]
+                        scopes.setdefault(page, []).append(after)
+                        break
+                    offset = stop
+                else:
+                    raise ValueError('Erratum crosses source ownership boundaries.')
+            originals[request['chapter_id']] = chapter['content']
+            bodies[request['chapter_id']] = body
+        if not scopes:
+            raise ValueError('No errata supplied.')
+        bundle = self.review.read_json(run['conversion'])
+        page_text = {}
+        for chapter in chapters:
+            parts = bodies.get(str(chapter['id']), chapter)['parts']
+            for part in parts:
+                if len(part['source']['pages']) == 1:
+                    page = part['source']['pages'][0]
+                    page_text[page] = page_text.get(page, '') + part['text']
+        receipts = []
+        output = self.settings.cache_root / str(run_id) / step.replace(':', '-')
+        for number, revised in scopes.items():
+            if any(page_text[number].count(text) != 1 for text in revised):
+                raise ValueError('The revised review scope is not unique on its page.')
+            pages = []
+            for page in bundle['manifest']['pages']:
+                if abs(page['page'] - number) > 1:
+                    continue
+                image = self.review.objects.materialize(bundle['files'][page['image']], output / page['image'])
+                pages.append({**page, 'text': page_text.get(page['page'], ''), 'image_path': str(image),
+                    'verified': False, 'receipts': [], 'changes': [], 'concerns': [],
+                    **({'review_scope': [{'text': text, 'start': page_text[number].index(text),
+                        'end': page_text[number].index(text)+len(text), 'reasons': ['核对这一处修订后的原文，保留其余既有审核决定。']}
+                        for text in revised]} if page['page'] == number else {})})
+            packet = output / f'{number}-input.json'
+            packet.write_text(json.dumps(pages, ensure_ascii=False, default=str), 'utf-8')
+            target = output / f'{number}-result.json'
+            root = self.settings.project_root / 'services/document-extraction'
+            python = root / ('.venv/Scripts/python.exe' if os.name == 'nt' else '.venv/bin/python')
+            # Reuse the conversion runtime rather than installing OCR dependencies in the platform.
+            process = subprocess.run([str(python), '-c',
+                'import json,sys; from pathlib import Path; '
+                'from document_extraction.settings import Settings; '
+                'from document_extraction.semantic_completion import complete_document; '
+                'pages=json.loads(Path(sys.argv[1]).read_text("utf-8")); '
+                'pages=[dict(p,image_path=Path(p["image_path"])) for p in pages]; '
+                'r=complete_document(pages, '
+                'Settings.load(Path(sys.argv[2])).vision_review, Path(sys.argv[3]), target_pages={int(sys.argv[4])}); '
+                'Path(sys.argv[5]).write_text(json.dumps(r,ensure_ascii=False,default=str),"utf-8")',
+                str(packet), str(root/'config/default.json'), str(output/str(number)), str(number), str(target)],
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=900, check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            if process.returncode:
+                raise ValueError('Conversion review runtime failed: ' + process.stderr[-2000:])
+            result = json.loads(target.read_text('utf-8'))
+            checked = next(p for p in result['pages'] if p['page'] == number)
+            receipt = {k: checked[k] for k in ('page', 'verified', 'receipts', 'concerns', 'input_text_sha256', 'final_text_sha256')}
+            receipt['reviewer'] = result['reviewer']
+            self.outputs.put(run_id, step+':check:'+fingerprint(receipt), receipt, dependency)
+            if not checked['verified'] or checked['text'] != page_text[number]:
+                raise ValueError(f'Local original-image verification did not accept page {number}; source unchanged.')
+            receipts.append(receipt)
+        evidence = {'changes': amendments, 'receipts': receipts, 'machine_review': True, 'human_review': False,
+                    'previous_content': originals}
+        evidence_ref = self.review.objects.put_bytes(json.dumps(evidence, ensure_ascii=False).encode())
+        references = {}
+        for identity, body in bodies.items():
+            body.setdefault('amendments', []).append(evidence_ref)
+            for part in body['parts']:
+                if any(p in scopes for p in part['source']['pages']):
+                    part['source'].setdefault('amendments', []).append(evidence_ref)
+            references[identity] = self.review.objects.put_bytes(json.dumps(body, ensure_ascii=False).encode())
+        saved = {'pages': sorted(scopes), 'content': references, 'evidence': evidence_ref, 'reindex_required': True}
+        saved_ref = self.review.objects.put_bytes(json.dumps(saved, ensure_ascii=False).encode())
+        with self.engine.begin() as connection:
+            current = connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update()).mappings().one()
+            if current['conversion'] != run['conversion'] or current['pending_count']:
+                raise ValueError('Source or review state changed during verification.')
+            for identity, reference in references.items():
+                row = connection.execute(select(db.chapters).where(db.chapters.c.id == identity).with_for_update()).mappings().one()
+                if row['content'] != originals[identity]:
+                    raise ValueError('Chapter changed during verification.')
+                connection.execute(update(db.chapters).where(db.chapters.c.id == identity).values(content=reference))
+            connection.execute(update(db.runs).where(db.runs.c.id == run_id).values(
+                result={**current['result'], 'source_amendment': evidence_ref,
+                        'retrieval_generation': 'pending-amendment-' + evidence_ref['sha256']},
+                revision=current['revision']+1))
+            connection.execute(insert(db.events).values(book_id=run['book_id'], run_id=run_id,
+                kind='library.revised', payload={'pages': sorted(scopes), 'chapters': list(references)}))
+            # Commit the checkpoint with the chapter pointers, so retries cannot reapply an edit.
+            connection.execute(insert(db.stage_outputs).values(run_id=run_id, step=step,
+                input_sha256=fingerprint(dependency), reference=saved_ref))
+        return saved
+
     def chapter(self, chapter_id):
         with self.engine.connect() as connection:
             row = (
