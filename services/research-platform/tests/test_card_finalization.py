@@ -52,8 +52,10 @@ def test_final_narrative_cannot_change_visually_checked_evidence():
         validate_final_candidate(revised, original, [{"unit_id": "u", "text": "运送120吨。"}])
 
 
-@pytest.mark.parametrize("final_pass", [True, False])
-def test_actual_observations_reach_final_review_and_only_finalized_cards_can_be_adopted(platform, final_pass):
+@pytest.mark.parametrize("final_pass,source_pass", [(True, True), (False, True), (True, False)])
+def test_actual_observations_reach_final_review_and_only_finalized_cards_can_be_adopted(
+    platform, final_pass, source_pass
+):
     settings, engine = platform
     book, run, identity = [str(uuid4()) for _ in range(3)]
     cards = Cards(settings, engine)
@@ -113,24 +115,34 @@ def test_actual_observations_reach_final_review_and_only_finalized_cards_can_be_
     class Models:
         async def run(self, run_id, key, prompt, payload, output_type, **kwargs):
             calls.append(key)
-            assert payload["original_checks"][0]["page_observations"][0]["printed_page"] == ""
             assert payload["research_state"]["available_units_cover_whole_book"]
-            if key.endswith(":修订"):
+            if ":source-coverage:" in key:
+                assert payload["source_units"][0]["unit_id"] == "u"
+                value = {
+                    **check,
+                    "checked_object_ids": ["u"],
+                    "conclusion": "pass" if source_pass else "needs_revision",
+                }
+            elif key.endswith(":修订"):
+                assert payload["original_checks"][0]["page_observations"][0]["printed_page"] == ""
                 value = deepcopy(payload["candidate"])
                 value["items"][1]["text"] = "原图为标题后接一段正文，未见印刷页码。"
             else:
-                value = {**check, "conclusion": "needs_revision" if len(calls) == 1 or not final_pass else "pass"}
+                value = {
+                    **check,
+                    "conclusion": "needs_revision" if len(calls) == 1 or not final_pass else "pass",
+                }
             result = output_type.model_validate(value)
             kwargs["validate"](result)
             return result
 
     cards.models = Models()
     asyncio.run(cards.finalize(run))
-    count = 3 if final_pass else 5
+    count = (4 if source_pass else 7) if final_pass else 5
     assert len(calls) == count
     asyncio.run(cards.finalize(run))
     assert len(calls) == count
-    assert cards.adopt(run)["adopted"] == int(final_pass)
+    assert cards.adopt(run)["adopted"] == int(final_pass and source_pass)
     adopted = cards.get(identity)
     assert adopted["candidate"]["items"][0] == candidate["items"][0]
     assert "未见印刷页码" in adopted["candidate"]["items"][1]["text"]

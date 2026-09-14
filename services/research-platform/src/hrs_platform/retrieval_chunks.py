@@ -1,8 +1,8 @@
 """Structure-aware retrieval projections over immutable chapter character ranges.
 
 Canonical text is never rewritten. Repeated table headings and linked notes are
-separate, source-mapped supplements. Card reading units deliberately do not use
-this splitter.
+separate, source-mapped supplements. Card reading reuses this parser with larger,
+non-overlapping units and validates complete chapter coverage independently.
 """
 
 import re
