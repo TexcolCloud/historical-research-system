@@ -22,7 +22,7 @@ from hrs_platform.visual_review import result_key
 
 
 @pytest.fixture
-def harness(platform, monkeypatch):
+def harness(platform, monkeypatch, request):
     settings, engine = platform
     book, run = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
@@ -39,7 +39,7 @@ def harness(platform, monkeypatch):
             )
         )
     cards = Cards(settings.model_copy(update={"model_max_calls": 4096}), engine)
-    originals = [chapter(f"合成原文{i}，运送{i}吨。") for i in range(3)]
+    originals = [chapter(f"合成原文{i}，运送{i}吨。") for i in range(getattr(request, "param", 3))]
     units = [unit for original in originals for unit in reading_units(original)]
     cards.library = SimpleNamespace(
         chapters=lambda _: originals,
@@ -364,3 +364,31 @@ def test_split_recovery_retires_failed_parent_even_after_worker_interruption(har
     assert finish(cards, run)["state"] == "completed"
     assert cards.get(parent)["state"] == "superseded"
     assert parent not in {str(row["id"]) for row in cards.list()}
+
+
+@pytest.mark.parametrize("harness", [6], indirect=True)
+def test_replayed_split_tree_reserves_all_leaf_slots_before_new_splits(harness, monkeypatch):
+    cards, run, units, scenario, calls = harness
+    scenario["combined"] = True
+    monkeypatch.setattr(module, "MAX_CARD_TOPICS", 3)
+    root = module.CardTopic(name="topic-0", objective="topic-0", unit_ids=[unit["unit_id"] for unit in units])
+    children = module.split_topic(root, units)
+    grandchildren = module.split_topic(children[1], units)
+    for key, rows in [
+        ("卡片主题:v2:0:division", children),
+        ("卡片主题:v2:0:split:1:division", grandchildren),
+    ]:
+        cards.outputs.put(run, key, {"topics": [row.model_dump() for row in rows]}, {})
+    original = cards.models.run
+
+    async def limited(*args, **kwargs):
+        if args[4] is CardDraft and len(args[3]["source_units"]) > 1:
+            raise ApplicationError("limit", type="model_output_limit", non_retryable=True)
+        return await original(*args, **kwargs)
+
+    cards.models.run = limited
+    result = finish(cards, run)
+    assert result["adopted"] == 1 and result["state"] == "needs_revision"
+    pending = get_run(cards.engine, run)["result"]["pending_topics"]
+    assert len(pending) == 2
+    assert cards.outputs.get(run, "卡片主题:v2:0:split:0:division") is None

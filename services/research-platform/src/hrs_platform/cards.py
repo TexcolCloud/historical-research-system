@@ -580,6 +580,18 @@ class Cards:
         produced, pending = [], []
         queue = deque((number, "", topic, main) for number, topic in enumerate(card_plan.topics))
         total_topics = len(queue)
+        # Reserve all persisted descendants before permitting any new split. A
+        # later sibling's old division must not consume an allowance twice.
+        known = deque((f"卡片主题:v2:{number}", "") for number in range(len(card_plan.topics)))
+        while known:
+            root, path = known.popleft()
+            key = root + (f":split:{path}" if path else "")
+            division = self.outputs.get(run_id, f"{key}:division")
+            if division:
+                total_topics += len(division["topics"]) - 1
+                known.extend(
+                    (root, f"{path}.{i}" if path else str(i)) for i in range(len(division["topics"]))
+                )
         while queue:
             number, path, topic, parent = queue.popleft()
             group = f"卡片主题:v2:{number}" + (f":split:{path}" if path else "")
@@ -603,7 +615,6 @@ class Cards:
                     (number, f"{path}.{i}" if path else str(i), child, str(uuid5(UUID(run_id), base_group)))
                     for i, child in enumerate(children)
                 )
-                total_topics += len(children) - 1
                 continue
             if revision:
                 group += f":repair:{revision}"
