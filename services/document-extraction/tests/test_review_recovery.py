@@ -104,3 +104,11 @@ def test_targeted_review_never_rechecks_accepted_neighbor(tmp_path):
     result=complete_document(pages, SimpleNamespace(review_mode='full'),tmp_path,reviewer=reviewer,target_pages={1})
     assert all(c['target']['page']==1 for c in calls)
     assert result['pages'][1]['receipts']==[] and result['pages'][1]['verified']
+
+
+def test_correction_scope_quotes_current_candidate_not_stale_ocr(tmp_path):
+    page,calls=run(tmp_path,'前文。甲一人。后文。',[
+        verdict(changes=[patch('甲一人','甲二十三人')]),verdict()],
+        review_scope=[{'text':'甲一人。','reasons':['旧疑点']}])
+    assert page['verified']
+    assert calls[1]['review_scope'][0]['text']=='甲二十三人。'

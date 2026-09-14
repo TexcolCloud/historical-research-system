@@ -300,7 +300,9 @@ def recheck_pending(review, run_id, settings, output, *, pages=None, progress=pr
         if not issues:
             continue
         target = next(p for p in source_pages if p['page'] == number)
-        target['review_scope'] = [{'text': i['text'], 'reasons': review.read_json(i['content']).get('reasons', [])}
+        target['review_scope'] = [{'text': i['text'], 'start':i['start']-boundaries[number]['start'],
+                                  'end':i['end']-boundaries[number]['start'],
+                                  'reasons': review.read_json(i['content']).get('reasons', [])}
                                   for i in issues]
         for p in source_pages:
             if abs(p["page"] - number) <= 1:
