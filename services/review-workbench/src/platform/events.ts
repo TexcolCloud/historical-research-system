@@ -79,6 +79,7 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
     ) ?? query.getQueryData<Book>(["platform", "book", event.book_id]);
   if (
     event.kind === "run.changed" &&
+    currentBook?.run_id === event.run_id &&
     event.payload.revision !== undefined &&
     currentBook?.revision !== undefined &&
     event.payload.revision <= currentBook.revision
@@ -98,7 +99,7 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
     void query.invalidateQueries({
       queryKey: ["platform", "run", event.run_id],
     });
-    if (event.kind === "execution.changed")
+    if (event.kind === "execution.changed" || event.kind === "run.changed")
       void query.invalidateQueries({
         queryKey: ["platform", "executions", event.run_id],
       });

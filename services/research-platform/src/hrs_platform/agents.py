@@ -17,22 +17,28 @@ from temporalio.exceptions import ApplicationError
 
 from .books import get_run
 from .domain.prompts import COMMON
-from .outputs import Outputs, execution_parent, fingerprint
+from .outputs import Outputs, StageInputMismatch, execution_parent, fingerprint
 
 
 class Models:
     def __init__(self, settings, engine):
         self.settings, self.outputs = settings, Outputs(settings, engine)
 
-    async def run(self, *args, **kwargs):
+    async def run(self, run_id, key, instructions, payload, output_type, **kwargs):
         # Provider schema mode can still return malformed JSON. Reuse the original
         # source and durable response feedback, with a bounded total of three sends.
-        for attempt in range(3):
-            try:
-                return await self._attempt(*args, **kwargs)
-            except (ModelBehaviorError, ValueError):
-                if attempt == 2:
-                    raise
+        parent = kwargs.pop("parent", None) or execution_parent.get()
+        with self.outputs.operation(
+            run_id, key, key[:100], kind="agent", objective=instructions[:200], parent=parent
+        ):
+            for attempt in range(3):
+                try:
+                    return await self._attempt(
+                        run_id, key, instructions, payload, output_type, parent=parent, **kwargs
+                    )
+                except (ModelBehaviorError, ValueError):
+                    if attempt == 2:
+                        raise
 
     async def _attempt(
         self,
@@ -48,7 +54,6 @@ class Models:
         validate=None,
     ):
         model = model or self.settings.reading_model
-        parent = parent or execution_parent.get()
         maximum = (
             self.settings.reasoning_max_output
             if model == self.settings.reasoning_model
@@ -63,7 +68,22 @@ class Models:
             "schema": schema.json_schema(),
             "tools": [{"name": tool.name, "schema": tool.params_json_schema} for tool in tools or []],
         }
-        cached = await asyncio.to_thread(self.outputs.get, run_id, key, dependency)
+        recovery = get_run(self.outputs.engine, run_id)["recovery_attempt"]
+        # Keep matching legacy results/receipts. Changed upstream repairs get a
+        # separate immutable slot instead of overwriting or replaying old evidence.
+        for storage_key in (key, f"{key}:input:{fingerprint(dependency)}"):
+            request_prefix = f"{storage_key}:recovery:{recovery}" if recovery else storage_key
+            try:
+                cached = await asyncio.to_thread(self.outputs.get, run_id, storage_key, dependency)
+                if cached is None:
+                    await asyncio.to_thread(
+                        self.outputs.get, run_id, f"{request_prefix}:request:1", dependency
+                    )
+            except StageInputMismatch:
+                if storage_key != key:
+                    raise
+            else:
+                break
         if cached is not None:
             value = output_type.model_validate(cached["output"])
             if validate:
@@ -71,22 +91,12 @@ class Models:
             return value
         if not self.settings.deepseek_api_key:
             raise ApplicationError("尚未配置 DeepSeek 文本模型密钥。", non_retryable=True)
-        await asyncio.to_thread(
-            self.outputs.node,
-            run_id,
-            key,
-            kind="agent",
-            label=key[:100],
-            objective=instructions[:200],
-            parent=parent,
-            details={"model": model, "input_sha256": fingerprint(payload)},
-        )
         attempt = 1
-        recovery = get_run(self.outputs.engine, run_id)["recovery_attempt"]
-        request_prefix = f"{key}:recovery:{recovery}" if recovery else key
         validation_feedback = []
         while (
-            await asyncio.to_thread(self.outputs.get, run_id, f"{request_prefix}:request:{attempt}")
+            await asyncio.to_thread(
+                self.outputs.get, run_id, f"{request_prefix}:request:{attempt}", dependency
+            )
             is not None
         ):
             if not tools:
@@ -111,7 +121,7 @@ class Models:
                         await asyncio.to_thread(
                             self.outputs.put,
                             run_id,
-                            key,
+                            storage_key,
                             {"output": recovered.model_dump(mode="json")},
                             dependency,
                         )
@@ -208,7 +218,7 @@ class Models:
             if validate:
                 validate(value)
             await asyncio.to_thread(
-                self.outputs.put, run_id, key, {"output": value.model_dump(mode="json")}, dependency
+                self.outputs.put, run_id, storage_key, {"output": value.model_dump(mode="json")}, dependency
             )
             await asyncio.to_thread(
                 self.outputs.node,
@@ -226,18 +236,5 @@ class Models:
                 },
             )
             return value
-        except Exception:
-            await asyncio.to_thread(
-                self.outputs.node,
-                run_id,
-                key,
-                kind="agent",
-                label=key[:100],
-                objective=instructions[:200],
-                parent=parent,
-                state="failed",
-                details={"attempt": attempt, "response_count": len(responses)},
-            )
-            raise
         finally:
             await client.close()

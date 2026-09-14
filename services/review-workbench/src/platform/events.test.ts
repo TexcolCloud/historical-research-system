@@ -108,3 +108,40 @@ test("replayed older progress cannot regress a freshly loaded book", () => {
   );
   expect(query.getQueryData(booksKey)).toEqual([book]);
 });
+
+test("card failure refreshes its run and execution graph despite a higher book revision", () => {
+  const query = new QueryClient();
+  const book = {
+    id: "book",
+    run_id: "book-run",
+    state: "ready",
+    revision: 300,
+  };
+  query.setQueryData(booksKey, [book]);
+  query.setQueryData(["platform", "book", "book"], book);
+  const keys = [
+    ["platform", "runs", "book"],
+    ["platform", "executions", "card-run"],
+  ];
+  keys.forEach((key) => query.setQueryData(key, []));
+  applyBookEvent(
+    query,
+    JSON.stringify({
+      sequence: 301,
+      book_id: "book",
+      run_id: "card-run",
+      kind: "run.changed",
+      payload: {
+        state: "failed",
+        stage: "planning",
+        run_kind: "cards",
+        revision: 2,
+      },
+    }),
+  );
+  keys.forEach((key) =>
+    expect(query.getQueryState(key)?.isInvalidated).toBe(true),
+  );
+  expect(query.getQueryData(booksKey)).toEqual([book]);
+  expect(query.getQueryData(["platform", "book", "book"])).toEqual(book);
+});

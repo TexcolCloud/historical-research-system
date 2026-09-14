@@ -8,12 +8,20 @@ from types import MappingProxyType, SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from temporalio.exceptions import ApplicationError
 
 from hrs_platform import cards as module
 from hrs_platform.cards import CardPlan, Cards, ResearchPlan, neighbor_context, validate_topics
 from hrs_platform.domain.generation_contracts import CardDraft, ReadingRecord
-from hrs_platform.outputs import fingerprint
-from hrs_platform.reading import card_model, read_batch, reading_units, scoped_check, synthesis_readings
+from hrs_platform.outputs import StageInputMismatch, fingerprint
+from hrs_platform.reading import (
+    card_model,
+    check_candidate_coverage,
+    read_batch,
+    reading_units,
+    scoped_check,
+    synthesis_readings,
+)
 
 
 def chapter(text):
@@ -70,7 +78,8 @@ class MemoryOutputs:
 
     def get(self, run, key, dependency=None):
         if key in self.values and dependency is not None:
-            assert self.dependencies[key] == fingerprint(dependency)
+            if self.dependencies[key] != fingerprint(dependency):
+                raise StageInputMismatch("Different fixed input")
         return deepcopy(self.values.get(key))
 
     def put(self, run, key, value, dependency):
@@ -194,6 +203,8 @@ def test_local_repair_reuses_only_unchanged_checks_and_preserves_verified_record
                     assert payload["fixed_unit_ids"] == ["a"]
                     assert payload["previous_record"]["readings"][0] == rows[0]
                     rows[1]["attribution"] = "译注"
+                    # A model may gratuitously rewrite an already accepted record.
+                    rows[0]["attribution"] = "模型误改"
                 value = output_type(
                     readings=rows,
                     themes=["修正概括"] if change_summary and revision else [],
@@ -202,6 +213,8 @@ def test_local_repair_reuses_only_unchanged_checks_and_preserves_verified_record
                     boundary_observations=[],
                 )
             else:
+                assert [u["unit_id"] for u in payload["source_units"]] == ["a", "b"]
+                assert payload["context_units"] == []
                 row = payload["reading_record"]["readings"][0]
                 value = output_type.model_validate(
                     verdict(
@@ -215,10 +228,60 @@ def test_local_repair_reuses_only_unchanged_checks_and_preserves_verified_record
 
     result = asyncio.run(read_batch(SimpleNamespace(run=run), "run", "read", batch, "scope", None))
     assert result["readings"][1]["attribution"] == "译注"
+    assert result["readings"][0] == record(batch[0])
     assert len([p for k, p in calls if ":check:" in k and p["required_object_ids"] == ["a"]]) == (
         2 if change_summary else 1
     )
     assert len([k for k, _ in calls if ":check:" in k]) == (4 if change_summary else 3)
+
+
+def test_candidate_windows_declare_whole_scope_but_only_review_window_targets():
+    units = [{"unit_id": key, "text": key} for key in ("a", "b", "c")]
+    targets = []
+
+    async def run(run_id, key, instructions, payload, output_type, **kwargs):
+        assert payload["candidate_source_unit_ids"] == ["a", "b", "c"]
+        assert payload["required_object_ids"] == [u["unit_id"] for u in payload["source_units"]]
+        targets.extend(payload["required_object_ids"])
+        value = output_type.model_validate(verdict(payload["required_object_ids"]))
+        kwargs["validate"](value)
+        return value
+
+    candidate = SimpleNamespace(model_dump=lambda **kwargs: {"scope": "a, b, c"})
+    result = asyncio.run(
+        check_candidate_coverage(
+            SimpleNamespace(run=run),
+            "run",
+            "test",
+            candidate,
+            units,
+            None,
+            "scope",
+            [],
+            {},
+        )
+    )
+    assert len(result) == 2 and targets == ["a", "b", "c"]
+
+
+def test_unresolved_reading_stops_activity_retry_after_bounded_content_repairs():
+    batch = [{"unit_id": "a", "text": "原文"}]
+    revisions = []
+
+    async def run(run_id, key, instructions, payload, output_type, **kwargs):
+        if output_type is ReadingRecord:
+            revisions.append(key)
+            value = ReadingRecord(
+                readings=[record(batch[0])], themes=[], structure=[], questions=[], boundary_observations=[]
+            )
+        else:
+            value = output_type.model_validate(verdict(["a"], failed=True))
+        kwargs["validate"](value)
+        return value
+
+    with pytest.raises(ApplicationError) as failure:
+        asyncio.run(read_batch(SimpleNamespace(run=run), "run", "read", batch, "scope", None))
+    assert failure.value.non_retryable and len(revisions) == 3
 
 
 def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resumes_without_api(monkeypatch):
