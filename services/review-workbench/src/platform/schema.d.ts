@@ -1432,8 +1432,8 @@ export interface operations {
                 book_id?: string | null;
                 semantic?: boolean;
                 limit?: number;
-                candidate_limit?: number;
-                rerank_limit?: number;
+                candidate_limit?: number | null;
+                rerank_limit?: number | null;
                 diverse?: boolean;
                 context_chars?: number;
                 total_chars?: number;

@@ -56,9 +56,9 @@ def evaluate_cases(
             source_excerpt(chapter(expected["chapter_id"]), expected["start"], expected["end"])
     rows = []
     for case in cases:
-        metrics = {}
+        metrics, trace = {}, {}
         hits = search.search(
-            case["query"], book_id, semantic=semantic, limit=limit, metrics=metrics, **(search_options or {})
+            case["query"], book_id, semantic=semantic, limit=limit, metrics=metrics, trace=trace, **(search_options or {})
         )
         evidence = [
             (str(hit["chapter_id"]), part, rank)
@@ -72,6 +72,7 @@ def evaluate_cases(
         )
         found = 0
         first_rank = None
+        complete_rank = None
         for expected in case["expected"]:
             matches = [
                 (part["start"], part["end"], rank)
@@ -86,14 +87,26 @@ def evaluate_cases(
                     if covered(expected["start"], expected["end"], [(a, b) for a, b, n in matches if n <= r])
                 )
                 first_rank = min(first_rank or rank, rank)
+                complete_rank = max(complete_rank or rank, rank)
+        complete_rank = complete_rank if found == len(case['expected']) and found else None
+        stages = {}
+        for stage, candidates in {**trace, 'returned': hits}.items():
+            ranges = [(str(h['chapter_id']), p['start'], p['end'])
+                      for h in candidates for p in [h, *h.get('context', [])]]
+            stages[stage] = sum(covered(z['start'], z['end'], [(a, b) for cid, a, b in ranges
+                if cid == z['chapter_id']]) for z in case['expected']) / len(case['expected']) if case['expected'] else None
         rows.append(
             {
                 "query": case["query"],
                 "category": case.get('category', 'unspecified'),
+                "id": case.get('id'),
+                "stage_evidence_coverage": stages,
                 "evidence_recall": found / len(case["expected"]) if case["expected"] else None,
                 "unanswerable": not case["expected"],
                 "unanswerable_returned_candidates": len(hits) if not case["expected"] else None,
                 "reciprocal_rank": 1 / first_rank if first_rank else 0,
+                "complete_evidence_rank": complete_rank,
+                "complete_reciprocal_rank": 1 / complete_rank if complete_rank else 0,
                 "source_integrity": valid / len(evidence) if evidence else None,
                 "returned": len(hits),
                 "timing": metrics,

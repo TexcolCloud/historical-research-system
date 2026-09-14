@@ -66,7 +66,7 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
         </p>
       )}
       {results.data?.length === 0 && (
-        <p>没有找到相关内容。本书索引完成后可检索全部正文。</p>
+        <p>没有找到相关内容。请调整关键词，或关闭研究检索后按原文查找。</p>
       )}
       {results.data?.map((hit) => (
         <article key={hit.id}>
