@@ -15,6 +15,40 @@ def table(value):
     return '<table><tr><th>地区</th><th>数量（吨）</th></tr><tr><td>' + value + '</td><td>120</td></tr></table>'
 
 
+def test_headerless_continuation_with_closed_local_rowspans_keeps_column_ownership():
+    from hrs_platform.structure_views import merge_table_parts
+
+    first = '<table><tr><th>地区</th><th>数量</th></tr><tr><td rowspan="2">甲县</td><td>120</td></tr><tr><td>130</td></tr></table>'
+    second = '<table><tr><td>乙县</td><td>140</td></tr></table>'
+    merged = first.replace('</table>', second.removeprefix('<table>'))
+    assert merge_table_parts([first, second], merged) == merged
+    assert merge_table_parts([first.replace('rowspan="2"', 'rowspan="3"'), second], merged) is None
+    assert merge_table_parts([first, second.replace('<td>140</td>', '')], merged) is None
+    assert merge_table_parts([first, second], merged.replace('140', '14')) is None
+    doc = source([first, second])
+    metadata = {'tables': [{'pages': [1, 2], 'merged_html': merged,
+        'members': [{'page': 1, 'original_html': first}, {'page': 2, 'original_html': second}]}]}
+    assert describe_structure(doc, metadata, [], {1, 2})['items'][0]['status'] == 'ready'
+    assert describe_structure(doc, metadata, [], {1})['items'][0]['status'] == 'retained'
+
+
+def test_a_retrieved_table_note_also_carries_its_source_checked_header():
+    from uuid import uuid4
+    from hrs_platform.retrieval_chunks import retrieval_chunks
+
+    first = table('甲县')
+    second = '<table><tr><td>乙县①</td><td>140</td></tr></table>'
+    merged = first.replace('</table>', second.removeprefix('<table>'))
+    chapter = {**source([first, second + '\n\n① 仅计本月。']),
+        **{k: str(uuid4()) for k in ('id', 'book_id', 'run_id')}, 'title': '统计'}
+    metadata = {'tables': [{'pages': [1, 2], 'merged_html': merged,
+        'members': [{'page': 1, 'original_html': first}, {'page': 2, 'original_html': second}]}]}
+    chapter['structure'] = describe_structure(chapter, metadata, [], {1, 2})['items']
+    hit = next(h for h in retrieval_chunks(chapter, '书') if h['kind'] == 'note')
+    assert any(c['role'] == 'note_owner' and '乙县' in c['text'] for c in hit['context'])
+    assert any(c['role'] == 'table_header' and c['pages'] == [1] for c in hit['context'])
+
+
 def test_source_checked_cross_page_table_is_one_reading_table_without_changing_evidence():
     first, second = table('甲县'), table('乙县')
     merged = first.replace('</table>', '<tr><td>乙县</td><td>120</td></tr></table>')

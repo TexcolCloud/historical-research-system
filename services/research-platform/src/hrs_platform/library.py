@@ -169,6 +169,9 @@ class Library:
             )
         corrections = []
         for row in rows:
+            # JSON null passes SQL IS NOT NULL; unchanged confirmations have no replacement.
+            if row["replacement"] is None:
+                continue
             body = self.review.read_json(row["content"])
             corrections.append(
                 {

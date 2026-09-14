@@ -14,8 +14,14 @@ from markdown_it import MarkdownIt
 
 from .footnotes import resolve_footnotes
 
-CHUNK_RULE = "structure-1400-160-v4-linked-source-structure"
+CHUNK_RULE = "structure-1400-160-v5-heading-note-units"
 NOTE = re.compile(r"(?m)^ {0,3}\[\^([^\]\n]+)\]:")
+IMAGE = re.compile(r'!\[([^\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\n]|\([^()\n]*\))*)\)')
+
+
+def embedding_text(text):
+    """Drop image transport paths, retaining descriptive alt text and canonical evidence."""
+    return IMAGE.sub(lambda m: '' if m[1].strip().lower() in {'', 'image'} else m[1], text)
 
 
 def source_excerpt(chapter, start, end):
@@ -185,7 +191,11 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
                        (n['note']['start'], n['note']['end']) if block['start'] < point < block['end'])})
         for start,end in zip(cuts,cuts[1:]):
             note = next((n for n in notes if n['note']['start'] <= start < n['note']['end']),None)
-            split_structure.append({**block,'start':start,'end':end, **({'kind':'note'} if note else {})})
+            if note and split_structure and split_structure[-1].get('note_start') == note['note']['start']:
+                split_structure[-1]['end'] = end
+            else:
+                split_structure.append({**block, 'start': start, 'end': end,
+                    **({'kind': 'note', 'note_start': note['note']['start']} if note else {})})
     structure = split_structure
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=size,
@@ -201,15 +211,18 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
         if (
             ordinary
             and pending
-            and block["kind"] != "heading"
-            and pending["path"] == block["path"]
+            and (pending.get('headings_only') or (
+                block["kind"] != "heading" and pending["section"] == block["section"]))
             and block["end"] - pending["start"] <= size
         ):
             pending["end"] = block["end"]
+            pending['path'] = list(dict.fromkeys([*pending['path'], *block['path']]))
+            pending['section'] = block['section']
+            pending['headings_only'] = pending.get('headings_only', False) and block['kind'] == 'heading'
         else:
             if pending:
                 units.append(pending)
-            pending = dict(block)
+            pending = dict(block, headings_only=block['kind'] == 'heading')
         if not ordinary:
             units.append(pending)
             pending = None
@@ -256,9 +269,19 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
         for start, end in ranges:
             hit = source_excerpt(chapter, start, end)
             additions = list(support)
+            for note in notes:
+                a,b = note['note']['start'], note['note']['end']
+                if any(start <= ref['start'] < end for ref in note['references']):
+                    additions.append((a,b,'footnote'))
+                if start < b and end > a:
+                    for owner in structure:
+                        if any(owner['start'] <= ref['start'] < owner['end'] for ref in note['references']):
+                            additions.append((owner['start'], owner['end'], 'note_owner'))
             for relation in chapter.get('structure', []):
                 if relation['status'] != 'ready' or not any(
-                    m['start'] < end and m['end'] > start for m in relation['members']
+                    m['start'] < b and m['end'] > a
+                    for m in relation['members']
+                    for a, b in [(start, end), *((a, b) for a, b, role in additions if role == 'note_owner')]
                 ):
                     continue
                 if relation['kind'] == 'continuation':
@@ -276,21 +299,13 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
                             for b in structure[max(0, index - 2):index] + structure[index + 1:index + 3]:
                                 if re.match(r'^(?:表\s*[\d一二三四五六七八九十]+|单位[：:]|注[：:]|说明[：:])', text[b['start']:b['end']].strip()):
                                     additions.append((b['start'], b['end'], 'table_note'))
-            for note in notes:
-                a,b = note['note']['start'], note['note']['end']
-                if any(start <= ref['start'] < end for ref in note['references']):
-                    additions.append((a,b,'footnote'))
-                if start < b and end > a:
-                    for owner in structure:
-                        if any(owner['start'] <= ref['start'] < owner['end'] for ref in note['references']):
-                            additions.append((owner['start'], owner['end'], 'note_owner'))
             context = [
                 dict(source_excerpt(chapter, a, b), role=role)
                 for a, b, role in dict.fromkeys(additions)
                 if not start <= a < b <= end
             ]
             path = list(dict.fromkeys([chapter["title"], *block["path"]]))
-            projection = "\n".join([book_title, " / ".join(path), hit["text"], *(c["text"] for c in context)])
+            projection = embedding_text("\n".join([book_title, " / ".join(path), hit["text"], *(c["text"] for c in context)]))
             yield {
                 **hit,
                 "book_title": book_title,
@@ -370,7 +385,9 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
             first, last = indexes[0], indexes[-1]
             for i in range(max(0, first - 1), min(len(structure), last + 2)):
                 b = structure[i]
-                if b["section"] != structure[first]["section"]:
+                if (i < first and b["section"] != structure[first]["section"]) or (
+                    i > last and b["section"] != structure[last]["section"]
+                ):
                     continue
                 # Complete a split paragraph before considering adjoining paragraphs.
                 for start, end in [

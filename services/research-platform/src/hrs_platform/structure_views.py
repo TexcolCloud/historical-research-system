@@ -8,7 +8,7 @@ from html.parser import HTMLParser
 from .footnotes import resolve_footnotes
 from .retrieval_chunks import TableRows, blocks
 
-POLICY = 'source-bound-reading-structure-v1'
+POLICY = 'source-bound-reading-structure-v2-local-rowspans'
 
 
 class Cells(HTMLParser):
@@ -52,8 +52,33 @@ class Cells(HTMLParser):
             self.cell = None
 
 
+def table_width(rows):
+    """Reject ragged/overlapping cells and rowspans crossing a source page boundary."""
+    occupied, width = {}, None
+    for index, row in enumerate(rows):
+        column = 0
+        for rowspan, colspan, _ in row:
+            if not rowspan.isdigit() or not colspan.isdigit():
+                return None
+            height, span = int(rowspan), int(colspan)
+            if height < 1 or span < 1 or span > 1000 or index + height > len(rows):
+                return None
+            while occupied.get(column, 0) > index:
+                column += 1
+            if any(occupied.get(c, 0) > index for c in range(column, column + span)):
+                return None
+            for c in range(column, column + span):
+                occupied[c] = index + height
+            column += span
+        active = {c for c, end in occupied.items() if end > index}
+        width = width if width is not None else len(active)
+        if active != set(range(width)):
+            return None
+    return width
+
+
 def merge_table_parts(texts, candidate):
-    """Only join repeated-header tables whose provider candidate preserves every source cell."""
+    """A supplied continuation candidate must preserve every cell and column owner."""
     parsed = [Cells(text) for text in texts]
     wanted = Cells(candidate)
     if not parsed or not all(p.valid and p.rows and all(p.rows) for p in [*parsed, wanted]):
@@ -68,16 +93,19 @@ def merge_table_parts(texts, candidate):
         header_count += 1
     header_count = header_count or 1
     header = parsed[0].rows[:header_count]
-    # Cross-page rowspans need an explicit cell-ownership review; do not flatten them.
-    if any(cell[0] != '1' for p in parsed for row in p.rows for cell in row):
+    widths = [table_width(p.rows) for p in [*parsed, wanted]]
+    if not widths[0] or any(width != widths[0] for width in widths):
         return None
     expected, additions = list(parsed[0].rows), []
     for raw, p in zip(texts[1:], parsed[1:], strict=True):
         rows = TableRows(raw).rows
-        if p.rows[:header_count] != header or len(rows) != len(p.rows) or len(rows) <= header_count:
+        skip = header_count if p.rows[:header_count] == header else 0
+        if len(rows) != len(p.rows) or len(rows) <= skip:
             return None
-        expected.extend(p.rows[header_count:])
-        additions.extend(raw[a:b] for a, b, _, _ in rows[header_count:])
+        if any(i + int(cell[0]) > skip for i, row in enumerate(p.rows[:skip]) for cell in row):
+            return None
+        expected.extend(p.rows[skip:])
+        additions.extend(raw[a:b] for a, b, _, _ in rows[skip:])
     if expected != wanted.rows:
         return None
     end = first_rows[-1][1]
@@ -151,7 +179,7 @@ def describe_structure(document, metadata, completion, approved_pages):
                    for m in group['members']]
         display = merge_table_parts([m['text'] for m in members], group['merged_html']) if all(members) else None
         add('table', '跨页表格', group['pages'], members, display,
-            reason='重复表头、行列及数值一致，原件逐页保留。' if display else '')
+            reason='表头、行列归属及数值通过来源一致性检查，原件逐页保留。' if display else '')
     for heading in metadata.get('titles', []):
         target = find(heading['page'], heading.get('after') or heading['title'], kind='heading')
         add('heading', heading['title'], [heading['page']], [target],

@@ -17,7 +17,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_review_wait_survives_worker_restart_and_resumes_only_after_committed_revision():
+@pytest.mark.parametrize("auto_cards", [True, False])
+def test_review_wait_survives_worker_restart_and_resumes_only_after_committed_revision(auto_cards):
     async def exercise():
         client = await connect(Settings.load())
         identity = str(uuid4())
@@ -35,6 +36,8 @@ def test_review_wait_survives_worker_restart_and_resumes_only_after_committed_re
                     return dict(committed)
                 if name == "review_status":
                     return dict(committed)
+                if name == "create_card_run" and not auto_cards:
+                    return {"run_id": identity, "skipped": True, "reason": "auto_cards_disabled"}
                 return {"run_id": identity, "state": "completed"}
 
             return call
@@ -77,10 +80,14 @@ def test_review_wait_survives_worker_restart_and_resumes_only_after_committed_re
             result = await asyncio.wait_for(handle.result(), 30)
         assert result["state"] == "completed"
         assert executed.count("convert_document") == 1
-        assert (
-            executed.index("review_status")
-            < executed.index("publish_book")
-            < executed.index("generate_cards")
-        )
+        assert executed.index("review_status") < executed.index("publish_book") < executed.index("index_book")
+        if auto_cards:
+            assert executed.index("index_book") < executed.index("generate_cards")
+        else:
+            assert result["auto_cards"] == "disabled"
+            assert "generate_cards" not in executed
+            assert "check_card_images" not in executed
+            assert "adopt_cards" not in executed
+            assert executed[-1] == "finish_book"
 
     asyncio.run(exercise())

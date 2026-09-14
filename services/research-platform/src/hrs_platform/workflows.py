@@ -47,6 +47,8 @@ class BookWorkflow:
             await step("publish_book")
             await step("index_book", long=True)
             card_request = await step("create_card_run")
+            if card_request.get("skipped"):
+                return {**await step("finish_book"), "auto_cards": "disabled"}
             result = await workflow.execute_child_workflow(
                 CardWorkflow.run,
                 {**card_request, "gpu_queue": request["gpu_queue"]},

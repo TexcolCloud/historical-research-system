@@ -7,8 +7,8 @@ from test_structure_views import table
 
 from hrs_platform import schema as db
 from hrs_platform.api import create_app
-from hrs_platform.library import Library
 from hrs_platform.exports import Exports
+from hrs_platform.library import Library
 
 
 def seed_structure_book(settings, engine):
@@ -77,3 +77,25 @@ def test_structure_read_api_cache_and_published_reader_share_checked_sources(pla
     with engine.connect() as connection:
         saved_steps = connection.scalars(select(db.stage_outputs.c.step).where(db.stage_outputs.c.run_id == run)).all()
     assert sum(step.startswith('reading-structure:') for step in saved_steps) == 2
+
+
+def test_confirm_without_replacement_and_correction_both_prepare_for_ingestion(platform):
+    from uuid import uuid4
+
+    from hrs_platform.contracts import ReviewDecision
+    from hrs_platform.review import digest
+
+    settings, engine = platform
+    run, library = seed_structure_book(settings, engine)
+    issues = library.review.list(run)
+    for index, issue in enumerate(issues):
+        current = {**issue, **library.review.read_json(issue['content'])}
+        changed = current['text'].replace('乙县', '丙县') if index else None
+        library.review.decide(issue['id'], ReviewDecision(
+            decision_id=uuid4(), expected_revision=current['revision'],
+            expected_text_sha256=digest('unchanged'),
+            action='correct' if index else 'confirm', text=changed))
+    assert library.review.status(run)['pending_count'] == 0
+    prepared = library.prepare(run)
+    text = ''.join(span['selected_text'] for span in prepared['spans'])
+    assert '甲县' in text and '丙县' in text and '乙县' not in text

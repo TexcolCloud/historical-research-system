@@ -20,6 +20,8 @@ from .outputs import Outputs, fingerprint
 from .retrieval_chunks import CHUNK_RULE, expand_hits, retrieval_chunks, source_excerpt
 from .retrieval_inputs import INPUT_RULE, bounded_chunks, ranking_windows, tokenizer_for
 from .retrieval_ranking import candidates_for_rerank, fuse, lexical_query
+from .structure_views import POLICY as STRUCTURE_POLICY
+from .structure_views import project_structure
 
 logger = logging.getLogger(__name__)
 EMBEDDING_BATCH = 8
@@ -199,6 +201,9 @@ class Search:
             raise ValueError("Only published chapters can be indexed.")
         with self.engine.connect() as connection:
             book_title = connection.scalar(select(db.books.c.title).where(db.books.c.id == run["book_id"]))
+        structure = (self.library.structure(run_id)
+                     if run['conversion'] and run['result'].get('review_initialized')
+                     else {'available': False, 'items': []})
         dependency = {
             "book_id": run["book_id"],
             "book_title": book_title,
@@ -208,6 +213,8 @@ class Search:
             ],
             "chunk_rule": CHUNK_RULE,
             "input_rule": INPUT_RULE,
+            "structure_policy": STRUCTURE_POLICY,
+            "structure_sha256": fingerprint(structure),
             "embedding": {**EMBEDDING_IDENTITY, 'device': self.settings.retrieval_device},
         }
         generation = fingerprint(dependency)
@@ -219,6 +226,9 @@ class Search:
                 chunks = []
                 for row in chapters:
                     chapter = self.library.chapter(row["id"])
+                    # Refresh source-checked relations without republishing canonical chapters.
+                    if structure['available']:
+                        chapter = {**chapter, 'structure': project_structure(structure, chapter['parts'])}
                     chunks.extend(bounded_chunks(chapter, retrieval_chunks(chapter, book_title), tokenizer))
             saved = self.embed_cached(run_id, chunks, metrics)
             with measured(metrics, "checkpoint_ms"):

@@ -78,6 +78,8 @@ class PipelineActivities:
 
     @activity.defn
     def create_card_run(self, run_id: str) -> dict:
+        if not self.settings.auto_cards_enabled:
+            return {"run_id": run_id, "skipped": True, "reason": "auto_cards_disabled"}
         return Cards(self.settings, self.engine).create_run(run_id)
 
     @activity.defn

@@ -36,6 +36,7 @@ class Settings(BaseModel):
     opensearch_index: str = "hrs-platform-v2-chunks"
     retrieval_device: Literal["cpu", "cuda"] = "cuda"
     retrieval_endpoint: str = "http://127.0.0.1:18160/retrieval"
+    auto_cards_enabled: bool = True
 
     @classmethod
     def load(cls, root=None):

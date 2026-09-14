@@ -18,6 +18,17 @@ class CharacterTokens:
         return SimpleNamespace(ids=list(range(len(text) + len(pair or "") + (4 if pair is not None else 2))))
 
 
+def test_bounded_projection_does_not_reintroduce_image_paths_from_supplements():
+    text = '正文[^a]。' * 40 + '\n\n[^a]: 图见![部署图](C:/cache/private-image.png)。'
+    chapter = {**{k: str(uuid4()) for k in ('id', 'book_id', 'run_id')}, 'title': '书',
+        'text': text, 'parts': [{'span_id': 'p', 'start': 0, 'text': text, 'source': {'pages': [1]}}]}
+    chunks = list(bounded_chunks(chapter, retrieval_chunks(chapter, '书'), CharacterTokens(), limit=120))
+    assert len(chunks) > 2
+    assert all('private-image' not in c['retrieval_text'] for c in chunks)
+    assert all(len(CharacterTokens().encode(c['retrieval_text']).ids) <= 120 for c in chunks)
+    assert any('private-image' in x['text'] for c in chunks for x in [c, *c['context']])
+
+
 def test_long_table_input_has_complete_source_coverage_and_bounded_projection():
     text = "<table><tr><th>数量</th></tr><tr><td>" + "甲地120吨，不含乙地。" * 100 + "</td></tr></table>"
     chapter = {

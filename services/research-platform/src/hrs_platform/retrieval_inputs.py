@@ -8,9 +8,9 @@ from uuid import UUID, uuid5
 from tokenizers import Tokenizer
 
 from .domain.settings import MODEL_REVISIONS
-from .retrieval_chunks import blocks, source_excerpt, table_groups
+from .retrieval_chunks import blocks, embedding_text, source_excerpt, table_groups
 
-INPUT_RULE = "bge-projection-6144-atomic-tables-notes-v3"
+INPUT_RULE = "bge-projection-6144-image-free-v4"
 INPUT_TOKENS = 6144
 
 
@@ -106,10 +106,10 @@ def structural_windows(chapter, chunk, count, limit):
 
 
 def bounded_chunks(chapter, chunks, tokenizer, limit=INPUT_TOKENS):
-    count = lambda text: len(tokenizer.encode(text).ids)
+    count = lambda text: len(tokenizer.encode(embedding_text(text)).ids)
     for chunk in chunks:
         if count(chunk["retrieval_text"]) <= limit and len(chunk["text"]) <= 6000:
-            yield chunk
+            yield {**chunk, 'retrieval_text': embedding_text(chunk['retrieval_text'])}
             continue
         prefix = chunk["book_title"] + "\n" + " / ".join(chunk["section_path"]) + "\n"
         # An unusually long title is metadata, not a reason to lose the source.
@@ -156,7 +156,7 @@ def bounded_chunks(chapter, chunks, tokenizer, limit=INPUT_TOKENS):
                 **item,
                 'id': identity,
                 "context": context,
-                "retrieval_text": projection,
+                "retrieval_text": embedding_text(projection),
                 "atomic_source_oversized": atomic,
                 "projection_context_omitted": omitted,
             }

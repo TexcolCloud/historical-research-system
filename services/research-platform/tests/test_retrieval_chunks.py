@@ -22,6 +22,51 @@ def chapter(text):
     }
 
 
+def test_consecutive_titles_travel_with_first_body_without_merging_full_sections():
+    source = chapter("# 村长任务\n\n## 训练意义\n\n说明训练目的。\n\n## 任职条件\n\n说明任职条件。")
+    hits = list(retrieval_chunks(source, "合成书"))
+    assert len(hits) == 2
+    assert hits[0]['text'].startswith('# 村长任务') and '说明训练目的' in hits[0]['text']
+    assert '任职条件' not in hits[0]['text']
+    assert hits[0]['section_path'] == ['运输记录', '村长任务', '训练意义']
+
+
+def test_heading_chain_expands_into_its_list_but_not_the_next_section():
+    source = chapter('# 总题\n\n## 条件\n\n须具备：\n\n1. 责任感。\n2. 知识。\n\n## 其他\n\n无关正文。')
+    hit = next(retrieval_chunks(source, '书'))
+    expanded = expand_hits([{**hit, 'score': 1}], lambda _: source)[0]
+    assert any('责任感' in c['text'] for c in expanded['context'])
+    assert all('无关正文' not in c['text'] for c in expanded['context'])
+
+
+def test_same_level_heading_chain_keeps_following_paragraphs_in_embedding():
+    source = chapter('#### 总题\n\n#### 条件\n\n须具备：\n\n责任感和知识。\n\n#### 其他\n\n无关正文。')
+    hit = next(retrieval_chunks(source, '书'))
+    assert '责任感和知识' in hit['retrieval_text']
+    assert '无关正文' not in hit['retrieval_text']
+
+
+def test_linked_note_and_separate_signature_are_one_source_chunk():
+    text = "正文①。\n\n① 注释说明。\n\n——译者\n\n后续正文。"
+    source = chapter(text)
+    source['parts'] = [{'span_id': 'p1', 'start': 0, 'text': text, 'source': {'pages': [1]}}]
+    hits = list(retrieval_chunks(source, "合成书"))
+    notes = [h for h in hits if h['kind'] == 'note']
+    assert len(notes) == 1 and '——译者' in notes[0]['text']
+    assert '后续正文' not in notes[0]['text']
+    assert any(c['role'] == 'note_owner' and '正文①' in c['text'] for c in notes[0]['context'])
+
+
+def test_image_destinations_are_not_embedding_text_but_source_stays_intact():
+    text = '图示如下。\n\n![部署图](<C:/cache/a folder/sha123.png>)\n\n![Image](pages/noise.png)\n\n后续文字。'
+    source = chapter(text)
+    hits = list(retrieval_chunks(source, '合成书'))
+    projection = '\n'.join(h['retrieval_text'] for h in hits)
+    assert '部署图' in projection and '后续文字' in projection
+    assert 'sha123' not in projection and 'noise.png' not in projection
+    assert ''.join(h['text'] for h in hits) == text
+
+
 @pytest.mark.parametrize(
     "text",
     [
