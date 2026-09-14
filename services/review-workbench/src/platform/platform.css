@@ -915,6 +915,96 @@ a:focus-visible {
   font-size: 12px;
   color: #718797;
 }
+.platform-structure {
+  margin: 16px 0;
+  border: 1px solid #dce5ec;
+  border-radius: 8px;
+  background: #fff;
+}
+.platform-structure > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.platform-structure summary small {
+  margin-left: auto;
+  color: #526779;
+  font-weight: 400;
+}
+.platform-structure-body {
+  padding: 0 16px 16px;
+}
+.platform-structure-body > p {
+  color: #526779;
+  font-size: 14px;
+}
+.platform-structure ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  max-height: 420px;
+  overflow: auto;
+}
+.platform-structure li {
+  border-top: 1px solid #e4ebf0;
+  padding: 14px 0;
+}
+.platform-structure li p {
+  margin: 8px 0;
+  color: #526779;
+  font-size: 14px;
+}
+.platform-structure-item-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.platform-structure-item-heading > span {
+  font-size: 12px;
+  color: #805d22;
+  background: #fff7e8;
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+.platform-structure-item-heading > span[data-ready="true"] {
+  color: #216653;
+  background: #edf7f2;
+}
+.platform-structure-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.platform-structure-pages a {
+  color: #285c7c;
+  font-size: 13px;
+  text-decoration: underline;
+}
+.platform-structure-diff {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.platform-structure-diff > div {
+  background: #f5f8fa;
+  border-radius: 5px;
+  padding: 10px;
+}
+.platform-structure-diff small,
+.platform-structure-diff code {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.platform-structure-diff small {
+  color: #526779;
+  margin-bottom: 4px;
+}
 .markdown-document .block-prosemirror:focus {
   outline: none;
 }

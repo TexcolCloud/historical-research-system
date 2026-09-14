@@ -14,7 +14,7 @@ from markdown_it import MarkdownIt
 
 from .footnotes import resolve_footnotes
 
-CHUNK_RULE = "structure-1400-160-v3-page-scoped-footnotes"
+CHUNK_RULE = "structure-1400-160-v4-linked-source-structure"
 NOTE = re.compile(r"(?m)^ {0,3}\[\^([^\]\n]+)\]:")
 
 
@@ -256,6 +256,26 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
         for start, end in ranges:
             hit = source_excerpt(chapter, start, end)
             additions = list(support)
+            for relation in chapter.get('structure', []):
+                if relation['status'] != 'ready' or not any(
+                    m['start'] < end and m['end'] > start for m in relation['members']
+                ):
+                    continue
+                if relation['kind'] == 'continuation':
+                    additions.extend((m['start'], m['end'], 'continuation') for m in relation['members'])
+                elif relation['kind'] == 'table':
+                    first = relation['members'][0]
+                    owner = next((b for b in structure if b['start'] == first['start'] and b['kind'] in {'table', 'html_table'}), None)
+                    if owner:
+                        _, shared_header = table_groups(text, owner, size)
+                        additions = [a for a in additions if a[2] != 'table_header']
+                        additions.append((*shared_header, 'table_header'))
+                    for m in relation['members']:
+                        index = next((i for i, b in enumerate(structure) if b['start'] == m['start']), None)
+                        if index is not None:
+                            for b in structure[max(0, index - 2):index] + structure[index + 1:index + 3]:
+                                if re.match(r'^(?:表\s*[\d一二三四五六七八九十]+|单位[：:]|注[：:]|说明[：:])', text[b['start']:b['end']].strip()):
+                                    additions.append((b['start'], b['end'], 'table_note'))
             for note in notes:
                 a,b = note['note']['start'], note['note']['end']
                 if any(start <= ref['start'] < end for ref in note['references']):

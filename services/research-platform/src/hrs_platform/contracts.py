@@ -162,10 +162,31 @@ class ChapterSummary(BaseModel):
     codepoints: int
 
 
+class StructureItem(BaseModel):
+    id: str
+    kind: str
+    title: str
+    pages: list[int]
+    status: str
+    reason: str
+    level: int | None = None
+    before: str = ''
+    after: str = ''
+
+
+class StructureReport(BaseModel):
+    policy: str
+    available: bool
+    items: list[StructureItem] = Field(default_factory=list)
+
+
 class Chapter(ChapterSummary):
     text: str
     parts: list[dict]
     footnotes: list[FootnoteLink] = Field(default_factory=list)
+    reading_text: str | None = None
+    reading_footnotes: list[FootnoteLink] = Field(default_factory=list)
+    structure: list[StructureItem] = Field(default_factory=list)
 
 
 class ExecutionNode(BaseModel):

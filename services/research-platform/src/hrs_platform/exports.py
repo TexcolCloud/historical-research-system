@@ -24,11 +24,11 @@ class Exports:
             raise HTTPException(409, "本书尚未入库，暂不能导出完整正文。")
         dependencies = [chapter["content"]["sha256"] for chapter in chapters]
         run_id = chapters[0]["run_id"]
-        saved = self.outputs.get(run_id, "export:book-markdown", dependencies)
+        saved = self.outputs.get(run_id, "export:book-reading-v1", dependencies)
         if saved is None:
-            content = "".join(self.library.chapter(row["id"])["text"] for row in chapters)
+            content = "".join(self.library.chapter(row["id"])["reading_text"] for row in chapters)
             saved = self.outputs.objects.put_bytes(content.encode("utf-8"), "text/markdown; charset=utf-8")
-            self.outputs.put(run_id, "export:book-markdown", saved, dependencies)
+            self.outputs.put(run_id, "export:book-reading-v1", saved, dependencies)
         with self.engine.connect() as connection:
             title = connection.scalar(select(db.books.c.title).where(db.books.c.id == str(book_id)))
         return title, saved

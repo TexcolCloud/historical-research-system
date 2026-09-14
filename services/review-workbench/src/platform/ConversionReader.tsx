@@ -8,6 +8,7 @@ import {
 import { Button } from "../components/ui/button";
 import { RenderedMarkdown } from "../editor/RenderedMarkdown";
 import { client } from "./client";
+import StructurePanel from "./StructurePanel";
 
 const pageOptions = (runId: string, page: number) =>
   queryOptions({
@@ -44,6 +45,7 @@ export default function ConversionReader({ runId }: { runId: string }) {
   }, [data, query, runId]);
   return (
     <section className="platform-conversion-reader">
+      <StructurePanel runId={runId} onLocate={setPage} />
       <p className="platform-inline-status">
         {data?.machine_status === "unreviewed-source"
           ? "此处为已保存的 OCR 底稿，尚未完成原件核验，仅供阅读。核验完成后，需人工确认的问题会出现在问题清单。"

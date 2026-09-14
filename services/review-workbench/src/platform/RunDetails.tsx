@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, LoaderCircle, Circle } from "lucide-react";
 import { client, type Book } from "./client";
 import RetryRunButton from "./RetryRunButton";
+import StructurePanel from "./StructurePanel";
 
 const phases = [
   { title: "接收原件", description: "文件上传与完整性校验" },
@@ -128,6 +129,9 @@ export default function RunDetails({ book }: { book: Book }) {
           );
         })}
       </ol>
+      {book.run_id && (
+        <StructurePanel runId={book.run_id} revision={book.revision} />
+      )}
       {runs.isError && <p role="alert">{runs.error.message}</p>}
       {failed && (
         <RetryRunButton

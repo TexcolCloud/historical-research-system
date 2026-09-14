@@ -362,6 +362,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/runs/{run_id}/structure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reading Structure */
+        get: operations["reading_structure_api_v2_runs__run_id__structure_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/reviews/{issue_id}/decisions": {
         parameters: {
             query?: never;
@@ -602,6 +619,12 @@ export interface components {
             }[];
             /** Footnotes */
             footnotes?: components["schemas"]["FootnoteLink"][];
+            /** Reading Text */
+            reading_text?: string | null;
+            /** Reading Footnotes */
+            reading_footnotes?: components["schemas"]["FootnoteLink"][];
+            /** Structure */
+            structure?: components["schemas"]["StructureItem"][];
         };
         /** ChapterSummary */
         ChapterSummary: {
@@ -1091,6 +1114,42 @@ export interface components {
              * @default false
              */
             oversized: boolean;
+        };
+        /** StructureItem */
+        StructureItem: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string;
+            /** Pages */
+            pages: number[];
+            /** Status */
+            status: string;
+            /** Reason */
+            reason: string;
+            /** Level */
+            level?: number | null;
+            /**
+             * Before
+             * @default
+             */
+            before: string;
+            /**
+             * After
+             * @default
+             */
+            after: string;
+        };
+        /** StructureReport */
+        StructureReport: {
+            /** Policy */
+            policy: string;
+            /** Available */
+            available: boolean;
+            /** Items */
+            items?: components["schemas"]["StructureItem"][];
         };
         /** UploadRequest */
         UploadRequest: {
@@ -1814,6 +1873,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reading_structure_api_v2_runs__run_id__structure_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StructureReport"];
                 };
             };
             /** @description Validation Error */
