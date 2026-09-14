@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections import deque
 from functools import cached_property
+from itertools import groupby
 from math import ceil
 from uuid import UUID, uuid5
 
@@ -314,6 +315,86 @@ class Cards:
 
         return Models(self.settings, self.engine)
 
+    async def _plan_topics(self, run_id, readings, units, chapters, parent):
+        dependency = {"readings": readings, "units": units, "chapters": chapters}
+        receipt = self.outputs.get(run_id, "card-topic-plan", dependency)
+        if receipt is None:
+            stage = "digest"
+            reason = None
+            try:
+                overview = await synthesis_readings(self.models, run_id, "全书主题:v2", readings, units, parent)
+                stage = "topic"
+                plan = await card_model(
+                    self.models,
+                    run_id,
+                    "卡片主题规划:v2",
+                    "在完整逐段阅读后按研究主题规划史料卡。阅读 Agent 的分工不等于卡片主题。"
+                    "同一分工可拆为多卡，同一主题可合并不同分工的单元；合并同一事件的重复叙述，保留观点冲突。"
+                    "每个 unit_id 恰好分给一个主题，禁止漏掉非引文单元；标题与书目单元随相关正文归组。"
+                    "主题应保持研究问题集中、原文数量适中；不要把整本长书塞入单卡。关联脚注和邻文可跨主题作为上下文。",
+                    {
+                        "reading_records": overview,
+                        "source_units": [
+                            {key: unit[key] for key in ("unit_id", "section_path", "kind")} for unit in units
+                        ],
+                    },
+                    CardPlan,
+                    model=self.settings.reasoning_model,
+                    parent=parent,
+                    validate=lambda value: validate_topics(value, units),
+                )
+            except ApplicationError as error:
+                if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget"}:
+                    raise
+                reason = error.type
+                titles = {chapter["id"]: chapter["title"] for chapter in chapters}
+                groups = [
+                    (chapter, list(rows)) for chapter, rows in groupby(units, lambda row: row["chapter_id"])
+                ]
+                # Reserve room for the existing local topic splitter; group only
+                # adjacent chapters when the catalogue exceeds 64 initial topics.
+                width = max(1, ceil(len(groups) / min(64, MAX_CARD_TOPICS)))
+                plan = CardPlan(
+                    rationale="全书规划未完成，按章节顺序建立基础研究范围；完整阅读记录保留，内容仍须独立核验。",
+                    topics=[
+                        CardTopic(
+                            name=f"章节基础主题 {offset // width + 1} · {titles.get(groups[offset][0], '未命名章节')}",
+                            objective="按来源顺序研究指定章节的完整内容，保留脚注归属、反证及限定；"
+                            "相邻章节仅共享研究范围，不预设它们属于同一事件。",
+                            unit_ids=[
+                                unit["unit_id"] for _, rows in groups[offset : offset + width] for unit in rows
+                            ],
+                        )
+                        for offset in range(0, len(groups), width)
+                    ],
+                )
+            validate_topics(plan, units)
+            receipt = self.outputs.put(
+                run_id,
+                "card-topic-plan",
+                {
+                    "plan": plan.model_dump(mode="json"),
+                    "fallback_stage": stage if reason else None,
+                    "reason": reason,
+                    "machine_approval": False,
+                },
+                dependency,
+            )
+        plan = CardPlan.model_validate(receipt["plan"])
+        validate_topics(plan, units)
+        if receipt["fallback_stage"]:
+            self.outputs.node(
+                run_id,
+                "topic-plan-fallback",
+                kind="component",
+                label="按章节恢复主题规划",
+                objective="仅建立完整研究范围，不代表内容核验通过",
+                parent=parent,
+                state="completed",
+                details=receipt,
+            )
+        return plan
+
     async def generate(self, run_id):
         from agents import function_tool
 
@@ -547,26 +628,7 @@ class Cards:
                 # TaskGroup has cancelled siblings; keep all failures in the cause.
                 raise failure.exceptions[0] from failure
             readings = [record for job in jobs for record in job.result()]
-            overview = await synthesis_readings(self.models, run_id, "全书主题:v2", readings, all_units, main)
-            card_plan = await card_model(
-                self.models,
-                run_id,
-                "卡片主题规划:v2",
-                "在完整逐段阅读后按研究主题规划史料卡。阅读 Agent 的分工不等于卡片主题。"
-                "同一分工可拆为多卡，同一主题可合并不同分工的单元；合并同一事件的重复叙述，保留观点冲突。"
-                "每个 unit_id 恰好分给一个主题，禁止漏掉非引文单元；标题与书目单元随相关正文归组。"
-                "主题应保持研究问题集中、原文数量适中；不要把整本长书塞入单卡。关联脚注和邻文可跨主题作为上下文。",
-                {
-                    "reading_records": overview,
-                    "source_units": [
-                        {key: unit[key] for key in ("unit_id", "section_path", "kind")} for unit in all_units
-                    ],
-                },
-                CardPlan,
-                model=self.settings.reasoning_model,
-                parent=main,
-                validate=lambda value: validate_topics(value, all_units),
-            )
+            card_plan = await self._plan_topics(run_id, readings, all_units, chapters, main)
             self.outputs.put(
                 run_id,
                 "card-research-package",
