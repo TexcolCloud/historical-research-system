@@ -452,6 +452,17 @@ class Cards:
                 topic_readings = [
                     {
                         **record,
+                        **(
+                            {
+                                "source_only_unit_ids": [
+                                    identity
+                                    for identity in record["source_only_unit_ids"]
+                                    if identity in topic.unit_ids
+                                ]
+                            }
+                            if "source_only_unit_ids" in record
+                            else {}
+                        ),
                         "readings": [row for row in record["readings"] if row["unit_id"] in topic.unit_ids],
                         "questions": [
                             question

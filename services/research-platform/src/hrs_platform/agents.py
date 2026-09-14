@@ -12,7 +12,7 @@ from agents import (
     RunConfig,
     Runner,
 )
-from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from openai import APIConnectionError, AsyncOpenAI, DefaultAsyncHttpxClient
 from temporalio.exceptions import ApplicationError
 
 from .books import get_run
@@ -42,6 +42,7 @@ class Models:
                     if attempt == 2:
                         raise ApplicationError(
                             "该模型步骤三次请求仍未通过输出校验，原始回执保留：" + str(error)[:500],
+                            type="model_output_invalid",
                             non_retryable=True,
                         ) from error
 
@@ -123,6 +124,7 @@ class Models:
                 if used_limit >= self.settings.model_max_output_ceiling:
                     raise ApplicationError(
                         "模型达到配置的输出 token 上限，请缩小本步骤范围或调整输出上限；截断回执保留。",
+                        type="model_output_limit",
                         non_retryable=True,
                     )
                 request_maximum = min(used_limit * 2, self.settings.model_max_output_ceiling)
@@ -175,7 +177,11 @@ class Models:
                         return recovered
             attempt += 1
         if attempt > 3:
-            raise ApplicationError("该模型步骤已达到三次请求上限，原始回执保留。", non_retryable=True)
+            raise ApplicationError(
+                "该模型步骤已达到三次请求上限，原始回执保留。",
+                type="model_output_invalid",
+                non_retryable=True,
+            )
         await asyncio.to_thread(
             self.outputs.put,
             run_id,
@@ -272,6 +278,13 @@ class Models:
                 },
             )
             return value
+        except APIConnectionError as error:
+            # The SDK wraps request-hook exceptions as connection errors. Preserve
+            # our global budget stop instead of turning it into an activity retry.
+            cause = error.__cause__
+            if isinstance(cause, ApplicationError) and cause.type == "model_request_budget":
+                raise cause from None
+            raise
         except (ModelBehaviorError, ValueError) as error:
             await asyncio.to_thread(
                 self.outputs.put,

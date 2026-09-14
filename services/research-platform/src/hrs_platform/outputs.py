@@ -7,6 +7,7 @@ from uuid import UUID, uuid5
 
 from sqlalchemy import func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from temporalio.exceptions import ApplicationError
 
 from . import schema as db
 from .activities import objects_for
@@ -65,7 +66,7 @@ class Outputs:
                 existing["input_sha256"] != fingerprint(dependency)
                 or existing["reference"]["sha256"] != reference["sha256"]
             ):
-                raise ValueError("Stage output conflicts with already committed evidence.")
+                raise RuntimeError("Stage output conflicts with already committed evidence.")
         return value
 
     def node(self, run_id, key, *, kind, label, objective, state="running", parent=None, details=None):
@@ -164,7 +165,11 @@ class Outputs:
                 )
             )
             if count >= maximum:
-                raise ValueError("本次运行已达到模型请求预算，已完成的结果和回执保留。")
+                raise ApplicationError(
+                    "本次运行已达到模型请求预算，已完成的结果和回执保留。",
+                    type="model_request_budget",
+                    non_retryable=True,
+                )
             connection.execute(
                 insert(db.stage_outputs).values(
                     run_id=run_id, step=step, input_sha256=fingerprint(value), reference=reference

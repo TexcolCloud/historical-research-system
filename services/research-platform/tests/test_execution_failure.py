@@ -1,7 +1,28 @@
 import pytest
+from temporalio.exceptions import ApplicationError
 from test_review import seed
 
 from hrs_platform.outputs import Outputs, execution_parent
+
+
+def test_total_request_budget_is_not_a_local_output_error(platform):
+    settings, engine = platform
+    run, _ = seed(engine)
+    outputs = Outputs(settings, engine)
+    with pytest.raises(ApplicationError) as failure:
+        outputs.reserve_request(run, "step:http-request:1:1", {"synthetic": True}, 0)
+    assert failure.value.type == "model_request_budget" and failure.value.non_retryable
+    assert outputs.get(run, "step:http-request:1:1") is None
+
+
+def test_immutable_evidence_conflict_is_not_a_model_validation_failure(platform):
+    settings, engine = platform
+    run, _ = seed(engine)
+    outputs = Outputs(settings, engine)
+    outputs.put(run, "fixed", {"value": "original"}, {"input": "fixed"})
+    with pytest.raises(RuntimeError, match="conflicts"):
+        outputs.put(run, "fixed", {"value": "changed"}, {"input": "fixed"})
+    assert outputs.get(run, "fixed") == {"value": "original"}
 
 
 def test_failed_research_branch_stops_showing_running_and_restores_parent(platform):
