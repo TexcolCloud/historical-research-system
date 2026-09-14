@@ -3,12 +3,14 @@
 import asyncio
 import json
 from functools import cached_property
+from math import ceil
 from uuid import UUID, uuid5
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from temporalio.exceptions import ApplicationError
 
 from . import schema as db
 from .activities import Activities
@@ -165,6 +167,26 @@ def neighbor_context(all_units, selected):
     )
 
 
+def card_stage(run, name):
+    revision = (run.get("result") or {}).get("card_revision", 0)
+    return f"{name}:revision:{revision}" if revision else name
+
+
+def repair_sources(previous, units, chosen):
+    if not previous:
+        return
+    known = {unit["unit_id"] for unit in units}
+    for check in [previous, *previous.get("source_checks", [])]:
+        for finding in check.get("findings", []):
+            chosen.update(set(finding.get("source_unit_ids", [])) & known)
+            if finding.get("object_id") in known:
+                chosen.add(finding["object_id"])
+        chosen.update(set(check.get("unverified_object_ids", [])) & known)
+        # A failed verdict without located findings still has an explicit checked scope.
+        if check.get("conclusion") != "pass" and not check.get("findings"):
+            chosen.update(set(check.get("checked_object_ids", [])) & known)
+
+
 class Cards:
     def __init__(self, settings, engine):
         self.settings, self.engine = settings, engine
@@ -268,10 +290,11 @@ class Cards:
     async def generate(self, run_id):
         from agents import function_tool
 
-        cached = self.outputs.get(run_id, "generated-cards")
+        run = get_run(self.engine, run_id)
+        generated_key = card_stage(run, "generated-cards")
+        cached = self.outputs.get(run_id, generated_key)
         if cached:
             return {"run_id": run_id, "candidates": len(cached["cards"])}
-        run = get_run(self.engine, run_id)
         snapshot = self.outputs.get(run_id, "card-reading-sources:v2")
         if snapshot is None:
             chapters = [
@@ -289,6 +312,39 @@ class Cards:
         chapters, all_units = snapshot["chapters"], snapshot["units"]
         if not all_units:
             raise ValueError("No reviewed source text is available for card reading.")
+        revision = (run.get("result") or {}).get("card_revision", 0)
+        # Preflight is a lower-bound estimate, not permission to exceed the hard cap.
+        minimum = len(all_units) + ceil(len(all_units) / 2) + ceil(len(all_units) / 8) + 4
+        budget = self.outputs.preflight(run_id, minimum, self.settings.model_max_calls)
+        self.outputs.node(
+            run_id,
+            "card-budget",
+            kind="component",
+            label="制卡调用预算预检",
+            objective="预计基础调用，不含修订和额外工具轮次",
+            state="completed",
+            details=budget,
+        )
+        prior_cards, adopted_ids = {}, set()
+        if revision:
+            prior_run = {**run, "result": {**(run.get("result") or {}), "card_revision": revision - 1}}
+            prior = (
+                self.outputs.get(run_id, card_stage(prior_run, "finalized-cards"))
+                or self.outputs.get(run_id, card_stage(prior_run, "generated-cards"))
+                or {"cards": []}
+            )
+            prior_cards = {row["id"]: row for row in prior["cards"]}
+            with self.engine.connect() as connection:
+                adopted_ids = set(
+                    map(
+                        str,
+                        connection.scalars(
+                            select(db.cards.c.id).where(
+                                db.cards.c.run_id == run_id, db.cards.c.state == "adopted"
+                            )
+                        ),
+                    )
+                )
         bundle = Review(self.settings, self.engine).read_json(run["conversion"])
         image_pages = sorted(
             {
@@ -327,22 +383,27 @@ class Cards:
             )
             return json.dumps(result, ensure_ascii=False)
 
-        plan = await card_model(
-            self.models,
-            run_id,
-            "主研究 Agent:v2",
-            "根据本书目录自主规划研究分工。每一章分配且只分配给一个子 Agent；相邻章节可组合。"
-            "分工数量按实际内容决定，无固定层数或节点数。可调用工具读取章首辅助判断。输出每个分工的名称、目标和 chapter_ids。",
-            {
-                "chapters": [
-                    {key: row[key] for key in ("id", "title", "kind", "pages", "codepoints")}
-                    for row in chapters
-                ]
-            },
-            ResearchPlan,
-            model=self.settings.reasoning_model,
-            tools=[read_chapter_opening],
-            validate=lambda value: validate_plan(value, [row["id"] for row in chapters]),
+        research = self.outputs.get(run_id, "card-research-package")
+        plan = (
+            ResearchPlan.model_validate(research["plan"])
+            if research
+            else await card_model(
+                self.models,
+                run_id,
+                "主研究 Agent:v2",
+                "根据本书目录自主规划研究分工。每一章分配且只分配给一个子 Agent；相邻章节可组合。"
+                "分工数量按实际内容决定，无固定层数或节点数。可调用工具读取章首辅助判断。输出每个分工的名称、目标和 chapter_ids。",
+                {
+                    "chapters": [
+                        {key: row[key] for key in ("id", "title", "kind", "pages", "codepoints")}
+                        for row in chapters
+                    ]
+                },
+                ResearchPlan,
+                model=self.settings.reasoning_model,
+                tools=[read_chapter_opening],
+                validate=lambda value: validate_plan(value, [row["id"] for row in chapters]),
+            )
         )
         source_evidence = {
             "available_original_pages": image_pages,
@@ -363,221 +424,304 @@ class Cards:
                 "scope": "研究范围是指定原文单元，可能仅为章内部分；关联上下文可旁读，不代表其他章节缺失。",
             }
 
-        semaphore = asyncio.Semaphore(2)
+        if research:
+            readings = research["readings"]
+            card_plan = CardPlan.model_validate(research["card_plan"])
+        else:
+            semaphore = asyncio.Semaphore(2)
 
-        async def read_assignment(number, assignment):
-            group = f"研究分工:v2:{number}"
-            async with semaphore:
+            async def read_assignment(number, assignment):
+                group = f"研究分工:v2:{number}"
+                async with semaphore:
+                    with self.outputs.operation(
+                        run_id,
+                        group,
+                        assignment.name,
+                        kind="group",
+                        objective=assignment.objective,
+                        parent=main,
+                    ) as branch:
+                        units = [row for row in all_units if row["chapter_id"] in assignment.chapter_ids]
+                        research_state = state(units)
+                        readings = []
+                        for offset in range(0, len(units), 2):
+                            batch = units[offset : offset + 2]
+                            reading = await read_batch(
+                                self.models,
+                                run_id,
+                                f"{group}:阅读:{offset}",
+                                batch,
+                                assignment.objective,
+                                branch,
+                                readings[-1] if readings else None,
+                                context=neighbor_context(all_units, batch),
+                                research_state=research_state,
+                            )
+                            readings.append(reading)
+                        self.outputs.put(
+                            run_id,
+                            f"{group}:readings:{fingerprint(readings)}",
+                            {"readings": readings},
+                            {"units": units, "assignment": assignment.model_dump()},
+                        )
+                        return readings
+
+            # Only independent assignments overlap. Their own batches retain previous-reading order.
+            try:
+                async with asyncio.TaskGroup() as tasks:
+                    jobs = [
+                        tasks.create_task(read_assignment(i, assignment))
+                        for i, assignment in enumerate(plan.assignments)
+                    ]
+            except ExceptionGroup as failure:
+                # Preserve the provider's recoverability and useful error message after
+                # TaskGroup has cancelled siblings; keep all failures in the cause.
+                raise failure.exceptions[0] from failure
+            readings = [record for job in jobs for record in job.result()]
+            overview = await synthesis_readings(self.models, run_id, "全书主题:v2", readings, all_units, main)
+            card_plan = await card_model(
+                self.models,
+                run_id,
+                "卡片主题规划:v2",
+                "在完整逐段阅读后按研究主题规划史料卡。阅读 Agent 的分工不等于卡片主题。"
+                "同一分工可拆为多卡，同一主题可合并不同分工的单元；合并同一事件的重复叙述，保留观点冲突。"
+                "每个 unit_id 恰好分给一个主题，禁止漏掉非引文单元；标题与书目单元随相关正文归组。"
+                "主题应保持研究问题集中、原文数量适中；不要把整本长书塞入单卡。关联脚注和邻文可跨主题作为上下文。",
+                {
+                    "reading_records": overview,
+                    "source_units": [
+                        {key: unit[key] for key in ("unit_id", "section_path", "kind")} for unit in all_units
+                    ],
+                },
+                CardPlan,
+                model=self.settings.reasoning_model,
+                parent=main,
+                validate=lambda value: validate_topics(value, all_units),
+            )
+            self.outputs.put(
+                run_id,
+                "card-research-package",
+                {
+                    "plan": plan.model_dump(mode="json"),
+                    "readings": readings,
+                    "card_plan": card_plan.model_dump(mode="json"),
+                },
+                {"snapshot": snapshot},
+            )
+        produced, pending = [], []
+        for number, topic in enumerate(card_plan.topics):
+            group = f"卡片主题:v2:{number}"
+            base_group = group
+            identity = str(uuid5(UUID(run_id), base_group))
+            checkpoint = f"{base_group}:result:{revision}"
+            saved = self.outputs.get(run_id, checkpoint)
+            if saved:
+                produced.append(saved)
+                continue
+            prior_card = prior_cards.get(identity)
+            if identity in adopted_ids and prior_card:
+                produced.append({**prior_card, "retained": True})
+                continue
+            if revision:
+                group += f":repair:{revision}"
+            if prior_card:
+                from .visual_review import result_key
+
+                prior_source = self.outputs.get(run_id, prior_card["source_step"])
+                prior_units = {row["unit_id"]: row for row in prior_source["units"]}
+                prior_card["repair_visual_checks"] = [
+                    self.outputs.get(
+                        run_id, result_key(identity, window["key"], prior_card.get("visual_revision"))
+                    )
+                    for window in visual_groups(
+                        prior_card.get("original_candidate", prior_card["candidate"]), prior_units
+                    )
+                ]
+            try:
                 with self.outputs.operation(
                     run_id,
                     group,
-                    assignment.name,
+                    topic.name,
                     kind="group",
-                    objective=assignment.objective,
+                    objective=topic.objective,
                     parent=main,
                 ) as branch:
-                    units = [row for row in all_units if row["chapter_id"] in assignment.chapter_ids]
+                    units = [row for row in all_units if row["unit_id"] in topic.unit_ids]
+                    context = neighbor_context(all_units, units)
+                    available = [*units, *context]
                     research_state = state(units)
-                    readings = []
-                    for offset in range(0, len(units), 2):
-                        batch = units[offset : offset + 2]
-                        reading = await read_batch(
+                    # Shared batch summaries are explicitly context, never evidence for another topic.
+                    topic_readings = [
+                        {
+                            **record,
+                            **(
+                                {
+                                    "source_only_unit_ids": [
+                                        identity
+                                        for identity in record["source_only_unit_ids"]
+                                        if identity in topic.unit_ids
+                                    ]
+                                }
+                                if "source_only_unit_ids" in record
+                                else {}
+                            ),
+                            "readings": [
+                                row for row in record["readings"] if row["unit_id"] in topic.unit_ids
+                            ],
+                            "questions": [
+                                question
+                                for question in record["questions"]
+                                if set(question["source_unit_ids"]) <= set(topic.unit_ids)
+                            ],
+                            "batch_context_unit_ids": [row["unit_id"] for row in record["readings"]],
+                        }
+                        for record in readings
+                        if any(row["unit_id"] in topic.unit_ids for row in record["readings"])
+                    ]
+                    source = {
+                        "units": available,
+                        "assigned_unit_ids": [row["unit_id"] for row in units],
+                        "readings": topic_readings,
+                        "topic": topic.model_dump(),
+                        "reading_assignment_indexes": [
+                            i
+                            for i, a in enumerate(plan.assignments)
+                            if set(a.chapter_ids) & {u["chapter_id"] for u in units}
+                        ],
+                    }
+                    source_step = f"{base_group}:sources:{fingerprint(source)}"
+                    self.outputs.put(
+                        run_id, source_step, source, {"topic": topic.model_dump(), "units": available}
+                    )
+                    synthesis_records = await synthesis_readings(
+                        self.models, run_id, group, topic_readings, units, branch
+                    )
+                    # Candidate quotes retain the complete containing unit, preserving notes and attribution.
+                    chosen = {
+                        quote["unit_id"]
+                        for record in synthesis_records
+                        for quote in record.get("quotation_candidates", [])
+                    }
+                    chosen.update(
+                        row["unit_id"]
+                        for record in synthesis_records
+                        for row in record.get("readings", [])
+                        if row["candidate_quotes"]
+                    )
+                    previous = prior_card.get("text_check") if prior_card else None
+                    card = CardDraft.model_validate(prior_card["candidate"]) if prior_card else None
+                    for round_number in range(3):
+                        repair_sources(previous, available, chosen)
+                        synthesis_units = [unit for unit in available if unit["unit_id"] in chosen]
+                        card = await card_model(
                             self.models,
                             run_id,
-                            f"{group}:阅读:{offset}",
-                            batch,
-                            assignment.objective,
-                            branch,
-                            readings[-1] if readings else None,
-                            context=neighbor_context(all_units, batch),
-                            research_state=research_state,
-                        )
-                        readings.append(reading)
-                    self.outputs.put(
-                        run_id,
-                        f"{group}:readings",
-                        {"readings": readings},
-                        {"units": units, "assignment": assignment.model_dump()},
-                    )
-                    return readings
-
-        # Only independent assignments overlap. Their own batches retain previous-reading order.
-        try:
-            async with asyncio.TaskGroup() as tasks:
-                jobs = [
-                    tasks.create_task(read_assignment(i, assignment))
-                    for i, assignment in enumerate(plan.assignments)
-                ]
-        except ExceptionGroup as failure:
-            # Preserve the provider's recoverability and useful error message after
-            # TaskGroup has cancelled siblings; keep all failures in the cause.
-            raise failure.exceptions[0] from failure
-        readings = [record for job in jobs for record in job.result()]
-        overview = await synthesis_readings(self.models, run_id, "全书主题:v2", readings, all_units, main)
-        card_plan = await card_model(
-            self.models,
-            run_id,
-            "卡片主题规划:v2",
-            "在完整逐段阅读后按研究主题规划史料卡。阅读 Agent 的分工不等于卡片主题。"
-            "同一分工可拆为多卡，同一主题可合并不同分工的单元；合并同一事件的重复叙述，保留观点冲突。"
-            "每个 unit_id 恰好分给一个主题，禁止漏掉非引文单元；标题与书目单元随相关正文归组。"
-            "主题应保持研究问题集中、原文数量适中；不要把整本长书塞入单卡。关联脚注和邻文可跨主题作为上下文。",
-            {
-                "reading_records": overview,
-                "source_units": [
-                    {key: unit[key] for key in ("unit_id", "section_path", "kind")} for unit in all_units
-                ],
-            },
-            CardPlan,
-            model=self.settings.reasoning_model,
-            parent=main,
-            validate=lambda value: validate_topics(value, all_units),
-        )
-        produced = []
-        for number, topic in enumerate(card_plan.topics):
-            group = f"卡片主题:v2:{number}"
-            with self.outputs.operation(
-                run_id,
-                group,
-                topic.name,
-                kind="group",
-                objective=topic.objective,
-                parent=main,
-            ) as branch:
-                units = [row for row in all_units if row["unit_id"] in topic.unit_ids]
-                context = neighbor_context(all_units, units)
-                available = [*units, *context]
-                research_state = state(units)
-                # Shared batch summaries are explicitly context, never evidence for another topic.
-                topic_readings = [
-                    {
-                        **record,
-                        **(
+                            f"{group}:制卡:{round_number}",
+                            prompts.SYNTHESIZE,
                             {
-                                "source_only_unit_ids": [
-                                    identity
-                                    for identity in record["source_only_unit_ids"]
-                                    if identity in topic.unit_ids
-                                ]
-                            }
-                            if "source_only_unit_ids" in record
-                            else {}
-                        ),
-                        "readings": [row for row in record["readings"] if row["unit_id"] in topic.unit_ids],
-                        "questions": [
-                            question
-                            for question in record["questions"]
-                            if set(question["source_unit_ids"]) <= set(topic.unit_ids)
-                        ],
-                        "batch_context_unit_ids": [row["unit_id"] for row in record["readings"]],
-                    }
-                    for record in readings
-                    if any(row["unit_id"] in topic.unit_ids for row in record["readings"])
-                ]
-                source = {
-                    "units": available,
-                    "assigned_unit_ids": [row["unit_id"] for row in units],
-                    "readings": topic_readings,
-                    "topic": topic.model_dump(),
-                    "reading_assignment_indexes": [
-                        i
-                        for i, a in enumerate(plan.assignments)
-                        if set(a.chapter_ids) & {u["chapter_id"] for u in units}
-                    ],
-                }
-                self.outputs.put(
-                    run_id, f"{group}:sources", source, {"topic": topic.model_dump(), "units": available}
-                )
-                synthesis_records = await synthesis_readings(
-                    self.models, run_id, group, topic_readings, units, branch
-                )
-                # Candidate quotes retain the complete containing unit, preserving notes and attribution.
-                chosen = {
-                    quote["unit_id"]
-                    for record in synthesis_records
-                    for quote in record.get("quotation_candidates", [])
-                }
-                chosen.update(
-                    row["unit_id"]
-                    for record in synthesis_records
-                    for row in record.get("readings", [])
-                    if row["candidate_quotes"]
-                )
-                synthesis_units = [unit for unit in units if unit["unit_id"] in chosen]
-                previous, card = None, None
-                for revision in range(3):
-                    card = await card_model(
-                        self.models,
-                        run_id,
-                        f"{group}:制卡:{revision}",
-                        prompts.SYNTHESIZE,
-                        {
+                                "reading_records": synthesis_records,
+                                "source_units": synthesis_units,
+                                "context_units": context,
+                                "research_state": research_state,
+                                "previous_check": previous,
+                                "previous_visual_checks": prior_card.get("repair_visual_checks", [])
+                                if prior_card
+                                else [],
+                                "previous_processing_error": prior_card.get("processing_error")
+                                if prior_card
+                                else None,
+                                "objective": topic.objective,
+                                "previous_candidate": card.model_dump(mode="json") if card else None,
+                            },
+                            CardDraft,
+                            model=self.settings.reasoning_model,
+                            parent=branch,
+                            validate=lambda value, units=available: validate_candidate(value, units),
+                        )
+                        referenced = {
+                            selection.unit_id for item in card.items for selection in item.selections
+                        }
+                        referenced.update(unit for item in card.items for unit in item.source_unit_ids)
+                        check_payload = {
+                            "candidate": card.model_dump(mode="json"),
                             "reading_records": synthesis_records,
-                            "source_units": synthesis_units,
+                            "source_units": [unit for unit in available if unit["unit_id"] in referenced],
                             "context_units": context,
                             "research_state": research_state,
-                            "previous_check": previous,
-                            "objective": topic.objective,
-                            "previous_candidate": card.model_dump(mode="json") if revision else None,
-                        },
-                        CardDraft,
-                        model=self.settings.reasoning_model,
-                        parent=branch,
-                        validate=lambda value, units=available: validate_candidate(value, units),
-                    )
-                    referenced = {selection.unit_id for item in card.items for selection in item.selections}
-                    referenced.update(unit for item in card.items for unit in item.source_unit_ids)
-                    check_payload = {
-                        "candidate": card.model_dump(mode="json"),
-                        "reading_records": synthesis_records,
-                        "source_units": [unit for unit in available if unit["unit_id"] in referenced],
-                        "context_units": context,
-                        "research_state": research_state,
-                    }
-                    check = await card_model(
-                        self.models,
-                        run_id,
-                        f"{group}:独立核验:{fingerprint(check_payload)}",
-                        prompts.CHECK_CARD,
-                        check_payload,
-                        SemanticCheck,
-                        model=self.settings.reasoning_model,
-                        parent=branch,
-                        validate=lambda value, card=card: validate_check(value, card),
-                    )
-                    previous = check.model_dump(mode="json")
-                    if passed(check):
-                        source_checks = await check_candidate_coverage(
+                        }
+                        check = await card_model(
                             self.models,
                             run_id,
-                            f"{group}:完整来源核验",
-                            card,
-                            units,
-                            branch,
-                            topic.objective,
-                            context,
-                            research_state,
+                            f"{group}:独立核验:{fingerprint(check_payload)}",
+                            prompts.CHECK_CARD,
+                            check_payload,
+                            SemanticCheck,
+                            model=self.settings.reasoning_model,
+                            parent=branch,
+                            validate=lambda value, card=card: validate_check(value, card),
                         )
-                        previous["source_checks"] = [
-                            result.model_dump(mode="json") for result in source_checks
-                        ]
-                        if all(passed(result) for result in source_checks):
-                            break
-                        previous["conclusion"] = "needs_revision"
-                produced.append(
+                        previous = check.model_dump(mode="json")
+                        if passed(check):
+                            source_checks = await check_candidate_coverage(
+                                self.models,
+                                run_id,
+                                f"{group}:完整来源核验",
+                                card,
+                                units,
+                                branch,
+                                topic.objective,
+                                context,
+                                research_state,
+                            )
+                            previous["source_checks"] = [
+                                result.model_dump(mode="json") for result in source_checks
+                            ]
+                            if all(passed(result) for result in source_checks):
+                                break
+                            previous["conclusion"] = "needs_revision"
+                    produced.append(
+                        {
+                            "id": identity,
+                            "topic_index": number,
+                            "candidate": card.model_dump(mode="json"),
+                            "text_check": previous,
+                            "source_step": source_step,
+                            "visual_revision": fingerprint(
+                                {
+                                    "candidate": card.model_dump(mode="json"),
+                                    "source": run.get("source"),
+                                    "conversion": run.get("conversion"),
+                                    "revision": revision,
+                                }
+                            ),
+                            "parent_node": branch,
+                        }
+                    )
+                    self.outputs.put(
+                        run_id, checkpoint, produced[-1], {"topic": topic.model_dump(), "revision": revision}
+                    )
+            except ApplicationError as error:
+                if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget"}:
+                    raise
+                pending.append(
                     {
-                        "id": str(uuid5(UUID(run_id), group)),
                         "topic_index": number,
-                        "candidate": card.model_dump(mode="json"),
-                        "text_check": previous,
-                        "source_step": f"{group}:sources",
-                        "parent_node": branch,
+                        "name": topic.name,
+                        "error_type": error.type,
+                        "message": str(error)[:500],
+                        "unit_ids": topic.unit_ids,
                     }
+                )
+                self.outputs.put(
+                    run_id,
+                    f"{base_group}:pending:{revision}:{fingerprint(pending[-1])}",
+                    pending[-1],
+                    {"topic": topic.model_dump()},
                 )
         self.outputs.put(
             run_id,
-            "generated-cards",
-            {"cards": produced},
+            generated_key,
+            {"cards": produced, "pending_topics": pending},
             {"reading_plan": plan.model_dump(), "card_plan": card_plan.model_dump()},
         )
         Activities(self.settings, self.engine).transition(run_id, "processing", "vision")
@@ -587,130 +731,182 @@ class Cards:
         from .visual_review import VisualReview
 
         run = get_run(self.engine, run_id)
-        generated = self.outputs.get(run_id, "generated-cards")
+        generated = self.outputs.get(run_id, card_stage(get_run(self.engine, run_id), "generated-cards"))
         bundle = self.review.read_json(run["conversion"])
         reviewer = VisualReview(self.settings, self.engine)
         for card in generated["cards"]:
+            if card.get("retained"):
+                continue
             source = self.outputs.get(run_id, card["source_step"])
             units = {row["unit_id"]: row for row in source["units"]}
             for group in visual_groups(card["candidate"], units):
-                reviewer.check(run, bundle, card, group)
+                try:
+                    reviewer.check(run, bundle, card, group)
+                except ApplicationError as error:
+                    if error.type != "visual_output_invalid":
+                        raise
+                    self.outputs.put(
+                        run_id,
+                        f"visual-error:{card['id']}:{card.get('visual_revision', 'original')}:{group['key']}",
+                        {"error_type": error.type, "message": str(error)[:500]},
+                        {"card": card},
+                    )
         return {"run_id": run_id}
 
     async def finalize(self, run_id):
         """Reconcile narrative with original checks; keep quotations, anchors and readings immutable."""
         from .visual_review import result_key
 
-        if self.outputs.get(run_id, "finalized-cards"):
+        if self.outputs.get(run_id, card_stage(get_run(self.engine, run_id), "finalized-cards")):
             return {"run_id": run_id}
         Activities(self.settings, self.engine).transition(run_id, "processing", "finalization")
-        generated = self.outputs.get(run_id, "generated-cards")
+        generated = self.outputs.get(run_id, card_stage(get_run(self.engine, run_id), "generated-cards"))
         sources = {card["id"]: self.outputs.get(run_id, card["source_step"]) for card in generated["cards"]}
-        all_assigned = {identity for source in sources.values() for identity in source["assigned_unit_ids"]}
+        snapshot = self.outputs.get(run_id, "card-reading-sources:v2")
+        all_assigned = (
+            {unit["unit_id"] for unit in snapshot["units"]}
+            if snapshot
+            else {identity for source in sources.values() for identity in source["assigned_unit_ids"]}
+        )
         finalized = []
         for card in generated["cards"]:
+            if card.get("retained"):
+                finalized.append(card)
+                continue
             source = sources[card["id"]]
             units = {row["unit_id"]: row for row in source["units"]}
             checks = [
-                self.outputs.get(run_id, result_key(card["id"], group["key"]))
+                self.outputs.get(run_id, result_key(card["id"], group["key"], card.get("visual_revision")))
                 for group in visual_groups(card["candidate"], units)
             ]
-            if not checks or not all(
-                check and all(item["result"] == "verified" for item in check["items"]) for check in checks
+            if (
+                card["text_check"]["conclusion"] != "pass"
+                or not checks
+                or not all(
+                    check and all(item["result"] == "verified" for item in check["items"]) for check in checks
+                )
             ):
                 finalized.append(card)
                 continue
-            original = CardDraft.model_validate(card["candidate"])
-            candidate = original
-            referenced = {identity for item in original.items for identity in item.source_unit_ids}
-            referenced.update(selection.unit_id for item in original.items for selection in item.selections)
-            review_units = [
-                unit
-                for unit in source["units"]
-                if unit["unit_id"] in referenced or unit["unit_id"] not in source["assigned_unit_ids"]
-            ]
-            research_state = {
-                "assigned_unit_ids": source["assigned_unit_ids"],
-                "available_units_cover_whole_book": all_assigned
-                <= {unit["unit_id"] for unit in review_units},
-                "scope": "指定分工与实际取得的上下文是不同范围。已提供的邻章可用于回答问题，不得误称未提供。",
-            }
-            final_receipt = None
-            for revision in range(3):
-                key = f"原图后定稿v3:{card['id']}:{revision}"
-                payload = {
-                    "candidate": candidate.model_dump(mode="json"),
-                    "source_units": review_units,
-                    "original_checks": checks,
-                    "research_state": research_state,
-                }
-                final_check = await card_model(
-                    self.models,
-                    run_id,
-                    key,
-                    prompts.FINAL_CHECK,
-                    payload,
-                    scoped_check([item.item_id for item in candidate.items]),
-                    model=self.settings.reasoning_model,
-                    parent=card["parent_node"],
-                    validate=lambda value, candidate=candidate: validate_check(value, candidate),
+            final_key = f"final-card:{card['id']}:{fingerprint({'card': card, 'checks': checks})}"
+            saved = self.outputs.get(run_id, final_key)
+            if saved:
+                finalized.append(saved)
+                continue
+            try:
+                original = CardDraft.model_validate(card["candidate"])
+                candidate = original
+                referenced = {identity for item in original.items for identity in item.source_unit_ids}
+                referenced.update(
+                    selection.unit_id for item in original.items for selection in item.selections
                 )
-                final_receipt = final_check.model_dump(mode="json")
-                # Revised narrative can drop an unquoted limit. The initial source
-                # receipt cannot approve changed claims, even with frozen quotations.
-                if passed(final_check) and candidate != original:
-                    source_checks = await check_candidate_coverage(
+                review_units = [
+                    unit
+                    for unit in source["units"]
+                    if unit["unit_id"] in referenced or unit["unit_id"] not in source["assigned_unit_ids"]
+                ]
+                research_state = {
+                    "assigned_unit_ids": source["assigned_unit_ids"],
+                    "available_units_cover_whole_book": all_assigned
+                    <= {unit["unit_id"] for unit in review_units},
+                    "scope": "指定分工与实际取得的上下文是不同范围。已提供的邻章可用于回答问题，不得误称未提供。",
+                }
+                final_receipt = None
+                for revision in range(3):
+                    key = f"原图后定稿v3:{card['id']}:{revision}:{card.get('visual_revision', 'original')}"
+                    payload = {
+                        "candidate": candidate.model_dump(mode="json"),
+                        "source_units": review_units,
+                        "original_checks": checks,
+                        "research_state": research_state,
+                    }
+                    final_check = await card_model(
                         self.models,
                         run_id,
-                        f"定稿完整来源:{card['id']}",
-                        candidate,
-                        [unit for unit in source["units"] if unit["unit_id"] in source["assigned_unit_ids"]],
-                        card["parent_node"],
-                        source.get("topic", {}).get("objective", candidate.title),
-                        [
-                            unit
-                            for unit in source["units"]
-                            if unit["unit_id"] not in source["assigned_unit_ids"]
-                        ],
-                        research_state,
+                        key,
+                        prompts.FINAL_CHECK,
+                        payload,
+                        scoped_check([item.item_id for item in candidate.items]),
+                        model=self.settings.reasoning_model,
+                        parent=card["parent_node"],
+                        validate=lambda value, candidate=candidate: validate_check(value, candidate),
                     )
-                    final_receipt["source_checks"] = [
-                        result.model_dump(mode="json") for result in source_checks
-                    ]
-                    if not source_checks or not all(passed(result) for result in source_checks):
-                        final_receipt["conclusion"] = "needs_revision"
-                if (final_receipt["conclusion"] == "pass" and passed(final_check)) or revision == 2:
-                    break
-                candidate = await card_model(
-                    self.models,
-                    run_id,
-                    key + ":修订",
-                    prompts.FINALIZE,
-                    {**payload, "previous_check": final_receipt},
-                    CardDraft,
-                    model=self.settings.reasoning_model,
-                    parent=card["parent_node"],
-                    validate=lambda value, original=original, source=source: validate_final_candidate(
-                        value, original, source["units"]
-                    ),
+                    final_receipt = final_check.model_dump(mode="json")
+                    # Revised narrative can drop an unquoted limit. The initial source
+                    # receipt cannot approve changed claims, even with frozen quotations.
+                    if passed(final_check) and candidate != original:
+                        source_checks = await check_candidate_coverage(
+                            self.models,
+                            run_id,
+                            f"定稿完整来源:{card['id']}",
+                            candidate,
+                            [
+                                unit
+                                for unit in source["units"]
+                                if unit["unit_id"] in source["assigned_unit_ids"]
+                            ],
+                            card["parent_node"],
+                            source.get("topic", {}).get("objective", candidate.title),
+                            [
+                                unit
+                                for unit in source["units"]
+                                if unit["unit_id"] not in source["assigned_unit_ids"]
+                            ],
+                            research_state,
+                        )
+                        final_receipt["source_checks"] = [
+                            result.model_dump(mode="json") for result in source_checks
+                        ]
+                        if not source_checks or not all(passed(result) for result in source_checks):
+                            final_receipt["conclusion"] = "needs_revision"
+                    if (final_receipt["conclusion"] == "pass" and passed(final_check)) or revision == 2:
+                        break
+                    chosen = {unit["unit_id"] for unit in review_units}
+                    repair_sources(final_receipt, source["units"], chosen)
+                    review_units = [unit for unit in source["units"] if unit["unit_id"] in chosen]
+                    payload["source_units"] = review_units
+                    candidate = await card_model(
+                        self.models,
+                        run_id,
+                        key + ":修订",
+                        prompts.FINALIZE,
+                        {**payload, "previous_check": final_receipt},
+                        CardDraft,
+                        model=self.settings.reasoning_model,
+                        parent=card["parent_node"],
+                        validate=lambda value, original=original, source=source: validate_final_candidate(
+                            value, original, source["units"]
+                        ),
+                    )
+                finalized.append(
+                    {
+                        **card,
+                        "candidate": candidate.model_dump(mode="json"),
+                        "text_check": final_receipt,
+                        "initial_text_check": card["text_check"],
+                        "original_candidate": card["candidate"],
+                    }
                 )
-            finalized.append(
-                {
-                    **card,
-                    "candidate": candidate.model_dump(mode="json"),
-                    "text_check": final_receipt,
-                    "initial_text_check": card["text_check"],
-                    "original_candidate": card["candidate"],
-                }
-            )
-        self.outputs.put(run_id, "finalized-cards", {"cards": finalized}, {"generated": generated})
+            except ApplicationError as error:
+                if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget"}:
+                    raise
+                finalized.append(
+                    {**card, "processing_error": {"error_type": error.type, "message": str(error)[:500]}}
+                )
+            self.outputs.put(run_id, final_key, finalized[-1], {"card": card, "checks": checks})
+        self.outputs.put(
+            run_id,
+            card_stage(get_run(self.engine, run_id), "finalized-cards"),
+            {"cards": finalized, "pending_topics": generated.get("pending_topics", [])},
+            {"generated": generated},
+        )
         return {"run_id": run_id}
 
     def adopt(self, run_id):
         from .visual_review import result_key
 
         run = get_run(self.engine, run_id)
-        generated = self.outputs.get(run_id, "finalized-cards")
+        generated = self.outputs.get(run_id, card_stage(get_run(self.engine, run_id), "finalized-cards"))
         if generated is None:
             raise ValueError(
                 "Final text review must incorporate original-image observations before adoption."
@@ -720,11 +916,15 @@ class Cards:
             source = self.outputs.get(run_id, card["source_step"])
             units = {row["unit_id"]: row for row in source["units"]}
             wanted = visual_groups(card["candidate"], units)
-            checks = [self.outputs.get(run_id, result_key(card["id"], group["key"])) for group in wanted]
+            checks = [
+                self.outputs.get(run_id, result_key(card["id"], group["key"], card.get("visual_revision")))
+                for group in wanted
+            ]
             semantic = card["text_check"]
             initial = card.get("initial_text_check", semantic)
             passed = (
                 bool(wanted)
+                and not card.get("processing_error")
                 and initial["conclusion"] == "pass"
                 and not initial["unverified_object_ids"]
                 and not any(finding["severity"] in {"serious", "material"} for finding in initial["findings"])
@@ -749,6 +949,7 @@ class Cards:
                         "initial_text": card.get("initial_text_check"),
                         "original_candidate": card.get("original_candidate"),
                         "visual": checks,
+                        "processing_error": card.get("processing_error"),
                         "machine_approval": passed,
                         "human_approval": False,
                     },
@@ -768,10 +969,30 @@ class Cards:
             )
         with self.engine.begin() as connection:
             for row in rows:
-                connection.execute(pg_insert(db.cards).values(**row).on_conflict_do_nothing())
-        state = "completed" if all(row["state"] == "adopted" for row in rows) else "needs_revision"
+                connection.execute(
+                    pg_insert(db.cards)
+                    .values(**row)
+                    .on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={key: row[key] for key in ("title", "state", "content", "checks")},
+                        where=db.cards.c.state != "adopted",
+                    )
+                )
+        state = (
+            "completed"
+            if rows and not generated.get("pending_topics") and all(row["state"] == "adopted" for row in rows)
+            else "needs_revision"
+        )
         Activities(self.settings, self.engine).transition(
-            run_id, state, "complete" if state == "completed" else "machine_review"
+            run_id,
+            state,
+            "complete" if state == "completed" else "machine_review",
+            result={
+                **(run.get("result") or {}),
+                "pending_topics": generated.get("pending_topics", []),
+                "cards": len(rows),
+                "adopted": sum(row["state"] == "adopted" for row in rows),
+            },
         )
         return {
             "run_id": run_id,

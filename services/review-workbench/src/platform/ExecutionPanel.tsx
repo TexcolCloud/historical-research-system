@@ -29,6 +29,7 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
     selectedRun ||
     runs.data?.find((run) => run.kind === "cards")?.id ||
     runs.data?.[0]?.id;
+  const activeRun = runs.data?.find((run) => run.id === id);
   return (
     <section className="platform-executions">
       <label>
@@ -47,9 +48,13 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
         </select>
       </label>
       {runs.isError && <p role="alert">{runs.error.message}</p>}
-      {runs.data?.find((run) => run.id === id)?.state === "failed" && id && (
-        <RetryRunButton key={id} runId={id} />
-      )}{" "}
+      {activeRun &&
+        (activeRun.state === "failed" ||
+          (activeRun.kind === "cards" &&
+            activeRun.state === "needs_revision")) &&
+        id && (
+          <RetryRunButton key={`${id}:${activeRun.revision}`} runId={id} />
+        )}{" "}
       {id && <RunGraph key={id} runId={id} />}
     </section>
   );

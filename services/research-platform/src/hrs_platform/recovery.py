@@ -23,10 +23,11 @@ def retry_run(engine, run_id, request_id):
         if run is None:
             raise HTTPException(404, "任务不存在。")
         from .deletion import require_active
+
         require_active(connection, run["book_id"])
         if connection.scalar(select(db.outbox.c.id).where(db.outbox.c.dedup_key == key)):
             return dict(run)
-        if run["state"] != "failed":
+        if run["state"] != "failed" and not (run["kind"] == "cards" and run["state"] == "needs_revision"):
             raise HTTPException(409, "仅未完成的失败任务需要重试，正在处理和已完成的任务不会重复执行。")
         attempt = run["recovery_attempt"] + 1
         values = {
@@ -35,6 +36,11 @@ def retry_run(engine, run_id, request_id):
             "recovery_attempt": attempt,
             "revision": run["revision"] + 1,
         }
+        if run["kind"] == "cards" and run["state"] == "needs_revision":
+            values["result"] = {
+                **(run["result"] or {}),
+                "card_revision": (run["result"] or {}).get("card_revision", 0) + 1,
+            }
         connection.execute(update(db.runs).where(db.runs.c.id == run_id).values(**values))
         published = (run["result"] or {}).get("published")
         if run["kind"] == "book" and not published:

@@ -1,0 +1,258 @@
+"""Synthetic failure injection through real orchestration, SQL and S3; no model calls."""
+
+import asyncio
+from copy import deepcopy
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import insert
+from temporalio.exceptions import ApplicationError
+from test_card_pipeline import chapter, record, verdict
+
+from hrs_platform import cards as module
+from hrs_platform import schema as db
+from hrs_platform.books import get_run
+from hrs_platform.cards import CardPlan, Cards, ResearchPlan
+from hrs_platform.domain.generation_contracts import CardDraft, ReadingRecord
+from hrs_platform.outputs import fingerprint
+from hrs_platform.reading import reading_units
+from hrs_platform.recovery import retry_run
+from hrs_platform.visual_review import result_key
+
+
+@pytest.fixture
+def harness(platform, monkeypatch):
+    settings, engine = platform
+    book, run = str(uuid4()), str(uuid4())
+    with engine.begin() as connection:
+        connection.execute(insert(db.books).values(id=book, title="Synthetic recovery", state="ready"))
+        connection.execute(
+            insert(db.runs).values(
+                id=run,
+                book_id=book,
+                kind="cards",
+                state="processing",
+                stage="planning",
+                conversion={"synthetic": True},
+                source={"sha256": "synthetic"},
+            )
+        )
+    cards = Cards(settings.model_copy(update={"model_max_calls": 4096}), engine)
+    originals = [chapter(f"合成原文{i}，运送{i}吨。") for i in range(3)]
+    units = [unit for original in originals for unit in reading_units(original)]
+    cards.library = SimpleNamespace(
+        chapters=lambda _: originals,
+        chapter=lambda identity: next(row for row in originals if row["id"] == identity),
+    )
+    bundle = {"manifest": {"pages": [], "page_count": 1}, "files": {}}
+    monkeypatch.setattr(module, "Review", lambda *_: SimpleNamespace(read_json=lambda _: bundle))
+    read_json = cards.review.read_json
+    monkeypatch.setattr(
+        cards.review, "read_json", lambda ref: bundle if ref == {"synthetic": True} else read_json(ref)
+    )
+    scenario, calls = {}, []
+
+    async def respond(run_id, key, instructions, payload, output_type, **kwargs):
+        cache = f"synthetic:{key}:{fingerprint(payload)}"
+        saved = cards.outputs.get(run_id, cache)
+        if saved:
+            return output_type.model_validate(saved)
+        calls.append((key, deepcopy(payload)))
+        if output_type is ResearchPlan:
+            value = output_type(
+                rationale="test",
+                assignments=[
+                    dict(name="read", objective="read", chapter_ids=[row["id"] for row in originals])
+                ],
+            )
+        elif output_type is CardPlan:
+            groups = [units] if scenario.get("combined") else [[unit] for unit in units]
+            value = output_type(
+                rationale="test",
+                topics=[
+                    dict(name=f"topic-{i}", objective=f"topic-{i}", unit_ids=[u["unit_id"] for u in group])
+                    for i, group in enumerate(groups)
+                ],
+            )
+        elif output_type is ReadingRecord:
+            rows = [record(unit) for unit in payload["source_units"]]
+            if scenario.get("omission"):
+                for row in rows:
+                    if row["unit_id"] != units[0]["unit_id"]:
+                        row["candidate_quotes"] = []
+            value = output_type(
+                readings=rows, themes=[], structure=[], questions=[], boundary_observations=[]
+            )
+        elif output_type is CardDraft:
+            if scenario.get("fail_topic") == payload.get("objective"):
+                raise ApplicationError(
+                    "synthetic exhausted output", type="model_output_invalid", non_retryable=True
+                )
+            value = output_type(
+                title=payload["objective"],
+                document_type="synthetic",
+                source_layer="synthetic",
+                formation_date={},
+                event_date={},
+                tags=[],
+                entities=[],
+                evidence_relations=[],
+                no_argument_reason="test",
+                items=[
+                    dict(
+                        item_id=f"e{i}",
+                        kind="evidence",
+                        title="evidence",
+                        text=unit["text"],
+                        source_unit_ids=[unit["unit_id"]],
+                        selections=[dict(unit_id=unit["unit_id"], quote=unit["text"])],
+                    )
+                    for i, unit in enumerate(payload["source_units"])
+                ],
+            )
+        else:
+            if (
+                scenario.get("final_failure")
+                and key.startswith("原图后定稿")
+                and payload["candidate"]["title"] == "topic-1"
+            ):
+                raise ApplicationError(
+                    "synthetic final invalid", type="model_output_invalid", non_retryable=True
+                )
+            ids = payload.get("required_object_ids") or [
+                item["item_id"] for item in payload["candidate"]["items"]
+            ]
+            receipt = verdict(ids)
+            if scenario.get("omission") and ":source-coverage:" in key:
+                missing = units[-1]["unit_id"]
+                if not any(missing in item["source_unit_ids"] for item in payload["candidate"]["items"]):
+                    receipt = verdict(ids, failed=True)
+                    receipt["findings"][0].update(object_id=missing, source_unit_ids=[missing])
+            value = output_type.model_validate(receipt)
+        kwargs["validate"](value)
+        cards.outputs.put(run_id, cache, value.model_dump(mode="json"), payload)
+        return value
+
+    def vision(run_row, bundle, card, group):
+        if scenario.get("visual_failure") and card["candidate"]["title"] == "topic-1":
+            raise ApplicationError(
+                "synthetic visual invalid", type="visual_output_invalid", non_retryable=True
+            )
+        return cards.outputs.put(
+            run,
+            result_key(card["id"], group["key"], card.get("visual_revision")),
+            {"items": [dict(item_id=item["item_id"], result="verified") for item in group["items"]]},
+            {},
+        )
+
+    monkeypatch.setattr("hrs_platform.visual_review.VisualReview.check", lambda self, *args: vision(*args))
+    monkeypatch.setattr("agents.Runner.run", lambda *a, **k: pytest.fail("Real model API called"))
+    cards.models = SimpleNamespace(run=respond, outputs=cards.outputs)
+    return cards, run, units, scenario, calls
+
+
+def finish(cards, run):
+    asyncio.run(cards.generate(run))
+    cards.check_images(run)
+    asyncio.run(cards.finalize(run))
+    return cards.adopt(run)
+
+
+def test_failed_topic_is_isolated_and_explicit_retry_keeps_adopted_cards(harness):
+    cards, run, _, scenario, calls = harness
+    scenario["fail_topic"] = "topic-1"
+    result = finish(cards, run)
+    assert result["state"] == "needs_revision" and result["adopted"] == 2
+    before = {str(row["id"]): row["content"] for row in cards.list()}
+    run_row = get_run(cards.engine, run)
+    assert run_row["result"]["pending_topics"][0]["topic_index"] == 1
+    request_id = str(uuid4())
+    retry_run(cards.engine, run, request_id)
+    retry_run(cards.engine, run, request_id)
+    assert get_run(cards.engine, run)["result"]["card_revision"] == 1
+    scenario.clear()
+    calls.clear()
+    result = finish(cards, run)
+    assert result["state"] == "completed" and result["adopted"] == 3
+    assert [payload["objective"] for key, payload in calls if ":制卡:" in key] == ["topic-1"]
+    assert all(row["content"] == before[str(row["id"])] for row in cards.list() if str(row["id"]) in before)
+
+
+def test_coverage_feedback_supplies_missing_original_before_next_revision(harness):
+    cards, run, units, scenario, calls = harness
+    scenario.update(combined=True, omission=True)
+    asyncio.run(cards.generate(run))
+    drafts = [payload for key, payload in calls if ":制卡:" in key]
+    assert len(drafts) == 2
+    missing = units[-1]["unit_id"]
+    assert missing not in {unit["unit_id"] for unit in drafts[0]["source_units"]}
+    assert missing in {unit["unit_id"] for unit in drafts[1]["source_units"]}
+    generated = cards.outputs.get(run, "generated-cards")
+    assert generated["cards"][0]["text_check"]["conclusion"] == "pass"
+
+
+def test_budget_preflight_and_local_vision_have_separate_allowances(harness):
+    cards, run, _, _, calls = harness
+    with pytest.raises(ApplicationError, match="预算不足"):
+        cards.outputs.preflight(run, 1348, 512)
+    assert not calls
+    cards.outputs.reserve_request(run, "视觉核对:card:http-request:0:0", {}, 1)
+    cards.outputs.reserve_request(run, "read:http-request:1:1", {}, 1)
+    with pytest.raises(ApplicationError):
+        cards.outputs.reserve_request(run, "read:recovery:1:http-request:1:1", {}, 1)
+    assert cards.outputs.request_count(run) == cards.outputs.request_count(run, vision=True) == 1
+
+
+def test_empty_partial_run_is_not_marked_completed(harness):
+    cards, run, _, _, _ = harness
+    cards.outputs.put(run, "finalized-cards", {"cards": [], "pending_topics": [{"topic_index": 0}]}, {})
+    assert cards.adopt(run)["state"] == "needs_revision"
+
+
+@pytest.mark.parametrize("stage", ["visual_failure", "final_failure"])
+def test_machine_review_failure_can_update_existing_card_without_rerunning_passed_cards(harness, stage):
+    cards, run, _, scenario, calls = harness
+    scenario[stage] = True
+    assert finish(cards, run)["adopted"] == 2
+    failed = next(row for row in cards.list() if row["state"] == "needs_revision")
+    prior = cards.get(failed["id"])
+    retry_run(cards.engine, run, str(uuid4()))
+    scenario.clear()
+    calls.clear()
+    assert finish(cards, run)["adopted"] == 3
+    repaired = cards.get(failed["id"])
+    assert repaired["state"] == "adopted"
+    assert repaired["checks"] != prior["checks"]
+    assert not any(key.startswith("主研究") or ":reading:" in key for key, _ in calls)
+    assert [payload["objective"] for key, payload in calls if ":制卡:" in key] == ["topic-1"]
+
+
+def test_worker_failure_keeps_completed_topic_checkpoint(harness):
+    cards, run, _, _, calls = harness
+    original = cards.models.run
+    failed = False
+
+    async def interrupted(run_id, key, instructions, payload, output_type, **kwargs):
+        nonlocal failed
+        if output_type is CardDraft and payload.get("objective") == "topic-1" and not failed:
+            failed = True
+            raise OSError("synthetic storage failure")
+        return await original(run_id, key, instructions, payload, output_type, **kwargs)
+
+    cards.models.run = interrupted
+    with pytest.raises(OSError):
+        asyncio.run(cards.generate(run))
+    assert cards.outputs.get(run, "卡片主题:v2:0:result:0")
+    assert cards.outputs.get(run, "generated-cards") is None
+    calls.clear()
+    assert finish(cards, run)["adopted"] == 3
+    assert [payload["objective"] for key, payload in calls if ":制卡:" in key] == ["topic-1", "topic-2"]
+
+
+def test_generation_refuses_insufficient_budget_before_any_model(harness):
+    cards, run, _, _, calls = harness
+    cards.settings.model_max_calls = 1
+    with pytest.raises(ApplicationError, match="预算不足"):
+        asyncio.run(cards.generate(run))
+    assert calls == []

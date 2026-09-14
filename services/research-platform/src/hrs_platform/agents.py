@@ -58,6 +58,7 @@ class Models:
         tools=None,
         parent=None,
         validate=None,
+        validation_version="1",
     ):
         # Callers explicitly select the reasoning model for planning/synthesis.
         # Model-name equality cannot distinguish roles when both use Flash.
@@ -75,6 +76,8 @@ class Models:
             "schema": schema.json_schema(),
             "tools": [{"name": tool.name, "schema": tool.params_json_schema} for tool in tools or []],
         }
+        if validation_version != "1":
+            dependency["validation_version"] = validation_version
         recovery = get_run(self.outputs.engine, run_id)["recovery_attempt"]
         # Keep matching legacy results/receipts. Changed upstream repairs get a
         # separate immutable slot instead of overwriting or replaying old evidence.
@@ -91,15 +94,40 @@ class Models:
                     raise
             else:
                 break
+        validation_feedback = []
         if cached is not None:
-            value = output_type.model_validate(cached["output"])
-            if validate:
-                validate(value)
-            return value
+            try:
+                value = output_type.model_validate(cached["output"])
+                if validate:
+                    validate(value)
+                return value
+            except ValueError as error:
+                rejected = {
+                    "output": cached,
+                    "problem": str(error)[:4000],
+                    "validation_version": validation_version,
+                }
+                await asyncio.to_thread(
+                    self.outputs.put,
+                    run_id,
+                    f"{storage_key}:rejected:{fingerprint(rejected)}",
+                    rejected,
+                    dependency,
+                )
+                # One repair slot per input/policy. Never overwrite evidence or grow
+                # an unbounded chain when the repaired output is also invalid.
+                storage_key += f":validation-repair:{fingerprint(dependency)}"
+                request_prefix = f"{storage_key}:recovery:{recovery}" if recovery else storage_key
+                repaired = await asyncio.to_thread(self.outputs.get, run_id, storage_key, dependency)
+                if repaired is not None:
+                    value = output_type.model_validate(repaired["output"])
+                    if validate:
+                        validate(value)
+                    return value
+                validation_feedback.append({"attempt": 0, "problem": rejected["problem"]})
         if not self.settings.deepseek_api_key:
             raise ApplicationError("尚未配置 DeepSeek 文本模型密钥。", non_retryable=True)
         attempt = 1
-        validation_feedback = []
         request_maximum = maximum
         while (
             await asyncio.to_thread(
@@ -142,7 +170,9 @@ class Models:
             if failure:
                 output_failure = True
                 validation_feedback.append({"attempt": attempt, "problem": failure["problem"]})
-            if not tools:
+            if previous and all(
+                item.get("type") in {"message", "reasoning"} for item in previous.get("output", [])
+            ):
                 if previous and previous.get("status") == "completed":
                     text = "".join(
                         part["text"]

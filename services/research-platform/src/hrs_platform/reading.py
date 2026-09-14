@@ -31,7 +31,11 @@ async def card_model(models, run_id, key, instructions, payload, output_type, **
         "schema": output_type.model_json_schema(),
     }
     if estimate_request(request)["input_tokens"] > CARD_INPUT_TOKENS:
-        raise ValueError(f"制卡步骤 {key} 超过输入预算，请缩小研究主题；已保存证据不截断、不放行。")
+        raise ApplicationError(
+            f"制卡步骤 {key} 超过输入预算，请缩小研究主题；已保存证据不截断、不放行。",
+            type="card_input_budget",
+            non_retryable=True,
+        )
     return await models.run(run_id, key, instructions, payload, output_type, **kwargs)
 
 
@@ -338,13 +342,19 @@ async def synthesis_readings(models, run_id, key, readings, units, parent):
     raise ValueError("阅读提要仍超过单次综合范围，需要拆分本次研究分工；完整阅读记录已保存。")
 
 
+def coverage_batches(units):
+    # Batch small structural units without merging identities or truncating tables.
+    for offset in range(0, len(units), 8):
+        for indexes in partition(list(range(offset, min(offset + 8, len(units)))), lambda i: units[i], 6000):
+            yield [units[i] for i in indexes]
+
+
 async def check_candidate_coverage(
     models, run_id, key, candidate, units, parent, objective, context, research_state
 ):
     """Check every assigned source again after synthesis, including unquoted limits."""
     checks = []
-    for offset in range(0, len(units), 2):
-        batch = units[offset : offset + 2]
+    for offset, batch in enumerate(coverage_batches(units)):
         identities = {unit["unit_id"] for unit in batch}
         payload = {
             "candidate": candidate.model_dump(mode="json"),
