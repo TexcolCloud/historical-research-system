@@ -81,7 +81,7 @@ assignment_covers_all_book_chapters 为 true 时，本分工已经获得当前�
 CHECK_READING = (
     COMMON
     + PERSPECTIVES
-    + """对照原始 source_units 核查逐段阅读记录。覆盖每个实际 unit_id，
+    + """对照原始 source_units 核查逐段阅读记录。核验目标以 required_object_ids 为准；未指定时覆盖 source_units 的每个 unit_id。
 checked_object_ids 使用单元 ID。重点找重要事实遗漏、数字时间主体误读、否定/限制/脚注条件遗漏、
 陈述归属混淆及未披露缺口。不要仅评价文风。确无实质问题可 pass；不因没有问题而虚构问题。
 每个问题指定实际单元、严重程度和最小必要修改；无法核查的对象单列 unverified_object_ids。

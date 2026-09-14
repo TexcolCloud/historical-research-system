@@ -73,6 +73,14 @@ class Activities:
                 connection.execute(
                     update(db.books).where(db.books.c.id == run["book_id"]).values(state=book_state)
                 )
+            if state == "failed":
+                # The workflow has drained its activities before recording terminal failure.
+                # Close nodes left by worker loss or an exception before local cleanup.
+                connection.execute(
+                    update(db.execution_nodes)
+                    .where(db.execution_nodes.c.run_id == run_id, db.execution_nodes.c.state == "running")
+                    .values(state="failed", finished_at=func.now())
+                )
             connection.execute(
                 insert(db.events).values(
                     book_id=run["book_id"],
