@@ -1,4 +1,5 @@
 import unittest
+import copy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -26,7 +27,7 @@ class CompletionTests(unittest.TestCase):
 
         def reviewer(packet, images, settings):
             calls.append(packet)
-            return responses[len(calls) - 1]
+            return copy.deepcopy(responses[min(len(calls) - 1, len(responses) - 1)])
 
         with TemporaryDirectory() as directory:
             image = Path(directory) / "page.png"

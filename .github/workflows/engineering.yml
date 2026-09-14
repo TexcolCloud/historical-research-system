@@ -52,6 +52,7 @@ jobs:
         run: >-
           .cache/engineering-envs/research-platform/bin/python -m pytest
           services/document-extraction/tests/test_review_scope_repairs.py
+          services/document-extraction/tests/test_review_recovery.py
           services/document-extraction/tests/test_single_ocr_completion.py
           services/document-extraction/tests/test_review_routing.py
           services/document-extraction/tests/test_review_transport.py

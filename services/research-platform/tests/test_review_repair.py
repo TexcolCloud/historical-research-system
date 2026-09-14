@@ -197,3 +197,38 @@ def test_verified_structural_patch_derives_bounds_without_cross_scope_adoption(p
     assert apply_verified_page(review, [review.get(i) for i in ids], page, {"start": 0}, {"kind": "test"}) == 2
     assert review.objects.read_bytes(review.get(ids[0])["replacement"]).decode() == before.replace("\n", "")
     assert review.get(ids[1])["replacement"] is None
+
+
+def test_completed_retry_can_localize_after_incomplete_first_check(platform):
+    review, run, ids = prepared(platform, '甲段。\n乙段。', ['甲段。', '乙段。'], [])
+    page = {'text':'甲段。\n乙段。', 'receipts':[
+        {'phase':'initial','verdict':{'review_state':'incomplete'}},
+        {'phase':'repair-review','verdict':{'review_state':'completed'}}],
+        'concerns':[{'kind':'claim','excerpt':'乙段。','explanation':'乙段数量待核验'}]}
+    assert refresh_unresolved(review, [review.get(i) for i in ids], page, {'start':0}, {'kind':'test'}) == 1
+    assert review.get(ids[0])['state']=='approved'
+    assert review.get(ids[1])['state']=='pending'
+
+
+def test_pending_recheck_uses_only_pending_scope_and_preserves_approved_text(platform, tmp_path, monkeypatch):
+    from pathlib import Path
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / 'document-extraction/src'))
+    from document_extraction import semantic_completion
+
+    from hrs_platform.books import get_run
+    from hrs_platform.review_repair import recheck_pending
+    review, run, ids = prepared(platform, '甲段。\n乙段。', ['甲段。', '乙段。'], [])
+    assert machine_decision(review, review.get(ids[1]), '乙段人工定稿。', {'kind':'test'})
+    approved_before = review.get(ids[1])['replacement']
+    bundle=review.read_json(get_run(review.engine,run)['conversion'])
+    bundle['files']['pages/1.png']=review.objects.put_bytes(b'image')
+    with review.engine.begin() as conn:
+        conn.execute(update(db.runs).where(db.runs.c.id==run).values(conversion=review.objects.put_bytes(json.dumps(bundle).encode())))
+    def complete(pages, settings, output, *, target_pages):
+        assert target_pages == {1}
+        assert [s['text'] for s in pages[0]['review_scope']] == ['甲段。']
+        return {'pages':[{**pages[0],'verified':True,'changes':[], 'concerns':[], 'receipts':[]}]}
+    monkeypatch.setattr(semantic_completion,'complete_document',complete)
+    stats=recheck_pending(review,run,None,tmp_path,progress=lambda *a,**kw:None)
+    assert stats['pages_checked']==stats['issues_machine_approved']==1
+    assert review.get(ids[1])['replacement']==approved_before
