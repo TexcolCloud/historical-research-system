@@ -795,6 +795,9 @@ class Cards:
         units = {unit["unit_id"]: unit for unit in detail["units"]}
         locations = []
         for item in detail["candidate"]["items"]:
+            # Older candidates remain exportable without inventing item identities.
+            if not item.get("item_id"):
+                continue
             for index, selection in enumerate(item.get("selections", [])):
                 start, end, pages, issue = None, None, [], None
                 unit = units.get(selection["unit_id"])
