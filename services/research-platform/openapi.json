@@ -2799,6 +2799,14 @@
             "type": "array",
             "title": "Section Path"
           },
+          "table_scopes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Table Scopes"
+          },
           "sources": {
             "items": {
               "additionalProperties": true,

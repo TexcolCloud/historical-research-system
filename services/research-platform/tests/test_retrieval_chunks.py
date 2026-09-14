@@ -156,6 +156,40 @@ def test_markdown_parser_does_not_treat_fenced_headings_as_sections():
     assert not any("伪标题" in " ".join(b["path"]) for b in blocks("```\n# 伪标题\n```\n\n正文"))
 
 
+def test_temporal_introduction_survives_numbered_siblings_but_not_next_section():
+    source = chapter('进入1942年，部队调整部署。\n\n其情况如下。\n\n## 一、甲地\n1月进驻。\n\n## 二、乙地\n2月撤出。\n\n## 其他事项\n另议。')
+    hits = list(retrieval_chunks(source, '样本'))
+    for title in ['一、甲地', '二、乙地', '其他事项']:
+        hit = next(h for h in hits if h['text'].startswith('## '+title))
+        result = expand_hits([{**hit,'score':1}], lambda _:source)[0]
+        assert any('进入1942年' in c['text'] for c in result['context']) == (title != '其他事项')
+        assert all(c['text']==source['text'][c['start']:c['end']] for c in result['context'])
+
+
+def test_continued_table_keeps_event_intro_and_shared_cell_scope():
+    intro = '将各部队强行改编如下，从而改变组织。\n\n'
+    first = '<table><tr><td>队伍</td><td>数量</td></tr><tr><td>甲</td><td>1</td></tr></table>\n\n'
+    second = '<table><tr><td>乙</td><td rowspan="2">共45</td></tr><tr><td>丙</td></tr></table>'
+    source = chapter(intro+first+second)
+    source['structure']=[{'kind':'table','status':'ready','members':[
+        {'start':len(intro),'end':len(intro+first)}, {'start':len(intro+first),'end':len(source['text'])}]}]
+    hit = next(h for h in retrieval_chunks(source,'样本') if 'rowspan' in h['text'])
+    result = expand_hits([{**hit,'score':1}],lambda _:source)[0]
+    assert any(c['role']=='table_intro' and '强行改编' in c['text'] for c in result['context'])
+    scope = next(c for c in result['table_scopes'] if c['value']=='共45')
+    assert scope['row_numbers']==[1,2] and scope['column_numbers']==[2]
+    assert scope['row_labels']==[['乙'],['丙']]
+
+
+def test_complete_paragraph_does_not_pull_optional_background():
+    source = chapter('# 第一节\n\n直接答案。\n\n无关背景。')
+    start=source['text'].index('直接答案')
+    from hrs_platform.retrieval_chunks import source_excerpt
+    hit={**source_excerpt(source,start,start+len('直接答案。\n\n')),'score':1,'context':[]}
+    result=expand_hits([hit],lambda _:source)
+    assert all('无关背景' not in c['text'] for c in result[0]['context'])
+
+
 def test_identically_named_sections_stay_separate_even_during_context_expansion():
     source = chapter("# 同名\n\n甲地运输。\n\n# 同名\n\n乙地驻留。")
     hits = list(retrieval_chunks(source, "样本"))
