@@ -133,9 +133,14 @@ export default function RunDetails({ book }: { book: Book }) {
         <StructurePanel runId={book.run_id} revision={book.revision} />
       )}
       {runs.isError && <p role="alert">{runs.error.message}</p>}
-      {failed && (
+      {(failed || needsRevision) && (
         <RetryRunButton
-          runId={cards?.state === "failed" ? cards.id : run!.id}
+          key={`${cards?.id ?? run?.id}:${cards?.revision ?? run?.revision}`}
+          runId={
+            cards && ["failed", "needs_revision"].includes(cards.state)
+              ? cards.id
+              : run!.id
+          }
         />
       )}
     </section>

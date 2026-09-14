@@ -146,6 +146,40 @@ class Outputs:
         finally:
             execution_parent.reset(token)
 
+    def request_count(self, run_id, *, vision=False, connection=None):
+        query = (
+            select(func.count())
+            .select_from(db.stage_outputs)
+            .where(
+                db.stage_outputs.c.run_id == run_id,
+                db.stage_outputs.c.step.contains(":http-request:"),
+                db.stage_outputs.c.step.startswith("视觉核对:")
+                if vision
+                else ~db.stage_outputs.c.step.startswith("视觉核对:"),
+            )
+        )
+        if connection is not None:
+            return connection.scalar(query)
+        with self.engine.connect() as connection:
+            return connection.scalar(query)
+
+    def preflight(self, run_id, minimum_total, maximum):
+        used = self.request_count(run_id)
+        if minimum_total > maximum or used >= maximum:
+            raise ApplicationError(
+                f"文本调用预算不足：基础处理预计至少 {minimum_total} 次，已使用 {used} 次，"
+                f"上限 {maximum} 次。请调整 PLATFORM_MODEL_MAX_CALLS 后重试；已有结果保留。",
+                type="model_request_budget",
+                non_retryable=True,
+            )
+        return {
+            "minimum_calls": minimum_total,
+            "used_calls": used,
+            "maximum_calls": maximum,
+            "remaining_calls": maximum - used,
+            "estimate_excludes_repairs_and_tool_rounds": True,
+        }
+
     def reserve_request(self, run_id, step, value, maximum):
         reference = self.objects.put_bytes(json.dumps(value, ensure_ascii=False).encode("utf-8"))
         with self.engine.begin() as connection:
@@ -157,13 +191,7 @@ class Outputs:
             )
             if prior:
                 return
-            count = connection.scalar(
-                select(func.count())
-                .select_from(db.stage_outputs)
-                .where(
-                    db.stage_outputs.c.run_id == run_id, db.stage_outputs.c.step.contains(":http-request:")
-                )
-            )
+            count = self.request_count(run_id, vision=step.startswith("视觉核对:"), connection=connection)
             if count >= maximum:
                 raise ApplicationError(
                     "本次运行已达到模型请求预算，已完成的结果和回执保留。",

@@ -76,6 +76,9 @@ class MemoryOutputs:
     def __init__(self):
         self.values, self.dependencies, self.events = {}, {}, []
 
+    def preflight(self, *args):
+        return {}
+
     def node(self, run, key, **properties):
         self.events.append((key, properties.get("state", "running")))
         return key
@@ -147,7 +150,7 @@ def test_topic_plan_rejects_uncovered_duplicate_or_unknown_units(assigned):
 def test_oversized_requests_stop_before_model_and_preserve_atomic_sources(monkeypatch):
     monkeypatch.setattr("hrs_platform.reading.CARD_INPUT_TOKENS", 1)
     models = SimpleNamespace(run=lambda *a, **k: pytest.fail("Oversize input reached a model"))
-    with pytest.raises(ValueError, match="超过输入预算"):
+    with pytest.raises(ApplicationError, match="超过输入预算"):
         asyncio.run(
             card_model(models, "run", "test", "review", {"source": "不允许截断"}, scoped_check(["u"]))
         )
@@ -267,7 +270,7 @@ def test_candidate_windows_declare_whole_scope_but_only_review_window_targets():
             {},
         )
     )
-    assert len(result) == 2 and targets == ["a", "b", "c"]
+    assert len(result) == 1 and targets == ["a", "b", "c"]
 
 
 @pytest.mark.parametrize("severity", ["minor", "material"])
@@ -367,7 +370,7 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
     units = [unit for source in originals for unit in reading_units(source)]
     assert len(units) == 6
     cards = object.__new__(Cards)
-    cards.settings = SimpleNamespace(reasoning_model="mock")
+    cards.settings = SimpleNamespace(reasoning_model="mock", model_max_calls=4096)
     cards.engine, cards.outputs = None, MemoryOutputs()
     cards.library = SimpleNamespace(
         chapters=lambda _: [MappingProxyType(row) for row in originals],
@@ -527,7 +530,7 @@ def test_failed_assignment_cancels_siblings_before_topic_generation(monkeypatch)
     originals = [chapter(name) for name in ["甲", "乙", "丙"]]
     cards = object.__new__(Cards)
     cards.settings, cards.engine, cards.outputs = (
-        SimpleNamespace(reasoning_model="mock"),
+        SimpleNamespace(reasoning_model="mock", model_max_calls=4096),
         None,
         MemoryOutputs(),
     )

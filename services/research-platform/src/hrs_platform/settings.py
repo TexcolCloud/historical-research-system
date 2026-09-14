@@ -29,7 +29,8 @@ class Settings(BaseModel):
     reasoning_model: str = "deepseek-flash"
     reading_model: str = "deepseek-flash"
     model_timeout_seconds: int = 600
-    model_max_calls: int = 512
+    model_max_calls: int = Field(default=4096, ge=1)
+    vision_max_calls: int = Field(default=4096, ge=1)
     reading_max_output: int = Field(default=16000, ge=1, le=384000)
     reasoning_max_output: int = Field(default=32000, ge=1, le=384000)
     model_max_output_ceiling: int = Field(default=64000, ge=1, le=384000)

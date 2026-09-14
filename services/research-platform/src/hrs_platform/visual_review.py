@@ -4,6 +4,7 @@ import base64
 import json
 
 from hrs_runtime.local_vision import MODEL, POLICY, chat
+from temporalio.exceptions import ApplicationError
 
 from .domain import prompts
 from .domain.generation_contracts import ImageCheck
@@ -12,7 +13,7 @@ from .outputs import Outputs, fingerprint
 from .review import Review
 
 
-def result_key(card_id, group_key):
+def result_key(card_id, group_key, revision=None):
     rules = fingerprint(
         {
             "instructions": prompts.VISION,
@@ -21,7 +22,9 @@ def result_key(card_id, group_key):
             "policy": POLICY,
         }
     )
-    return f"视觉核对:{card_id}:{group_key}:rules-{rules[:16]}"
+    return f"视觉核对:{card_id}:{group_key}:rules-{rules[:16]}" + (
+        f":candidate-{revision}" if revision else ""
+    )
 
 
 class VisualReview:
@@ -38,7 +41,7 @@ class VisualReview:
         except Exception as error:
             self.outputs.node(
                 run["id"],
-                result_key(card["id"], group["key"]),
+                result_key(card["id"], group["key"], card.get("visual_revision")),
                 kind="model",
                 label="原件视觉核验",
                 objective=f"对照原件 {group['pages']} 页",
@@ -50,7 +53,7 @@ class VisualReview:
 
     def _check(self, run, bundle, card, group):
         run_id = run["id"]
-        key = result_key(card["id"], group["key"])
+        key = result_key(card["id"], group["key"], card.get("visual_revision"))
         request_prefix = f"{key}:recovery:{run['recovery_attempt']}" if run["recovery_attempt"] else key
         cached = self.outputs.get(run_id, key)
         if cached:
@@ -111,7 +114,7 @@ class VisualReview:
                     # Its allowance remains spent; recovery uses the next bounded attempt.
                     if self.outputs.get(run_id, request_key):
                         continue
-                    self.outputs.reserve_request(run_id, request_key, request, self.settings.model_max_calls)
+                    self.outputs.reserve_request(run_id, request_key, request, self.settings.vision_max_calls)
                     content = []
                     for image in evidence:
                         ref = image["reference"]
@@ -157,7 +160,11 @@ class VisualReview:
                     continue
                 break
             if verdict is None:
-                raise ValueError("视觉核验回执无效或已达到请求上限；原始证据保留。")
+                raise ApplicationError(
+                    "视觉核验回执无效或已达到请求上限；原始证据保留。",
+                    type="visual_output_invalid",
+                    non_retryable=True,
+                )
             if all(item.result == "verified" for item in verdict.items) or not any(
                 item.result in {"unreadable", "not_located", "not_checked"} for item in verdict.items
             ):

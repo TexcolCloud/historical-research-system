@@ -21,6 +21,51 @@ class Receipt(BaseModel):
     acknowledgement: str
 
 
+def test_invalid_committed_output_is_repaired_once_without_overwriting_evidence(monkeypatch):
+    model, dependency = setup(monkeypatch)
+    model.outputs.put("run", "step", {"output": {"acknowledgement": "invalid"}}, dependency)
+    calls = []
+
+    def validate(value):
+        if value.acknowledgement != "ready":
+            raise ValueError("acknowledgement must be ready")
+
+    async def respond(*args, **kwargs):
+        calls.append(json.loads(kwargs["input"]))
+        return SimpleNamespace(final_output={"acknowledgement": "ready"})
+
+    monkeypatch.setattr(module.Runner, "run", respond)
+    for _ in range(2):
+        value = asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt, validate=validate))
+        assert value.acknowledgement == "ready"
+    assert len(calls) == 1
+    assert "acknowledgement must be ready" in str(calls[0])
+    assert model.outputs.get("run", "step")["output"]["acknowledgement"] == "invalid"
+
+
+def test_tool_enabled_terminal_receipt_is_replayed_without_provider_call(monkeypatch):
+    model, dependency = setup(monkeypatch)
+    tool = SimpleNamespace(name="lookup", params_json_schema={})
+    dependency["tools"] = [{"name": "lookup", "schema": {}}]
+    model.outputs.put("run", "step:request:1", dependency, dependency)
+    model.outputs.put(
+        "run",
+        "step:response:1:1",
+        {
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": '{"acknowledgement":"ready"}'}],
+                }
+            ],
+        },
+        dependency,
+    )
+    value = asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt, tools=[tool]))
+    assert value.acknowledgement == "ready"
+
+
 class TrackedOutputs(MemoryOutputs):
     operation = Outputs.operation
     engine = None
