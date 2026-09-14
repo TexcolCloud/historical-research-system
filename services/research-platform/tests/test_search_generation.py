@@ -101,6 +101,19 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
             assert "lexical;dur=" in response.headers["Server-Timing"]
             assert "total;dur=" in response.headers["Server-Timing"]
         count_before_rebuild = len(embeddings)
+        # Calibrated rejection is scoped to this exact book generation and semantic mode.
+        with engine.begin() as connection:
+            current = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == run))
+            connection.execute(update(db.runs).where(db.runs.c.id == run).values(result={**current,
+                'retrieval_policy':{'rule':module.EVIDENCE_RULE,'generation':first['generation'],
+                    'reranker_revision':module.MODEL_REVISIONS['BAAI/bge-reranker-v2-m3'],
+                    'min_top_score':2,'candidate_limit':30,'rerank_limit':20}}))
+        with TestClient(create_app(settings, engine)) as client:
+            response = client.get('/api/v2/search', params={'q':'粮食','book_id':book})
+            assert response.json() == [] and response.headers['X-Retrieval-Evidence'] == 'low_relevance'
+        assert search.search('粮食',book,semantic=False)
+        assert search.search('粮食',book,use_calibration=False)
+        assert search.search('粮食')  # A global search must not inherit a book threshold.
         monkeypatch.setattr(module, "CHUNK_RULE", module.CHUNK_RULE + "-test-new-version")
 
         def partial(client, actions, **kwargs):
@@ -115,7 +128,7 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
                 "retrieval_metrics"
             ]
             assert metrics["status"] == "failed" and metrics["total_ms"] > 0
-        assert all(h["generation"] == first["generation"] for h in search.search("粮食", book))
+        assert all(h["generation"] == first["generation"] for h in search.search("粮食", book, use_calibration=False))
         monkeypatch.setattr(module.helpers, "bulk", bulk)
         second = search.index(run)
         assert second["generation"] != first["generation"]

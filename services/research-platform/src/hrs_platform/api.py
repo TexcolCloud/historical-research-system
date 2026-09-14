@@ -130,8 +130,8 @@ def create_app(settings=None, engine=None):
         book_id: UUID | None = None,
         semantic: bool = True,
         limit: int = Query(default=8, ge=1, le=50),
-        candidate_limit: int = Query(default=50, ge=1, le=100),
-        rerank_limit: int = Query(default=30, ge=1, le=100),
+        candidate_limit: int | None = Query(default=None, ge=1, le=100),
+        rerank_limit: int | None = Query(default=None, ge=1, le=100),
         diverse: bool = False,
         context_chars: int = Query(default=6000, ge=1400, le=12000),
         total_chars: int = Query(default=24000, ge=1400, le=60000),
@@ -145,6 +145,7 @@ def create_app(settings=None, engine=None):
             for name, value in metrics.items()
             if name.endswith("_ms")
         )
+        response.headers['X-Retrieval-Evidence'] = metrics.get('evidence_status', 'unassessed')
         return result
 
     @app.get("/api/v2/books/{book_id}/chapters", response_model=list[ChapterSummary])

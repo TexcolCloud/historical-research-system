@@ -6,6 +6,7 @@ this splitter.
 """
 
 import re
+from functools import lru_cache
 from html.parser import HTMLParser
 from uuid import UUID, uuid5
 
@@ -317,6 +318,12 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
             }
 
 
+@lru_cache(maxsize=16)
+def context_blocks(text):
+    """Read-only Markdown ranges reused during result expansion."""
+    return blocks(text)
+
+
 def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24000, *, diverse=False, metrics=None):
     """Merge intersecting evidence and spend a separate, bounded context budget."""
     from .retrieval_ranking import diverse_order
@@ -335,7 +342,8 @@ def expand_hits(hits, load_chapter, limit=20, context_chars=6000, total_chars=24
         chapter_id = hit["chapter_id"]
         if chapter_id not in chapters:
             chapters[chapter_id] = load_chapter(chapter_id)
-            structures[chapter_id] = blocks(chapters[chapter_id]["text"])
+            text = chapters[chapter_id]['text']
+            structures[chapter_id] = context_blocks(text) if len(text) <= 1_000_000 else blocks(text)
         chapter = chapters[chapter_id]
         overlaps = [
             h

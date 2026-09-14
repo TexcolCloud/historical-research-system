@@ -3,6 +3,17 @@
 import re
 
 
+def multipart_queries(query):
+    """Split only an explicit two-part evidence request; never rewrite its facts."""
+    match = re.fullmatch(r'(?:请)?分别(?:指出|找出|提供|说明)(.+?)，以及(.+?)[。？?]?', query.strip())
+    if not match or any(c in query for c in '“”"「」'):
+        return []
+    parts = [part.strip('。？? ') for part in match.groups()]
+    if any(len(part) < 6 or '以及' in part for part in parts):
+        return []
+    return parts
+
+
 def lexical_query(query, scope):
     phrases = [query, *re.findall(r'[“"「](.+?)[”"」]', query), *re.findall(r"(?<!\d)\d{4}(?!\d)", query)]
     return {

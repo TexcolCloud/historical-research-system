@@ -83,6 +83,14 @@ def test_hybrid_retrieval_widens_candidates_but_bounds_reranking(monkeypatch):
     metrics = {}
     assert search.search('运输', rerank_limit=12, min_rerank_score=100, metrics=metrics) == []
     assert metrics['relevance_rejected'] == 12
+    assert search.search('运输', rerank_limit=12, min_top_score=100, metrics=metrics) == []
+    assert metrics['evidence_status'] == 'low_relevance'
+    assert search.search('运输', rerank_limit=12, min_top_score=5, metrics=metrics)
+    assert metrics['relevance_rejected'] == 0  # Query gate preserves lower-scoring supporting hits.
+    search._policy = {'candidate_limit':30, 'rerank_limit':20, 'min_top_score':100}
+    assert search.search('运输') == []
+    assert search.search('运输', use_calibration=False)
+    assert search.search('运输', semantic=False)  # Lexical search never inherits a model threshold.
 
 
 def test_offline_unreviewed_sample_is_rejected_before_storage_or_inference():
@@ -128,6 +136,39 @@ def test_candidate_reservation_keeps_single_lane_evidence_and_budget():
              [row('dense'), row('shared1'), row('shared2')]]
     result = candidates_for_rerank(lanes, 2, lane_quota=1)
     assert {r['id'] for r in result} == {'lexical', 'dense'}
+
+
+def test_only_explicit_two_part_requests_are_split_without_rewriting_facts():
+    from hrs_platform.retrieval_ranking import multipart_queries
+    assert multipart_queries('请分别指出甲军调动的日期，以及乙地税率所据的月份。') == ['甲军调动的日期', '乙地税率所据的月份']
+    assert multipart_queries('分别找出甲地部队的人数，以及乙地部队的番号？') == ['甲地部队的人数', '乙地部队的番号']
+    for query in ['两支部队分别有多少人？', '请分别指出日期，以及人数。',
+                  '请分别指出甲军调动的日期，以及乙地税率以及丙地税率。',
+                  '请分别指出“甲军调动的日期，以及乙地税率所据的月份”。']:
+        assert multipart_queries(query) == []
+
+
+def test_two_part_search_retains_each_clause_and_respects_shared_budget():
+    sources = [chapter('甲军三月调动。'), chapter('乙地税率按照四月材料。')]
+    hits = [{**next(retrieval_chunks(c, '书')), 'score': 100-i*200} for i,c in enumerate(sources)]
+    search = object.__new__(Search)
+    search.library = SimpleNamespace(chapter={c['id']:c for c in sources}.__getitem__)
+    calls = []
+    def single(query, book_id, **options):
+        calls.append((query, book_id, options))
+        return [hits[len(calls)-1]]
+    search.search = single
+    metrics = {}
+    result = search.search_parts(['甲军调动的日期', '乙地税率所据月份'], 'book', 2, 100, 100, metrics, None)
+    assert {h['chapter_id'] for h in result} == {c['id'] for c in sources}
+    assert all(book == 'book' and not options['decompose'] for _,book,options in calls)
+    assert sum(len(h['text']) + sum(len(c['text']) for c in h['context']) for h in result) <= 100
+    calls.clear()
+    result = search.search_parts(['甲军调动的日期', '乙地税率所据月份'], 'book', 1, 100, 100, {}, None)
+    assert len(result) == 1
+    search.search = lambda query, *args, **kwargs: [hits[0]] if query == 'known' else []
+    search.search_parts(['known', 'missing'], 'book', 2, 100, 100, metrics, None)
+    assert metrics['evidence_status'] == 'partial_evidence'
 
 
 def test_structured_table_windows_preserve_rowspans_and_long_notes_keep_owner():

@@ -11,6 +11,7 @@ from sqlalchemy import func, insert, select, update
 
 from . import schema as db
 from .books import get_run
+from .chapter_content import chapter_content
 from .domain.book_structure import (
     BOOK_SYSTEM,
     batches_for,
@@ -19,11 +20,10 @@ from .domain.book_structure import (
     validate_outline,
     validate_outline_boundaries,
 )
-from .footnotes import resolve_footnotes
 from .outputs import Outputs, fingerprint
 from .review import Review, digest
 from .structure_views import POLICY as STRUCTURE_POLICY
-from .structure_views import describe_structure, project_structure, reading_view
+from .structure_views import describe_structure, project_structure
 
 
 class OutlineItem(BaseModel):
@@ -386,9 +386,4 @@ class Library:
             )
         if not row:
             raise HTTPException(404, "章节尚未发布。")
-        body = self.review.read_json(row["content"])
-        text = "".join(part["text"] for part in body["parts"])
-        chapter = {**row, "parts": body["parts"], "text": text, 'structure': body.get('structure', []),
-                   'footnotes':resolve_footnotes(text,body['parts'])}
-        reading = reading_view(chapter)
-        return {**chapter, 'reading_text': reading['text'], 'reading_footnotes': reading['footnotes']}
+        return {**row, **chapter_content(self.settings, row['content'])}
