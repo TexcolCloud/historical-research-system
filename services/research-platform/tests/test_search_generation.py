@@ -52,11 +52,12 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         assert all("独立运输样本" in text and "运输" in text for text in texts)
         return {"scores": [1.0] * len(texts)}
 
-    monkeypatch.setattr(search, "compute", compute)
+    # The API constructs its own Search instance; isolate those calls as well.
+    monkeypatch.setattr(Search, "compute", lambda self, operation, texts, **options: compute(operation, texts, **options))
     monkeypatch.setattr(module, "query_vector", lambda *_: [1.0] + [0.0] * 1023)
     tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
-    monkeypatch.setattr(search, "tokenizer", lambda _: tokenizer)
+    monkeypatch.setattr(Search, "tokenizer", lambda self, model: tokenizer)
     bulk = module.helpers.bulk
     try:
         with engine.begin() as connection:
