@@ -35,9 +35,15 @@ previous_record 是上次阅读记录。重试只修复 repair_findings 指出�
 不能遗漏、虚构或重复单元。识别本段具体记载、谁在陈述、关键时间数量主体、否定及限定条件。
 分清当时形成的记载和后来的研究、回忆、编者说明。保留脚注、图表及跨页接续的依赖。
 candidate_quotes 只能逐字照录该单元连续文字；不校字、不改标点，不用省略号拼接。
+从对应 unit_id 的 text 直接复制，保留换行、空格、全半角、脚注符号和原字形；在 JSON 字符串中正确转义换行。
+不得从 context_units、previous_reading、摘要或记忆中重写引文。较长引文优先改选能支撑同一判断的较短连续原句。
+validation_feedback 中的 unit_id、quote_index 与 invalid_quote 指定引用错误位置，按原 text 重新摘录后自查连续匹配；
+不要把无误记录全部重写，也不要用删除关键引文来回避校验。无研究用途的单元允许 candidate_quotes 为空。
 只把影响理解的具体缺口列为 questions；不为了填满栏位提出可由现有原文回答的问题。
 这是紧凑的逐段阅读记录：每栏只写本单元新增且有研究意义的信息，无信息用空数组；不重复全篇背景。
 书目信息、短标题和接续词按其实际功能记录。勿在多个栏位重复同一记载。
+候选引文通常每单元 1—3 条，每条优先不超过 200 字；必要限定可以保留更长原句，不整段重复抄录。
+themes、structure 与 boundary_observations 仅记录本批新增内容，不复述 previous_reading；解释简洁，避免反复分析同一问题。
 """
 )
 
@@ -81,7 +87,7 @@ assignment_covers_all_book_chapters 为 true 时，本分工已经获得当前�
 CHECK_READING = (
     COMMON
     + PERSPECTIVES
-    + """对照原始 source_units 核查逐段阅读记录。覆盖每个实际 unit_id，
+    + """对照原始 source_units 核查逐段阅读记录。核验目标以 required_object_ids 为准；未指定时覆盖 source_units 的每个 unit_id。
 checked_object_ids 使用单元 ID。重点找重要事实遗漏、数字时间主体误读、否定/限制/脚注条件遗漏、
 陈述归属混淆及未披露缺口。不要仅评价文风。确无实质问题可 pass；不因没有问题而虚构问题。
 每个问题指定实际单元、严重程度和最小必要修改；无法核查的对象单列 unverified_object_ids。

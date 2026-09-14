@@ -4,6 +4,7 @@ import json
 from enum import Enum
 
 from pydantic import create_model
+from temporalio.exceptions import ApplicationError
 
 from .domain import prompts
 from .domain.digests import DIGEST_INSTRUCTIONS, partition
@@ -120,19 +121,31 @@ async def read_batch(
         if len(value.readings) != len(batch) or {row.unit_id for row in value.readings} != identities:
             raise ValueError("Every supplied unit must be read exactly once.")
         by_id = {row["unit_id"]: row["text"] for row in batch}
-        if any(quote not in by_id[row.unit_id] for row in value.readings for quote in row.candidate_quotes):
-            raise ValueError("Reading quotations must be exact continuous source text.")
+        invalid = [
+            {"unit_id": row.unit_id, "quote_index": index, "invalid_quote": quote[:500]}
+            for row in value.readings
+            for index, quote in enumerate(row.candidate_quotes)
+            if not quote.strip() or quote not in by_id[row.unit_id]
+        ]
+        if invalid:
+            raise ValueError(
+                "Reading quotations must be exact continuous source text. "
+                "以下引文未命中对应 source_units[].text，请按 unit_id 和 quote_index 重新摘录连续原文，"
+                "保留换行、空格、标点和原字形；不得从 context_units 或其他单元引用，也不能为了通过校验"
+                "删除有研究价值的引文。其他正确记录保持不变。错误位置（最多 5 项）："
+                + json.dumps(invalid[:5], ensure_ascii=False)
+            )
 
     problems, prior, accepted = None, None, {}
     for revision in range(3):
 
         def validate_repair(value, accepted=accepted):
-            validate(value)
-            if any(
-                row.unit_id in accepted and row.model_dump(mode="json") != accepted[row.unit_id]
+            # Restore fixed records deterministically; model rewrites are not repairs.
+            value.readings = [
+                type(row).model_validate(accepted[row.unit_id]) if row.unit_id in accepted else row
                 for row in value.readings
-            ):
-                raise ValueError("A local reading repair must preserve already verified unit records.")
+            ]
+            validate(value)
 
         reading = await card_model(
             models,
@@ -160,11 +173,8 @@ async def read_batch(
             for unit in batch
         ):
             payload = {
-                "source_units": [unit],
-                "context_units": [
-                    *(context or []),
-                    *(other for other in batch if other["unit_id"] != unit["unit_id"]),
-                ],
+                "source_units": batch,
+                "context_units": context or [],
                 "research_state": research_state or {},
                 "reading_record": {**prior, "readings": [record]},
                 "required_object_ids": [unit["unit_id"]],
@@ -174,7 +184,9 @@ async def read_batch(
                 run_id,
                 f"{key}:check:{fingerprint(payload)}",
                 prompts.CHECK_READING
-                + "\n只核验 source_units 及其在批次概括中的表达；其他概括不属本单元时不判遗漏。上下文不是核验对象。",
+                + "\nsource_units 保留完整阅读批次，required_object_ids 才是本轮核验目标。"
+                "reading_record 的概括、结构、问题及边界描述属于完整批次，readings 仅保留目标单元。"
+                "只对目标单元及概括中涉及它的实质问题出具核验，不把其他批次成员误判为上下文或漏读。",
                 payload,
                 scoped_check([unit["unit_id"]]),
                 parent=parent,
@@ -186,7 +198,7 @@ async def read_batch(
                 problems.append(check.model_dump(mode="json"))
         if not problems:
             return prior
-    raise ValueError("逐段阅读仍有实质核验问题，阅读记录和原始证据已保留。")
+    raise ApplicationError("逐段阅读仍有实质核验问题，阅读记录和原始证据已保留。", non_retryable=True)
 
 
 async def synthesis_readings(models, run_id, key, readings, units, parent):
@@ -255,6 +267,7 @@ async def check_candidate_coverage(
         payload = {
             "candidate": candidate.model_dump(mode="json"),
             "required_object_ids": sorted(identities),
+            "candidate_source_unit_ids": [unit["unit_id"] for unit in units],
             "source_units": batch,
             "context_units": context,
             "research_state": research_state,
@@ -267,6 +280,8 @@ async def check_candidate_coverage(
             prompts.CHECK_READING + "\n本轮核验对象是最终 candidate 与完整原文的对应关系。"
             "逐个 source_units 检查候选是否遗漏或改变影响研究结论的事实、数量口径、否定、归属和限制。"
             "卡片无需抄录所有句子，但不得因综合提要而丢失重要反证或边界。"
+            "candidate_source_unit_ids 是候选的完整研究范围，本批 source_units 只是核验窗口；"
+            "候选中涉及其他单元的范围表述不构成本批越界，不因窗口不含它们而判来源缺失。"
             "checked_object_ids/unverified_object_ids 使用本批 source_units 的 unit_id；不要使用卡片 item_id。",
             payload,
             scoped_check(identities),

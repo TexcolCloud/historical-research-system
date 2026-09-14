@@ -15,6 +15,10 @@ from .review import digest
 execution_parent = ContextVar("execution_parent", default=None)
 
 
+class StageInputMismatch(ValueError):
+    """An immutable output belongs to another model input."""
+
+
 def fingerprint(value):
     return digest(json.dumps(value, sort_keys=True, ensure_ascii=False, default=str))
 
@@ -37,7 +41,7 @@ class Outputs:
         if row is None:
             return None
         if dependency is not None and row["input_sha256"] != fingerprint(dependency):
-            raise ValueError("The saved stage belongs to different fixed input.")
+            raise StageInputMismatch("The saved stage belongs to different fixed input.")
         return json.loads(self.objects.read_bytes(row["reference"]))
 
     def put(self, run_id, step, value, dependency):

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 
 class Settings(BaseModel):
@@ -26,17 +26,24 @@ class Settings(BaseModel):
     cache_root: Path
     deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    reasoning_model: str = "deepseek-v4-pro"
+    reasoning_model: str = "deepseek-flash"
     reading_model: str = "deepseek-flash"
     model_timeout_seconds: int = 600
     model_max_calls: int = 512
-    reading_max_output: int = 16000
-    reasoning_max_output: int = 32000
+    reading_max_output: int = Field(default=16000, ge=1, le=384000)
+    reasoning_max_output: int = Field(default=32000, ge=1, le=384000)
+    model_max_output_ceiling: int = Field(default=64000, ge=1, le=384000)
     opensearch_url: str = "http://127.0.0.1:19260"
     opensearch_index: str = "hrs-platform-v2-chunks"
     retrieval_device: Literal["cpu", "cuda"] = "cuda"
     retrieval_endpoint: str = "http://127.0.0.1:18160/retrieval"
     auto_cards_enabled: bool = True
+
+    @model_validator(mode="after")
+    def output_budgets(self):
+        if max(self.reading_max_output, self.reasoning_max_output) > self.model_max_output_ceiling:
+            raise ValueError("Initial output budgets must not exceed model_max_output_ceiling.")
+        return self
 
     @classmethod
     def load(cls, root=None):
