@@ -121,8 +121,20 @@ async def read_batch(
         if len(value.readings) != len(batch) or {row.unit_id for row in value.readings} != identities:
             raise ValueError("Every supplied unit must be read exactly once.")
         by_id = {row["unit_id"]: row["text"] for row in batch}
-        if any(quote not in by_id[row.unit_id] for row in value.readings for quote in row.candidate_quotes):
-            raise ValueError("Reading quotations must be exact continuous source text.")
+        invalid = [
+            {"unit_id": row.unit_id, "quote_index": index, "invalid_quote": quote[:500]}
+            for row in value.readings
+            for index, quote in enumerate(row.candidate_quotes)
+            if not quote.strip() or quote not in by_id[row.unit_id]
+        ]
+        if invalid:
+            raise ValueError(
+                "Reading quotations must be exact continuous source text. "
+                "以下引文未命中对应 source_units[].text，请按 unit_id 和 quote_index 重新摘录连续原文，"
+                "保留换行、空格、标点和原字形；不得从 context_units 或其他单元引用，也不能为了通过校验"
+                "删除有研究价值的引文。其他正确记录保持不变。错误位置（最多 5 项）："
+                + json.dumps(invalid[:5], ensure_ascii=False)
+            )
 
     problems, prior, accepted = None, None, {}
     for revision in range(3):
