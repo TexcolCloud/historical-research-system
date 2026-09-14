@@ -15,12 +15,23 @@ notes 为空只说明当前单元未关联注释，不能据此断定漏注；�
 """
 
 
+PERSPECTIVES = """\n严格区分三层：原文或原表记载、译者或编者的更正与评述、研究者基于证据的推断。
+译注更正不能静默覆盖原表称谓或数字；分别引用双方原话，在 attribution 标注陈述者，interpretation 说明差异。
+研究者推断使用 epistemic_state=inferred；原文与注释冲突未解决时明确披露 disputed，不把译注意见写成原作者自述。
+同一原文的译注与转述不是独立互证。用 evidence_relations 的 limit/counter/background 表达限制或反对关系。
+table_scopes 表示共享行列口径；不得把共享统计数值拆成各行数值。context 中 footnote/note_owner 关系也必须保留归属。
+核验应检查这些具体归属和适用范围，不能仅因引文能匹配就判整项成立。
+"""
+
+
 READ = (
     COMMON
+    + PERSPECTIVES
     + """逐个阅读输入 source_units，按实际顺序为每个 unit_id 提供一份 readings。
 这是 assignment 文献任务的一个内部批次。利用 research_state 中的全篇目录和覆盖进度、previous_reading 续接前批；
 context_units 是理解所需的邻段、跨页续文或关联注释，只为 source_units 输出 readings，不把上下文旁读计作本批覆盖。
-如有 context_deferred_unit_ids，或遇到未能理解的指代、脚注和统计条件，应通过 read_source_units 或阅读产物回查。
+遇到未能理解的指代、脚注和统计条件，使用已提供的 context 与 context_units；证据仍不足时保留具体缺口，不能声称调用未提供的工具。
+previous_record 是上次阅读记录。重试只修复 repair_findings 指出的错误，fixed_unit_ids 中的单元记录逐字段保留；仍返回完整 readings。
 不能遗漏、虚构或重复单元。识别本段具体记载、谁在陈述、关键时间数量主体、否定及限定条件。
 分清当时形成的记载和后来的研究、回忆、编者说明。保留脚注、图表及跨页接续的依赖。
 candidate_quotes 只能逐字照录该单元连续文字；不校字、不改标点，不用省略号拼接。
@@ -33,12 +44,14 @@ candidate_quotes 只能逐字照录该单元连续文字；不校字、不改标
 
 SYNTHESIZE = (
     COMMON
+    + PERSPECTIVES
     + """依据完整阅读记录、所列原始来源单元、实际已得补查与固定书目，形成一篇通用史料卡。
 覆盖客户模板：研究对象概览、形成背景、文本结构、核心主题、关键原文、史料性质及来源层次、
 研究价值和证据边界、具体论证、局限与待查。用 kind=section 的完整条目承载各栏目，section 使用
 overview/background/structure/theme/source_criticism/research_value/limitations/open_questions。
 按材料需要决定篇幅和主题数，不机械凑论点。不得只列摘要而不保留具体历史事实和证据。
 每个 item 有临时唯一 item_id；更新时完整保留基准中未改条目和其已有 item_id。
+reading_records 的 batch_context_unit_ids 标明原阅读批次；themes/structure/boundary_observations 可能涵盖其他主题，仅作背景，不能当作本主题已取得的原文证据。
 原文证据 kind=evidence，每条 selections 指定真实 unit_id 与逐字连续 quote；跨页按原顺序分别选择。
 不连续位置不得混成无说明的单段引文。quote 不校字；解释或校改另写 interpretation 和依据。
 其他条目用 evidence_refs 引用证据的 item_id，必要时也列实际 source_unit_ids。
@@ -67,6 +80,7 @@ assignment_covers_all_book_chapters 为 true 时，本分工已经获得当前�
 
 CHECK_READING = (
     COMMON
+    + PERSPECTIVES
     + """对照原始 source_units 核查逐段阅读记录。覆盖每个实际 unit_id，
 checked_object_ids 使用单元 ID。重点找重要事实遗漏、数字时间主体误读、否定/限制/脚注条件遗漏、
 陈述归属混淆及未披露缺口。不要仅评价文风。确无实质问题可 pass；不因没有问题而虚构问题。
@@ -79,6 +93,7 @@ checked_object_ids 使用单元 ID。重点找重要事实遗漏、数字时间�
 
 CHECK_CARD = (
     COMMON
+    + PERSPECTIVES
     + """这是独立于生成调用的整卡语义核查。请从实际原文、全篇阅读记录、固定来源及原件核对结果
 检验候选：具体判断能否从证据得出，出处/引文/释读是否分清，时空主体与数量口径是否越界，
 重要反证、否定、限定、注释及缺页条件是否保留，概览和研究价值是否与所读范围相称。

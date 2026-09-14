@@ -16,10 +16,18 @@ from .books import get_run
 from .domain import prompts
 from .domain.generation_contracts import CardDraft, SemanticCheck
 from .library import Library
-from .outputs import Outputs
-from .reading import check_candidate_coverage, passed, read_batch, scoped_check, synthesis_readings
+from .outputs import Outputs, fingerprint
+from .reading import (
+    card_model,
+    check_candidate_coverage,
+    coverage,
+    passed,
+    read_batch,
+    reading_units,
+    scoped_check,
+    synthesis_readings,
+)
 from .review import Review
-from .search import chapter_chunks
 
 
 class Assignment(BaseModel):
@@ -31,6 +39,25 @@ class Assignment(BaseModel):
 class ResearchPlan(BaseModel):
     rationale: str
     assignments: list[Assignment] = Field(min_length=1, max_length=64)
+
+
+class CardTopic(BaseModel):
+    name: str
+    objective: str
+    unit_ids: list[str] = Field(min_length=1)
+
+
+class CardPlan(BaseModel):
+    rationale: str
+    topics: list[CardTopic] = Field(min_length=1, max_length=256)
+
+
+def validate_topics(plan, units):
+    assigned = [identity for topic in plan.topics for identity in topic.unit_ids]
+    if len(assigned) != len(set(assigned)) or set(assigned) != {unit["unit_id"] for unit in units}:
+        raise ValueError(
+            "Every read source unit must belong to exactly one card topic; context may be shared."
+        )
 
 
 def validate_plan(plan, chapter_ids):
@@ -57,9 +84,7 @@ def validate_candidate(card, units):
 
 
 def validate_check(check, card):
-    wanted = {item.item_id for item in card.items}
-    if set(check.checked_object_ids) | set(check.unverified_object_ids) != wanted:
-        raise ValueError("The independent check must account for every candidate item.")
+    coverage(check, {item.item_id for item in card.items})
 
 
 def validate_final_candidate(candidate, original, units):
@@ -119,9 +144,20 @@ def neighbor_context(all_units, selected):
     wanted = {0}
     for index in indexes:
         wanted.update((index - 1, index + 1))
-    return [
+    neighbors = [
         row for index, row in enumerate(all_units) if index in wanted and row["unit_id"] not in selected_ids
     ]
+    # Linked notes/owners can be far from the selected unit or across reading assignments.
+    supplements = [
+        dict(extra, unit_id=extra["id"])
+        for unit in [*selected, *neighbors]
+        for extra in unit.get("context", [])
+    ]
+    return list(
+        {
+            row["unit_id"]: row for row in [*supplements, *neighbors] if row["unit_id"] not in selected_ids
+        }.values()
+    )
 
 
 class Cards:
@@ -137,6 +173,7 @@ class Cards:
         identity = str(uuid5(UUID(parent_id), str(request_id) if request_id else "cards"))
         with self.engine.begin() as connection:
             from .deletion import require_active
+
             require_active(connection, parent["book_id"])
             created = connection.scalar(
                 pg_insert(db.runs)
@@ -230,7 +267,23 @@ class Cards:
         if cached:
             return {"run_id": run_id, "candidates": len(cached["cards"])}
         run = get_run(self.engine, run_id)
-        chapters = self.library.chapters(run["book_id"])
+        snapshot = self.outputs.get(run_id, "card-reading-sources:v2")
+        if snapshot is None:
+            chapters = [
+                {key: row[key] for key in ("id", "title", "kind", "pages", "codepoints")}
+                for row in self.library.chapters(run["book_id"])
+            ]
+            originals = [await asyncio.to_thread(self.library.chapter, row["id"]) for row in chapters]
+            all_units = [unit for chapter in originals for unit in reading_units(chapter)]
+            snapshot = self.outputs.put(
+                run_id,
+                "card-reading-sources:v2",
+                {"chapters": chapters, "units": all_units},
+                {"chapters": originals, "reading_rule": "structured-full-coverage-v2"},
+            )
+        chapters, all_units = snapshot["chapters"], snapshot["units"]
+        if not all_units:
+            raise ValueError("No reviewed source text is available for card reading.")
         bundle = Review(self.settings, self.engine).read_json(run["conversion"])
         image_pages = sorted(
             {
@@ -240,7 +293,7 @@ class Cards:
             }
         )
         Activities(self.settings, self.engine).transition(run_id, "processing", "planning")
-        main = str(uuid5(UUID(run_id), "主研究 Agent"))
+        main = str(uuid5(UUID(run_id), "主研究 Agent:v2"))
 
         @function_tool
         async def read_chapter_opening(chapter_id: str) -> str:
@@ -251,11 +304,11 @@ class Cards:
             self.outputs.node(
                 run_id, key, kind="tool", label="读取章节开头", objective=chapter_id, parent=main
             )
-            chapter = await asyncio.to_thread(self.library.chapter, chapter_id)
+            text = "".join(unit["text"] for unit in all_units if unit["chapter_id"] == chapter_id)
             result = {
                 "chapter_id": chapter_id,
-                "text": chapter["text"][:3000],
-                "complete": len(chapter["text"]) <= 3000,
+                "text": text[:3000],
+                "complete": len(text) <= 3000,
             }
             self.outputs.node(
                 run_id,
@@ -269,9 +322,10 @@ class Cards:
             )
             return json.dumps(result, ensure_ascii=False)
 
-        plan = await self.models.run(
+        plan = await card_model(
+            self.models,
             run_id,
-            "主研究 Agent",
+            "主研究 Agent:v2",
             "根据本书目录自主规划研究分工。每一章分配且只分配给一个子 Agent；相邻章节可组合。"
             "分工数量按实际内容决定，无固定层数或节点数。可调用工具读取章首辅助判断。输出每个分工的名称、目标和 chapter_ids。",
             {
@@ -285,67 +339,141 @@ class Cards:
             tools=[read_chapter_opening],
             validate=lambda value: validate_plan(value, [row["id"] for row in chapters]),
         )
-        all_units = []
-        for chapter_row in chapters:
-            chapter = await asyncio.to_thread(self.library.chapter, chapter_row["id"])
-            all_units.extend(
-                {**row, "unit_id": row["id"], "physical_page": row["pages"][0] if row["pages"] else None}
-                for row in chapter_chunks(chapter, size=5000, overlap=0)
-            )
+        source_evidence = {
+            "available_original_pages": image_pages,
+            "source_page_count": bundle["manifest"]["page_count"],
+            "text_agent_has_viewed_images": False,
+            "original_image_check": "separate_local_visual_stage" if image_pages else "no_images_supplied",
+        }
+
+        def state(units):
+            assigned = {unit["chapter_id"] for unit in units}
+            return {
+                "available_book_chapters": [{"title": row["title"], "id": row["id"]} for row in chapters],
+                "assigned_chapter_ids": sorted(assigned),
+                "assigned_unit_count": len(units),
+                "assignment_covers_all_book_chapters": {unit["unit_id"] for unit in units}
+                == {unit["unit_id"] for unit in all_units},
+                "source_evidence": source_evidence,
+                "scope": "研究范围是指定原文单元，可能仅为章内部分；关联上下文可旁读，不代表其他章节缺失。",
+            }
+
+        semaphore = asyncio.Semaphore(2)
+
+        async def read_assignment(number, assignment):
+            group = f"研究分工:v2:{number}"
+            async with semaphore:
+                with self.outputs.operation(
+                    run_id,
+                    group,
+                    assignment.name,
+                    kind="group",
+                    objective=assignment.objective,
+                    parent=main,
+                ) as branch:
+                    units = [row for row in all_units if row["chapter_id"] in assignment.chapter_ids]
+                    research_state = state(units)
+                    readings = []
+                    for offset in range(0, len(units), 2):
+                        batch = units[offset : offset + 2]
+                        reading = await read_batch(
+                            self.models,
+                            run_id,
+                            f"{group}:阅读:{offset}",
+                            batch,
+                            assignment.objective,
+                            branch,
+                            readings[-1] if readings else None,
+                            context=neighbor_context(all_units, batch),
+                            research_state=research_state,
+                        )
+                        readings.append(reading)
+                    self.outputs.put(
+                        run_id,
+                        f"{group}:readings",
+                        {"readings": readings},
+                        {"units": units, "assignment": assignment.model_dump()},
+                    )
+                    return readings
+
+        # Only independent assignments overlap. Their own batches retain previous-reading order.
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                jobs = [
+                    tasks.create_task(read_assignment(i, assignment))
+                    for i, assignment in enumerate(plan.assignments)
+                ]
+        except ExceptionGroup as failure:
+            # Preserve the provider's recoverability and useful error message after
+            # TaskGroup has cancelled siblings; keep all failures in the cause.
+            raise failure.exceptions[0] from failure
+        readings = [record for job in jobs for record in job.result()]
+        overview = await synthesis_readings(self.models, run_id, "全书主题:v2", readings, all_units, main)
+        card_plan = await card_model(
+            self.models,
+            run_id,
+            "卡片主题规划:v2",
+            "在完整逐段阅读后按研究主题规划史料卡。阅读 Agent 的分工不等于卡片主题。"
+            "同一分工可拆为多卡，同一主题可合并不同分工的单元；合并同一事件的重复叙述，保留观点冲突。"
+            "每个 unit_id 恰好分给一个主题，禁止漏掉非引文单元；标题与书目单元随相关正文归组。"
+            "主题应保持研究问题集中、原文数量适中；不要把整本长书塞入单卡。关联脚注和邻文可跨主题作为上下文。",
+            {
+                "reading_records": overview,
+                "source_units": [
+                    {key: unit[key] for key in ("unit_id", "section_path", "kind")} for unit in all_units
+                ],
+            },
+            CardPlan,
+            model=self.settings.reasoning_model,
+            parent=main,
+            validate=lambda value: validate_topics(value, all_units),
+        )
         produced = []
-        for number, assignment in enumerate(plan.assignments):
-            group = f"研究分工:{number}"
+        for number, topic in enumerate(card_plan.topics):
+            group = f"卡片主题:v2:{number}"
             with self.outputs.operation(
                 run_id,
                 group,
-                assignment.name,
+                topic.name,
                 kind="group",
-                objective=assignment.objective,
+                objective=topic.objective,
                 parent=main,
             ) as branch:
-                units = [row for row in all_units if row["chapter_id"] in assignment.chapter_ids]
+                units = [row for row in all_units if row["unit_id"] in topic.unit_ids]
                 context = neighbor_context(all_units, units)
                 available = [*units, *context]
-                research_state = {
-                    "available_book_chapters": [{"title": row["title"], "id": row["id"]} for row in chapters],
-                    "assigned_chapter_ids": assignment.chapter_ids,
-                    "assignment_covers_all_book_chapters": set(assignment.chapter_ids)
-                    == {row["id"] for row in chapters},
-                    "source_evidence": {
-                        "available_original_pages": image_pages,
-                        "source_page_count": bundle["manifest"]["page_count"],
-                        "text_agent_has_viewed_images": False,
-                        "original_image_check": "separate_local_visual_stage"
-                        if image_pages
-                        else "no_images_supplied",
-                    },
-                    "scope": "本卡研究分工仅覆盖指定章节；相邻正文和全书开头作为上下文。其他分工章节仍在本书中，不能称为书籍缺失。",
-                }
-                readings = []
-                for offset in range(0, len(units), 2):
-                    batch = units[offset : offset + 2]
-
-                    reading = await read_batch(
-                        self.models,
-                        run_id,
-                        f"{assignment.name}:阅读:{number}:{offset}",
-                        batch,
-                        assignment.objective,
-                        branch,
-                        readings[-1] if readings else None,
-                        context=neighbor_context(all_units, batch),
-                        research_state=research_state,
-                    )
-                    readings.append(reading)
+                research_state = state(units)
+                # Shared batch summaries are explicitly context, never evidence for another topic.
+                topic_readings = [
+                    {
+                        **record,
+                        "readings": [row for row in record["readings"] if row["unit_id"] in topic.unit_ids],
+                        "questions": [
+                            question
+                            for question in record["questions"]
+                            if set(question["source_unit_ids"]) <= set(topic.unit_ids)
+                        ],
+                        "batch_context_unit_ids": [row["unit_id"] for row in record["readings"]],
+                    }
+                    for record in readings
+                    if any(row["unit_id"] in topic.unit_ids for row in record["readings"])
+                ]
                 source = {
                     "units": available,
                     "assigned_unit_ids": [row["unit_id"] for row in units],
-                    "readings": readings,
-                    "assignment": assignment.model_dump(),
+                    "readings": topic_readings,
+                    "topic": topic.model_dump(),
+                    "reading_assignment_indexes": [
+                        i
+                        for i, a in enumerate(plan.assignments)
+                        if set(a.chapter_ids) & {u["chapter_id"] for u in units}
+                    ],
                 }
-                self.outputs.put(run_id, f"{group}:sources", source, {"chapter_ids": assignment.chapter_ids})
+                self.outputs.put(
+                    run_id, f"{group}:sources", source, {"topic": topic.model_dump(), "units": available}
+                )
                 synthesis_records = await synthesis_readings(
-                    self.models, run_id, group, readings, units, branch
+                    self.models, run_id, group, topic_readings, units, branch
                 )
                 # Candidate quotes retain the complete containing unit, preserving notes and attribution.
                 chosen = {
@@ -360,11 +488,12 @@ class Cards:
                     if row["candidate_quotes"]
                 )
                 synthesis_units = [unit for unit in units if unit["unit_id"] in chosen]
-                previous = None
+                previous, card = None, None
                 for revision in range(3):
-                    card = await self.models.run(
+                    card = await card_model(
+                        self.models,
                         run_id,
-                        f"{assignment.name}:制卡:{number}:{revision}",
+                        f"{group}:制卡:{revision}",
                         prompts.SYNTHESIZE,
                         {
                             "reading_records": synthesis_records,
@@ -372,7 +501,8 @@ class Cards:
                             "context_units": context,
                             "research_state": research_state,
                             "previous_check": previous,
-                            "objective": assignment.objective,
+                            "objective": topic.objective,
+                            "previous_candidate": card.model_dump(mode="json") if revision else None,
                         },
                         CardDraft,
                         model=self.settings.reasoning_model,
@@ -381,17 +511,19 @@ class Cards:
                     )
                     referenced = {selection.unit_id for item in card.items for selection in item.selections}
                     referenced.update(unit for item in card.items for unit in item.source_unit_ids)
-                    check = await self.models.run(
+                    check_payload = {
+                        "candidate": card.model_dump(mode="json"),
+                        "reading_records": synthesis_records,
+                        "source_units": [unit for unit in available if unit["unit_id"] in referenced],
+                        "context_units": context,
+                        "research_state": research_state,
+                    }
+                    check = await card_model(
+                        self.models,
                         run_id,
-                        f"{assignment.name}:独立核验:{number}:{revision}",
+                        f"{group}:独立核验:{fingerprint(check_payload)}",
                         prompts.CHECK_CARD,
-                        {
-                            "candidate": card.model_dump(mode="json"),
-                            "reading_records": synthesis_records,
-                            "source_units": [unit for unit in available if unit["unit_id"] in referenced],
-                            "context_units": context,
-                            "research_state": research_state,
-                        },
+                        check_payload,
                         SemanticCheck,
                         model=self.settings.reasoning_model,
                         parent=branch,
@@ -402,11 +534,11 @@ class Cards:
                         source_checks = await check_candidate_coverage(
                             self.models,
                             run_id,
-                            f"{assignment.name}:完整来源核验:{number}:{revision}",
+                            f"{group}:完整来源核验",
                             card,
                             units,
                             branch,
-                            assignment.objective,
+                            topic.objective,
                             context,
                             research_state,
                         )
@@ -419,14 +551,19 @@ class Cards:
                 produced.append(
                     {
                         "id": str(uuid5(UUID(run_id), group)),
-                        "assignment_index": number,
+                        "topic_index": number,
                         "candidate": card.model_dump(mode="json"),
                         "text_check": previous,
                         "source_step": f"{group}:sources",
                         "parent_node": branch,
                     }
                 )
-        self.outputs.put(run_id, "generated-cards", {"cards": produced}, {"plan": plan.model_dump()})
+        self.outputs.put(
+            run_id,
+            "generated-cards",
+            {"cards": produced},
+            {"reading_plan": plan.model_dump(), "card_plan": card_plan.model_dump()},
+        )
         Activities(self.settings, self.engine).transition(run_id, "processing", "vision")
         return {"run_id": run_id, "candidates": len(produced)}
 
@@ -482,16 +619,17 @@ class Cards:
                 <= {unit["unit_id"] for unit in review_units},
                 "scope": "指定分工与实际取得的上下文是不同范围。已提供的邻章可用于回答问题，不得误称未提供。",
             }
-            final_check = None
+            final_receipt = None
             for revision in range(3):
-                key = f"原图后定稿v2:{card['id']}:{revision}"
+                key = f"原图后定稿v3:{card['id']}:{revision}"
                 payload = {
                     "candidate": candidate.model_dump(mode="json"),
                     "source_units": review_units,
                     "original_checks": checks,
                     "research_state": research_state,
                 }
-                final_check = await self.models.run(
+                final_check = await card_model(
+                    self.models,
                     run_id,
                     key,
                     prompts.FINAL_CHECK,
@@ -501,13 +639,38 @@ class Cards:
                     parent=card["parent_node"],
                     validate=lambda value, candidate=candidate: validate_check(value, candidate),
                 )
-                if passed(final_check) or revision == 2:
+                final_receipt = final_check.model_dump(mode="json")
+                # Revised narrative can drop an unquoted limit. The initial source
+                # receipt cannot approve changed claims, even with frozen quotations.
+                if passed(final_check) and candidate != original:
+                    source_checks = await check_candidate_coverage(
+                        self.models,
+                        run_id,
+                        f"定稿完整来源:{card['id']}",
+                        candidate,
+                        [unit for unit in source["units"] if unit["unit_id"] in source["assigned_unit_ids"]],
+                        card["parent_node"],
+                        source.get("topic", {}).get("objective", candidate.title),
+                        [
+                            unit
+                            for unit in source["units"]
+                            if unit["unit_id"] not in source["assigned_unit_ids"]
+                        ],
+                        research_state,
+                    )
+                    final_receipt["source_checks"] = [
+                        result.model_dump(mode="json") for result in source_checks
+                    ]
+                    if not source_checks or not all(passed(result) for result in source_checks):
+                        final_receipt["conclusion"] = "needs_revision"
+                if (final_receipt["conclusion"] == "pass" and passed(final_check)) or revision == 2:
                     break
-                candidate = await self.models.run(
+                candidate = await card_model(
+                    self.models,
                     run_id,
                     key + ":修订",
                     prompts.FINALIZE,
-                    {**payload, "previous_check": final_check.model_dump(mode="json")},
+                    {**payload, "previous_check": final_receipt},
                     CardDraft,
                     model=self.settings.reasoning_model,
                     parent=card["parent_node"],
@@ -519,7 +682,7 @@ class Cards:
                 {
                     **card,
                     "candidate": candidate.model_dump(mode="json"),
-                    "text_check": final_check.model_dump(mode="json"),
+                    "text_check": final_receipt,
                     "initial_text_check": card["text_check"],
                     "original_candidate": card["candidate"],
                 }

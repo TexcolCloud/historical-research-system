@@ -28,3 +28,32 @@ def test_context_ids_are_excluded_from_both_model_schema_and_validated_receipts(
         coverage(
             model.model_validate({**payload, "checked_object_ids": ["target-a"]}), {"target-a", "target-b"}
         )
+
+
+@pytest.mark.parametrize(
+    "duplicate,overlap,bad_finding", [(True, False, False), (False, True, False), (False, False, True)]
+)
+def test_receipts_cannot_double_count_targets_or_attach_findings_to_another_scope(
+    duplicate, overlap, bad_finding
+):
+    model = scoped_check(["a"])
+    payload = {
+        "checked_object_ids": ["a", "a"] if duplicate else ["a"],
+        "unverified_object_ids": ["a"] if overlap else [],
+        "conclusion": "pass",
+        "reasoning_summary": "test",
+        "findings": [
+            {
+                "object_id": "context-only",
+                "severity": "minor",
+                "code": "scope",
+                "explanation": "test",
+                "source_unit_ids": [],
+                "required_change": "test",
+            }
+        ]
+        if bad_finding
+        else [],
+    }
+    with pytest.raises(ValueError):
+        coverage(model.model_validate(payload), ["a"])
