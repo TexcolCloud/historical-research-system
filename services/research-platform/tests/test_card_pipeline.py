@@ -200,6 +200,105 @@ def test_long_readings_use_token_bounded_digests_without_borrowing_unseen_source
     assert calls[0]["records"][0]["record"] == readings[0]
 
 
+@pytest.mark.parametrize("shrinks_on_last_round", [False, True])
+def test_digest_four_round_limit_routes_to_topic_recovery(monkeypatch, shrinks_on_last_round):
+    calls = []
+    units = [{"unit_id": "a", "text": "原文"}]
+    readings = [{"readings": [record(units[0])]}]
+
+    def estimate(payload):
+        # Only the synthesis target remains over its limit; each individual
+        # request is still below the 48k hard input ceiling.
+        return {"input_tokens": 1 if shrinks_on_last_round and len(calls) == 4 else 7000}
+
+    monkeypatch.setattr("hrs_platform.reading.estimate_request", estimate)
+
+    async def run(run_id, key, instructions, payload, output_type, **kwargs):
+        calls.append(key)
+        value = output_type(covered_record_indexes=[0], themes=[], structure=[], facts=[],
+                            quotation_candidates=[], questions=[], boundary_observations=[])
+        kwargs["validate"](value)
+        return value
+
+    operation = synthesis_readings(SimpleNamespace(run=run), "run", "digest", readings, units, None)
+    if shrinks_on_last_round:
+        assert asyncio.run(operation)[0]["covered_record_indexes"] == [0]
+    else:
+        with pytest.raises(ApplicationError) as failure:
+            asyncio.run(operation)
+        assert failure.value.type == "card_input_budget"
+    assert len(calls) == 4
+    assert readings[0]["readings"][0]["candidate_quotes"] == ["原文"]
+
+
+@pytest.mark.parametrize("stage", ["digest", "topic"])
+@pytest.mark.parametrize("error_type", ["model_output_invalid", "model_output_limit", "card_input_budget"])
+def test_topic_fallback_is_bounded_durable_and_validates_source_identity(monkeypatch, stage, error_type):
+    cards = object.__new__(Cards)
+    cards.outputs, cards.settings = MemoryOutputs(), SimpleNamespace(reasoning_model="mock")
+    cards.models = SimpleNamespace(run=lambda *a, **k: pytest.fail("Unexpected model call"))
+    chapters = [{"id": str(i), "title": f"第{i}章"} for i in range(270)]
+    units = [{"unit_id": f"u{i}", "chapter_id": str(i), "text": f"正文{i}①",
+              "section_path": [], "kind": "paragraph"} for i in range(270)]
+    readings = [{"readings": [record(unit) for unit in units]}]
+
+    async def digest(*args, **kwargs):
+        if stage == "digest":
+            raise ApplicationError("content failure", type=error_type, non_retryable=True)
+        return readings
+
+    async def fail(*args, **kwargs):
+        raise ApplicationError("content failure", type=error_type, non_retryable=True)
+
+    monkeypatch.setattr(module, "synthesis_readings", digest)
+    monkeypatch.setattr(module, "card_model", fail)
+    # Simulate a crash after the immutable plan commit but before its UI event.
+    def unavailable_event(*args, **kwargs):
+        raise OSError("event unavailable")
+
+    cards.outputs.node = unavailable_event
+    with pytest.raises(OSError, match="event unavailable"):
+        asyncio.run(cards._plan_topics("run", readings, units, chapters, "parent"))
+    cards.outputs.node = lambda *a, **k: "node"
+    monkeypatch.setattr(module, "synthesis_readings", lambda *a, **k: pytest.fail("Saved plan reran digest"))
+    monkeypatch.setattr(module, "card_model", lambda *a, **k: pytest.fail("Saved plan reran model"))
+    plan = asyncio.run(cards._plan_topics("run", readings, units, chapters, "parent"))
+    assert len(plan.topics) <= 64 < module.MAX_CARD_TOPICS
+    assert [uid for topic in plan.topics for uid in topic.unit_ids] == [unit["unit_id"] for unit in units]
+    receipt = cards.outputs.get("run", "card-topic-plan")
+    assert receipt["fallback_stage"] == stage and receipt["reason"] == error_type
+    assert receipt["machine_approval"] is False
+    assert readings[0]["readings"][0]["candidate_quotes"] == ["正文0①"]
+    with pytest.raises(StageInputMismatch):
+        asyncio.run(cards._plan_topics("run", readings, [*units, {**units[0], "unit_id": "new"}], chapters, "parent"))
+
+
+@pytest.mark.parametrize("stage", ["digest", "topic"])
+@pytest.mark.parametrize("error", [
+    ApplicationError("budget", type="model_request_budget", non_retryable=True),
+    ApplicationError("unknown response", type="model_request_exhausted", non_retryable=True),
+    ApplicationError("credentials", non_retryable=True),
+    OSError("S3 unavailable"), asyncio.CancelledError(),
+])
+def test_topic_planning_does_not_hide_operational_failures(monkeypatch, stage, error):
+    cards = object.__new__(Cards)
+    cards.outputs, cards.settings, cards.models = MemoryOutputs(), SimpleNamespace(reasoning_model="mock"), None
+
+    async def digest(*args, **kwargs):
+        if stage == "digest":
+            raise error
+        return []
+
+    async def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(module, "synthesis_readings", digest)
+    monkeypatch.setattr(module, "card_model", fail)
+    with pytest.raises(type(error)):
+        asyncio.run(cards._plan_topics("run", [], [], [], None))
+    assert not cards.outputs.values
+
+
 @pytest.mark.parametrize("change_summary", [False, True])
 def test_local_repair_reuses_only_unchanged_checks_and_preserves_verified_records(change_summary):
     batch = [{"unit_id": "a", "text": "原文甲"}, {"unit_id": "b", "text": "原文乙"}]
@@ -364,9 +463,10 @@ def test_global_failures_and_cancellation_do_not_become_source_fallback(error):
     assert not models.outputs.values
 
 
+@pytest.mark.parametrize("planning_failure", [None, "digest", "topic"])
 @pytest.mark.parametrize("fallback", [False, True])
 def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resumes_without_api(
-    monkeypatch, fallback
+    monkeypatch, fallback, planning_failure
 ):
     originals = [
         chapter(
@@ -402,6 +502,12 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
     )
     calls, cache, active, maximum, fail_topic = [], {}, 0, 0, True
     first_reads_ready = asyncio.Event()
+    if planning_failure == "digest":
+        async def digest(*args, **kwargs):
+            if args[2] == "全书主题:v2":
+                raise ApplicationError("digest exhausted", type="card_input_budget", non_retryable=True)
+            return await synthesis_readings(*args, **kwargs)
+        monkeypatch.setattr(module, "synthesis_readings", digest)
 
     async def run(identity, key, instructions, payload, output_type, **kwargs):
         nonlocal active, maximum, fail_topic
@@ -421,6 +527,8 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
                     ],
                 )
             elif output_type is CardPlan:
+                if planning_failure == "topic":
+                    raise ApplicationError("topic exhausted", type="model_output_invalid", non_retryable=True)
                 if fail_topic:
                     fail_topic = False
                     raise RuntimeError("temporary topic failure")
@@ -502,20 +610,29 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
         return value
 
     cards.models = SimpleNamespace(run=run, outputs=cards.outputs)
-    with pytest.raises(RuntimeError, match="temporary topic"):
-        asyncio.run(cards.generate(run_id))
-    assert cards.outputs.get(run_id, "generated-cards") is None
-    # Published library changes must not silently replace fixed evidence on retry.
-    cards.library = SimpleNamespace(chapters=lambda _: pytest.fail("Snapshot was not reused"))
+    if not planning_failure:
+        with pytest.raises(RuntimeError, match="temporary topic"):
+            asyncio.run(cards.generate(run_id))
+        assert cards.outputs.get(run_id, "generated-cards") is None
+        # Published library changes must not silently replace fixed evidence on retry.
+        cards.library = SimpleNamespace(chapters=lambda _: pytest.fail("Snapshot was not reused"))
     result = asyncio.run(cards.generate(run_id))
-    assert result["candidates"] == 3 and maximum == 2
+    assert result["candidates"] == (2 if planning_failure else 3) and maximum == 2
     read_calls = [p for k, p in calls if k.endswith(":reading:0")]
     assert sorted(unit["unit_id"] for p in read_calls for unit in p["source_units"]) == sorted(
         unit["unit_id"] for unit in units
     )
     saved = cards.outputs.get(run_id, "generated-cards")["cards"]
     first_source = cards.outputs.get(run_id, saved[0]["source_step"])
-    assert first_source["reading_assignment_indexes"] == [0, 1]
+    assert first_source["reading_assignment_indexes"] == ([0] if planning_failure else [0, 1])
+    if planning_failure:
+        package = cards.outputs.get(run_id, "card-research-package")
+        assigned = [uid for topic in package["card_plan"]["topics"] for uid in topic["unit_ids"]]
+        assert assigned == [unit["unit_id"] for unit in units]
+        assert len(package["readings"]) == 4
+        receipt = cards.outputs.get(run_id, "card-topic-plan")
+        assert receipt["fallback_stage"] == planning_failure
+        assert receipt["machine_approval"] is False
     assert all(row["text_check"]["source_checks"] for row in saved)
     if fallback:
         assert any("fallback" in key for key, _ in cards.outputs.events)

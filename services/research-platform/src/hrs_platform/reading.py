@@ -290,9 +290,11 @@ async def read_batch(
 async def synthesis_readings(models, run_id, key, readings, units, parent):
     current = readings
     known = {row["unit_id"]: row for row in units}
-    for level in range(4):
+    for level in range(5):
         if estimate_request({"records": current})["input_tokens"] <= 6000:
             return current
+        if level == 4:
+            break
         next_level = []
         groups = partition(list(range(len(current))), current.__getitem__, 6000)
         for index, group in enumerate(groups):
@@ -339,7 +341,11 @@ async def synthesis_readings(models, run_id, key, readings, units, parent):
             )
             next_level.append(result.model_dump(mode="json"))
         current = next_level
-    raise ValueError("阅读提要仍超过单次综合范围，需要拆分本次研究分工；完整阅读记录已保存。")
+    raise ApplicationError(
+        "阅读提要仍超过单次综合范围，需要拆分本次研究分工；完整阅读记录已保存。",
+        type="card_input_budget",
+        non_retryable=True,
+    )
 
 
 def coverage_batches(units):
