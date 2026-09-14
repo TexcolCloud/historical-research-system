@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections import deque
 from functools import cached_property
 from math import ceil
 from uuid import UUID, uuid5
@@ -17,6 +18,7 @@ from .activities import Activities
 from .books import get_run
 from .domain import prompts
 from .domain.generation_contracts import CardDraft, SemanticCheck
+from .domain.tokens import estimate_request
 from .library import Library
 from .outputs import Outputs, fingerprint
 from .reading import (
@@ -30,6 +32,10 @@ from .reading import (
     synthesis_readings,
 )
 from .review import Review
+
+TOPIC_PREFLIGHT_TOKENS = 24000
+MAX_TOPIC_SPLIT_DEPTH = 4
+MAX_CARD_TOPICS = 256
 
 
 class Assignment(BaseModel):
@@ -51,7 +57,7 @@ class CardTopic(BaseModel):
 
 class CardPlan(BaseModel):
     rationale: str
-    topics: list[CardTopic] = Field(min_length=1, max_length=256)
+    topics: list[CardTopic] = Field(min_length=1, max_length=MAX_CARD_TOPICS)
 
 
 def validate_topics(plan, units):
@@ -165,6 +171,27 @@ def neighbor_context(all_units, selected):
             row["unit_id"]: row for row in [*supplements, *neighbors] if row["unit_id"] not in selected_ids
         }.values()
     )
+
+
+def split_topic(topic, all_units):
+    units = [unit for unit in all_units if unit["unit_id"] in topic.unit_ids]
+    if len(units) < 2:
+        return []
+    boundaries = [
+        i
+        for i in range(1, len(units))
+        if (units[i].get("chapter_id"), units[i].get("section_path"))
+        != (units[i - 1].get("chapter_id"), units[i - 1].get("section_path"))
+    ]
+    middle = min(boundaries or range(1, len(units)), key=lambda i: abs(i - len(units) / 2))
+    return [
+        CardTopic(
+            name=f"{topic.name} · {i + 1}",
+            objective=topic.objective,
+            unit_ids=[unit["unit_id"] for unit in group],
+        )
+        for i, group in enumerate((units[:middle], units[middle:]))
+    ]
 
 
 def card_stage(run, name):
@@ -346,12 +373,23 @@ class Cards:
                     )
                 )
         bundle = Review(self.settings, self.engine).read_json(run["conversion"])
-        image_pages = sorted(
-            {
-                page["page"]
-                for page in bundle["manifest"].get("pages", [])
-                if page.get("image") in bundle["files"]
-            }
+        from .visual_review import VisualReview
+
+        required_pages = {
+            page for unit in all_units for source in unit["sources"] for page in source["pages"]
+        }
+        prepared = await asyncio.to_thread(
+            VisualReview(self.settings, self.engine).prepare, run, bundle, required_pages
+        )
+        image_pages = [row["page"] for row in prepared["pages"]]
+        self.outputs.node(
+            run_id,
+            "original-preflight",
+            kind="component",
+            label="原图来源预检",
+            objective="检查原图并按固定 PDF 恢复缺失物理页",
+            state="completed" if not prepared["issues"] else "failed",
+            details=prepared,
         )
         Activities(self.settings, self.engine).transition(run_id, "processing", "planning")
         main = str(uuid5(UUID(run_id), "主研究 Agent:v2"))
@@ -384,27 +422,58 @@ class Cards:
             return json.dumps(result, ensure_ascii=False)
 
         research = self.outputs.get(run_id, "card-research-package")
-        plan = (
-            ResearchPlan.model_validate(research["plan"])
-            if research
-            else await card_model(
-                self.models,
-                run_id,
-                "主研究 Agent:v2",
-                "根据本书目录自主规划研究分工。每一章分配且只分配给一个子 Agent；相邻章节可组合。"
-                "分工数量按实际内容决定，无固定层数或节点数。可调用工具读取章首辅助判断。输出每个分工的名称、目标和 chapter_ids。",
-                {
-                    "chapters": [
-                        {key: row[key] for key in ("id", "title", "kind", "pages", "codepoints")}
-                        for row in chapters
-                    ]
-                },
-                ResearchPlan,
-                model=self.settings.reasoning_model,
-                tools=[read_chapter_opening],
-                validate=lambda value: validate_plan(value, [row["id"] for row in chapters]),
+        saved_plan = self.outputs.get(run_id, "card-reading-plan")
+        try:
+            plan = (
+                ResearchPlan.model_validate(research["plan"])
+                if research
+                else ResearchPlan.model_validate(saved_plan)
+                if saved_plan
+                else await card_model(
+                    self.models,
+                    run_id,
+                    "主研究 Agent:v2",
+                    "根据本书目录自主规划研究分工。每一章分配且只分配给一个子 Agent；相邻章节可组合。"
+                    "分工数量按实际内容决定，无固定层数或节点数。可调用工具读取章首辅助判断。输出每个分工的名称、目标和 chapter_ids。",
+                    {
+                        "chapters": [
+                            {key: row[key] for key in ("id", "title", "kind", "pages", "codepoints")}
+                            for row in chapters
+                        ]
+                    },
+                    ResearchPlan,
+                    model=self.settings.reasoning_model,
+                    tools=[read_chapter_opening],
+                    validate=lambda value: validate_plan(value, [row["id"] for row in chapters]),
+                )
             )
-        )
+        except ApplicationError as error:
+            if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget"}:
+                raise
+            width = max(1, ceil(len(chapters) / 64))
+            plan = ResearchPlan(
+                rationale="规划收尾失败，按原目录保留完整阅读范围。",
+                assignments=[
+                    Assignment(
+                        name=f"目录通读：{chapters[offset]['title']}",
+                        objective="按原目录逐章通读后再规划研究主题。",
+                        chapter_ids=[row["id"] for row in chapters[offset : offset + width]],
+                    )
+                    for offset in range(0, len(chapters), width)
+                ],
+            )
+            self.outputs.node(
+                run_id,
+                "reading-plan-fallback",
+                kind="component",
+                label="目录阅读分工回退",
+                objective="仅分配阅读范围，不代表内容核验通过",
+                parent=main,
+                state="completed",
+                details={"reason": error.type, "machine_approval": False},
+            )
+        validate_plan(plan, [row["id"] for row in chapters])
+        self.outputs.put(run_id, "card-reading-plan", plan.model_dump(mode="json"), {"chapters": chapters})
         source_evidence = {
             "available_original_pages": image_pages,
             "source_page_count": bundle["manifest"]["page_count"],
@@ -509,8 +578,11 @@ class Cards:
                 {"snapshot": snapshot},
             )
         produced, pending = [], []
-        for number, topic in enumerate(card_plan.topics):
-            group = f"卡片主题:v2:{number}"
+        queue = deque((number, "", topic, main) for number, topic in enumerate(card_plan.topics))
+        total_topics = len(queue)
+        while queue:
+            number, path, topic, parent = queue.popleft()
+            group = f"卡片主题:v2:{number}" + (f":split:{path}" if path else "")
             base_group = group
             identity = str(uuid5(UUID(run_id), base_group))
             checkpoint = f"{base_group}:result:{revision}"
@@ -521,6 +593,17 @@ class Cards:
             prior_card = prior_cards.get(identity)
             if identity in adopted_ids and prior_card:
                 produced.append({**prior_card, "retained": True})
+                continue
+            division = self.outputs.get(run_id, f"{base_group}:division")
+            if division:
+                if prior_card:
+                    self._supersede(identity)
+                children = [CardTopic.model_validate(row) for row in division["topics"]]
+                queue.extend(
+                    (number, f"{path}.{i}" if path else str(i), child, str(uuid5(UUID(run_id), base_group)))
+                    for i, child in enumerate(children)
+                )
+                total_topics += len(children) - 1
                 continue
             if revision:
                 group += f":repair:{revision}"
@@ -544,7 +627,7 @@ class Cards:
                     topic.name,
                     kind="group",
                     objective=topic.objective,
-                    parent=main,
+                    parent=parent,
                 ) as branch:
                     units = [row for row in all_units if row["unit_id"] in topic.unit_ids]
                     context = neighbor_context(all_units, units)
@@ -593,6 +676,23 @@ class Cards:
                     self.outputs.put(
                         run_id, source_step, source, {"topic": topic.model_dump(), "units": available}
                     )
+                    preflight_input = {
+                        "instructions": prompts.COMMON + prompts.SYNTHESIZE,
+                        "input": {
+                            "source_units": units,
+                            "context_units": context,
+                            "reading_records": topic_readings,
+                        },
+                        "schema": CardDraft.model_json_schema(),
+                    }
+                    if estimate_request(preflight_input)["input_tokens"] > TOPIC_PREFLIGHT_TOKENS or (
+                        prior_card
+                        and (prior_card.get("processing_error") or {}).get("error_type")
+                        in {"model_output_limit", "card_input_budget"}
+                    ):
+                        raise ApplicationError(
+                            "主题需要缩小输入与输出范围。", type="card_input_budget", non_retryable=True
+                        )
                     synthesis_records = await synthesis_readings(
                         self.models, run_id, group, topic_readings, units, branch
                     )
@@ -683,6 +783,7 @@ class Cards:
                         {
                             "id": identity,
                             "topic_index": number,
+                            "topic_path": path,
                             "candidate": card.model_dump(mode="json"),
                             "text_check": previous,
                             "source_step": source_step,
@@ -703,9 +804,46 @@ class Cards:
             except ApplicationError as error:
                 if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget"}:
                     raise
+                depth = len(path.split(".")) if path else 0
+                children = (
+                    split_topic(topic, all_units)
+                    if error.type in {"model_output_limit", "card_input_budget"}
+                    and depth < MAX_TOPIC_SPLIT_DEPTH
+                    and total_topics < MAX_CARD_TOPICS
+                    else []
+                )
+                if children:
+                    division = {
+                        "topics": [child.model_dump() for child in children],
+                        "reason": error.type,
+                        "source_unit_ids": topic.unit_ids,
+                        "depth": depth,
+                    }
+                    self.outputs.put(
+                        run_id, f"{base_group}:division", division, {"topic": topic.model_dump()}
+                    )
+                    split_parent = self.outputs.node(
+                        run_id,
+                        base_group,
+                        kind="group",
+                        label=topic.name,
+                        objective="原主题超限，已拆分，子主题尚须独立核验。",
+                        parent=parent,
+                        state="completed",
+                        details=division,
+                    )
+                    if prior_card:
+                        self._supersede(identity)
+                    queue.extend(
+                        (number, f"{path}.{i}" if path else str(i), child, split_parent)
+                        for i, child in enumerate(children)
+                    )
+                    total_topics += len(children) - 1
+                    continue
                 pending.append(
                     {
                         "topic_index": number,
+                        "topic_path": path,
                         "name": topic.name,
                         "error_type": error.type,
                         "message": str(error)[:500],
@@ -743,7 +881,7 @@ class Cards:
                 try:
                     reviewer.check(run, bundle, card, group)
                 except ApplicationError as error:
-                    if error.type != "visual_output_invalid":
+                    if error.type not in {"visual_output_invalid", "original_missing"}:
                         raise
                     self.outputs.put(
                         run_id,
@@ -786,7 +924,16 @@ class Cards:
                     check and all(item["result"] == "verified" for item in check["items"]) for check in checks
                 )
             ):
-                finalized.append(card)
+                failures = [
+                    self.outputs.get(
+                        run_id,
+                        f"visual-error:{card['id']}:{card.get('visual_revision', 'original')}:{group['key']}",
+                    )
+                    for group in visual_groups(card["candidate"], units)
+                ]
+                finalized.append(
+                    {**card, "processing_error": next((error for error in failures if error), None)}
+                )
                 continue
             final_key = f"final-card:{card['id']}:{fingerprint({'card': card, 'checks': checks})}"
             saved = self.outputs.get(run_id, final_key)
@@ -1001,9 +1148,21 @@ class Cards:
             "adopted": sum(row["state"] == "adopted" for row in rows),
         }
 
+    def _supersede(self, identity):
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(db.cards)
+                .where(db.cards.c.id == identity, db.cards.c.state != "adopted")
+                .values(state="superseded")
+            )
+
     def list(self, book_id=None, offset=0, limit=100):
         query = (
-            select(db.cards).order_by(db.cards.c.created_at.desc(), db.cards.c.id).offset(offset).limit(limit)
+            select(db.cards)
+            .where(db.cards.c.state != "superseded")
+            .order_by(db.cards.c.created_at.desc(), db.cards.c.id)
+            .offset(offset)
+            .limit(limit)
         )
         if book_id:
             query = query.where(db.cards.c.book_id == str(book_id))

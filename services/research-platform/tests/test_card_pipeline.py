@@ -24,6 +24,13 @@ from hrs_platform.reading import (
 )
 
 
+@pytest.fixture(autouse=True)
+def no_original_io(monkeypatch):
+    monkeypatch.setattr("hrs_platform.visual_review.VisualReview.__init__", lambda self, *args: None)
+    monkeypatch.setattr("hrs_platform.visual_review.VisualReview.prepare",
+                        lambda self, run, bundle, numbers: {"pages": [], "issues": []})
+
+
 def chapter(text):
     return {
         "id": str(uuid4()),

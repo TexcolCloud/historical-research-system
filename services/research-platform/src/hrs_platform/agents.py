@@ -6,6 +6,7 @@ import json
 from agents import (
     Agent,
     AgentOutputSchema,
+    MaxTurnsExceeded,
     ModelBehaviorError,
     ModelSettings,
     OpenAIResponsesModel,
@@ -28,14 +29,56 @@ class Models:
         # Provider schema mode can still return malformed JSON. Reuse the original
         # source and durable response feedback, with a bounded total of three sends.
         parent = kwargs.pop("parent", None) or execution_parent.get()
+        close_dependency = {
+            "instructions": instructions,
+            "payload": payload,
+            "schema": output_type.model_json_schema(),
+            "model": kwargs.get("model"),
+            "tools": [tool.name for tool in kwargs.get("tools") or []],
+        }
+        close_key = f"{key}:tool-closeout:{fingerprint(close_dependency)}"
+
+        async def close(history):
+            options = {name: value for name, value in kwargs.items() if name != "tools"}
+            from .reading import card_model
+
+            return await card_model(
+                self,
+                run_id,
+                close_key + ":final",
+                instructions
+                + "\n工具读取阶段已结束。仅使用给定任务和已取得信息输出最终结果，不能要求继续调用工具。",
+                {"task": payload, "completed_tool_history": history},
+                output_type,
+                parent=execution_parent.get() or parent,
+                **options,
+            )
+
+        saved = None
+        if kwargs.get("tools"):
+            saved = await asyncio.to_thread(self.outputs.get, run_id, close_key, close_dependency)
         with self.outputs.operation(
             run_id, key, key[:100], kind="agent", objective=instructions[:200], parent=parent
         ):
+            if saved is not None:
+                return await close(saved["history"])
             for attempt in range(3):
                 try:
                     return await self._attempt(
                         run_id, key, instructions, payload, output_type, parent=parent, **kwargs
                     )
+                except MaxTurnsExceeded as error:
+                    if not kwargs.get("tools"):
+                        raise ApplicationError(
+                            "收尾步骤未能返回完整输出。", type="model_output_invalid", non_retryable=True
+                        ) from error
+                    history = (
+                        [item.to_input_item() for item in error.run_data.new_items] if error.run_data else []
+                    )
+                    await asyncio.to_thread(
+                        self.outputs.put, run_id, close_key, {"history": history}, close_dependency
+                    )
+                    return await close(history)
                 except StageInputMismatch:
                     raise
                 except (ModelBehaviorError, ValueError) as error:
@@ -287,7 +330,7 @@ class Models:
                         ensure_ascii=False,
                         default=str,
                     ),
-                    max_turns=6 if tools else 1,
+                    max_turns=4 if tools else 1,
                     run_config=RunConfig(tracing_disabled=True),
                 )
             value = output_type.model_validate(result.final_output)
