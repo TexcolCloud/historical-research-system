@@ -11,7 +11,7 @@ dependencies = [
   "fastapi>=0.141.1,<0.142", "pydantic>=2.13.5,<3", "uvicorn>=0.35,<1",
   "SQLAlchemy>=2.0.52,<2.1", "psycopg[binary]>=3.3.5,<4", "alembic>=1.19.2,<2",
   "python-dotenv>=1,<2", "temporalio>=1.16,<2", "httpx>=0.28,<1", "hrs-runtime==0.1.0",
-  "pypdf>=6,<7", "filelock>=3.32,<4", "psutil>=7.2,<8",
+  "pypdfium2>=5,<6", "pypdf>=6,<7", "filelock>=3.32,<4", "psutil>=7.2,<8",
   "openai-agents>=0.22.1,<0.23", "Pillow>=11,<13", "tokenizers>=0.22,<0.23",
   "opensearch-py>=3,<4", "langchain-text-splitters>=0.3,<2",
   "markdown-it-py>=3,<5", "OpenCC>=1.1,<2",

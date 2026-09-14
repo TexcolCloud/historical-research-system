@@ -377,3 +377,40 @@ def test_invalid_output_budgets_fail_before_runtime(overrides):
         **base, reading_max_output=384000, reasoning_max_output=384000, model_max_output_ceiling=384000
     )
     assert maximum.reading_max_output == 384000
+
+
+def test_tool_exhaustion_closes_without_tools_and_replays_saved_history(monkeypatch):
+    model, dependency = setup(monkeypatch)
+    from agents import MaxTurnsExceeded
+
+    tool = SimpleNamespace(name="lookup", params_json_schema={})
+    calls = []
+
+    async def respond(agent, **kwargs):
+        calls.append((len(agent.tools), kwargs["input"]))
+        if agent.tools:
+            error = MaxTurnsExceeded("turn limit")
+            error.run_data = SimpleNamespace(
+                new_items=[
+                    SimpleNamespace(
+                        to_input_item=lambda: {
+                            "type": "function_call_output",
+                            "call_id": "one",
+                            "output": "retained opening",
+                        }
+                    )
+                ]
+            )
+            raise error
+        assert "retained opening" in kwargs["input"]
+        return SimpleNamespace(final_output={"acknowledgement": "ready"})
+
+    monkeypatch.setattr(module.Runner, "run", respond)
+    for _ in range(2):
+        assert (
+            asyncio.run(
+                model.run("run", "step", "test", dependency["input"], Receipt, tools=[tool])
+            ).acknowledgement
+            == "ready"
+        )
+    assert [count for count, _ in calls] == [1, 0]

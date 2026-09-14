@@ -2,8 +2,12 @@
 
 import base64
 import json
+from importlib.metadata import version
+from io import BytesIO
 
+from botocore.exceptions import BotoCoreError, ClientError
 from hrs_runtime.local_vision import MODEL, POLICY, chat
+from hrs_runtime.object_storage import ObjectStorageError
 from temporalio.exceptions import ApplicationError
 
 from .domain import prompts
@@ -11,6 +15,8 @@ from .domain.generation_contracts import ImageCheck
 from .domain.vision import original_crops
 from .outputs import Outputs, fingerprint
 from .review import Review
+
+RENDER_POLICY = f"pdfium-{version('pypdfium2')}-216dpi-v1"
 
 
 def result_key(card_id, group_key, revision=None):
@@ -35,6 +41,134 @@ class VisualReview:
             Review(settings, engine),
         )
 
+    def prepare(self, run, bundle, numbers):
+        """Verify source objects, restoring physical PDF pages without OCR or approval."""
+        manifest = bundle["manifest"]
+        mapped = {row["page"]: row for row in manifest.get("pages", [])}
+        ready, issues = [], []
+        for number in sorted(set(numbers)):
+            key = f"original-page:{run['source']['sha256']}:{number}:{RENDER_POLICY}"
+            retained = self.outputs.get(run["id"], key)
+            reference = (
+                retained["reference"]
+                if retained
+                else bundle["files"].get(mapped.get(number, {}).get("image"))
+            )
+            try:
+                if reference is None:
+                    raise FileNotFoundError("Missing page mapping")
+                self.review.objects.verify(reference)
+            except (FileNotFoundError, ObjectStorageError, ClientError, BotoCoreError) as error:
+                if isinstance(error, (ClientError, BotoCoreError)) and not self._missing(error):
+                    raise ApplicationError(
+                        f"原件第 {number} 页暂时无法读取，存储重试后仍失败。",
+                        type="original_unavailable",
+                        non_retryable=False,
+                    ) from error
+                try:
+                    reference = self._restore_page(run, manifest, number, key)
+                except ApplicationError as failure:
+                    if failure.type != "original_missing":
+                        raise
+                    issues.append(
+                        {
+                            "page": number,
+                            "error_type": failure.type,
+                            "message": str(failure),
+                            "required_action": "恢复原 PDF/页图或修正来源映射后重试；不能跳过原图核验。",
+                        }
+                    )
+                    continue
+            ready.append({"page": number, "reference": reference})
+        report = {"pages": ready, "issues": issues, "machine_approval": False}
+        self.outputs.put(
+            run["id"],
+            f"original-preflight:{fingerprint(report)}",
+            report,
+            {"source": run["source"], "numbers": sorted(set(numbers))},
+        )
+        return report
+
+    @staticmethod
+    def _missing(error):
+        return isinstance(error, ClientError) and str(error.response.get("Error", {}).get("Code")) in {
+            "404",
+            "NoSuchKey",
+            "NotFound",
+        }
+
+    def _restore_page(self, run, manifest, number, key):
+        import pypdfium2 as pdfium
+
+        source = run["source"]
+        if (
+            manifest.get("source_sha256") != source.get("sha256")
+            or source.get("media_type") != "application/pdf"
+            or not isinstance(number, int)
+            or not 1 <= number <= manifest.get("page_count", 0)
+        ):
+            raise ApplicationError(
+                f"原件第 {number} 页缺失，无法确认原 PDF 与物理页映射。",
+                type="original_missing",
+                non_retryable=True,
+            )
+        try:
+            path = self.review.objects.materialize(
+                source, self.settings.cache_root / run["id"] / "original-recovery.pdf"
+            )
+            document = pdfium.PdfDocument(str(path))
+            try:
+                if len(document) != manifest["page_count"]:
+                    raise ApplicationError(
+                        f"原 PDF 页数与转换记录不符，不能恢复第 {number} 页。",
+                        type="original_missing",
+                        non_retryable=True,
+                    )
+                page = document[number - 1]
+                try:
+                    bitmap = page.render(scale=3)
+                    try:
+                        with BytesIO() as buffer:
+                            image = bitmap.to_pil()
+                            try:
+                                image.save(buffer, format="PNG")
+                            finally:
+                                image.close()
+                            reference = self.review.objects.put_bytes(buffer.getvalue(), "image/png")
+                    finally:
+                        bitmap.close()
+                finally:
+                    page.close()
+            finally:
+                document.close()
+        except (ClientError, BotoCoreError) as error:
+            missing = self._missing(error)
+            raise ApplicationError(
+                f"原 PDF 无法读取，未恢复第 {number} 页。",
+                type="original_missing" if missing else "original_unavailable",
+                non_retryable=missing,
+            ) from error
+        except (ObjectStorageError, pdfium.PdfiumError) as error:
+            raise ApplicationError(
+                f"原 PDF 无法通过完整性检查或渲染，未恢复第 {number} 页。",
+                type="original_missing",
+                non_retryable=True,
+            ) from error
+        # The content-addressed object can be restored again if it was deleted.
+        self.outputs.put(
+            run["id"],
+            key,
+            {
+                "reference": reference,
+                "page": number,
+                "source_sha256": source["sha256"],
+                "renderer": RENDER_POLICY,
+                "machine_approval": False,
+            },
+            {"source": source, "page": number},
+        )
+        return reference
+
     def check(self, run, bundle, card, group):
         try:
             return self._check(run, bundle, card, group)
@@ -58,15 +192,14 @@ class VisualReview:
         cached = self.outputs.get(run_id, key)
         if cached:
             return cached
-        pages = {row["page"]: row for row in bundle["manifest"]["pages"]}
-        evidence = [
-            {
-                "image_id": f"original-page-{number}",
-                "page": number,
-                "reference": bundle["files"][pages[number]["image"]],
-            }
-            for number in group["pages"]
-        ]
+        prepared = self.prepare(run, bundle, group["pages"])
+        if prepared["issues"]:
+            raise ApplicationError(
+                json.dumps(prepared["issues"], ensure_ascii=False),
+                type="original_missing",
+                non_retryable=True,
+            )
+        evidence = [{"image_id": f"original-page-{row['page']}", **row} for row in prepared["pages"]]
         self.outputs.node(
             run_id,
             key,

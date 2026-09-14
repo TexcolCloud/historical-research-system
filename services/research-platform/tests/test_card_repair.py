@@ -22,7 +22,7 @@ from hrs_platform.visual_review import result_key
 
 
 @pytest.fixture
-def harness(platform, monkeypatch):
+def harness(platform, monkeypatch, request):
     settings, engine = platform
     book, run = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
@@ -39,7 +39,7 @@ def harness(platform, monkeypatch):
             )
         )
     cards = Cards(settings.model_copy(update={"model_max_calls": 4096}), engine)
-    originals = [chapter(f"合成原文{i}，运送{i}吨。") for i in range(3)]
+    originals = [chapter(f"合成原文{i}，运送{i}吨。") for i in range(getattr(request, "param", 3))]
     units = [unit for original in originals for unit in reading_units(original)]
     cards.library = SimpleNamespace(
         chapters=lambda _: originals,
@@ -147,6 +147,10 @@ def harness(platform, monkeypatch):
         )
 
     monkeypatch.setattr("hrs_platform.visual_review.VisualReview.check", lambda self, *args: vision(*args))
+    monkeypatch.setattr(
+        "hrs_platform.visual_review.VisualReview.prepare",
+        lambda self, run, bundle, numbers: {"pages": [], "issues": []},
+    )
     monkeypatch.setattr("agents.Runner.run", lambda *a, **k: pytest.fail("Real model API called"))
     cards.models = SimpleNamespace(run=respond, outputs=cards.outputs)
     return cards, run, units, scenario, calls
@@ -256,3 +260,135 @@ def test_generation_refuses_insufficient_budget_before_any_model(harness):
     with pytest.raises(ApplicationError, match="预算不足"):
         asyncio.run(cards.generate(run))
     assert calls == []
+
+
+def test_tool_closeout_failure_uses_durable_catalogue_reading_plan(harness):
+    cards, run, _, _, calls = harness
+    original = cards.models.run
+
+    async def fail_plan(*args, **kwargs):
+        if args[4] is ResearchPlan:
+            raise ApplicationError("plan invalid", type="model_output_invalid", non_retryable=True)
+        return await original(*args, **kwargs)
+
+    cards.models.run = fail_plan
+    assert finish(cards, run)["state"] == "completed"
+    plan = cards.outputs.get(run, "card-reading-plan")
+    assert len({identity for row in plan["assignments"] for identity in row["chapter_ids"]}) == 3
+    assert "目录" in plan["rationale"]
+
+
+def test_output_limit_splits_only_failed_topic_and_reuses_children_on_restart(harness):
+    cards, run, units, scenario, calls = harness
+    scenario["combined"] = True
+    original = cards.models.run
+    failed_sizes = []
+
+    async def bounded(*args, **kwargs):
+        if args[4] is CardDraft and len(args[3]["source_units"]) > 1:
+            failed_sizes.append(len(args[3]["source_units"]))
+            raise ApplicationError("output too long", type="model_output_limit", non_retryable=True)
+        return await original(*args, **kwargs)
+
+    cards.models.run = bounded
+    result = finish(cards, run)
+    assert result["state"] == "completed" and result["adopted"] == 3
+    generated = cards.outputs.get(run, "generated-cards")
+    assigned = [
+        uid
+        for card in generated["cards"]
+        for uid in cards.outputs.get(run, card["source_step"])["assigned_unit_ids"]
+    ]
+    assert sorted(assigned) == sorted(unit["unit_id"] for unit in units)
+    assert len(set(card["id"] for card in generated["cards"])) == 3
+    before = len(calls)
+    assert finish(cards, run)["adopted"] == 3
+    assert len(calls) == before and failed_sizes == [3, 2]
+
+
+def test_atomic_overflow_stays_pending_without_recursive_retries(harness):
+    cards, run, _, scenario, calls = harness
+    original = cards.models.run
+
+    async def overflow(*args, **kwargs):
+        if args[4] is CardDraft and args[3]["objective"] == "topic-1":
+            raise ApplicationError("atomic overflow", type="model_output_limit", non_retryable=True)
+        return await original(*args, **kwargs)
+
+    cards.models.run = overflow
+    result = finish(cards, run)
+    assert result["state"] == "needs_revision" and result["adopted"] == 2
+    pending = get_run(cards.engine, run)["result"]["pending_topics"]
+    assert len(pending) == 1 and pending[0]["topic_path"] == ""
+
+
+def test_topic_preflight_splits_before_draft_calls_and_depth_is_bounded(harness, monkeypatch):
+    cards, run, units, scenario, calls = harness
+    scenario["combined"] = True
+    monkeypatch.setattr(module, "TOPIC_PREFLIGHT_TOKENS", 1)
+    monkeypatch.setattr(module, "MAX_TOPIC_SPLIT_DEPTH", 1)
+    result = finish(cards, run)
+    assert result["state"] == "needs_revision" and result["cards"] == 0
+    pending = get_run(cards.engine, run)["result"]["pending_topics"]
+    assert len(pending) == 2
+    assert sorted(uid for row in pending for uid in row["unit_ids"]) == sorted(
+        unit["unit_id"] for unit in units
+    )
+    assert not any(":制卡:" in key for key, _ in calls)
+
+
+def test_split_recovery_retires_failed_parent_even_after_worker_interruption(harness, monkeypatch):
+    cards, run, _, scenario, _ = harness
+    scenario["combined"] = True
+    original = cards.models.run
+
+    async def limited_final(*args, **kwargs):
+        if args[1].startswith("原图后定稿"):
+            raise ApplicationError("final output too long", type="model_output_limit", non_retryable=True)
+        return await original(*args, **kwargs)
+
+    cards.models.run = limited_final
+    assert finish(cards, run)["state"] == "needs_revision"
+    parent = str(cards.list()[0]["id"])
+    retry_run(cards.engine, run, str(uuid4()))
+    cards.models.run = original
+    retire = cards._supersede
+
+    def interrupted(*args):
+        raise OSError("worker interrupted after split checkpoint")
+
+    monkeypatch.setattr(cards, "_supersede", interrupted)
+    with pytest.raises(OSError):
+        asyncio.run(cards.generate(run))
+    monkeypatch.setattr(cards, "_supersede", retire)
+    assert finish(cards, run)["state"] == "completed"
+    assert cards.get(parent)["state"] == "superseded"
+    assert parent not in {str(row["id"]) for row in cards.list()}
+
+
+@pytest.mark.parametrize("harness", [6], indirect=True)
+def test_replayed_split_tree_reserves_all_leaf_slots_before_new_splits(harness, monkeypatch):
+    cards, run, units, scenario, calls = harness
+    scenario["combined"] = True
+    monkeypatch.setattr(module, "MAX_CARD_TOPICS", 3)
+    root = module.CardTopic(name="topic-0", objective="topic-0", unit_ids=[unit["unit_id"] for unit in units])
+    children = module.split_topic(root, units)
+    grandchildren = module.split_topic(children[1], units)
+    for key, rows in [
+        ("卡片主题:v2:0:division", children),
+        ("卡片主题:v2:0:split:1:division", grandchildren),
+    ]:
+        cards.outputs.put(run, key, {"topics": [row.model_dump() for row in rows]}, {})
+    original = cards.models.run
+
+    async def limited(*args, **kwargs):
+        if args[4] is CardDraft and len(args[3]["source_units"]) > 1:
+            raise ApplicationError("limit", type="model_output_limit", non_retryable=True)
+        return await original(*args, **kwargs)
+
+    cards.models.run = limited
+    result = finish(cards, run)
+    assert result["adopted"] == 1 and result["state"] == "needs_revision"
+    pending = get_run(cards.engine, run)["result"]["pending_topics"]
+    assert len(pending) == 2
+    assert cards.outputs.get(run, "卡片主题:v2:0:split:0:division") is None
