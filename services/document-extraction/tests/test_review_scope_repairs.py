@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from document_extraction.artifacts import _issue_range
 from document_extraction.semantic_completion import complete_document
 from hrs_runtime.review_scope import figure_page
@@ -66,6 +67,7 @@ def test_map_carrier_is_not_plain_body_text():
 
 def test_failed_broad_proposal_does_not_hold_unchanged_paragraphs(tmp_path):
     import json
+
     from document_extraction.artifacts import write_outputs
 
     source = tmp_path / 'source.pdf'
@@ -82,3 +84,29 @@ def test_failed_broad_proposal_does_not_hold_unchanged_paragraphs(tmp_path):
     cards = json.loads((tmp_path / 'review-cards.json').read_text('utf-8'))['cards']
     assert len(cards) == 1
     assert cards[0]['region']['text'] == '遗产10具。'
+
+
+@pytest.mark.parametrize('before,after', [('甲地\n运输120吨。', '甲地运输120吨。'), ('甲地运输120吨。', '甲地\n运输120吨。')])
+def test_unverified_paragraph_restructure_exports_local_pending_review(tmp_path, before, after):
+    import json
+
+    from document_extraction.artifacts import write_outputs
+
+    source = tmp_path / 'source.pdf'
+    source.write_bytes(b'synthetic-source')
+    image = tmp_path / 'original.png'
+    image.write_bytes(b'synthetic-image')
+    original = '前段无误。\n\n' + before + '\n\n后段无误。'
+    proposal = dict(before=before, after=after, source_reading=after,
+                    location='第二段', kind='organization', explanation='段内换行需要确认')
+    # A repeated proposal in the independent recheck must remain unresolved.
+    result = complete_document([dict(page=1, text=original, image_path=image)], None, tmp_path,
+                              reviewer=lambda *_: verdict([proposal]))
+    assert not result['pages'][0]['verified']
+    assert result['pages'][0]['text'] == original
+    write_outputs(source, tmp_path, result, ['fixture'], {})
+    cards = json.loads((tmp_path / 'review-cards.json').read_text('utf-8'))['cards']
+    assert len(cards) == 1
+    assert cards[0]['region']['text'] == before
+    assert cards[0]['reviewer_required'] == 'human'
+    assert cards[0]['region']['kind'] != 'page'

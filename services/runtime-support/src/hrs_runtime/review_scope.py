@@ -37,11 +37,14 @@ def locate(text, excerpt):
 def split_change(change):
     """Separate actual inline edits from unchanged context; keep paragraph restructuring atomic."""
     before, after = change['before'], change['after']
+    base = change.get('start_before', 0)
     edits = [(a, b, c, d) for tag, a, b, c, d in
              SequenceMatcher(None, before, after, autojunk=False).get_opcodes() if tag != 'equal']
-    if any('\n' in before[a:b] or '\n' in after[c:d] for a, b, c, d in edits):
-        return [change]
-    base = change.get('start_before', 0)
+    if any(char in before[a:b] or char in after[c:d]
+           for a, b, c, d in edits for char in '\r\n'):
+        # Proposals have no offsets; callers may only supply the located start.
+        # Derive both bounds on every path, including unsplit structural edits.
+        return [{**change, 'start_before': base, 'end_before': base + len(before)}]
     return [{**change, 'before':before[a:b], 'after':after[c:d],
              'start_before':base+a, 'end_before':base+b} for a, b, c, d in edits]
 

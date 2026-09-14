@@ -166,3 +166,34 @@ def test_verified_broad_proposal_applies_only_actual_local_edits(platform):
     )
     assert review.get(ids[0])["replacement"] is None
     assert review.objects.read_bytes(review.get(ids[1])["replacement"]).decode() == "遗尸10具。"
+
+
+def test_structural_proposal_refresh_keeps_affected_scope_pending(platform):
+    before = "甲地\n运输120吨。"
+    original = before + "\n\n后段无误。"
+    review, run, ids = prepared(platform, original, [before, "后段无误。"], [])
+    page = {
+        "text": original,
+        "receipts": [{"verdict": {"review_state": "completed"}}],
+        "concerns": [{
+            "kind": "organization", "excerpt": before, "explanation": "段内换行需要确认",
+            "proposed_change": {"before": before, "after": before.replace("\n", "")},
+        }],
+    }
+    assert refresh_unresolved(review, [review.get(i) for i in ids], page, {"start": 0}, {"kind": "test"}) == 1
+    assert review.get(ids[0])["state"] == "pending"
+    assert review.get(ids[0])["reasons"] == ["段内换行需要确认"]
+    assert review.get(ids[1])["state"] == "approved"
+
+
+def test_verified_structural_patch_derives_bounds_without_cross_scope_adoption(platform):
+    before = "甲地\n运输120吨。"
+    original = before + "\n\n后段无误。"
+    review, run, ids = prepared(platform, original, [before, "后段无误。"], [])
+    changes = [{"before": original, "after": original.replace("\n", ""), "start_before": 0}]
+    page = {"verified": True, "changes": changes}
+    assert apply_verified_page(review, [review.get(i) for i in ids], page, {"start": 0}, {"kind": "test"}) == 0
+    page["changes"] = [{"before": before, "after": before.replace("\n", ""), "start_before": 0}]
+    assert apply_verified_page(review, [review.get(i) for i in ids], page, {"start": 0}, {"kind": "test"}) == 2
+    assert review.objects.read_bytes(review.get(ids[0])["replacement"]).decode() == before.replace("\n", "")
+    assert review.get(ids[1])["replacement"] is None
