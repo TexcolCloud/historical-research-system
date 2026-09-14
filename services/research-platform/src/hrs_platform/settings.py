@@ -26,7 +26,7 @@ class Settings(BaseModel):
     cache_root: Path
     deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    reasoning_model: str = "deepseek-v4-pro"
+    reasoning_model: str = "deepseek-flash"
     reading_model: str = "deepseek-flash"
     model_timeout_seconds: int = 600
     model_max_calls: int = 512

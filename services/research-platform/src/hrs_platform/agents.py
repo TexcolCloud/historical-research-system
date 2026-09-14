@@ -53,16 +53,21 @@ class Models:
         parent=None,
         validate=None,
     ):
+        # Callers explicitly select the reasoning model for planning/synthesis.
+        # Model-name equality cannot distinguish roles when both use Flash.
+        reasoning_call = model is not None
+        effort = "high" if reasoning_call else "low"
         model = model or self.settings.reading_model
         maximum = (
             self.settings.reasoning_max_output
-            if model == self.settings.reasoning_model
+            if reasoning_call
             else self.settings.reading_max_output
         )
         schema = AgentOutputSchema(output_type)
         dependency = {
             "model": model,
             "max_output_tokens": maximum,
+            "reasoning_effort": effort,
             "instructions": instructions,
             "input": payload,
             "schema": schema.json_schema(),
@@ -196,7 +201,7 @@ class Models:
             model_settings=ModelSettings(
                 store=False,
                 max_tokens=maximum,
-                reasoning={"effort": "high" if model == self.settings.reasoning_model else "low"},
+                reasoning={"effort": effort},
                 parallel_tool_calls=False,
             ),
         )

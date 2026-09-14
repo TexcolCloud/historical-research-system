@@ -33,6 +33,7 @@ def setup(monkeypatch):
         reading_model="mock",
         reasoning_model="mock",
         reasoning_max_output=100,
+        reading_max_output=100,
         deepseek_api_key=SecretStr("synthetic"),
         deepseek_base_url="http://unused.invalid",
         model_timeout_seconds=10,
@@ -42,6 +43,7 @@ def setup(monkeypatch):
     dependency = {
         "model": "mock",
         "max_output_tokens": 100,
+        "reasoning_effort": "low",
         "instructions": "test",
         "input": {"source": "fixed"},
         "schema": AgentOutputSchema(Receipt).json_schema(),
@@ -124,3 +126,22 @@ def test_changed_input_never_reuses_old_receipt_and_preserves_it(monkeypatch, co
         {"output": {"acknowledgement": "old source"}} if committed else None
     )
     assert model.outputs.events[-1] == ("step", "completed")
+
+
+def test_shared_model_keeps_reading_and_reasoning_budgets_separate(monkeypatch):
+    model, _ = setup(monkeypatch)
+    model.settings.reading_max_output = 50
+    seen = []
+
+    async def respond(agent, **kwargs):
+        seen.append((agent.model_settings.reasoning.effort, agent.model_settings.max_tokens))
+        return SimpleNamespace(final_output={"acknowledgement": "ready"})
+
+    monkeypatch.setattr(module.Runner, "run", respond)
+
+    async def exercise():
+        await model.run("run", "read", "test", {}, Receipt)
+        await model.run("run", "reason", "test", {}, Receipt, model="mock")
+
+    asyncio.run(exercise())
+    assert seen == [("low", 50), ("high", 100)]
