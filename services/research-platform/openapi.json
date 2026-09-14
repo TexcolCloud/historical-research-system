@@ -1090,6 +1090,46 @@
         }
       }
     },
+    "/api/v2/runs/{run_id}/structure": {
+      "get": {
+        "summary": "Reading Structure",
+        "operationId": "reading_structure_api_v2_runs__run_id__structure_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StructureReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/reviews/{issue_id}/decisions": {
       "post": {
         "summary": "Review Decision",
@@ -1642,6 +1682,31 @@
             },
             "type": "array",
             "title": "Footnotes"
+          },
+          "reading_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reading Text"
+          },
+          "reading_footnotes": {
+            "items": {
+              "$ref": "#/components/schemas/FootnoteLink"
+            },
+            "type": "array",
+            "title": "Reading Footnotes"
+          },
+          "structure": {
+            "items": {
+              "$ref": "#/components/schemas/StructureItem"
+            },
+            "type": "array",
+            "title": "Structure"
           }
         },
         "type": "object",
@@ -2762,6 +2827,93 @@
           "score"
         ],
         "title": "SearchHit"
+      },
+      "StructureItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Pages"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "before": {
+            "type": "string",
+            "title": "Before",
+            "default": ""
+          },
+          "after": {
+            "type": "string",
+            "title": "After",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "pages",
+          "status",
+          "reason"
+        ],
+        "title": "StructureItem"
+      },
+      "StructureReport": {
+        "properties": {
+          "policy": {
+            "type": "string",
+            "title": "Policy"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StructureItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy",
+          "available"
+        ],
+        "title": "StructureReport"
       },
       "UploadRequest": {
         "properties": {

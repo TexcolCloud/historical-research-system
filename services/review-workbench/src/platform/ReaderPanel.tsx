@@ -4,6 +4,7 @@ import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { RenderedMarkdown } from "../editor/RenderedMarkdown";
 import { client } from "./client";
+import StructurePanel from "./StructurePanel";
 
 const chapterOptions = (id: string) =>
   queryOptions({
@@ -119,6 +120,17 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
             导出全书 Markdown
           </a>
         </div>
+        {chapter.data && (
+          <StructurePanel
+            key={id}
+            runId={chapter.data.run_id}
+            items={chapter.data.structure ?? []}
+            onLocate={(value) => {
+              setPage(value);
+              setOriginal(true);
+            }}
+          />
+        )}
         <div
           className={
             original
@@ -131,8 +143,12 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
               <>
                 <h1>{chapter.data.title}</h1>
                 <RenderedMarkdown
-                  markdown={chapter.data.text}
-                  footnotes={chapter.data.footnotes}
+                  markdown={chapter.data.reading_text ?? chapter.data.text}
+                  footnotes={
+                    chapter.data.reading_text != null
+                      ? chapter.data.reading_footnotes
+                      : chapter.data.footnotes
+                  }
                   assetBaseUrl={`/api/v2/runs/${chapter.data.run_id}/artifacts`}
                 />
               </>
@@ -149,11 +165,18 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
                   value={page ?? chapter.data.pages[0]}
                   onChange={(e) => setPage(Number(e.target.value))}
                 >
-                  {chapter.data.pages.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
+                  {Array.from(
+                    new Set([
+                      ...chapter.data.pages,
+                      ...(page == null ? [] : [page]),
+                    ]),
+                  )
+                    .sort((a, b) => a - b)
+                    .map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
                 </select>
               </label>
               <iframe

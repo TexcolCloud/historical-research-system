@@ -20,8 +20,10 @@ from .domain.book_structure import (
     validate_outline_boundaries,
 )
 from .footnotes import resolve_footnotes
-from .outputs import Outputs
+from .outputs import Outputs, fingerprint
 from .review import Review, digest
+from .structure_views import POLICY as STRUCTURE_POLICY
+from .structure_views import describe_structure, project_structure, reading_view
 
 
 class OutlineItem(BaseModel):
@@ -136,6 +138,22 @@ class Library:
             raise ValueError("Human review must finish before ingestion or partitioning.")
         run = get_run(self.engine, run_id)
         bundle = self.review.read_json(run["conversion"])
+        spans = self._source_spans(run_id, bundle)
+        if not spans:
+            raise ValueError("No usable source text; the source remains preserved.")
+        return self.outputs.put(
+            run_id,
+            "reviewed-source",
+            {
+                "spans": spans,
+                "source_sha256": run["source"]["sha256"],
+                "review_revision": status["revision"],
+                "page_count": bundle['manifest']["page_count"],
+            },
+            {"conversion": run["conversion"]["sha256"], "review_revision": status["revision"]},
+        )
+
+    def _source_spans(self, run_id, bundle):
         files, manifest = bundle["files"], bundle["manifest"]
         markdown = self.review.objects.read_bytes(files[manifest["candidate_markdown"]]).decode("utf-8")
         pages = self.review.read_json(files[manifest["page_boundaries"]])["pages"]
@@ -161,20 +179,45 @@ class Library:
                     "text": self.review.objects.read_bytes(row["replacement"]).decode("utf-8"),
                 }
             )
-        spans = reviewed_spans(markdown, pages, corrections, run_id)
-        if not spans:
-            raise ValueError("No usable source text; the source remains preserved.")
-        return self.outputs.put(
-            run_id,
-            "reviewed-source",
-            {
-                "spans": spans,
-                "source_sha256": run["source"]["sha256"],
-                "review_revision": status["revision"],
-                "page_count": manifest["page_count"],
-            },
-            {"conversion": run["conversion"]["sha256"], "review_revision": status["revision"]},
-        )
+        return reviewed_spans(markdown, pages, corrections, run_id)
+
+    def structure(self, run_id):
+        """Reuse retained structure and current decisions; no OCR or model calls."""
+        run = get_run(self.engine, run_id)
+        status = self.review.status(run_id)
+        dependency = {'policy': STRUCTURE_POLICY, 'conversion': run['conversion'],
+                      'review_revision': status['revision']}
+        key = 'reading-structure:' + fingerprint(dependency)
+        if run['conversion']:
+            cached = self.outputs.get(run_id, key, dependency)
+            if cached is not None:
+                return cached
+            bundle = self.review.read_json(run['conversion'])
+            files = bundle['files']
+            spans = self._source_spans(run_id, bundle)
+            parts = [{'span_id': s['id'], 'start': s['start_offset'], 'end': s['end_offset'],
+                      'text': s['selected_text'], 'source': s['source_record']} for s in spans]
+            completion = self.review.read_json(files['completion.json'])['pages'] if 'completion.json' in files else []
+            pages = {p['page'] for p in bundle['manifest']['pages']}
+            if (run['result'] or {}).get('review_initialized'):
+                with self.engine.connect() as connection:
+                    pending = connection.execute(select(db.review_issues.c.page, db.review_issues.c.content).where(
+                        db.review_issues.c.run_id == run_id, db.review_issues.c.state == 'pending')).mappings().all()
+                unresolved = {p for row in pending for p in self.review.read_json(row['content']).get('pages', [row['page']])}
+                approved = pages - unresolved
+            else:
+                approved = {p['page'] for p in bundle['manifest']['pages'] if p['status'] == 'release-accepted'}
+        else:
+            draft = self.review.ocr_draft(run)
+            if draft is None:
+                return {'policy': STRUCTURE_POLICY, 'available': False, 'items': []}
+            files, checkpoint = draft
+            parts = [{'text': p['text'] + '\n\n', 'source': {'pages': [p['page']]}} for p in checkpoint['pages']]
+            completion, approved = [], set()
+        metadata = self.review.read_json(files['paddle-restructure.json']) if 'paddle-restructure.json' in files else {}
+        document = {'text': ''.join(p['text'] for p in parts), 'parts': parts}
+        report = describe_structure(document, metadata, completion, approved)
+        return self.outputs.put(run_id, key, report, dependency) if run['conversion'] else report
 
     async def organize(self, run_id):
         source = self.prepare(run_id)
@@ -182,6 +225,9 @@ class Library:
         cached = self.outputs.get(run_id, "organization")
         if cached:
             return cached
+        structure = self.structure(run_id)
+        heading_evidence = [{k: item[k] for k in ('title', 'pages', 'level')}
+                            for item in structure['items'] if item['kind'] == 'heading' and item['status'] == 'ready']
         batches = list(batches_for(spans, 12000))
         overview = await self.models.run(
             run_id,
@@ -189,7 +235,7 @@ class Library:
             BOOK_SYSTEM
             + "\n本步只制定 organization_outline。heading_candidates 来自整书扫描，可能包括小节和重复页眉。"
             "结合目录及首尾内容确定顶层章、序跋和附录，不把物理页或下级小节单独当成章。",
-            outline_context(spans),
+            {**outline_context(spans), 'source_heading_hierarchy': heading_evidence},
             BookOutline,
             validate=lambda value: validate_outline(value.model_dump()),
         )
@@ -197,6 +243,8 @@ class Library:
         for index, batch in enumerate(batches):
             payload = {
                 "organization_outline": outline,
+                'source_heading_hierarchy': [h for h in heading_evidence if any(
+                    p in h['pages'] for s in batch for p in s['source_record']['pages'])],
                 "opened_items": [event["title"] for event in events if event["kind"] == "article"],
                 "active_boundary": events[-1] if events else None,
                 "units": [
@@ -258,8 +306,11 @@ class Library:
         organization = self.outputs.get(run_id, "organization")
         if not organization:
             raise ValueError("Chapter organization is required.")
+        structure = self.structure(run_id)
         rows = []
         for position, group in enumerate(organization["groups"]):
+            group = {**group, 'structure_policy': STRUCTURE_POLICY,
+                     'structure': project_structure(structure, group['parts'])}
             identity = str(uuid5(UUID(run_id), f"chapter:{position}"))
             content = self.review.objects.put_bytes(json.dumps(group, ensure_ascii=False).encode("utf-8"))
             rows.append(
@@ -334,4 +385,7 @@ class Library:
             raise HTTPException(404, "章节尚未发布。")
         body = self.review.read_json(row["content"])
         text = "".join(part["text"] for part in body["parts"])
-        return {**row, "parts": body["parts"], "text": text, 'footnotes':resolve_footnotes(text,body['parts'])}
+        chapter = {**row, "parts": body["parts"], "text": text, 'structure': body.get('structure', []),
+                   'footnotes':resolve_footnotes(text,body['parts'])}
+        reading = reading_view(chapter)
+        return {**chapter, 'reading_text': reading['text'], 'reading_footnotes': reading['footnotes']}

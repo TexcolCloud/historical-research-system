@@ -28,6 +28,7 @@ from .contracts import (
     ReviewReceipt,
     RunSummary,
     SearchHit,
+    StructureReport,
     TusHook,
     UploadRequest,
     UploadSession,
@@ -223,6 +224,10 @@ def create_app(settings=None, engine=None):
     @app.get("/api/v2/runs/{run_id}/review-pages/{page}", response_model=ConversionPage)
     def review_page(run_id: UUID, page: int):
         return review.page(run_id, page)
+
+    @app.get('/api/v2/runs/{run_id}/structure', response_model=StructureReport)
+    def reading_structure(run_id: UUID):
+        return library.structure(str(run_id))
 
     @app.post("/api/v2/reviews/{issue_id}/decisions", response_model=ReviewReceipt)
     def review_decision(issue_id: UUID, request: ReviewDecision):
