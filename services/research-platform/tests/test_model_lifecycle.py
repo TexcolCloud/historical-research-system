@@ -85,8 +85,10 @@ def test_every_exit_after_start_closes_agent_and_restores_parent(monkeypatch, fa
 
         monkeypatch.setattr(module.Runner, "run", cancel)
         expected = asyncio.CancelledError
-    with pytest.raises(expected):
+    with pytest.raises(expected) as error:
         asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt))
+    if failure == "exhausted":
+        assert error.value.type == "model_request_exhausted"
     assert model.outputs.events[-1] == ("step", "failed")
     assert execution_parent.get() is None
 

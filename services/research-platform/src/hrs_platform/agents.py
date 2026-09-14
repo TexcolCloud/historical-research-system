@@ -107,6 +107,7 @@ class Models:
             )
             is not None
         ):
+            output_failure = False
             previous = None
             response_number = 1
             # A tool round can exhaust its output after earlier completed tool calls.
@@ -120,6 +121,7 @@ class Models:
                 and previous.get("status") == "incomplete"
                 and (previous.get("incomplete_details") or {}).get("reason") == "max_output_tokens"
             ):
+                output_failure = True
                 used_limit = previous.get("max_output_tokens") or request_maximum
                 if used_limit >= self.settings.model_max_output_ceiling:
                     raise ApplicationError(
@@ -138,6 +140,7 @@ class Models:
                 self.outputs.get, run_id, f"{request_prefix}:validation-error:{attempt}"
             )
             if failure:
+                output_failure = True
                 validation_feedback.append({"attempt": attempt, "problem": failure["problem"]})
             if not tools:
                 if previous and previous.get("status") == "completed":
@@ -153,6 +156,7 @@ class Models:
                         if validate:
                             validate(recovered)
                     except ValueError as error:
+                        output_failure = True
                         if not failure:
                             validation_feedback.append({"attempt": attempt, "problem": str(error)[:4000]})
                     else:
@@ -179,7 +183,7 @@ class Models:
         if attempt > 3:
             raise ApplicationError(
                 "该模型步骤已达到三次请求上限，原始回执保留。",
-                type="model_output_invalid",
+                type="model_output_invalid" if output_failure else "model_request_exhausted",
                 non_retryable=True,
             )
         await asyncio.to_thread(

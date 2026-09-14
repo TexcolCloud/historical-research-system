@@ -338,6 +338,7 @@ def test_local_model_failure_falls_back_without_more_calls(error_type, stage):
     "error",
     [
         ApplicationError("budget", type="model_request_budget", non_retryable=True),
+        ApplicationError("unknown response", type="model_request_exhausted", non_retryable=True),
         ApplicationError("credentials", non_retryable=True),
         OSError("S3 unavailable"),
         asyncio.CancelledError(),
