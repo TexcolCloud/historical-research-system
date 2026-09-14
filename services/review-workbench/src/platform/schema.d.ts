@@ -510,6 +510,8 @@ export interface components {
             verdict: {
                 [key: string]: unknown;
             };
+            /** Quote Locations */
+            quote_locations?: components["schemas"]["CardQuoteLocation"][];
         };
         /** CardDraft */
         CardDraft: {
@@ -531,6 +533,29 @@ export interface components {
             evidence_relations: components["schemas"]["DraftRelation"][];
             /** No Argument Reason */
             no_argument_reason: string | null;
+        };
+        /** CardQuoteLocation */
+        CardQuoteLocation: {
+            /** Item Id */
+            item_id: string;
+            /** Selection Index */
+            selection_index: number;
+            /** Unit Id */
+            unit_id: string;
+            /**
+             * Start
+             * @description Start in source-unit text, measured in Unicode code points.
+             */
+            start: number | null;
+            /**
+             * End
+             * @description Exclusive end in source-unit text, measured in Unicode code points.
+             */
+            end: number | null;
+            /** Pages */
+            pages: number[];
+            /** Issue */
+            issue: string | null;
         };
         /** CardSource */
         CardSource: {

@@ -98,6 +98,10 @@ python -m hrs_platform.cli evaluate --run-id <书籍运行UUID> --cases cases.js
 
 /api/v2 提供 books、uploads、runs/retry、reviews/draft/decisions、chapters、search、cards、executions、exports 和 SSE。原件支持 HTTP Range。Markdown 导出保存于 S3，删除下载缓存后仍可读取；卡片导出保留完整日期、实体、证据关系和核验记录。
 
+史料卡查看页展示形成/事件时间及其依据、人物地点身份依据、原文陈述归属、推断/分歧状态、上下文、表格口径、限制、其他解释和待查问题。引用证据、日期依据与论证关系可在卡内双向定位；跳转不改写路由片段。卡片选择写入 URL，支持返回历史与缓存切换，切卡清除上一张的出处面板。
+
+详情接口的 `quote_locations` 按条目及引文序号返回来源单元内的 Unicode 码点范围（左闭右开）与实际 PDF 物理页，复用导出的引文定位逻辑；重复引文按 occurrence 定位，跨页保留全部命中页。网页在原始 Markdown 文本摘录中高亮指定引文，完整渲染正文可另外展开。缺少正文或页码依据时明确提示，不用来源单元首页冒充引文页码。新增定位数据按需读取计算，不修改既有卡片、审核记录或原文。
+
 ~~~powershell
 .cache/engineering-envs/research-platform/Scripts/python.exe -m hrs_platform.export_openapi
 node services/review-workbench/tooling/openapi/node_modules/openapi-typescript/bin/cli.js services/research-platform/openapi.json -o services/review-workbench/src/platform/schema.d.ts

@@ -653,6 +653,7 @@ a:focus-visible {
 .platform-card-content {
   min-width: 0;
   position: relative;
+  align-items: start;
 }
 .platform-card-content > article,
 .platform-search-panel article {
@@ -680,14 +681,241 @@ a:focus-visible {
   border: 1px solid #dacda6;
   border-radius: 9px;
   padding: 22px;
-  position: sticky;
-  bottom: 12px;
-  max-height: 50vh;
+  margin-top: 20px;
+  max-height: 75vh;
   overflow: auto;
+  min-width: 0;
 }
 .platform-card-content pre,
 .platform-search-panel pre {
   overflow: auto;
+}
+.platform-card-content > article {
+  margin-top: 0;
+  min-width: 0;
+}
+.platform-card-heading h1 {
+  font-size: 26px;
+  line-height: 1.4;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.platform-card-heading > p {
+  color: #607b8f;
+  line-height: 1.8;
+}
+.platform-card-tags,
+.platform-card-item-meta,
+.platform-card-references,
+.platform-card-outline,
+.platform-card-page-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.platform-card-tags span,
+.platform-card-item-meta span {
+  padding: 3px 9px;
+  border-radius: 5px;
+  background: #eef4f7;
+  color: #4f6d83;
+  font-size: 12px;
+}
+.platform-card-item-meta [data-state="inferred"],
+.platform-card-item-meta [data-state="disputed"] {
+  background: #fcf2dc;
+  color: #835a1d;
+}
+.platform-card-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 22px 0;
+}
+.platform-card-dates > section {
+  padding: 16px;
+  border: 1px solid #e0e8ee;
+  border-radius: 7px;
+  background: #f8fafb;
+  min-width: 0;
+}
+.platform-card-dates h2,
+.platform-card-explanation h3,
+.platform-card-relations h3,
+.platform-card-quote-context h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 8px 0;
+  color: #37566c;
+}
+.platform-card-dates p {
+  margin: 8px 0;
+  font-variant-numeric: tabular-nums;
+}
+.platform-card-dates small,
+.platform-card-label {
+  color: #637d8e;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.platform-card-label {
+  display: block;
+  margin: 6px 0;
+}
+.platform-card-entities {
+  margin: 16px 0;
+  border-bottom: 1px solid #e5ebf0;
+  padding-bottom: 16px;
+}
+.platform-card-entities ul,
+.platform-card-relations ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.platform-card-entities li + li,
+.platform-card-relations li + li {
+  border-top: 1px solid #e5ebf0;
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.platform-card-entities p,
+.platform-card-relations p,
+.platform-card-attribution {
+  font-size: 14px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.platform-card-outline {
+  padding: 10px 0;
+  border-bottom: 1px solid #dfe7ed;
+  gap: 4px;
+}
+.platform-card-content button {
+  white-space: normal;
+  height: auto;
+  min-height: 40px;
+  text-align: left;
+}
+.platform-card-references button,
+.platform-card-outline button {
+  padding: 6px 8px;
+  justify-content: flex-start;
+}
+.platform-card-references {
+  gap: 4px;
+}
+.platform-card-item {
+  scroll-margin: 24px;
+}
+.platform-card-item:focus,
+.platform-card-source:focus {
+  outline: 2px solid #7e9eaf;
+  outline-offset: 5px;
+}
+.platform-card-explanation {
+  margin: 16px 0;
+}
+.platform-card-explanation > ul {
+  padding-left: 22px;
+}
+.platform-card-relations {
+  padding: 14px 16px;
+  background: #f6f9fb;
+  border-radius: 7px;
+  margin: 16px 0;
+}
+.platform-card-relations .platform-status {
+  margin-bottom: 0;
+}
+.platform-card-source h2 {
+  margin: 0;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.platform-card-quote-context pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.9;
+  max-height: 36vh;
+  margin: 14px 0;
+}
+.platform-card-quote-context mark {
+  background: #f7dfa2;
+  color: #493710;
+  padding: 2px 0;
+}
+.platform-card-page-links {
+  margin: 14px 0;
+}
+.platform-card-page-links a {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  color: #426a87;
+  text-decoration: underline;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+.platform-card-full-source {
+  margin-top: 18px;
+  border-top: 1px solid #e5dabb;
+  padding-top: 14px;
+}
+.platform-card-full-source .prose {
+  overflow-x: auto;
+}
+.platform-card-content summary {
+  cursor: pointer;
+  min-height: 40px;
+  padding: 8px 0;
+  line-height: 1.6;
+}
+.platform-card-verdict {
+  margin-top: 24px;
+  color: #627d90;
+}
+.platform-card-verdict pre {
+  font-size: 12px;
+  max-height: 320px;
+}
+.platform-card-loading {
+  min-height: 420px;
+  padding: 32px;
+  background: #fff;
+  border-radius: 9px;
+  color: #627d90;
+}
+@media (min-width: 1400px) {
+  .platform-card-content[data-source-open="true"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 20px;
+  }
+  .platform-card-source {
+    position: sticky;
+    top: 12px;
+    margin-top: 0;
+  }
+}
+@media (max-width: 650px) {
+  .platform-card-content > article,
+  .platform-card-source {
+    padding: 18px;
+  }
+  .platform-card-dates {
+    grid-template-columns: 1fr;
+  }
+  .platform-card-heading h1 {
+    font-size: 22px;
+  }
+  .platform-card-content button,
+  .platform-card-page-links a {
+    min-height: 44px;
+  }
 }
 .platform-search-panel {
   margin-top: 24px;
