@@ -1449,6 +1449,13 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Verdict"
+          },
+          "quote_locations": {
+            "items": {
+              "$ref": "#/components/schemas/CardQuoteLocation"
+            },
+            "type": "array",
+            "title": "Quote Locations"
           }
         },
         "type": "object",
@@ -1540,6 +1547,75 @@
           "no_argument_reason"
         ],
         "title": "CardDraft"
+      },
+      "CardQuoteLocation": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "selection_index": {
+            "type": "integer",
+            "title": "Selection Index"
+          },
+          "unit_id": {
+            "type": "string",
+            "title": "Unit Id"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start",
+            "description": "Start in source-unit text, measured in Unicode code points."
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End",
+            "description": "Exclusive end in source-unit text, measured in Unicode code points."
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Pages"
+          },
+          "issue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "selection_index",
+          "unit_id",
+          "start",
+          "end",
+          "pages",
+          "issue"
+        ],
+        "title": "CardQuoteLocation"
       },
       "CardSource": {
         "properties": {

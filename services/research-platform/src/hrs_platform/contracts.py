@@ -221,10 +221,21 @@ class CardSource(BaseModel):
     end: int
 
 
+class CardQuoteLocation(BaseModel):
+    item_id: str
+    selection_index: int
+    unit_id: str
+    start: int | None = Field(description="Start in source-unit text, measured in Unicode code points.")
+    end: int | None = Field(description="Exclusive end in source-unit text, measured in Unicode code points.")
+    pages: list[int]
+    issue: str | None
+
+
 class CardDetail(CardSummary):
     candidate: CardDraft
     units: list[CardSource]
     verdict: dict
+    quote_locations: list[CardQuoteLocation] = Field(default_factory=list)
 
 
 class SearchContext(BaseModel):

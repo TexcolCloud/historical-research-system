@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
-import { RenderedMarkdown } from "../editor/RenderedMarkdown";
+import CardReading from "./CardReading";
 import { client, readCards } from "./client";
 import StartCardsButton from "./StartCardsButton";
-import { useSearchParams } from "react-router-dom";
+
 export default function CardsPanel({
   bookId,
   published = false,
@@ -12,40 +12,52 @@ export default function CardsPanel({
   bookId: string;
   published?: boolean;
 }) {
-  const [params] = useSearchParams();
-  const [selected, setSelected] = useState(""),
-    [sourceId, setSourceId] = useState("");
+  const [params, setParams] = useSearchParams();
   const cards = useQuery({
     queryKey: ["platform", "cards", bookId],
     queryFn: ({ signal }) => readCards(bookId, signal),
   });
-  const id = selected || params.get("card") || cards.data?.[0]?.id || "";
+  const requested = params.get("card");
+  const id = requested
+    ? cards.data?.find((row) => row.id === requested)?.id
+    : cards.data?.[0]?.id;
   const card = useQuery({
     queryKey: ["platform", "card", id],
     enabled: Boolean(id),
+    staleTime: 30_000,
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/cards/{card_id}", {
-        params: { path: { card_id: id } },
+        params: { path: { card_id: id! } },
         signal,
       });
       if (!data) throw new Error("无法读取卡片详情。");
       return data;
     },
   });
-  const source = card.data?.units.find((unit) => unit.unit_id === sourceId);
-  if (cards.isError || card.isError)
-    return <p role="alert">{cards.error?.message || card.error?.message}</p>;
+  if (cards.isError)
+    return (
+      <div role="alert">
+        <p>{cards.error.message}</p>
+        <Button variant="outline" onClick={() => void cards.refetch()}>
+          重新读取列表
+        </Button>
+      </div>
+    );
   if (!cards.data?.length)
     return (
       <section className="platform-empty">
         <h2>{cards.isPending ? "正在读取卡片…" : "还没有生成的卡片"}</h2>
-        <p>本书入库后自动开始制卡，可在任务运行中查看实际分工和进展。</p>
-        {published && !cards.isPending && <StartCardsButton bookId={bookId} />}
+        <p>
+          制卡任务完成后，卡片会显示在这里；已有任务可在“任务运行”中查看进展。
+        </p>
+        {published && !cards.isPending && (
+          <StartCardsButton key={bookId} bookId={bookId} />
+        )}
       </section>
     );
   return (
     <>
-      <StartCardsButton bookId={bookId} />
+      <StartCardsButton key={bookId} bookId={bookId} />
       <div className="platform-reader-grid">
         <nav aria-label="本书史料卡">
           {cards.data.map((row) => (
@@ -53,8 +65,9 @@ export default function CardsPanel({
               key={row.id}
               aria-current={row.id === id ? "true" : undefined}
               onClick={() => {
-                setSelected(row.id);
-                setSourceId("");
+                const next = new URLSearchParams(params);
+                next.set("card", row.id);
+                setParams(next);
               }}
             >
               {row.title}
@@ -66,75 +79,22 @@ export default function CardsPanel({
             </button>
           ))}
         </nav>
-        <div className="platform-card-content">
-          {card.data && (
-            <article>
-              <span className="platform-status">
-                {card.data.state === "adopted"
-                  ? "已通过机器核验"
-                  : "此卡尚不可作为已核验成果使用"}
-              </span>
-              <h1>{card.data.title}</h1>
-              <a
-                className="platform-export"
-                href={`/api/v2/cards/${card.data.id}/export`}
-              >
-                导出卡片 Markdown
-              </a>
-              <p>
-                {card.data.candidate.document_type} ·{" "}
-                {card.data.candidate.source_layer}
-              </p>
-              {card.data.candidate.items.map((item) => (
-                <section key={item.item_id} className="platform-card-item">
-                  <h2>{item.title}</h2>
-                  <RenderedMarkdown markdown={item.text} />
-                  {item.interpretation && <p>{item.interpretation}</p>}
-                  {item.limitations?.map((limit) => (
-                    <p className="platform-inline-status" key={limit}>
-                      {limit}
-                    </p>
-                  ))}
-                  {item.selections?.map((quote, index) => (
-                    <blockquote key={index}>
-                      <RenderedMarkdown markdown={quote.quote} />
-                      <Button
-                        variant="link"
-                        onClick={() => setSourceId(quote.unit_id)}
-                      >
-                        查看引文出处
-                      </Button>
-                    </blockquote>
-                  ))}
-                </section>
-              ))}
-              <details>
-                <summary>机器核验记录</summary>
-                <pre>{JSON.stringify(card.data.verdict, null, 2)}</pre>
-              </details>
-            </article>
-          )}
-          {source && (
-            <aside className="platform-card-source">
-              <div className="platform-review-actions">
-                <strong>
-                  {source.title} · 原件 {source.pages.join("、")} 页
-                </strong>
-                <Button variant="ghost" onClick={() => setSourceId("")}>
-                  收起出处
-                </Button>
-              </div>
-              <RenderedMarkdown markdown={source.text} />
-              <a
-                target="_blank"
-                rel="noreferrer"
-                href={`/api/v2/runs/${source.run_id}/artifacts/original.pdf#page=${source.pages[0]}`}
-              >
-                对照原书
-              </a>
-            </aside>
-          )}
-        </div>
+        {!id ? (
+          <p role="alert">本书没有这张史料卡，请从左侧选择。</p>
+        ) : card.isError ? (
+          <div role="alert">
+            <p>{card.error.message}</p>
+            <Button variant="outline" onClick={() => void card.refetch()}>
+              重新读取卡片
+            </Button>
+          </div>
+        ) : card.isPending ? (
+          <div className="platform-card-loading" role="status">
+            正在读取所选卡片…
+          </div>
+        ) : (
+          card.data && <CardReading key={card.data.id} card={card.data} />
+        )}
       </div>
     </>
   );

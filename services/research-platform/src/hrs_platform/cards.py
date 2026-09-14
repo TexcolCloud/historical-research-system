@@ -100,13 +100,18 @@ def validate_final_candidate(candidate, original, units):
         )
 
 
-def quote_pages(unit, selection):
+def quote_range(unit, selection):
     start = -1
     for _ in range(selection.get("occurrence", 0) + 1):
         start = unit["text"].find(selection["quote"], start + 1)
         if start < 0:
             raise ValueError("Quotation is absent from the reviewed source.")
     end = start + len(selection["quote"])
+    return start, end
+
+
+def quote_pages(unit, selection):
+    start, end = quote_range(unit, selection)
     pages = sorted(
         {
             page
@@ -782,8 +787,41 @@ class Cards:
             )
         if row is None:
             raise HTTPException(404, "卡片不存在。")
-        return {
+        detail = {
             **row,
             **self.review.read_json(row["content"]),
             "verdict": self.review.read_json(row["checks"]),
         }
+        units = {unit["unit_id"]: unit for unit in detail["units"]}
+        locations = []
+        for item in detail["candidate"]["items"]:
+            # Older candidates remain exportable without inventing item identities.
+            if not item.get("item_id"):
+                continue
+            for index, selection in enumerate(item.get("selections", [])):
+                start, end, pages, issue = None, None, [], None
+                unit = units.get(selection["unit_id"])
+                if unit is None:
+                    issue = "未找到此引文的来源正文。"
+                else:
+                    try:
+                        start, end = quote_range(unit, selection)
+                    except ValueError:
+                        issue = "引文未能在保存的来源正文中精确定位。"
+                    else:
+                        try:
+                            pages = quote_pages(unit, selection)
+                        except (ValueError, KeyError):
+                            issue = "引文已定位，但缺少可核实的原件页码。"
+                locations.append(
+                    {
+                        "item_id": item["item_id"],
+                        "selection_index": index,
+                        "unit_id": selection["unit_id"],
+                        "start": start,
+                        "end": end,
+                        "pages": pages,
+                        "issue": issue,
+                    }
+                )
+        return {**detail, "quote_locations": locations}
