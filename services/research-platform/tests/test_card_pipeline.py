@@ -76,6 +76,10 @@ class MemoryOutputs:
     def __init__(self):
         self.values, self.dependencies, self.events = {}, {}, []
 
+    def node(self, run, key, **properties):
+        self.events.append((key, properties.get("state", "running")))
+        return key
+
     def get(self, run, key, dependency=None):
         if key in self.values and dependency is not None:
             if self.dependencies[key] != fingerprint(dependency):
@@ -226,7 +230,9 @@ def test_local_repair_reuses_only_unchanged_checks_and_preserves_verified_record
         kwargs["validate"](value)
         return value
 
-    result = asyncio.run(read_batch(SimpleNamespace(run=run), "run", "read", batch, "scope", None))
+    result = asyncio.run(
+        read_batch(SimpleNamespace(run=run, outputs=MemoryOutputs()), "run", "read", batch, "scope", None)
+    )
     assert result["readings"][1]["attribution"] == "译注"
     assert result["readings"][0] == record(batch[0])
     assert len([p for k, p in calls if ":check:" in k and p["required_object_ids"] == ["a"]]) == (
@@ -264,27 +270,94 @@ def test_candidate_windows_declare_whole_scope_but_only_review_window_targets():
     assert len(result) == 2 and targets == ["a", "b", "c"]
 
 
-def test_unresolved_reading_stops_activity_retry_after_bounded_content_repairs():
-    batch = [{"unit_id": "a", "text": "原文"}]
+@pytest.mark.parametrize("severity", ["minor", "material"])
+def test_unresolved_reading_falls_back_to_source_without_approving_failed_interpretation(severity):
+    batch = [{"unit_id": "a", "text": "已核验原文"}, {"unit_id": "b", "text": "原文乙，\n数量 7。"}]
     revisions = []
+    outputs = MemoryOutputs()
 
     async def run(run_id, key, instructions, payload, output_type, **kwargs):
         if output_type is ReadingRecord:
             revisions.append(key)
+            rows = [record(unit) for unit in batch]
+            rows[1]["attribution"] = "错误归属"
             value = ReadingRecord(
-                readings=[record(batch[0])], themes=[], structure=[], questions=[], boundary_observations=[]
+                readings=rows, themes=["错误概括"], structure=[], questions=[], boundary_observations=[]
             )
         else:
-            value = output_type.model_validate(verdict(["a"], failed=True))
+            identity = payload["required_object_ids"][0]
+            check = verdict([identity], failed=identity == "b")
+            if check["findings"]:
+                check["findings"][0]["severity"] = severity
+            value = output_type.model_validate(check)
         kwargs["validate"](value)
         return value
 
-    with pytest.raises(ApplicationError) as failure:
-        asyncio.run(read_batch(SimpleNamespace(run=run), "run", "read", batch, "scope", None))
-    assert failure.value.non_retryable and len(revisions) == 3
+    models = SimpleNamespace(run=run, outputs=outputs)
+    result = asyncio.run(read_batch(models, "run", "read", batch, "scope", None))
+    assert len(revisions) == 3
+    assert result["readings"][0] == record(batch[0])
+    assert result["readings"][1]["candidate_quotes"] == [batch[1]["text"]]
+    assert result["readings"][1]["main_records"] == []
+    assert "错误" not in json.dumps(result, ensure_ascii=False)
+    assert result["themes"] == []
+    assert result["source_only_unit_ids"] == ["b"]
+    assert any("fallback" in key for key, _ in outputs.events)
+    models.run = lambda *a, **k: pytest.fail("Resolved batch reran a model")
+    assert asyncio.run(read_batch(models, "run", "read", batch, "scope", None)) == result
 
 
-def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resumes_without_api(monkeypatch):
+@pytest.mark.parametrize("error_type", ["model_output_limit", "model_output_invalid"])
+@pytest.mark.parametrize("stage", ["reading", "check"])
+def test_local_model_failure_falls_back_without_more_calls(error_type, stage):
+    async def run(run_id, key, instructions, payload, output_type, **kwargs):
+        if stage == "check" and output_type is ReadingRecord:
+            value = ReadingRecord(
+                readings=[record(unit) for unit in payload["source_units"]],
+                themes=[],
+                structure=[],
+                questions=[],
+                boundary_observations=[],
+            )
+            kwargs["validate"](value)
+            return value
+        raise ApplicationError("model output exhausted", type=error_type, non_retryable=True)
+
+    models = SimpleNamespace(run=run, outputs=MemoryOutputs())
+    result = asyncio.run(read_batch(models, "run", "read", [{"unit_id": "a", "text": "来源"}], "scope", None))
+    assert result["source_only_unit_ids"] == ["a"]
+    assert result["readings"][0]["candidate_quotes"] == ["来源"]
+    changed = asyncio.run(
+        read_batch(models, "run", "read", [{"unit_id": "a", "text": "新来源"}], "scope", None)
+    )
+    assert changed["readings"][0]["candidate_quotes"] == ["新来源"]
+    assert len(models.outputs.values) == 2
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ApplicationError("budget", type="model_request_budget", non_retryable=True),
+        ApplicationError("unknown response", type="model_request_exhausted", non_retryable=True),
+        ApplicationError("credentials", non_retryable=True),
+        OSError("S3 unavailable"),
+        asyncio.CancelledError(),
+    ],
+)
+def test_global_failures_and_cancellation_do_not_become_source_fallback(error):
+    async def run(*args, **kwargs):
+        raise error
+
+    models = SimpleNamespace(run=run, outputs=MemoryOutputs())
+    with pytest.raises(type(error)):
+        asyncio.run(read_batch(models, "run", "read", [{"unit_id": "a", "text": "来源"}], "scope", None))
+    assert not models.outputs.values
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resumes_without_api(
+    monkeypatch, fallback
+):
     originals = [
         chapter(
             f"# {name}一\n\n{name}材料一。\n\n# {name}二\n\n{name}材料二。\n\n# {name}三\n\n{name}材料三。"
@@ -318,6 +391,7 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
         "hrs_platform.visual_review.VisualReview.check", lambda *a, **k: pytest.fail("Vision API called")
     )
     calls, cache, active, maximum, fail_topic = [], {}, 0, 0, True
+    first_reads_ready = asyncio.Event()
 
     async def run(identity, key, instructions, payload, output_type, **kwargs):
         nonlocal active, maximum, fail_topic
@@ -370,7 +444,9 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
                     assert payload["previous_reading"] is None
                 active += 1
                 maximum = max(maximum, active)
-                await asyncio.sleep(0)
+                if active == 2:
+                    first_reads_ready.set()
+                await asyncio.wait_for(first_reads_ready.wait(), timeout=5)
                 active -= 1
                 value = output_type(
                     readings=[record(unit) for unit in payload["source_units"]],
@@ -406,12 +482,16 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
                 ids = payload.get("required_object_ids") or [
                     row["item_id"] for row in payload["candidate"]["items"]
                 ]
-                value = output_type.model_validate(verdict(ids))
+                value = output_type.model_validate(
+                    verdict(
+                        ids, failed=fallback and "reading_record" in payload and ids == [units[0]["unit_id"]]
+                    )
+                )
             cache[key] = (value.model_dump(mode="json"), dependency)
         kwargs["validate"](value)
         return value
 
-    cards.models = SimpleNamespace(run=run)
+    cards.models = SimpleNamespace(run=run, outputs=cards.outputs)
     with pytest.raises(RuntimeError, match="temporary topic"):
         asyncio.run(cards.generate(run_id))
     assert cards.outputs.get(run_id, "generated-cards") is None
@@ -419,7 +499,7 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
     cards.library = SimpleNamespace(chapters=lambda _: pytest.fail("Snapshot was not reused"))
     result = asyncio.run(cards.generate(run_id))
     assert result["candidates"] == 3 and maximum == 2
-    read_calls = [p for k, p in calls if ":reading:" in k]
+    read_calls = [p for k, p in calls if k.endswith(":reading:0")]
     assert sorted(unit["unit_id"] for p in read_calls for unit in p["source_units"]) == sorted(
         unit["unit_id"] for unit in units
     )
@@ -427,6 +507,17 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
     first_source = cards.outputs.get(run_id, saved[0]["source_step"])
     assert first_source["reading_assignment_indexes"] == [0, 1]
     assert all(row["text_check"]["source_checks"] for row in saved)
+    if fallback:
+        assert any("fallback" in key for key, _ in cards.outputs.events)
+        assert any(record.get("source_only_unit_ids") for record in first_source["readings"])
+        assert any(":独立核验:" in key for key, _ in calls)
+        assert any(":source-coverage:" in key for key, _ in calls)
+        for candidate in saved:
+            source = cards.outputs.get(run_id, candidate["source_step"])
+            assert all(
+                set(record.get("source_only_unit_ids", [])) <= set(source["assigned_unit_ids"])
+                for record in source["readings"]
+            )
     before = len(calls)
     assert asyncio.run(cards.generate(run_id)) == result and len(calls) == before
     assert transitions[-1][1:] == ("processing", "vision")

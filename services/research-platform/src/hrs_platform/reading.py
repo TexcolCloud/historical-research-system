@@ -1,5 +1,6 @@
 """Reuse retained research prompts and bounded digests without the retired job queue."""
 
+import asyncio
 import json
 from enum import Enum
 
@@ -116,6 +117,72 @@ async def read_batch(
     models, run_id, key, batch, objective, parent, previous=None, context=None, research_state=None
 ):
     identities = {row["unit_id"] for row in batch}
+    dependency = {
+        "batch": batch,
+        "objective": objective,
+        "previous": previous,
+        "context": context,
+        "research_state": research_state,
+        "reading_instructions": prompts.READ,
+        "check_instructions": prompts.CHECK_READING,
+        "policy": "source-only-fallback-v1",
+    }
+    checkpoint = f"{key}:resolved:{fingerprint(dependency)}"
+    saved = await asyncio.to_thread(models.outputs.get, run_id, checkpoint, dependency)
+    if saved is not None:
+        return saved["output"]
+
+    async def save(result, fallback=None):
+        await asyncio.to_thread(
+            models.outputs.put, run_id, checkpoint, {"output": result, "fallback": fallback}, dependency
+        )
+        return result
+
+    async def source_fallback(accepted, checks, reason):
+        # Only reviewed source survives; failed interpretations and shared summaries
+        # are discarded, never promoted to semantic or human approval.
+        affected = [unit["unit_id"] for unit in batch if unit["unit_id"] not in accepted]
+        records = [
+            accepted[unit["unit_id"]]
+            if unit["unit_id"] in accepted
+            else {
+                "unit_id": unit["unit_id"],
+                "main_records": [],
+                "attribution": "来源正文原文，陈述归属以原文为准。",
+                "dates_quantities_actors": [],
+                "negations_and_limits": [],
+                "note_table_dependencies": [],
+                "candidate_quotes": [unit["text"]] if unit["text"].strip() else [],
+                "uncertainties": [],
+            }
+            for unit in batch
+        ]
+        value = ReadingRecord(
+            readings=records, themes=[], structure=[], questions=[], boundary_observations=[]
+        )
+        validate(value)
+        result = {**value.model_dump(mode="json"), "source_only_unit_ids": affected}
+        details = {
+            "strategy": "source_only",
+            "unit_ids": affected,
+            "reason": reason,
+            "checks": checks,
+            "semantic_approval": False,
+            "source_sha256": fingerprint(batch),
+        }
+        # The visible component completes its fallback, not an approval of the failed reading.
+        await asyncio.to_thread(
+            models.outputs.node,
+            run_id,
+            checkpoint + ":fallback",
+            kind="component",
+            label="原文回退（未采用模型解读）",
+            parent=parent,
+            objective="保留来源全文继续制卡，最终内容仍须语义与原图核验。",
+            state="completed",
+            details=details,
+        )
+        return await save(result, details)
 
     def validate(value):
         if len(value.readings) != len(batch) or {row.unit_id for row in value.readings} != identities:
@@ -147,27 +214,33 @@ async def read_batch(
             ]
             validate(value)
 
-        reading = await card_model(
-            models,
-            run_id,
-            f"{key}:reading:{revision}",
-            prompts.READ,
-            {
-                "objective": objective,
-                "source_units": batch,
-                "previous_reading": previous,
-                "context_units": context or [],
-                "research_state": research_state or {},
-                "repair_findings": problems,
-                "previous_record": prior,
-                "fixed_unit_ids": sorted(accepted),
-            },
-            ReadingRecord,
-            parent=parent,
-            validate=validate_repair,
-        )
+        try:
+            reading = await card_model(
+                models,
+                run_id,
+                f"{key}:reading:{revision}",
+                prompts.READ,
+                {
+                    "objective": objective,
+                    "source_units": batch,
+                    "previous_reading": previous,
+                    "context_units": context or [],
+                    "research_state": research_state or {},
+                    "repair_findings": problems,
+                    "previous_record": prior,
+                    "fixed_unit_ids": sorted(accepted),
+                },
+                ReadingRecord,
+                parent=parent,
+                validate=validate_repair,
+            )
+        except ApplicationError as error:
+            if error.type not in {"model_output_invalid", "model_output_limit"}:
+                raise
+            return await source_fallback(accepted, problems, error.type)
         prior = reading.model_dump(mode="json")
         problems, accepted = [], {}
+        failed_output = False
         for unit, record in (
             (unit, next(row for row in prior["readings"] if row["unit_id"] == unit["unit_id"]))
             for unit in batch
@@ -179,26 +252,35 @@ async def read_batch(
                 "reading_record": {**prior, "readings": [record]},
                 "required_object_ids": [unit["unit_id"]],
             }
-            check = await card_model(
-                models,
-                run_id,
-                f"{key}:check:{fingerprint(payload)}",
-                prompts.CHECK_READING
-                + "\nsource_units 保留完整阅读批次，required_object_ids 才是本轮核验目标。"
-                "reading_record 的概括、结构、问题及边界描述属于完整批次，readings 仅保留目标单元。"
-                "只对目标单元及概括中涉及它的实质问题出具核验，不把其他批次成员误判为上下文或漏读。",
-                payload,
-                scoped_check([unit["unit_id"]]),
-                parent=parent,
-                validate=lambda value, identity=unit["unit_id"]: coverage(value, [identity]),
-            )
+            try:
+                check = await card_model(
+                    models,
+                    run_id,
+                    f"{key}:check:{fingerprint(payload)}",
+                    prompts.CHECK_READING
+                    + "\nsource_units 保留完整阅读批次，required_object_ids 才是本轮核验目标。"
+                    "reading_record 的概括、结构、问题及边界描述属于完整批次，readings 仅保留目标单元。"
+                    "只对目标单元及概括中涉及它的实质问题出具核验，不把其他批次成员误判为上下文或漏读。",
+                    payload,
+                    scoped_check([unit["unit_id"]]),
+                    parent=parent,
+                    validate=lambda value, identity=unit["unit_id"]: coverage(value, [identity]),
+                )
+            except ApplicationError as error:
+                if error.type not in {"model_output_invalid", "model_output_limit"}:
+                    raise
+                problems.append({"unit_id": unit["unit_id"], "error_type": error.type})
+                failed_output = True
+                continue
             if passed(check):
                 accepted[unit["unit_id"]] = record
             else:
                 problems.append(check.model_dump(mode="json"))
         if not problems:
-            return prior
-    raise ApplicationError("逐段阅读仍有实质核验问题，阅读记录和原始证据已保留。", non_retryable=True)
+            return await save(prior)
+        if failed_output:
+            return await source_fallback(accepted, problems, "review_output_failed")
+    return await source_fallback(accepted, problems, "content_repairs_exhausted")
 
 
 async def synthesis_readings(models, run_id, key, readings, units, parent):

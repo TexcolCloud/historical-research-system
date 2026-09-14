@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from agents import AgentOutputSchema
+from httpx import MockTransport
 from pydantic import BaseModel, SecretStr
 from temporalio.exceptions import ApplicationError
 from test_card_pipeline import MemoryOutputs, record, verdict
@@ -84,8 +85,10 @@ def test_every_exit_after_start_closes_agent_and_restores_parent(monkeypatch, fa
 
         monkeypatch.setattr(module.Runner, "run", cancel)
         expected = asyncio.CancelledError
-    with pytest.raises(expected):
+    with pytest.raises(expected) as error:
         asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt))
+    if failure == "exhausted":
+        assert error.value.type == "model_request_exhausted"
     assert model.outputs.events[-1] == ("step", "failed")
     assert execution_parent.get() is None
 
@@ -149,6 +152,30 @@ def test_shared_model_keeps_reading_and_reasoning_budgets_separate(monkeypatch):
 
     asyncio.run(exercise())
     assert seen == [("low", 50), ("high", 100)]
+
+
+def test_sdk_request_hook_preserves_nonretryable_global_budget(monkeypatch):
+    runner = module.Runner.run
+    client = module.DefaultAsyncHttpxClient
+    model, dependency = setup(monkeypatch)
+    model.settings.model_max_calls = 0
+
+    def exhausted(*args):
+        raise ApplicationError("Budget exhausted", type="model_request_budget", non_retryable=True)
+
+    model.outputs.reserve_request = exhausted
+    monkeypatch.setattr(module.Runner, "run", runner)
+    monkeypatch.setattr(
+        module,
+        "DefaultAsyncHttpxClient",
+        lambda **kwargs: client(
+            **kwargs, transport=MockTransport(lambda _: pytest.fail("Request escaped budget guard"))
+        ),
+    )
+    with pytest.raises(ApplicationError) as failure:
+        asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt))
+    assert failure.value.type == "model_request_budget" and failure.value.non_retryable
+    assert model.outputs.get("run", "step:request:2") is None
 
 
 def test_truncated_receipts_raise_budget_without_replaying_partial_json(monkeypatch):

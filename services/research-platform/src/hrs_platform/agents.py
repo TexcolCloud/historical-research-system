@@ -12,7 +12,7 @@ from agents import (
     RunConfig,
     Runner,
 )
-from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from openai import APIConnectionError, AsyncOpenAI, DefaultAsyncHttpxClient
 from temporalio.exceptions import ApplicationError
 
 from .books import get_run
@@ -42,6 +42,7 @@ class Models:
                     if attempt == 2:
                         raise ApplicationError(
                             "该模型步骤三次请求仍未通过输出校验，原始回执保留：" + str(error)[:500],
+                            type="model_output_invalid",
                             non_retryable=True,
                         ) from error
 
@@ -106,6 +107,7 @@ class Models:
             )
             is not None
         ):
+            output_failure = False
             previous = None
             response_number = 1
             # A tool round can exhaust its output after earlier completed tool calls.
@@ -119,10 +121,12 @@ class Models:
                 and previous.get("status") == "incomplete"
                 and (previous.get("incomplete_details") or {}).get("reason") == "max_output_tokens"
             ):
+                output_failure = True
                 used_limit = previous.get("max_output_tokens") or request_maximum
                 if used_limit >= self.settings.model_max_output_ceiling:
                     raise ApplicationError(
                         "模型达到配置的输出 token 上限，请缩小本步骤范围或调整输出上限；截断回执保留。",
+                        type="model_output_limit",
                         non_retryable=True,
                     )
                 request_maximum = min(used_limit * 2, self.settings.model_max_output_ceiling)
@@ -136,6 +140,7 @@ class Models:
                 self.outputs.get, run_id, f"{request_prefix}:validation-error:{attempt}"
             )
             if failure:
+                output_failure = True
                 validation_feedback.append({"attempt": attempt, "problem": failure["problem"]})
             if not tools:
                 if previous and previous.get("status") == "completed":
@@ -151,6 +156,7 @@ class Models:
                         if validate:
                             validate(recovered)
                     except ValueError as error:
+                        output_failure = True
                         if not failure:
                             validation_feedback.append({"attempt": attempt, "problem": str(error)[:4000]})
                     else:
@@ -175,7 +181,11 @@ class Models:
                         return recovered
             attempt += 1
         if attempt > 3:
-            raise ApplicationError("该模型步骤已达到三次请求上限，原始回执保留。", non_retryable=True)
+            raise ApplicationError(
+                "该模型步骤已达到三次请求上限，原始回执保留。",
+                type="model_output_invalid" if output_failure else "model_request_exhausted",
+                non_retryable=True,
+            )
         await asyncio.to_thread(
             self.outputs.put,
             run_id,
@@ -272,6 +282,13 @@ class Models:
                 },
             )
             return value
+        except APIConnectionError as error:
+            # The SDK wraps request-hook exceptions as connection errors. Preserve
+            # our global budget stop instead of turning it into an activity retry.
+            cause = error.__cause__
+            if isinstance(cause, ApplicationError) and cause.type == "model_request_budget":
+                raise cause from None
+            raise
         except (ModelBehaviorError, ValueError) as error:
             await asyncio.to_thread(
                 self.outputs.put,

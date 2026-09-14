@@ -52,6 +52,8 @@ SYNTHESIZE = (
     COMMON
     + PERSPECTIVES
     + """依据完整阅读记录、所列原始来源单元、实际已得补查与固定书目，形成一篇通用史料卡。
+reading_records 中 source_only_unit_ids 表示撤下未通过的模型解读后仅保留原文；不是已核验的解释。
+这类单元仍按完整 source_units 研究并接受后续核验，不把程序回退、模型报错或空的解读字段写成史料缺失或历史局限。
 覆盖客户模板：研究对象概览、形成背景、文本结构、核心主题、关键原文、史料性质及来源层次、
 研究价值和证据边界、具体论证、局限与待查。用 kind=section 的完整条目承载各栏目，section 使用
 overview/background/structure/theme/source_criticism/research_value/limitations/open_questions。
