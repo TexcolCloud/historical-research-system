@@ -1522,13 +1522,6 @@
             "type": "array",
             "title": "Entities"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/DraftItem"
-            },
-            "type": "array",
-            "title": "Items"
-          },
           "evidence_relations": {
             "items": {
               "$ref": "#/components/schemas/DraftRelation"
@@ -1546,6 +1539,13 @@
               }
             ],
             "title": "No Argument Reason"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DraftItem"
+            },
+            "type": "array",
+            "title": "Items"
           }
         },
         "additionalProperties": false,
@@ -1558,9 +1558,9 @@
           "event_date",
           "tags",
           "entities",
-          "items",
           "evidence_relations",
-          "no_argument_reason"
+          "no_argument_reason",
+          "items"
         ],
         "title": "CardDraft"
       },

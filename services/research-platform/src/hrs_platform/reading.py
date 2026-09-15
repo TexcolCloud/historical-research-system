@@ -23,10 +23,54 @@ from .retrieval_chunks import (
 CARD_INPUT_TOKENS = 48000
 
 
+def source_payload(payload):
+    """Send each identified original once, retaining explicit note/owner links."""
+    if "source_units" not in payload:
+        return payload
+    sources, contexts, known = [], [], {}
+
+    def add(unit, target):
+        identity = unit.get("unit_id", unit.get("id"))
+        if identity is None:
+            target.append(unit)
+            return
+        if identity in known:
+            old = known[identity]
+            if old.get("text") != unit.get("text") or old.get("sources") != unit.get("sources"):
+                raise ValueError("A source identity cannot refer to different evidence.")
+            return
+        value = {**unit, "unit_id": identity}
+        known[identity] = value
+        target.append(value)
+
+    for unit in payload["source_units"]:
+        add(unit, sources)
+    for unit in payload.get("context_units", []):
+        add(unit, contexts)
+    # Appending related originals is intentional: links can be nested and shared.
+    queue = [*sources, *contexts]
+    for unit in queue:
+        if not unit.get("context"):
+            continue
+        links = []
+        for extra in unit["context"]:
+            identity = extra.get("unit_id", extra.get("id"))
+            if identity is None or "text" not in extra:
+                links.append(extra)
+                continue
+            before = len(contexts)
+            add(extra, contexts)
+            queue.extend(contexts[before:])
+            links.append({"unit_id": identity, "role": extra.get("role")})
+        unit["context"] = links
+    return {**payload, "source_units": sources, "context_units": contexts}
+
+
 async def card_model(models, run_id, key, instructions, payload, output_type, **kwargs):
     """Fail before sending an oversized card request; never truncate source evidence."""
+    payload = source_payload(payload)
     request = {
-        "instructions": prompts.COMMON + instructions,
+        "instructions": instructions if instructions.startswith(prompts.COMMON) else prompts.COMMON + instructions,
         "input": payload,
         "schema": output_type.model_json_schema(),
     }
@@ -250,7 +294,7 @@ async def read_batch(
                 {
                     "objective": objective,
                     "source_units": batch,
-                    "previous_reading": previous,
+                    "previous_reading": compact_readings([previous])[0] if previous else previous,
                     "context_units": context or [],
                     "research_state": research_state or {},
                     "repair_findings": problems,
@@ -268,41 +312,109 @@ async def read_batch(
         prior = reading.model_dump(mode="json")
         problems, accepted = [], {}
         failed_output = False
-        for unit, record in (
-            (unit, next(row for row in prior["readings"] if row["unit_id"] == unit["unit_id"]))
-            for unit in batch
-        ):
+        shared = {k: v for k, v in prior.items() if k != "readings"}
+        records = {row["unit_id"]: row for row in prior["readings"]}
+        receipts, dependencies = {}, {}
+        for identity, row in records.items():
+            dependency_check = {
+                "source_units": batch, "context_units": context or [],
+                "research_state": research_state or {}, "summary": shared, "reading": row,
+                "instructions": prompts.CHECK_READING, "policy": "batch-reading-check-v1",
+            }
+            check_key = f"{key}:unit-check:{fingerprint(dependency_check)}"
+            dependencies[identity] = (check_key, dependency_check)
+            receipts[identity] = await asyncio.to_thread(
+                models.outputs.get, run_id, check_key, dependency_check
+            )
+
+        async def check_targets(targets, *, partial, shared=shared, records=records,
+                                dependencies=dependencies, receipts=receipts):
             payload = {
                 "source_units": batch,
                 "context_units": context or [],
                 "research_state": research_state or {},
-                "reading_record": {**prior, "readings": [record]},
-                "required_object_ids": [unit["unit_id"]],
+                "reading_record": {**shared, "readings": [records[i] for i in targets]},
+                "required_object_ids": targets,
             }
-            try:
-                check = await card_model(
-                    models,
-                    run_id,
-                    f"{key}:check:{fingerprint(payload)}",
-                    prompts.CHECK_READING
-                    + "\nsource_units 保留完整阅读批次，required_object_ids 才是本轮核验目标。"
-                    "reading_record 的概括、结构、问题及边界描述属于完整批次，readings 仅保留目标单元。"
-                    "只对目标单元及概括中涉及它的实质问题出具核验，不把其他批次成员误判为上下文或漏读。",
-                    payload,
-                    scoped_check([unit["unit_id"]]),
-                    parent=parent,
-                    validate=lambda value, identity=unit["unit_id"]: coverage(value, [identity]),
+
+            def validate_check(value):
+                actual = set(value.checked_object_ids) | set(value.unverified_object_ids)
+                if actual - set(targets):
+                    raise ValueError("Review refers to a different source scope.")
+                coverage(value, actual if partial else targets)
+
+            instructions = (
+                prompts.CHECK_READING
+                + "\nsource_units 保留完整批次作为上下文，只核验 required_object_ids。"
+                "逐个目标记录结论，问题归到实际受影响的 unit_id；共享概括错误须标出所有受影响目标。"
+                "不能核验的目标列入 unverified_object_ids，不以总体 pass 代替逐项检查。"
+            )
+            batch_dependency = {"payload": payload, "instructions": instructions}
+            batch_key = f"{key}:batch-check:{fingerprint(batch_dependency)}"
+            saved_check = await asyncio.to_thread(models.outputs.get, run_id, batch_key, batch_dependency)
+            if saved_check is None:
+                value = await card_model(
+                    models, run_id, f"{key}:check:{fingerprint(payload)}", instructions,
+                    payload, scoped_check(targets), parent=parent, validate=validate_check,
                 )
+                await asyncio.to_thread(models.outputs.put, run_id, batch_key,
+                                        value.model_dump(mode="json"), batch_dependency)
+            else:
+                value = scoped_check(targets).model_validate(saved_check)
+                validate_check(value)
+            actual = set(value.checked_object_ids) | set(value.unverified_object_ids)
+            for identity in targets:
+                if identity not in actual or receipts[identity] is not None:
+                    continue
+                findings = [f for f in value.findings if f.object_id == identity]
+                unresolved = identity in value.unverified_object_ids
+                # A non-pass without a located reason cannot approve any target.
+                unlocated = value.conclusion != "pass" and not value.findings and not value.unverified_object_ids
+                conclusion = value.conclusion if findings or unresolved or unlocated else "pass"
+                receipt = SemanticCheck(
+                    checked_object_ids=[] if unresolved else [identity],
+                    unverified_object_ids=[identity] if unresolved else [],
+                    findings=findings, conclusion=conclusion, reasoning_summary=value.reasoning_summary,
+                ).model_dump(mode="json")
+                check_key, dependency_check = dependencies[identity]
+                receipts[identity] = await asyncio.to_thread(
+                    models.outputs.put, run_id, check_key, receipt, dependency_check
+                )
+
+        pending = [i for i in records if receipts[i] is None]
+        failed_single_scope = False
+        if pending:
+            # Freeze the request scope before calling the model. After a partial
+            # receipt fanout, replay its completed result rather than pay for a new scope.
+            scope_dependency = {"checks": [entry[0] for entry in dependencies.values()]}
+            scope_key = f"{key}:check-scope:{fingerprint(scope_dependency)}"
+            scope = await asyncio.to_thread(models.outputs.get, run_id, scope_key, scope_dependency)
+            if scope is None:
+                scope = await asyncio.to_thread(models.outputs.put, run_id, scope_key,
+                                                {"targets": pending}, scope_dependency)
+            try:
+                await check_targets(scope["targets"], partial=len(scope["targets"]) > 1)
             except ApplicationError as error:
                 if error.type not in {"model_output_invalid", "model_output_limit"}:
                     raise
-                problems.append({"unit_id": unit["unit_id"], "error_type": error.type})
-                failed_output = True
-                continue
-            if passed(check):
-                accepted[unit["unit_id"]] = record
+                if len(scope["targets"]) == 1:
+                    failed_output = True
+                    failed_single_scope = True
+        # A missing batch verdict (or an oversized model response) gets one
+        # bounded per-unit check; missing output is never approval.
+        for identity in pending:
+            if receipts[identity] is None and not failed_single_scope:
+                try:
+                    await check_targets([identity], partial=False)
+                except ApplicationError as error:
+                    if error.type not in {"model_output_invalid", "model_output_limit"}:
+                        raise
+                    failed_output = True
+        for identity, receipt in receipts.items():
+            if receipt is not None and passed(SemanticCheck.model_validate(receipt)):
+                accepted[identity] = records[identity]
             else:
-                problems.append(check.model_dump(mode="json"))
+                problems.append(receipt or {"unit_id": identity, "error_type": "review_output_failed"})
         if not problems:
             return await save(prior)
         if failed_output:

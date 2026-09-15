@@ -1,6 +1,28 @@
 import pytest
+from test_card_finalization import draft
 
-from hrs_platform.cards import ResearchPlan, neighbor_context, quote_pages, validate_plan
+from hrs_platform.cards import ResearchPlan, apply_card_repair, neighbor_context, quote_pages, validate_plan
+from hrs_platform.domain.generation_contracts import CardRepair
+
+
+def test_card_patch_preserves_untouched_items_and_rejects_dangling_evidence():
+    original = draft()
+    before = original.model_dump(mode="json")
+    changed = original.items[0].model_copy(update={"attribution": "译者更正"})
+    patch = CardRepair(items=[changed], remove_item_ids=[], metadata=None)
+    repaired = apply_card_repair(original, patch)
+    assert original.model_dump(mode="json") == before
+    assert repaired.items[0].attribution == "译者更正"
+    assert repaired.items[1:] == original.items[1:]
+    assert repaired.model_dump(exclude={"items"}) == original.model_dump(exclude={"items"})
+    with pytest.raises(ValueError, match="conflicting"):
+        apply_card_repair(original, CardRepair(items=[changed, changed], remove_item_ids=[], metadata=None))
+    with pytest.raises(ValueError, match="conflicting"):
+        apply_card_repair(original, CardRepair(items=[], remove_item_ids=["unknown"], metadata=None))
+    # A correction cannot leave metadata pointing at deleted evidence.
+    original.formation_date.basis = [original.items[0].item_id]
+    with pytest.raises(ValueError, match="evidence_refs"):
+        apply_card_repair(original, CardRepair(items=[], remove_item_ids=[original.items[0].item_id], metadata=None))
 
 
 def test_agent_scope_does_not_hide_the_previous_chapter_or_book_opening():

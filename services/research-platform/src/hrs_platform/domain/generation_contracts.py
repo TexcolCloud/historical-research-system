@@ -100,7 +100,7 @@ class DraftEntity(Contract):
     identity_basis: str
 
 
-class CardDraft(Contract):
+class CardMetadata(Contract):
     title: str
     document_type: str
     source_layer: str
@@ -108,9 +108,12 @@ class CardDraft(Contract):
     event_date: HistoricalDate
     tags: list[str]
     entities: list[DraftEntity]
-    items: list[DraftItem]
     evidence_relations: list[DraftRelation]
     no_argument_reason: str | None
+
+
+class CardDraft(CardMetadata):
+    items: list[DraftItem]
 
     @model_validator(mode="after")
     def references_identify_candidate_items(self):
@@ -133,6 +136,13 @@ class CardDraft(Contract):
         ):
             raise ValueError("Relation argument_id must identify an argument item in this candidate")
         return self
+
+
+class CardRepair(Contract):
+    """Only changed/new items; untouched metadata and items are retained by the host."""
+    items: list[DraftItem]
+    remove_item_ids: list[str]
+    metadata: CardMetadata | None
 
 
 class CheckFinding(Contract):

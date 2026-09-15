@@ -14,7 +14,7 @@ from .books import get_run
 from .domain.generation_contracts import DigestFact
 from .domain.tokens import estimate_request
 from .outputs import execution_parent, fingerprint
-from .reading import card_model, neighbor_context
+from .reading import card_model, neighbor_context, source_payload
 from .retrieval_chunks import source_excerpt
 from .search import Search, recover_retrieval, task_search
 
@@ -127,7 +127,7 @@ class CardEvidence:
             "topic": topic.model_dump(),
             "clues": clues,
             "previous": previous,
-            "rule": "bounded-evidence-v2",
+            "rule": "bounded-evidence-v3",
         }
         stage = f"{key}:evidence:{fingerprint(dependency)}"
         saved = await asyncio.to_thread(self.outputs.get, run_id, stage, dependency)
@@ -293,10 +293,9 @@ class CardEvidence:
                 for query in queries:
                     index = ["support", "counter", "qualify"].index(query.purpose)
                     results.append(searches[index] or await complete_query(index))
-                return json.dumps(results, ensure_ascii=False)
+                return json.dumps([{k: r[k] for k in ("request", "hits")} for r in results], ensure_ascii=False)
 
-        @function_tool(failure_error_function=None)
-        async def read_evidence(unit_ids: list[str]) -> str:
+        async def read_sources(unit_ids: list[str]) -> dict:
             """Read complete original units with required linked notes/owners and headers.
 
             Accepts returned search IDs or assigned topic IDs for direct-source fallback.
@@ -305,10 +304,10 @@ class CardEvidence:
             async with tool_lock:
                 identities = sorted(set(unit_ids))
                 if not identities or set(identities) - allowed():
-                    return json.dumps({"error": "Only search result IDs or assigned topic IDs are readable."})
+                    return {"error": "Only search result IDs or assigned topic IDs are readable."}
                 cached = next((r for r in reads if r and r["requested_ids"] == identities), None)
                 if cached:
-                    return json.dumps(cached, ensure_ascii=False)
+                    return cached
                 if all(reads):
                     raise ApplicationError(
                         "读取次数不足以容纳主题证据，需拆分主题。",
@@ -363,7 +362,19 @@ class CardEvidence:
                     state="completed",
                     details=receipt,
                 )
-                return json.dumps(receipt, ensure_ascii=False)
+                return receipt
+
+        def read_view(receipt):
+            if "units" not in receipt:
+                return receipt
+            packed = source_payload({"source_units": receipt["units"]})
+            return {"units": [*packed["source_units"], *packed["context_units"]],
+                    "related_unit_ids": receipt["related_unit_ids"]}
+
+        @function_tool(failure_error_function=None)
+        async def read_evidence(unit_ids: list[str]) -> str:
+            """Read complete original units and linked notes; at most three distinct reads."""
+            return json.dumps(read_view(await read_sources(unit_ids)), ensure_ascii=False)
 
         def validate(value):
             if {r["request"]["purpose"] for r in searches if r} != PURPOSES:
@@ -382,11 +393,44 @@ class CardEvidence:
             if not value.sufficient and not value.unresolved_questions:
                 raise ValueError("Explain the unresolved evidence before deferring.")
 
-        # Finish interrupted queries before asking the model to continue. Completed
-        # tool receipts remain outside the immutable model input and are replayed by tools.
+        # Finish interrupted queries before asking the model to continue. Dynamic
+        # tool receipts are replayed by tools; planned searches use a frozen bootstrap below.
         for index, intent in enumerate(intents):
             if intent and searches[index] is None:
                 await complete_query(index)
+
+        initial = None
+        if topic.queries and previous is None:
+            if len(topic.queries) != 3 or {q.purpose for q in topic.queries} != PURPOSES:
+                raise ValueError("Planned queries must cover three distinct evidence purposes.")
+            # Existing saved plans without queries, and targeted repair research,
+            # use the same tools below to plan dynamically. New plans skip those round trips.
+            initial = await asyncio.to_thread(self.outputs.get, run_id, stage + ":bootstrap", dependency)
+            if initial is None:
+                for query in topic.queries:
+                    index = ["support", "counter", "qualify"].index(query.purpose)
+                    if intents[index] is None:
+                        intents[index] = await asyncio.to_thread(
+                            self.outputs.put, run_id, f"{stage}:intent:{index}", query.model_dump(), dependency
+                        )
+                for index in range(3):
+                    if searches[index] is None:
+                        await complete_query(index)
+                selected = list(dict.fromkeys([
+                    *topic.unit_ids,
+                    *(u for row in searches for hit in row["hits"][:1] for u in hit["unit_ids"]),
+                ]))
+                try:
+                    originals = read_view(await read_sources(selected))
+                except ApplicationError as error:
+                    if error.type != "card_input_budget":
+                        raise
+                    originals = {"units": [], "selection_required": True}
+                initial = await asyncio.to_thread(
+                    self.outputs.put, run_id, stage + ":bootstrap",
+                    {"searches": [{k: r[k] for k in ("request", "hits")} for r in searches],
+                     "originals": originals}, dependency,
+                )
 
         result = await card_model(
             models,
@@ -397,12 +441,16 @@ class CardEvidence:
             "检索无命中可以直接读取指定主题单元；无命中不证明不存在反证。"
             "检查人物、时间、数量口径、作者/译者归属、反证和限定。findings 每条绑定实际已读来源 ID，"
             "分类记录具体发现，区分原文事实与推断；source_unit_ids 恰为这些发现使用的来源并集。"
-            "预算不足或关键证据无法确定时 sufficient=false 并列出 unresolved_questions，不强行闭合。",
+            "预算不足或关键证据无法确定时 sufficient=false 并列出 unresolved_questions，不强行闭合。"
+            "若有 initial_evidence，三类检索已经完成，originals.units 是程序已读取的完整原文。"
+            "优先据此直接评估，不重复检索和读取；只有原文尚未取得或需要更多相关原文时才调用工具。"
+            "预装配不保证证据充分；预览提示尚未读取的反证或口径差异时，必须补读或明确保留未决问题。",
             {
                 "topic": topic.model_dump(),
                 "clues": clues,
                 "previous_check": previous,
                 "corpus": corpus,
+                **({"initial_evidence": initial} if initial is not None else {}),
             },
             EvidenceAssessment,
             model=self.settings.reasoning_model,

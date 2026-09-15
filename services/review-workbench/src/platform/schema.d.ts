@@ -527,12 +527,12 @@ export interface components {
             tags: string[];
             /** Entities */
             entities: components["schemas"]["DraftEntity"][];
-            /** Items */
-            items: components["schemas"]["DraftItem"][];
             /** Evidence Relations */
             evidence_relations: components["schemas"]["DraftRelation"][];
             /** No Argument Reason */
             no_argument_reason: string | null;
+            /** Items */
+            items: components["schemas"]["DraftItem"][];
         };
         /** CardQuoteLocation */
         CardQuoteLocation: {

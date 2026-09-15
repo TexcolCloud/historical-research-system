@@ -14,7 +14,7 @@ from hrs_platform import cards as module
 from hrs_platform import schema as db
 from hrs_platform.books import get_run
 from hrs_platform.cards import CardPlan, Cards, ResearchPlan
-from hrs_platform.domain.generation_contracts import CardDraft, ReadingRecord
+from hrs_platform.domain.generation_contracts import CardDraft, CardRepair, ReadingRecord
 from hrs_platform.outputs import fingerprint
 from hrs_platform.reading import reading_units
 from hrs_platform.recovery import retry_run
@@ -85,12 +85,12 @@ def harness(platform, monkeypatch, request):
             value = output_type(
                 readings=rows, themes=[], structure=[], questions=[], boundary_observations=[]
             )
-        elif output_type is CardDraft:
+        elif output_type in {CardDraft, CardRepair}:
             if scenario.get("fail_topic") == payload.get("objective"):
                 raise ApplicationError(
                     "synthetic exhausted output", type="model_output_invalid", non_retryable=True
                 )
-            value = output_type(
+            value = CardDraft(
                 title=payload["objective"],
                 document_type="synthetic",
                 source_layer="synthetic",
@@ -112,6 +112,9 @@ def harness(platform, monkeypatch, request):
                     for i, unit in enumerate(payload["source_units"])
                 ],
             )
+            if output_type is CardRepair:
+                value = CardRepair(items=value.items, remove_item_ids=[],
+                                   metadata=value.model_dump(exclude={"items"}))
         else:
             if (
                 scenario.get("final_failure")

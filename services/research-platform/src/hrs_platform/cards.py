@@ -17,9 +17,9 @@ from temporalio.exceptions import ApplicationError
 from . import schema as db
 from .activities import Activities
 from .books import get_run
-from .card_evidence import CardEvidence
+from .card_evidence import PURPOSES, CardEvidence, EvidenceQuery
 from .domain import prompts
-from .domain.generation_contracts import CardDraft, SemanticCheck
+from .domain.generation_contracts import CardDraft, CardRepair, SemanticCheck
 from .domain.tokens import estimate_request
 from .library import Library
 from .outputs import Outputs, fingerprint
@@ -58,6 +58,7 @@ class CardTopic(BaseModel):
     name: str
     objective: str
     unit_ids: list[str] = Field(min_length=1)
+    queries: list[EvidenceQuery] = Field(default_factory=list, max_length=3)
 
 
 class CardPlan(BaseModel):
@@ -66,6 +67,9 @@ class CardPlan(BaseModel):
 
 
 def validate_topics(plan, units):
+    for topic in plan.topics:
+        if topic.queries and {q.purpose for q in topic.queries} != PURPOSES:
+            raise ValueError("A planned evidence search requires support, counter and qualify.")
     assigned = [identity for topic in plan.topics for identity in topic.unit_ids]
     if len(assigned) != len(set(assigned)) or set(assigned) != {unit["unit_id"] for unit in units}:
         raise ValueError(
@@ -98,6 +102,22 @@ def validate_candidate(card, units):
 
 def validate_check(check, card):
     coverage(check, {item.item_id for item in card.items})
+
+
+def apply_card_repair(original, patch):
+    """Reassemble a complete candidate before reference and semantic validation."""
+    items = {item.item_id: item.model_dump(mode="json") for item in original.items}
+    changed = [item.item_id for item in patch.items]
+    removed = set(patch.remove_item_ids)
+    if (len(changed) != len(set(changed)) or len(removed) != len(patch.remove_item_ids)
+            or removed - items.keys() or removed & set(changed)):
+        raise ValueError("Card repair has duplicate, unknown or conflicting item IDs.")
+    for identity in removed:
+        del items[identity]
+    items.update((item.item_id, item.model_dump(mode="json")) for item in patch.items)
+    metadata = (patch.metadata.model_dump(mode="json") if patch.metadata is not None
+                else original.model_dump(mode="json", exclude={"items"}))
+    return CardDraft.model_validate({**metadata, "items": list(items.values())})
 
 
 def validate_final_candidate(candidate, original, units):
@@ -318,7 +338,9 @@ class Cards:
                     "在完整逐段阅读后按研究主题规划史料卡。阅读 Agent 的分工不等于卡片主题。"
                     "同一分工可拆为多卡，同一主题可合并不同分工的单元；合并同一事件的重复叙述，保留观点冲突。"
                     "每个 unit_id 恰好分给一个主题，禁止漏掉非引文单元；标题与书目单元随相关正文归组。"
-                    "主题应保持研究问题集中、原文数量适中；不要把整本长书塞入单卡。关联脚注和邻文可跨主题作为上下文。",
+                    "主题应保持研究问题集中、原文数量适中；不要把整本长书塞入单卡。关联脚注和邻文可跨主题作为上下文。"
+                    "每个主题同时提供 queries：support、counter、qualify 各一条具体检索词，包含本主题的实体、事件或数量口径。"
+                    "程序会执行检索和读取原文；反证查询应查找相反记载，限定查询应查找归属、时间范围或注释条件。",
                     {
                         "reading_records": overview,
                         "source_units": [
@@ -414,7 +436,7 @@ class Cards:
         saved_plan = self.outputs.get(run_id, "card-reading-plan")
         # Preflight is a lower-bound estimate, not permission to exceed the hard cap.
         minimum = (
-            len(all_units) + ceil(len(all_units) / (2 if saved_plan else 8)) + ceil(len(all_units) / 8) + 4
+            2 * ceil(len(all_units) / (2 if saved_plan else 8)) + ceil(len(all_units) / 8) + 4
         )
         budget = self.outputs.preflight(run_id, minimum, self.settings.model_max_calls)
         self.outputs.node(
@@ -847,11 +869,22 @@ class Cards:
                             context = [unit for unit in available if unit["unit_id"] not in topic.unit_ids]
                         repair_sources(previous, available, chosen)
                         synthesis_units = [unit for unit in available if unit["unit_id"] in chosen]
-                        card = await card_model(
+                        original_card = card
+                        output_type = CardDraft if original_card is None else CardRepair
+                        instructions = prompts.SYNTHESIZE
+                        if original_card is not None:
+                            instructions += (
+                                "\n本轮输出局部修订：items 只返回新增或修改的完整条目，"
+                                "未改条目由程序保留。删除条目列在 remove_item_ids；"
+                                "卡片级字段有变化时 metadata 返回完整元数据，否则为 null。"
+                                "修复错误及其影响的日期、关系、推论和限定，保留未受影响条目及 item_id。"
+                                "合并后的完整卡片仍接受独立语义和全文覆盖核验。"
+                            )
+                        result = await card_model(
                             self.models,
                             run_id,
                             f"{group}:制卡:{round_number}",
-                            prompts.SYNTHESIZE,
+                            instructions,
                             {
                                 "reading_records": synthesis_records,
                                 "source_units": synthesis_units,
@@ -868,13 +901,14 @@ class Cards:
                                 "objective": topic.objective,
                                 "previous_candidate": card.model_dump(mode="json") if card else None,
                             },
-                            CardDraft,
+                            output_type,
                             model=self.settings.reasoning_model,
                             parent=branch,
-                            validate=lambda value, units=[*synthesis_units, *context]: validate_candidate(
-                                value, units
+                            validate=lambda value, units=[*synthesis_units, *context], original=original_card: validate_candidate(
+                                apply_card_repair(original, value) if original is not None else value, units
                             ),
                         )
+                        card = apply_card_repair(original_card, result) if original_card is not None else result
                         referenced = {
                             selection.unit_id for item in card.items for selection in item.selections
                         }

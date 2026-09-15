@@ -13,9 +13,9 @@ from test_card_pipeline import MemoryOutputs, chapter
 
 from hrs_platform import card_evidence as module
 from hrs_platform.card_evidence import CardEvidence
-from hrs_platform.search import recover_retrieval
 from hrs_platform.cards import CardTopic, quote_pages
 from hrs_platform.reading import compact_readings, coverage_batches, reading_units
+from hrs_platform.search import recover_retrieval
 
 
 @pytest.fixture
@@ -113,6 +113,74 @@ def test_real_tools_map_search_ranges_to_frozen_originals_and_reuse_receipts(res
     assert all(hit["preview_only"] for r in result["searches"] for hit in r["hits"])
     assert execute(research, lambda *a, **k: pytest.fail("Repeated model call")) == result
     assert len(research.calls) == 3
+
+
+def test_planned_queries_supply_originals_without_model_tool_round_trips(research):
+    research.topic.queries = [module.EvidenceQuery(query=p, purpose=p)
+                             for p in ("support", "counter", "qualify")]
+    model_calls = []
+
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        model_calls.append(payload)
+        initial = payload["initial_evidence"]
+        assert len(initial["searches"]) == 3
+        assert all("metrics" not in row for row in initial["searches"])
+        originals = initial["originals"]["units"]
+        assert any("口径不同" in u["text"] for u in originals)
+        uid = originals[0]["unit_id"]
+        result = output_type(source_unit_ids=[uid], sufficient=True, unresolved_questions=[],
+                             findings=[dict(category="limitation", text="有口径限定", source_unit_ids=[uid])])
+        kwargs["validate"](result)
+        return result
+
+    first = execute(research, model)
+    assert len(model_calls) == 1 and len(research.calls) == 3
+    assert execute(research, model) == first
+    assert len(model_calls) == 1
+
+
+def test_planned_query_outage_recovers_before_first_paid_call(research):
+    research.topic.queries = [module.EvidenceQuery(query=p, purpose=p)
+                             for p in ("support", "counter", "qualify")]
+    query, broken = research.search.search, [True]
+
+    def flaky(text, *args, **kw):
+        if text == "counter" and broken[0]:
+            raise OSError("synthetic outage")
+        return query(text, *args, **kw)
+
+    research.search.search = flaky
+    with pytest.raises(OSError):
+        execute(research, lambda *a, **k: pytest.fail("Model called before retrieval recovered"))
+    broken[0] = False
+
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        uid = payload["initial_evidence"]["originals"]["units"][0]["unit_id"]
+        result = output_type(source_unit_ids=[uid], sufficient=True, unresolved_questions=[],
+                             findings=[dict(category="event", text="恢复", source_unit_ids=[uid])])
+        kwargs["validate"](result)
+        return result
+
+    assert execute(research, model)["assessment"]["sufficient"]
+    assert [q for q, _ in research.calls] == ["support", "counter", "qualify"]
+
+
+def test_planned_evidence_over_budget_keeps_tools_without_truncation(research, monkeypatch):
+    research.topic.queries = [module.EvidenceQuery(query=p, purpose=p)
+                             for p in ("support", "counter", "qualify")]
+    original = deepcopy(research.units)
+    monkeypatch.setattr(module, "READ_TOKENS", 1)
+
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        assert payload["initial_evidence"]["originals"]["selection_required"]
+        assert len(kwargs["tools"]) == 2
+        result = output_type(source_unit_ids=[], findings=[], sufficient=False,
+                             unresolved_questions=["需要缩小取证范围"])
+        kwargs["validate"](result)
+        return result
+
+    assert not execute(research, model)["assessment"]["sufficient"]
+    assert original == research.units
 
 
 @pytest.mark.parametrize(
