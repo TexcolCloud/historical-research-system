@@ -1,9 +1,7 @@
-# 文档入库：退役模块记录
+# document-ingestion（退役入口）
 
-现役实现、API、运行方式和有效测试见 [Research Platform](../research-platform/README.md)。本目录不再提供独立业务服务。
+当前业务接口、运行和测试统一见 [Research Platform](../research-platform/README.md)。不要使用旧独立模块的命令或 API 草案启动业务。
 
-已清理不能独立运行的旧评测脚本、旧 API 契约及构建入口。删除前文件可查看 [Git 快照 b8bab4a](https://github.com/TexcolCloud/historical-research-system/tree/b8bab4a/services/document-ingestion)；更早实现通过 Git 历史追溯。保留的历史文档描述当时的规则、路径和命令，不作为当前操作指南。
+保留 [config/compose.acceptance.yml](config/compose.acceptance.yml) 和 [postgres-init.sql](config/postgres-init.sql)，管理共享 PostgreSQL 与 S3。项目名及卷定义仍沿用原值，迁移管理路径需另外核对卷归属。
 
-保留 `config/compose.acceptance.yml` 和 `config/postgres-init.sql`，用于当前仍在使用的 PostgreSQL 与 S3 容器。
-
-本地被忽略的评测结果、原件与业务文件不在此次删除范围内；未迁移或清除数据库、S3 对象及模型权重。
+历史设计、操作和验收资料仅保留在本地，不随 Git 分发。历史实现可从 [Git 快照](https://github.com/TexcolCloud/historical-research-system/tree/b8bab4a/services/document-ingestion) 追溯；这些记录不表示当前部署行为。

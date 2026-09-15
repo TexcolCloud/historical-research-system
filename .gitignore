@@ -18,7 +18,11 @@ node_modules/
 [Aa][Gg][Ee][Nn][Tt].[Mm][Dd]
 [Cc][Oo][Nn][Tt][Ee][Xx][Tt].[Mm][Dd]
 /GITHUB_PREPARATION.md
-/docs/
+docs/
+# Historical reports remain local; current operating instructions live in README files.
+/services/document-retrieval/evaluation/README.md
+/services/research-platform/RETRIEVAL_TUNING.md
+/services/research-platform/RAGAS_EVALUATION.md
 /文档提取管道调优文档案/
 /文档提取管道调优档案/
 .mypy_cache/

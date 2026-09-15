@@ -6,6 +6,8 @@
 
 从仓库根目录运行，复用 `.env` 中的 SQL、S3 和 DeepSeek 文本配置。
 
+先准备已发布、已完成索引的书籍、可访问的 API，以及按下节格式核对过的题集和参考答案。本工具不会生成可信题集或自动补齐原图审批；`snapshot` 可能触发本地嵌入／重排，`run` 会调用付费文本模型。这里只提供可替换的路径示例，不依赖某一轮私有 `.scratch` 文件。
+
 ```powershell
 $env:UV_PROJECT_ENVIRONMENT = "$PWD/.cache/engineering-envs/ragas"
 $env:PYTHONUTF8 = '1'
@@ -13,11 +15,11 @@ uv sync --project services/research-platform/evaluation/tools/ragas --locked
 
 $runner = 'services/research-platform/evaluation/tools/ragas/evaluate.py'
 $python = '.cache/engineering-envs/ragas/Scripts/python.exe'
-& $python $runner snapshot --dataset .scratch/retrieval-round2-dataset.json --dataset .scratch/retrieval-round2-fresh-dataset.json --references .scratch/ragas_references.json --output .scratch/ragas-snapshot.json
+& $python $runner snapshot --dataset .scratch/evaluation-dataset.json --references .scratch/evaluation-references.json --output .scratch/ragas-snapshot.json
 & $python $runner run --input .scratch/ragas-snapshot.json --output .scratch/ragas-report.json --concurrency 4
 ```
 
-`--api` 可指定服务地址，`--limit` 默认返回 5 条。Linux 使用环境的 `bin/python`。若输入已存于 S3，可先通过现有 `Outputs.get` 导出对应 `ragas-snapshot:*`，直接运行第二步。示例题集是本地私有评测材料，不随代码提交。
+`--api` 可指定服务地址，`--limit` 默认返回 5 条。`--dataset` 可重复提供同一书籍运行、同一有效 generation 的题集，不能一次混合多本书。Linux 使用环境的 `bin/python`。若输入已存于 S3，可先通过现有 `Outputs.get` 导出对应 `ragas-snapshot:*`，直接运行第二步。实际题集与报告不随代码提交。
 
 Ragas 0.4.3 仍引用旧 Vertex 适配器，所以固定 `langchain-community<0.4`，精确版本由本目录的 `uv.lock` 管理。默认关闭 Ragas 使用统计。
 

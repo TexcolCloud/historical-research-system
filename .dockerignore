@@ -6,6 +6,9 @@
 **/.ruff_cache
 **/state
 **/evaluation
+**/docs
+**/RETRIEVAL_TUNING.md
+**/RAGAS_EVALUATION.md
 **/output
 **/dist
 **/build

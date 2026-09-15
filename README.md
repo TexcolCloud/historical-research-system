@@ -113,7 +113,7 @@ if (-not (Test-Path .env)) { Copy-Item .env.platform.example .env }
 if (-not (Test-Path AGENTS.md)) { New-Item -ItemType File AGENTS.md | Out-Null }
 ```
 
-编辑 `.env`，将所有 `CHANGE_ME` 替换为真实配置。字段说明见 [配置模板](.env.platform.example)；原件、真实配置、模型权重和业务存储数据不包含在仓库中。
+编辑 `.env`，将所有 `CHANGE_ME` 替换为真实配置，并确认文本模型选择。当前模板显式选择 Pro 推理模型；需要统一使用 Flash 时，将 `CARDS_REASONING_MODEL` 和 `CARDS_READING_MODEL` 均设为 `deepseek-flash`。主机与容器的配置优先级见 [平台配置](services/research-platform/README.md#运行与配置)。原件、真实配置、模型权重和业务存储数据不包含在仓库中。
 
 ### 2. 安装 OCR、平台环境与模型
 
@@ -201,17 +201,17 @@ models/                  # 本地权重与缓存；大文件不入 Git
 
 ## 文档
 
-| 主题                       | 入口                                                                                                                                     |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| 部署、审核、恢复与后端接口 | [Research Platform](services/research-platform/README.md)                                                                                |
-| 前端开发与交互规则         | [Review Workbench](services/review-workbench/README.md)                                                                                  |
-| OCR CLI 与转换产物         | [Document Extraction](services/document-extraction/README.md)；当前默认 [default.json](services/document-extraction/config/default.json) |
-| 模型准备与目录             | [Local Models](models/README.md)                                                                                                         |
-| API 契约                   | [OpenAPI](services/research-platform/openapi.json)                                                                                       |
-| 检索评测与已知限制         | [检索调优记录](services/research-platform/RETRIEVAL_TUNING.md)                                                                           |
-| 自动化检查                 | [GitHub Actions](https://github.com/TexcolCloud/historical-research-system/actions/workflows/engineering.yml)                            |
+| 主题                       | 入口                                                                                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 部署、审核、恢复与后端接口 | [Research Platform](services/research-platform/README.md)                                                                                    |
+| 前端开发与交互规则         | [Review Workbench](services/review-workbench/README.md)                                                                                      |
+| OCR CLI 与转换产物         | [Document Extraction](services/document-extraction/README.md)；当前默认 [default.json](services/document-extraction/config/default.json)     |
+| 模型准备与目录             | [Local Models](models/README.md)                                                                                                             |
+| API 契约                   | [OpenAPI](services/research-platform/openapi.json)                                                                                           |
+| 检索评测与已知限制         | [检索与来源](services/research-platform/README.md#检索与来源)、[Ragas 操作说明](services/research-platform/evaluation/tools/ragas/README.md) |
+| 自动化检查                 | [GitHub Actions](https://github.com/TexcolCloud/historical-research-system/actions/workflows/engineering.yml)                                |
 
-部分模块文档保留了历史实验和本地追溯链接。根 `docs/`、`output/`、调优档案及个人开发指令不随 Git 分发；其中的历史记录不替代当前配置与运行行为。
+文档按“入门 → 操作指南 → 参考与限制”组织：根 README 提供安装和首次使用，模块 README 解释当前职责、日常操作及验证。各级 `docs/`、历史调优与验收报告、`output/` 及个人开发指令留在本地，不随 Git 分发；保留的操作说明不依赖这些本地资料才能阅读。API 契约、配置示例、测试资源、依赖锁与第三方许可证继续随仓库保存。
 
 ## 常见问题
 
