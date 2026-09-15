@@ -650,7 +650,8 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
     assert transitions[-1][1:] == ("processing", "vision")
 
 
-def test_failed_assignment_cancels_siblings_before_topic_generation(monkeypatch):
+@pytest.mark.parametrize("transport", [False, True])
+def test_failed_assignment_drains_transport_siblings_but_cancels_on_global_errors(monkeypatch, transport):
     originals = [chapter(name) for name in ["甲", "乙", "丙"]]
     cards = object.__new__(Cards)
     cards.settings, cards.engine, cards.outputs = (
@@ -694,18 +695,30 @@ def test_failed_assignment_cancels_siblings_before_topic_generation(monkeypatch)
             try:
                 if objective == "甲":
                     await second.wait()
+                    if transport:
+                        raise ApplicationError(
+                            "offline", {"retry_at": 1000}, type="model_transport_wait", non_retryable=True
+                        )
                     raise RuntimeError("reading failed")
                 second.set()
+                if transport:
+                    await asyncio.sleep(0.01)
+                    return {"readings": []}
                 await asyncio.Future()
             finally:
                 running.remove(objective)
                 stopped.append(objective)
 
         monkeypatch.setattr(module, "read_batch", reading)
-        with pytest.raises(RuntimeError, match="reading failed"):
+        with pytest.raises(
+            ApplicationError if transport else RuntimeError,
+            match="offline" if transport else "reading failed",
+        ):
             await cards.generate(str(uuid4()))
         assert not running and "乙" in stopped and len(started) >= 2
         assert "generated-cards" not in cards.outputs.values
         assert not any("卡片主题" in key for key, _ in cards.outputs.events)
+        if transport:
+            assert any("研究分工:v2:1:readings:" in key for key in cards.outputs.values)
 
     asyncio.run(exercise())

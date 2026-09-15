@@ -48,8 +48,50 @@ def test_terminal_run_closes_abandoned_nodes_without_rewriting_completed_work(pl
     outputs = Outputs(settings, engine)
     outputs.node(run, "done", kind="agent", label="Done", objective="Read", state="completed")
     outputs.node(run, "abandoned", kind="agent", label="Interrupted", objective="Read")
+    outputs.node(run, "waiting", kind="agent", label="Waiting", objective="Read", state="waiting")
     PipelineActivities(settings, engine).record_pipeline_failure(run)
     nodes = {row["label"]: row for row in outputs.list_nodes(run)}
     assert nodes["Done"]["state"] == "completed"
     assert nodes["Interrupted"]["state"] == "failed"
     assert nodes["Interrupted"]["finished_at"] is not None
+    assert nodes["Waiting"]["state"] == "failed" and nodes["Waiting"]["finished_at"] is not None
+
+
+def test_service_recovery_is_visible_and_cleared_when_activity_resumes(platform, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from hrs_platform.activities import Activities
+    from hrs_platform.books import get_run
+    from hrs_platform.pipeline_activities import PipelineActivities
+
+    settings, engine = platform
+    run, _ = seed(engine)
+    pipeline = PipelineActivities(settings, engine)
+    monkeypatch.setattr(
+        "hrs_platform.pipeline_activities.activity.info",
+        lambda: SimpleNamespace(activity_type="generate_cards"),
+    )
+    monkeypatch.setattr("hrs_platform.pipeline_activities.activity.heartbeat", lambda *_: None)
+
+    async def offline():
+        raise ApplicationError(
+            "waiting", {"retry_at": 1060.0}, type="model_transport_wait", non_retryable=True
+        )
+
+    with pytest.raises(ApplicationError):
+        asyncio.run(pipeline.observe(run, offline()))
+    saved = get_run(engine, run)
+    assert saved["state"] == "processing" and saved["error"]["code"] == "model_transport_wait"
+    assert Outputs(settings, engine).list_nodes(run)[0]["state"] == "waiting"
+
+    async def done():
+        return {"complete": True}
+
+    assert asyncio.run(pipeline.observe(run, done())) == {"complete": True}
+    assert get_run(engine, run)["error"] is None
+    assert Outputs(settings, engine).list_nodes(run)[0]["state"] == "completed"
+    Activities(settings, engine).transition(run, "processing", "planning", error=saved["error"])
+    pipeline.record_pipeline_failure(run)
+    stopped = get_run(engine, run)
+    assert stopped["state"] == "failed" and stopped["error"]["code"] == "model_transport_exhausted"
