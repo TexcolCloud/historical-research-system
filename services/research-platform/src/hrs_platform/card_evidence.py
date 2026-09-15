@@ -393,8 +393,8 @@ class CardEvidence:
             if not value.sufficient and not value.unresolved_questions:
                 raise ValueError("Explain the unresolved evidence before deferring.")
 
-        # Finish interrupted queries before asking the model to continue. Completed
-        # tool receipts remain outside the immutable model input and are replayed by tools.
+        # Finish interrupted queries before asking the model to continue. Dynamic
+        # tool receipts are replayed by tools; planned searches use a frozen bootstrap below.
         for index, intent in enumerate(intents):
             if intent and searches[index] is None:
                 await complete_query(index)

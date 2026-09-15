@@ -454,7 +454,7 @@ def test_local_model_failure_falls_back_without_more_calls(error_type, stage):
         read_batch(models, "run", "read", [{"unit_id": "a", "text": "新来源"}], "scope", None)
     )
     assert changed["readings"][0]["candidate_quotes"] == ["新来源"]
-    assert len(models.outputs.values) == 2
+    assert sum(":resolved:" in key for key in models.outputs.values) == 2
 
 
 @pytest.mark.parametrize(

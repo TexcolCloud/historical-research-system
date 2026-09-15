@@ -343,17 +343,28 @@ async def read_batch(
                     raise ValueError("Review refers to a different source scope.")
                 coverage(value, actual if partial else targets)
 
-            value = await card_model(
-                models, run_id, f"{key}:check:{fingerprint(payload)}",
+            instructions = (
                 prompts.CHECK_READING
                 + "\nsource_units 保留完整批次作为上下文，只核验 required_object_ids。"
                 "逐个目标记录结论，问题归到实际受影响的 unit_id；共享概括错误须标出所有受影响目标。"
-                "不能核验的目标列入 unverified_object_ids，不以总体 pass 代替逐项检查。",
-                payload, scoped_check(targets), parent=parent, validate=validate_check,
+                "不能核验的目标列入 unverified_object_ids，不以总体 pass 代替逐项检查。"
             )
+            batch_dependency = {"payload": payload, "instructions": instructions}
+            batch_key = f"{key}:batch-check:{fingerprint(batch_dependency)}"
+            saved_check = await asyncio.to_thread(models.outputs.get, run_id, batch_key, batch_dependency)
+            if saved_check is None:
+                value = await card_model(
+                    models, run_id, f"{key}:check:{fingerprint(payload)}", instructions,
+                    payload, scoped_check(targets), parent=parent, validate=validate_check,
+                )
+                await asyncio.to_thread(models.outputs.put, run_id, batch_key,
+                                        value.model_dump(mode="json"), batch_dependency)
+            else:
+                value = scoped_check(targets).model_validate(saved_check)
+                validate_check(value)
             actual = set(value.checked_object_ids) | set(value.unverified_object_ids)
             for identity in targets:
-                if identity not in actual:
+                if identity not in actual or receipts[identity] is not None:
                     continue
                 findings = [f for f in value.findings if f.object_id == identity]
                 unresolved = identity in value.unverified_object_ids
@@ -371,18 +382,28 @@ async def read_batch(
                 )
 
         pending = [i for i in records if receipts[i] is None]
+        failed_single_scope = False
         if pending:
+            # Freeze the request scope before calling the model. After a partial
+            # receipt fanout, replay its completed result rather than pay for a new scope.
+            scope_dependency = {"checks": [entry[0] for entry in dependencies.values()]}
+            scope_key = f"{key}:check-scope:{fingerprint(scope_dependency)}"
+            scope = await asyncio.to_thread(models.outputs.get, run_id, scope_key, scope_dependency)
+            if scope is None:
+                scope = await asyncio.to_thread(models.outputs.put, run_id, scope_key,
+                                                {"targets": pending}, scope_dependency)
             try:
-                await check_targets(pending, partial=len(pending) > 1)
+                await check_targets(scope["targets"], partial=len(scope["targets"]) > 1)
             except ApplicationError as error:
                 if error.type not in {"model_output_invalid", "model_output_limit"}:
                     raise
-                if len(pending) == 1:
+                if len(scope["targets"]) == 1:
                     failed_output = True
+                    failed_single_scope = True
         # A missing batch verdict (or an oversized model response) gets one
         # bounded per-unit check; missing output is never approval.
         for identity in pending:
-            if receipts[identity] is None and not (failed_output and len(pending) == 1):
+            if receipts[identity] is None and not failed_single_scope:
                 try:
                     await check_targets([identity], partial=False)
                 except ApplicationError as error:
