@@ -213,6 +213,13 @@ models/                  # 本地权重与缓存；大文件不入 Git
 
 文档按“入门 → 操作指南 → 参考与限制”组织：根 README 提供安装和首次使用，模块 README 解释当前职责、日常操作及验证。各级 `docs/`、历史调优与验收报告、`output/` 及个人开发指令留在本地，不随 Git 分发；保留的操作说明不依赖这些本地资料才能阅读。API 契约、配置示例、测试资源、依赖锁与第三方许可证继续随仓库保存。
 
+旧业务实现已退役，但以下路径仍管理当前共享基础设施，保留原 Compose 项目名与卷定义：
+
+- [PostgreSQL 与 S3](services/document-ingestion/config/compose.acceptance.yml)，以及同目录初始化 SQL。
+- [OpenSearch 与快照卷](services/document-retrieval/config/compose.yml)。
+
+这些文件不启动旧业务服务。迁移其管理路径前需验证卷归属和备份恢复；历史代码可从 Git 记录追溯，现役回归与 Ragas 工具位于 `services/research-platform`。
+
 ## 常见问题
 
 <details>
