@@ -140,8 +140,9 @@ def test_foreign_stale_or_missing_index_never_becomes_empty_evidence(research, f
 
     with pytest.raises(ApplicationError) as error:
         execute(research, model)
-    assert error.value.type in {"card_corpus_changed", "card_index_missing"}
-    assert not research.outputs.values
+    assert error.value.type == ("retrieval_wait" if failure == "deleted_index" else "card_corpus_changed")
+    assert not any(":search:" in key and "retrieval-recovery" not in key or ":read:" in key
+                   for key in research.outputs.values)
 
 
 def test_mid_research_disconnect_reuses_completed_queries_and_reads(research):
@@ -217,20 +218,22 @@ def test_preview_only_citations_and_foreign_read_ids_are_rejected(research):
         execute(research, model)
 
 
-def test_budgets_survive_model_retry_without_truncating_source(research, monkeypatch):
+@pytest.mark.parametrize("multiple", [False, True])
+def test_budgets_survive_model_retry_without_truncating_source(research, monkeypatch, multiple):
     original = deepcopy(research.units)
     monkeypatch.setattr(module, "READ_TOKENS", 1)
 
     async def model(run_id, key, instructions, payload, output_type, **kwargs):
         search, read = kwargs["tools"]
         await invoke(search, queries=[{"query": p, "purpose": p} for p in module.PURPOSES])
-        assert "budget" in (await invoke(search, queries=[{"query": "extra", "purpose": "support"}]))["error"]
-        assert "token budget" in (await invoke(read, unit_ids=research.topic.unit_ids))["error"]
-        raise ValueError("retry model output")
+        cached = await invoke(search, queries=[{"query": "extra", "purpose": "support"}])
+        assert cached[0]["request"]["query"] == "support"
+        await invoke(read, unit_ids=[u["unit_id"] for u in research.units] if multiple else research.topic.unit_ids)
 
     for _ in range(2):
-        with pytest.raises(ValueError, match="retry"):
+        with pytest.raises(ApplicationError) as failure:
             execute(research, model)
+        assert failure.value.type == "card_input_budget"
     assert len(research.calls) == 3
     assert research.units == original
     assert not any(":read:" in key for key in research.outputs.values)
@@ -248,3 +251,118 @@ def test_token_packing_and_compact_clues_keep_every_source_and_original_reading(
     assert clues[0]["readings"][0]["negations_and_limits"] == ["不含水运"]
     assert "candidate_quotes" not in clues[0]["readings"][0]
     assert record["readings"][0]["candidate_quotes"] == ["原文"]
+
+
+def test_duplicate_purposes_cannot_poison_reserved_slots(research):
+    async def model(run, key, instructions, payload, output_type, **kw):
+        search = kw["tools"][0]
+        invalid = await invoke(search, queries=[{"query": str(i), "purpose": "support"} for i in range(3)])
+        assert "error" in invalid and not research.calls
+        # Rewriting support replays its receipt without consuming counter/qualify.
+        for q in ("first", "rewritten", "again"):
+            rows = await invoke(search, queries=[{"query": q, "purpose": "support"}])
+            assert rows[0]["request"]["query"] == "first"
+        await use_tools(output_type, kw)
+        assert len(research.calls) == 3
+        raise RuntimeError("probe complete")
+    with pytest.raises(RuntimeError, match="probe complete"):
+        execute(research, model)
+
+
+def test_large_neighbor_units_are_explicit_reads_not_mandatory_overflow(research):
+    research.units = reading_units(chapter("# 合成章节\n\n" + "该地运输物资数量发生变化，但不包括仓库转运部分。\n\n" * 1200))
+    research.topic.unit_ids = [research.units[2]["unit_id"]]
+    async def model(*args, **kw):
+        receipt = await invoke(kw["tools"][1], unit_ids=research.topic.unit_ids)
+        assert "error" not in receipt
+        assert receipt["units"][0]["text"] == research.units[2]["text"]
+        assert research.units[1]["unit_id"] in receipt["related_unit_ids"]
+        assert research.units[3]["unit_id"] in receipt["related_unit_ids"]
+        raise RuntimeError("probe complete")
+    with pytest.raises(RuntimeError, match="probe complete"):
+        execute(research, model)
+
+
+@pytest.mark.parametrize("outage", ["gpu", "opensearch"])
+def test_retrieval_outage_restores_intents_before_any_new_model_call(research, monkeypatch, outage):
+    from opensearchpy.exceptions import ConnectionError
+
+    from hrs_platform.domain.errors import Problem
+    now, attempts, model_calls = [1000.0], [], []
+    monkeypatch.setattr(module.time, "time", lambda: now[0])
+    original = research.search.search
+    def flaky(query, *args, **kw):
+        attempts.append(query)
+        if query == "counter" and now[0] < 1360:
+            if outage == "gpu":
+                raise Problem("retrieval_unavailable", "offline", retryable=True)
+            raise ConnectionError("N/A", "offline")
+        return original(query, *args, **kw)
+    research.search.search = flaky
+    async def model(run, key, instructions, payload, output_type, **kw):
+        model_calls.append(payload)
+        receipt = await use_tools(output_type, kw)
+        uid = receipt["units"][0]["unit_id"]
+        value = output_type(source_unit_ids=[uid], findings=[dict(category="event", text="合成", source_unit_ids=[uid])],
+                            unresolved_questions=[], sufficient=True)
+        kw["validate"](value)
+        return value
+    for at in (1000, 1001, 1060, 1180):
+        now[0] = at
+        with pytest.raises(ApplicationError) as error:
+            execute(research, model)
+        assert error.value.type == "retrieval_wait"
+        assert len(model_calls) == 1
+    # The first successful query is retained across three failures and restarts.
+    assert [q for q, _ in research.calls] == ["support"]
+    now[0] = 1420
+    assert execute(research, model)["assessment"]["sufficient"]
+    assert model_calls[0] == model_calls[1]
+    assert [q for q, _ in research.calls] == ["support", "counter", "qualify"]
+    assert attempts.count("support") == 1
+
+
+def test_terminal_model_result_is_reused_after_evidence_receipt_write_failure(research, monkeypatch):
+    from test_model_lifecycle import Receipt
+    from test_model_transport import success, transport_model
+    model, sends = transport_model(monkeypatch, lambda request: success())
+    original, fail = research.outputs.put, [True]
+    def write(run, key, value, dependency):
+        if "assessment" in value and fail[0]:
+            fail[0] = False
+            raise OSError("synthetic final write failure")
+        return original(run, key, value, dependency)
+    research.outputs.put = write
+    async def run(run_id, key, instructions, payload, output_type, **kw):
+        receipt = await use_tools(output_type, kw)
+        await model.run(run_id, key, "test", payload, Receipt)
+        uid = receipt["units"][0]["unit_id"]
+        value = output_type(source_unit_ids=[uid], findings=[dict(category="event", text="合成", source_unit_ids=[uid])],
+                            unresolved_questions=[], sufficient=True)
+        kw["validate"](value)
+        return value
+    with pytest.raises(OSError, match="final write"):
+        execute(research, run)
+    assert execute(research, run)["assessment"]["sufficient"]
+    assert len(sends) == 1 and len(research.calls) == 3
+
+
+def test_persistent_retrieval_failures_exhaust_and_explicit_retry_gets_new_epoch(research, monkeypatch):
+    from hrs_platform.domain.errors import Problem
+    now, calls = [1000.0], []
+    monkeypatch.setattr(module.time, "time", lambda: now[0])
+    async def unavailable():
+        calls.append(True)
+        raise Problem("retrieval_unavailable", "offline", retryable=True)
+    for attempt in range(1, 13):
+        with pytest.raises(ApplicationError) as error:
+            asyncio.run(research.evidence.recover("run", "probe", unavailable))
+        assert error.value.type == ("retrieval_exhausted" if attempt == 12 else "retrieval_wait")
+        now[0] = error.value.details[0]["retry_at"]
+    with pytest.raises(ApplicationError) as error:
+        asyncio.run(research.evidence.recover("run", "probe", unavailable))
+    assert error.value.type == "retrieval_exhausted" and len(calls) == 12
+    research.parent["recovery_attempt"] = 1
+    async def restored():
+        return "ready"
+    assert asyncio.run(research.evidence.recover("run", "probe", restored)) == "ready"

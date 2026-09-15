@@ -292,7 +292,8 @@ def test_tool_closeout_failure_uses_durable_catalogue_reading_plan(harness):
     assert "目录" in plan["rationale"]
 
 
-def test_output_limit_splits_only_failed_topic_and_reuses_children_on_restart(harness):
+@pytest.mark.parametrize("stage", ["draft", "evidence"])
+def test_budget_limit_splits_only_failed_topic_and_reuses_children_on_restart(harness, stage):
     cards, run, units, scenario, calls = harness
     scenario["combined"] = True
     original = cards.models.run
@@ -304,7 +305,17 @@ def test_output_limit_splits_only_failed_topic_and_reuses_children_on_restart(ha
             raise ApplicationError("output too long", type="model_output_limit", non_retryable=True)
         return await original(*args, **kwargs)
 
-    cards.models.run = bounded
+    if stage == "draft":
+        cards.models.run = bounded
+    else:
+        research = cards.evidence.research
+        async def bounded_evidence(*args, **kwargs):
+            size = len(args[4].unit_ids)
+            if size > 1:
+                failed_sizes.append(size)
+                raise ApplicationError("evidence too large", type="card_input_budget", non_retryable=True)
+            return await research(*args, **kwargs)
+        cards.evidence.research = bounded_evidence
     result = finish(cards, run)
     assert result["state"] == "completed" and result["adopted"] == 3
     generated = cards.outputs.get(run, "generated-cards")

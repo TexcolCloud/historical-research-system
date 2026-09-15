@@ -32,7 +32,7 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
   const activeRun = runs.data?.find((run) => run.id === id);
   const waiting =
     activeRun?.state === "processing" &&
-    activeRun.error?.code === "model_transport_wait";
+    ["model_transport_wait", "retrieval_wait"].includes(String(activeRun.error?.code));
   const recovery = activeRun?.error?.recovery;
   const retryAt =
     recovery && typeof recovery === "object" && "retry_at" in recovery
@@ -58,7 +58,7 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
       {runs.isError && <p role="alert">{runs.error.message}</p>}
       {waiting && (
         <p role="status">
-          等待文本服务恢复，已完成结果保留。
+          等待{activeRun?.error?.code === "retrieval_wait" ? "检索" : "文本"}服务恢复，已完成结果保留。
           {typeof retryAt === "number" &&
             Number.isFinite(retryAt) &&
             `预计 ${new Date(retryAt * 1000).toLocaleString("zh-CN")} 自动重试。`}

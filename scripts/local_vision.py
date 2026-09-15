@@ -1,10 +1,8 @@
 """Loopback broker owning one Qwen llama.cpp process; shared serial GPU scheduling."""
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import multiprocessing
 import os
-from pathlib import Path
 import signal
 import socket
 import subprocess
@@ -12,11 +10,18 @@ import sys
 import threading
 import time
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'services/runtime-support/src'))
-from hrs_runtime.local_vision import MODEL, POLICY, free_gib, gpu_lease
+from hrs_runtime.local_vision import (  # noqa: E402 - script bootstrap
+    MODEL,
+    POLICY,
+    free_gib,
+    gpu_lease,
+)
 
 
 def retrieval_worker(connection):
@@ -35,7 +40,7 @@ def retrieval_worker(connection):
                 else:
                     value = {'scores': models.rerank(body['query'], body['texts'])}
                 connection.send({'result': value, 'seconds': time.monotonic() - started})
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - child protocol error envelope
                 connection.send({'error': type(error).__name__})
     except EOFError:
         pass
@@ -61,6 +66,8 @@ class Vision:
         self.cancelled_tasks = set()
         self.retrieval_process = None
         self.retrieval_pipe = None
+        self.active_retrieval = None
+        self.cancelled_retrievals = {}
 
     def unload_retrieval(self):
         process, self.retrieval_process = self.retrieval_process, None
@@ -84,36 +91,71 @@ class Vision:
             raise ValueError('Invalid retrieval request')
         if operation == 'rerank' and (not isinstance(body.get('query'), str) or not 1 <= len(body['query']) <= 1000):
             raise ValueError('Invalid rerank query')
-        with gpu_lease():
-            if self.closing.is_set():
-                raise RuntimeError('local_runtime_stopping')
-            self.unload()
-            if self.retrieval_process is None or not self.retrieval_process.is_alive():
-                self.unload_retrieval()
-                if free_gib() < float(os.getenv('HRS_RETRIEVAL_PEAK_GIB', '6')) + self.reserve:
-                    raise RuntimeError('gpu_memory_unavailable_for_retrieval')
-                context = multiprocessing.get_context('spawn')
-                self.retrieval_pipe, child = context.Pipe()
-                self.retrieval_process = context.Process(target=retrieval_worker, args=(child,), daemon=True)
-                self.retrieval_process.start()
-                child.close()
+        task_id = str(UUID(body['task_id'])) if body.get('task_id') else None
+        request_id = str(UUID(body['request_id'])) if body.get('request_id') else None
+
+        def check_cancelled():
+            with self.task_lock:
+                if self.closing.is_set():
+                    raise RuntimeError('local_runtime_stopping')
+                if (task_id and task_id in self.cancelled_tasks
+                        or request_id and request_id in self.cancelled_retrievals):
+                    raise RuntimeError('retrieval_cancelled')
+
+        # Return contention to the durable caller instead of keeping a worker
+        # and HTTP request queued behind a whole OCR/vision book.
+        with gpu_lease(timeout=60, check_cancelled=check_cancelled):
             try:
-                self.retrieval_pipe.send(body)
-                if not self.retrieval_pipe.poll(900):
-                    raise TimeoutError('retrieval_timeout')
-                response = self.retrieval_pipe.recv()
+                with self.task_lock:
+                    check_cancelled()
+                    self.active_retrieval = (task_id, request_id)
+                    self.unload()
+                    if self.retrieval_process is None or not self.retrieval_process.is_alive():
+                        self.unload_retrieval()
+                        if free_gib() < float(os.getenv('HRS_RETRIEVAL_PEAK_GIB', '6')) + self.reserve:
+                            raise RuntimeError('gpu_memory_unavailable_for_retrieval')
+                        context = multiprocessing.get_context('spawn')
+                        self.retrieval_pipe, child = context.Pipe()
+                        self.retrieval_process = context.Process(target=retrieval_worker, args=(child,), daemon=True)
+                        self.retrieval_process.start()
+                        child.close()
+                    pipe = self.retrieval_pipe
+                    pipe.send(body)
+                deadline = time.monotonic() + 900
+                while not pipe.poll(0.2):
+                    check_cancelled()
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError('retrieval_timeout')
+                check_cancelled()
+                response = pipe.recv()
                 if 'error' in response:
                     raise RuntimeError('retrieval_failed:' + response['error'])
                 self.event({'event': 'retrieval_completed', 'operation': operation, 'items': len(texts), 'seconds': response['seconds']})
                 return response['result']
             except Exception:
-                self.unload_retrieval()
+                with self.task_lock:
+                    self.unload_retrieval()
                 raise
+            finally:
+                with self.task_lock:
+                    self.active_retrieval = None
+
+    def cancel_retrieval(self, request_ids):
+        identities = {str(UUID(value)) for value in request_ids}
+        with self.task_lock:
+            now = time.monotonic()
+            self.cancelled_retrievals = {key: at for key, at in self.cancelled_retrievals.items() if now - at < 3600}
+            self.cancelled_retrievals.update({key: now for key in identities})
+            if self.active_retrieval and self.active_retrieval[1] in identities:
+                self.unload_retrieval()
+        return {'cancelled': sorted(identities)}
 
     def cancel_tasks(self, task_ids):
         identities = {str(UUID(value)) for value in task_ids}
         with self.task_lock:
             self.cancelled_tasks.update(identities)
+            if self.active_retrieval and self.active_retrieval[0] in identities:
+                self.unload_retrieval()
             if self.active_task in identities or (self.active_task is None and self.last_task in identities):
                 self.unload()
         return {'cancelled': sorted(identities)}
@@ -263,13 +305,15 @@ def main():
                     value = vision.complete(body)
                 elif self.path == '/retrieval':
                     value = vision.retrieve(body)
+                elif self.path == '/cancel-retrieval':
+                    value = vision.cancel_retrieval(body['request_ids'])
                 elif self.path == '/cancel-tasks':
                     value = vision.cancel_tasks(body['task_ids'])
                 else:
                     self.reply(404, {'error': 'unknown_route'})
                     return
                 self.reply(200, value)
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - HTTP error envelope
                 vision.event({'event': 'failed', 'error_class': type(error).__name__, 'reason': str(error)[:200]})
                 self.reply(503, {'error': 'local_vision_unavailable', 'error_class': type(error).__name__})
 

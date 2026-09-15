@@ -27,7 +27,7 @@ class PipelineActivities:
         observer = asyncio.create_task(heartbeat())
         try:
             run = get_run(self.engine, run_id)
-            if (run["error"] or {}).get("code") == "model_transport_wait":
+            if (run["error"] or {}).get("code") in {"model_transport_wait", "retrieval_wait"}:
                 Activities(self.settings, self.engine).transition(
                     run_id, "processing", run["stage"], error=None
                 )
@@ -54,6 +54,8 @@ class PipelineActivities:
                 except ApplicationError as error:
                     if error.type in {
                         "model_transport_wait",
+                        "retrieval_wait",
+                        "retrieval_exhausted",
                         "model_transport_exhausted",
                         "model_request_rejected",
                         "model_execution_timeout",
@@ -144,14 +146,15 @@ class PipelineActivities:
     def record_pipeline_failure(self, run_id: str) -> dict:
         run = get_run(self.engine, run_id)
         previous = run["error"] or {}
-        if previous.get("code") == "model_transport_wait":
+        if previous.get("code") in {"model_transport_wait", "retrieval_wait"}:
             error = {
-                "code": "model_transport_exhausted",
+                "code": "retrieval_exhausted" if previous["code"] == "retrieval_wait" else "model_transport_exhausted",
                 "stage": run["stage"],
-                "message": "文本服务恢复等待已达上限，已提交结果保留，请稍后手动重试。",
+                "message": "服务恢复等待已达上限，已提交结果保留，请稍后手动重试。",
                 "last_failure": previous,
             }
         elif previous.get("code") in {
+            "retrieval_exhausted",
             "model_transport_exhausted",
             "model_request_rejected",
             "model_execution_timeout",

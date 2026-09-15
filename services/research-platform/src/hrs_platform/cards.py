@@ -407,7 +407,7 @@ class Cards:
                 {"chapters": originals, "reading_rule": "structured-full-coverage-v2"},
             )
         chapters, all_units = snapshot["chapters"], snapshot["units"]
-        corpus = await asyncio.to_thread(self.evidence.pin, run, snapshot)
+        corpus = await self.evidence.prepare(run, snapshot)
         if not all_units:
             raise ValueError("No reviewed source text is available for card reading.")
         revision = (run.get("result") or {}).get("card_revision", 0)
