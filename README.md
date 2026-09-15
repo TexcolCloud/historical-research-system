@@ -32,20 +32,9 @@
 
 ## 工作流程
 
-```mermaid
-flowchart LR
-    A[上传 PDF] --> B[OCR 与结构整理]
-    B --> C[本地视觉核验与修正复核]
-    C --> D{仍有未解决内容?}
-    D -->|有| E[人工逐项核对]
-    E --> D
-    D -->|无| F[组织章节并入库]
-    F --> G[阅读与检索索引]
-    G --> H[Agent 通读与制卡]
-    H --> I[文本与本地原图核验]
-    I -->|通过| J[定稿采用与导出]
-    I -->|未通过| K[保留候选与修订记录]
-```
+[![书籍处理工作流：接收与转换、视觉核验、入库索引与制卡](assets/diagrams/book-workflow.svg)](assets/diagrams/book-workflow.svg)
+
+按编号从左到右阅读，各阶段内部从上到下；同名圆形连接符接续流程。点击图片可查看全尺寸。
 
 - **入库前完成整书内容核对。** 审核工作区可以阅读已识别的内容，但未解决、未核验内容不能绕过入库和分块门槛。
 - **草稿保存不等于放行。** 人工决定和草稿不会被机器覆盖；文章结构不额外增加人工批准步骤。
@@ -56,23 +45,9 @@ flowchart LR
 
 ## 架构
 
-```mermaid
-flowchart TB
-    UI[React 书籍工作台] --> API[FastAPI / api/v2]
-    UI --> UP[Uppy + tusd 可恢复上传]
-    UP --> S3[S3 对象存储]
-    API --> DB[PostgreSQL]
-    API --> TF[Temporal 持久工作流]
-    TF --> CPU[CPU worker / 章节组织与文本研究]
-    TF --> GPU[Windows GPU worker / OCR 与视觉核验]
-    CPU --> DS[DeepSeek 文本服务]
-    CPU --> BR[共享 GPU broker]
-    GPU --> BR
-    API --> OS[OpenSearch 检索索引]
-    CPU --> OS
-    CPU --> S3
-    GPU --> S3
-```
+[![系统组件与部署边界：浏览器、应用容器、GPU 进程与共享基础设施](assets/diagrams/system-architecture.svg)](assets/diagrams/system-architecture.svg)
+
+箭头标明请求或任务方向，边框划分运行边界，D1–D3 标明存储依赖。图示约定和实现依据见[制图说明](assets/diagrams/README.md)。
 
 | 层次     | 现有组件与职责                                                                                         |
 | -------- | ------------------------------------------------------------------------------------------------------ |

@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1640" height="1460" viewBox="0 0 1640 1460" role="img" aria-labelledby="title desc">
+<title id="title">系统组件与部署边界</title><desc id="desc">范围：当前单工作站配置  ·  浏览器 / Docker 应用 / Windows GPU 进程 / 外部文本服务；全部连接线为水平或垂直线段。可放大阅读。</desc>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#516477"/></marker></defs>
+<g font-family="Microsoft YaHei, Noto Sans CJK SC, PingFang SC, sans-serif">
+<rect x="0" y="0" width="1640" height="1460" fill="#ffffff" stroke="#ffffff" stroke-width="1.6"/>
+<text x="40" y="58" font-size="34" fill="#16324a" text-anchor="start" font-weight="700">系统组件与部署边界</text>
+<text x="40" y="94" font-size="19" fill="#516477" text-anchor="start">范围：当前单工作站配置  ·  浏览器 / Docker 应用 / Windows GPU 进程 / 外部文本服务</text>
+<text x="40" y="132" font-size="18" fill="#516477" text-anchor="start">图例：实线箭头＝请求方向   虚线箭头＝逻辑任务 / 已提交事件   D1–D3＝存储依赖   G1＝HTTP 模型依赖</text>
+<rect x="70" y="190" width="370" height="110" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="70" y="190" width="5" height="110" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="88" y="222" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">浏览器 · React 工作台</text>
+<text x="88" y="253" font-size="19" fill="#516477" text-anchor="start">书籍 / 待办 / 卡片 / 执行图</text>
+<text x="88" y="279" font-size="19" fill="#516477" text-anchor="start">Uppy、Tiptap、TanStack Query</text>
+<rect x="620" y="190" width="370" height="110" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="620" y="190" width="5" height="110" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="638" y="222" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">Web 入口 · Nginx</text>
+<text x="638" y="253" font-size="19" fill="#516477" text-anchor="start">静态前端 + 同源反向代理</text>
+<text x="638" y="279" font-size="19" fill="#516477" text-anchor="start">127.0.0.1:18156</text>
+<rect x="1150" y="190" width="370" height="110" fill="#f7f8fa" stroke="#516477" stroke-width="1.6"/>
+<rect x="1150" y="190" width="5" height="110" fill="#516477" stroke="#516477" stroke-width="1.6"/>
+<text x="1168" y="222" font-size="24" fill="#516477" text-anchor="start" font-weight="700">外部服务 · DeepSeek</text>
+<text x="1168" y="253" font-size="19" fill="#516477" text-anchor="start">HTTPS / 文本研究与推理</text>
+<text x="1168" y="279" font-size="19" fill="#516477" text-anchor="start">不承担生产原图核验</text>
+<polyline points="440,245 620,245" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="449" y="211" width="169.04000000000002" height="24" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="456" y="226" font-size="16" fill="#516477" text-anchor="start">HTTP · JSON / SSE</text>
+<rect x="40" y="355" width="1020" height="655" fill="#fafcfe" stroke="#c9d5df" stroke-width="1.6"/>
+<rect x="40" y="355" width="1020" height="62" fill="#eaf0f6" stroke="#c9d5df" stroke-width="1.6"/>
+<text x="60" y="394" font-size="24" fill="#16324a" text-anchor="start" font-weight="700">Docker Desktop · Linux 应用容器</text>
+<rect x="1120" y="355" width="480" height="655" fill="#fafcfe" stroke="#c9d5df" stroke-width="1.6"/>
+<rect x="1120" y="355" width="480" height="62" fill="#eaf0f6" stroke="#c9d5df" stroke-width="1.6"/>
+<text x="1140" y="394" font-size="24" fill="#16324a" text-anchor="start" font-weight="700">Windows · GPU 进程边界</text>
+<rect x="70" y="455" width="370" height="150" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="70" y="455" width="5" height="150" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="88" y="487" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">FastAPI 业务接口</text>
+<text x="88" y="518" font-size="19" fill="#516477" text-anchor="start">书籍、审核、原件、检索及 SSE</text>
+<text x="88" y="544" font-size="19" fill="#516477" text-anchor="start">SQL 事务保存状态与 outbox</text>
+<text x="88" y="590" font-size="17" fill="#255f91" text-anchor="start">存储：D1 / D2 / D3</text>
+<text x="88" y="568" font-size="17" fill="#255f91" text-anchor="start">模型：G1 · 查询嵌入 / 重排</text>
+<rect x="620" y="455" width="370" height="150" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="620" y="455" width="5" height="150" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="638" y="487" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">tusd 上传服务</text>
+<text x="638" y="518" font-size="19" fill="#516477" text-anchor="start">可恢复上传；原件直接写入 S3</text>
+<text x="638" y="544" font-size="19" fill="#516477" text-anchor="start">上传 hooks 回调 API</text>
+<text x="638" y="590" font-size="17" fill="#255f91" text-anchor="start">存储：D2 / hrs/v2/uploads/</text>
+<polyline points="805,300 805,330 255,330 255,455" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="295" y="308" width="287.87" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="302" y="324" font-size="17" fill="#516477" text-anchor="start">/api/v2 · 含 SSE / 原件 Range</text>
+<polyline points="805,330 805,455" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="813" y="417" width="91.52" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="820" y="433" font-size="17" fill="#516477" text-anchor="start">/uploads</text>
+<polyline points="620,530 440,530" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="448" y="494" width="130.27999999999997" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="455" y="510" font-size="17" fill="#516477" text-anchor="start">hooks · HTTP</text>
+<rect x="70" y="755" width="370" height="165" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="70" y="755" width="5" height="165" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="88" y="787" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">Temporal 服务</text>
+<text x="88" y="818" font-size="19" fill="#516477" text-anchor="start">Book / Card / Delete 工作流</text>
+<text x="88" y="844" font-size="19" fill="#516477" text-anchor="start">历史、信号、定时器与任务队列</text>
+<text x="88" y="905" font-size="17" fill="#255f91" text-anchor="start">存储：D1 / 独立 Temporal 数据库</text>
+<rect x="620" y="755" width="370" height="165" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="620" y="755" width="5" height="165" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="638" y="787" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">CPU worker + dispatcher</text>
+<text x="638" y="818" font-size="19" fill="#516477" text-anchor="start">章节组织、索引、文本研究与制卡</text>
+<text x="638" y="844" font-size="19" fill="#516477" text-anchor="start">执行工作流；派发 outbox 已提交事件</text>
+<text x="638" y="905" font-size="17" fill="#255f91" text-anchor="start">存储：D1 / D2 / D3</text>
+<polyline points="255,605 255,665 805,665 805,755" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)" stroke-dasharray="7 5"/>
+<rect x="358" y="635" width="336.49" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="365" y="651" font-size="17" fill="#516477" text-anchor="start">D1 outbox → dispatcher（逻辑事件）</text>
+<polyline points="620,805 440,805" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="449" y="770" width="160.08" height="24" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="456" y="785" font-size="16" fill="#516477" text-anchor="start">SDK · 启动 / 信号</text>
+<polyline points="440,870 620,870" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)" stroke-dasharray="7 5"/>
+<rect x="453" y="842" width="114.47999999999999" height="24" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="460" y="857" font-size="16" fill="#516477" text-anchor="start">CPU 队列任务</text>
+<rect x="1150" y="455" width="370" height="150" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="1150" y="455" width="5" height="150" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="1168" y="487" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">GPU worker</text>
+<text x="1168" y="518" font-size="19" fill="#516477" text-anchor="start">领取转换 / 原图核验活动</text>
+<text x="1168" y="544" font-size="19" fill="#516477" text-anchor="start">隔离 OCR 子进程；进度与检查点</text>
+<text x="1168" y="590" font-size="17" fill="#255f91" text-anchor="start">存储：D1 / D2；GPU 活动队列</text>
+<polyline points="440,775 510,775 510,710 1100,710 1100,530 1150,530" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)" stroke-dasharray="7 5"/>
+<rect x="730" y="684" width="227.34999999999997" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="737" y="700" font-size="17" fill="#516477" text-anchor="start">GPU 队列任务 · Temporal</text>
+<rect x="1150" y="755" width="370" height="165" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="1150" y="755" width="5" height="165" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="1168" y="787" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">G1 · 共享 GPU broker</text>
+<text x="1168" y="818" font-size="19" fill="#516477" text-anchor="start">Qwen / llama.cpp；BGE 子进程</text>
+<text x="1168" y="844" font-size="19" fill="#516477" text-anchor="start">显存准入、按需卸载与系统互斥</text>
+<text x="1168" y="905" font-size="17" fill="#255f91" text-anchor="start">127.0.0.1:18160；Qwen 内部 :18161</text>
+<polyline points="1335,605 1335,755" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1193" y="660" width="251.48999999999998" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="1200" y="676" font-size="17" fill="#516477" text-anchor="start">HTTP · 视觉 / prepare-ocr</text>
+<polyline points="990,865 1150,865" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="991" y="834" width="150.79999999999998" height="23" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="998" y="848" font-size="15" fill="#516477" text-anchor="start">HTTP / retrieval</text>
+<polyline points="990,795 1080,795 1080,170 1335,170 1335,190" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1093" y="147" width="210.51999999999998" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="1100" y="163" font-size="17" fill="#516477" text-anchor="start">HTTPS · 文本与工具请求</text>
+<text x="70" y="968" font-size="18" fill="#516477" text-anchor="start">API 返回状态与 SSE；长任务由 worker 执行，浏览器关闭不取消持久任务。</text>
+<text x="1140" y="954" font-size="18" fill="#516477" text-anchor="start">OCR 在独立 Python 进程中运行。</text>
+<text x="1140" y="982" font-size="18" fill="#516477" text-anchor="start">模型权重在本机；不要求同时驻留。</text>
+<rect x="40" y="1050" width="1560" height="290" fill="#f8fafc" stroke="#c9d5df" stroke-width="1.6"/>
+<text x="60" y="1090" font-size="24" fill="#16324a" text-anchor="start" font-weight="700">外部共享基础设施 · 业务命名空间隔离</text>
+<rect x="70" y="1120" width="465" height="190" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="70" y="1120" width="5" height="190" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="88" y="1152" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">D1 · PostgreSQL</text>
+<text x="88" y="1183" font-size="19" fill="#516477" text-anchor="start">书籍 / 审核 / outbox / 产物引用</text>
+<text x="88" y="1209" font-size="19" fill="#516477" text-anchor="start">业务：historical_research_v2</text>
+<text x="88" y="1235" font-size="19" fill="#516477" text-anchor="start">Temporal 历史与 visibility 专用库</text>
+<text x="88" y="1295" font-size="17" fill="#255f91" text-anchor="start">主机 :55436 · SQL / 数据库连接</text>
+<rect x="585" y="1120" width="465" height="190" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="585" y="1120" width="5" height="190" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="603" y="1152" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">D2 · SeaweedFS S3</text>
+<text x="603" y="1183" font-size="19" fill="#516477" text-anchor="start">原 PDF / OCR / 页图 / 章节</text>
+<text x="603" y="1209" font-size="19" fill="#516477" text-anchor="start">补丁 / 草稿 / 模型回执 / 导出</text>
+<text x="603" y="1235" font-size="19" fill="#516477" text-anchor="start">权威业务文件；内容摘要绑定来源</text>
+<text x="603" y="1295" font-size="17" fill="#255f91" text-anchor="start">主机 :58333 · S3 API / hrs/v2/</text>
+<rect x="1100" y="1120" width="465" height="190" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="1100" y="1120" width="5" height="190" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="1118" y="1152" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">D3 · OpenSearch</text>
+<text x="1118" y="1183" font-size="19" fill="#516477" text-anchor="start">关键词索引 / BGE 向量</text>
+<text x="1118" y="1209" font-size="19" fill="#516477" text-anchor="start">按已发布章节与规则重建</text>
+<text x="1118" y="1235" font-size="19" fill="#516477" text-anchor="start">完成新代索引后切换生效版本</text>
+<text x="1118" y="1295" font-size="17" fill="#255f91" text-anchor="start">主机 :19260 · HTTP / 可重建索引</text>
+<text x="40" y="1382" font-size="19" fill="#516477" text-anchor="start">依赖标记：D1–D3 对应下栏存储；API 的 G1 通过 HTTP /retrieval 访问 GPU broker，与 worker 共用模型。</text>
+<text x="40" y="1416" font-size="19" fill="#516477" text-anchor="start">容器通过 host.docker.internal 访问主机端点；公开端口绑定回环地址。本图不表示已完成公网多用户验收。</text>
+</g>
+</svg>
