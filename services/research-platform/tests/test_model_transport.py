@@ -312,3 +312,53 @@ def test_circuit_opened_between_request_intent_and_send_reuses_unsent_slot(monke
     now[0] = 1060.0
     assert asyncio.run(restart(model).run("run", "step", "test", {}, Receipt)).acknowledgement == "ready"
     assert sends == ["step:http-request:1:1"]
+
+
+def test_local_tool_wait_does_not_spend_model_request_timeout(monkeypatch):
+    from hrs_platform.domain.tokens import estimate_request
+    estimate_request({"warmup": "synthetic"})
+    calls = []
+    def provider(request):
+        calls.append(request)
+        if len(calls) > 1:
+            return success()
+        value = success().json()
+        value["output"] = [{"id": "tool", "type": "function_call", "call_id": "gpu",
+                            "name": "wait_for_gpu", "arguments": "{}", "status": "completed"}]
+        return httpx.Response(200, json=value)
+    @function_tool
+    async def wait_for_gpu() -> str:
+        """Synthetic resource queue."""
+        await asyncio.sleep(0.15)
+        return "ready"
+    model, sends = transport_model(monkeypatch, provider)
+    model.settings.model_timeout_seconds = 0.05
+    value = asyncio.run(model.run("run", "tool-wait", "test", {}, Receipt, tools=[wait_for_gpu]))
+    assert value.acknowledgement == "ready" and len(sends) == 2
+    assert not any("transport-error" in key for key in model.outputs.values)
+
+
+def test_tool_runs_still_have_a_fresh_deadline_for_each_model_request(monkeypatch):
+    from hrs_platform.domain.tokens import estimate_request
+    estimate_request({"warmup": "synthetic"})
+    calls = []
+    async def provider(request):
+        calls.append(request)
+        if len(calls) > 1:
+            await asyncio.sleep(0.15)
+            return success()
+        value = success().json()
+        value["output"] = [{"id": "tool", "type": "function_call", "call_id": "gpu",
+                            "name": "wait_for_gpu", "arguments": "{}", "status": "completed"}]
+        return httpx.Response(200, json=value)
+    @function_tool
+    async def wait_for_gpu() -> str:
+        """Synthetic resource queue."""
+        await asyncio.sleep(0.15)
+        return "ready"
+    model, sends = transport_model(monkeypatch, provider)
+    model.settings.model_timeout_seconds = 0.05
+    with pytest.raises(ApplicationError) as failure:
+        asyncio.run(model.run("run", "tool-network-timeout", "test", {}, Receipt, tools=[wait_for_gpu]))
+    assert failure.value.type == "model_transport_wait"
+    assert len(sends) == 2

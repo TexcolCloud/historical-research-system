@@ -1,13 +1,17 @@
 """Rebuildable OpenSearch index; immutable reviewed chapters remain authoritative."""
 
+import asyncio
 import json
 import logging
 import math
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
+from threading import Event
 from time import perf_counter
+from uuid import uuid4
 
 from opensearchpy import OpenSearch, RequestError, helpers
 from sqlalchemy import select, update
@@ -27,6 +31,38 @@ logger = logging.getLogger(__name__)
 EMBEDDING_BATCH = 8
 EMBEDDING_IDENTITY = {"revision": MODEL_REVISIONS["BAAI/bge-m3"], "adapter": "bge-cls-l2-float32-v1"}
 EVIDENCE_RULE = 'book-scoped-query-relevance-v1'
+retrieval_owner = ContextVar('retrieval_owner', default=None)
+
+
+async def task_search(search, endpoint, run_id, *args, **kwargs):
+    """Keep the activity slot until its owned retrieval request actually exits."""
+    owner = {'task_id': str(run_id), 'request_id': str(uuid4()), 'cancelled': Event()}
+    token = retrieval_owner.set(owner)
+    running = asyncio.create_task(asyncio.to_thread(search, *args, **kwargs))
+    try:
+        return await asyncio.shield(running)
+    except asyncio.CancelledError:
+        owner['cancelled'].set()
+        try:
+            if endpoint:
+                import httpx
+
+                with suppress(httpx.HTTPError):
+                    await asyncio.to_thread(
+                        httpx.post, endpoint.rsplit('/', 1)[0] + '/cancel-retrieval',
+                        json={'request_ids': [owner['request_id']]}, timeout=30,
+                    )
+        finally:
+            # Even an unreachable broker must not release the slot while the
+            # original bounded HTTP/CPU call is still alive.
+            while not running.done():
+                with suppress(Exception, asyncio.CancelledError):
+                    await asyncio.shield(running)
+            with suppress(Exception, asyncio.CancelledError):
+                running.result()
+        raise
+    finally:
+        retrieval_owner.reset(token)
 
 
 def calibrated_policy(result):
@@ -89,11 +125,19 @@ def remote_compute(endpoint, operation, texts, **options):
     from .domain.errors import Problem
     result = {'vectors': [], 'scores': []}
     for offset in range(0, len(texts), 32):
+        owner = retrieval_owner.get()
+        if owner and owner['cancelled'].is_set():
+            raise RuntimeError('retrieval_cancelled')
+        identity = {key: owner[key] for key in ('task_id', 'request_id')} if owner else {}
         try:
-            response = httpx.post(endpoint, json={'operation': operation, 'texts': texts[offset:offset + 32], **options}, timeout=1800)
+            response = httpx.post(endpoint, json={'operation': operation, 'texts': texts[offset:offset + 32], **options, **identity}, timeout=1800)
             response.raise_for_status()
         except httpx.HTTPError as error:
-            raise Problem('retrieval_unavailable', '本地 GPU 检索服务暂不可用，请确认主机运行服务已启动后重试。', status=503, retryable=True) from error
+            retryable = (not isinstance(error, httpx.HTTPStatusError)
+                         or error.response.status_code in {408, 409, 429}
+                         or error.response.status_code >= 500)
+            raise Problem('retrieval_unavailable', '本地 GPU 检索请求失败，请检查主机运行服务及请求配置。',
+                          status=503, retryable=retryable) from error
         value = response.json()
         key = 'vectors' if operation == 'embed' else 'scores'
         if len(value[key]) != len(texts[offset:offset + 32]):

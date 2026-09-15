@@ -133,7 +133,7 @@ class Outputs:
         try:
             yield identity
         except BaseException as error:
-            waiting = isinstance(error, ApplicationError) and error.type == "model_transport_wait"
+            waiting = isinstance(error, ApplicationError) and error.type in {"model_transport_wait", "retrieval_wait"}
             self.node(
                 run_id,
                 key,

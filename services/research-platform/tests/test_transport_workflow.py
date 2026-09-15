@@ -9,8 +9,9 @@ from temporalio.exceptions import ActivityError, ApplicationError
 from hrs_platform import workflows as module
 
 
+@pytest.mark.parametrize("kind", ["model_transport", "retrieval"])
 @pytest.mark.parametrize("delay,expected_sleeps", [(60, 12), (1800, 2)])
-def test_repeated_service_waits_have_both_count_and_time_bounds(monkeypatch, delay, expected_sleeps):
+def test_repeated_service_waits_have_both_count_and_time_bounds(monkeypatch, delay, expected_sleeps, kind):
     now, sleeps, calls = [1000.0], [], []
     monkeypatch.setattr(module.workflow, "now", lambda: datetime.fromtimestamp(now[0], UTC))
 
@@ -25,7 +26,7 @@ def test_repeated_service_waits_have_both_count_and_time_bounds(monkeypatch, del
             activity_id="one",
             retry_state=None,
         ) from ApplicationError(
-            "offline", {"retry_at": now[0] + delay}, type="model_transport_wait", non_retryable=True
+            "offline", {"retry_at": now[0] + delay}, type=kind + "_wait", non_retryable=True
         )
 
     async def sleep(seconds):
@@ -35,7 +36,7 @@ def test_repeated_service_waits_have_both_count_and_time_bounds(monkeypatch, del
     monkeypatch.setattr(module.workflow, "execute_activity", execute)
     monkeypatch.setattr(module.workflow, "sleep", sleep)
     with pytest.raises(ApplicationError) as failure:
-        asyncio.run(module.execute_with_model_recovery("generate_cards", "synthetic"))
-    assert failure.value.type == "model_transport_exhausted" and failure.value.non_retryable
+        asyncio.run(module.execute_with_service_recovery("generate_cards", "synthetic"))
+    assert failure.value.type == kind + "_exhausted" and failure.value.non_retryable
     assert len(sleeps) == expected_sleeps
     assert len(calls) == expected_sleeps + 1

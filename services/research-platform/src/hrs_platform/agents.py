@@ -359,11 +359,15 @@ class Models:
                     )
                 raise
             phase = "request"
+            if tools:
+                deadline.reschedule(asyncio.get_running_loop().time() + self.settings.model_timeout_seconds)
 
         async def capture(response):
             nonlocal phase, hook_error, status_code
             phase, status_code = "response_read", response.status_code
             raw = await response.aread()
+            if tools:
+                deadline.reschedule(None)
             # Only protocol bodies are persisted; authorization headers are never serialized.
             try:
                 value = json.loads(raw)
@@ -408,7 +412,9 @@ class Models:
             ),
         )
         try:
-            async with asyncio.timeout(self.settings.model_timeout_seconds):
+            # HTTP requests retain their own timeout. Tool queue/inference time is
+            # bounded by the tool, not charged against a whole multi-turn run.
+            async with asyncio.timeout(None if tools else self.settings.model_timeout_seconds) as deadline:
                 result = await Runner.run(
                     agent,
                     input=json.dumps(

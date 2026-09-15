@@ -12,7 +12,7 @@ import { respondWith } from "./test-responses";
 
 afterEach(cleanup);
 
-test("execution view distinguishes automatic service recovery from manual retry", async () => {
+test.each(["model_transport_wait", "retrieval_wait"])("execution view distinguishes %s from manual retry", async (code) => {
   const run = {
     id: "card-run",
     book_id: "book",
@@ -22,7 +22,7 @@ test("execution view distinguishes automatic service recovery from manual retry"
     revision: 1,
     updated_at: "2026-09-15T00:00:00Z",
     pending_count: 0,
-    error: { code: "model_transport_wait", recovery: { retry_at: 1790000000 } },
+    error: { code, recovery: { retry_at: 1790000000 } },
   };
   respondWith((request) => (request.url.includes("executions") ? [] : [run]));
   const query = new QueryClient({
@@ -34,7 +34,7 @@ test("execution view distinguishes automatic service recovery from manual retry"
     </QueryClientProvider>,
   );
   expect((await screen.findByRole("status")).textContent).toContain(
-    "等待文本服务恢复",
+    code === "retrieval_wait" ? "等待检索服务恢复" : "等待文本服务恢复",
   );
   expect(screen.getByRole("status").textContent).toContain("已完成结果保留");
   expect(screen.queryByRole("button", { name: "重试本阶段" })).toBeNull();

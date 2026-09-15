@@ -38,7 +38,7 @@ class StubEvidence:
     def __init__(self, *args):
         pass
 
-    def pin(self, run, snapshot):
+    async def prepare(self, run, snapshot):
         return {"generation": "synthetic"}
 
     async def research(self, models, run_id, key, corpus, topic, clues, all_units, parent, previous=None):

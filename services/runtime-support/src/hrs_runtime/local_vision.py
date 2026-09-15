@@ -1,11 +1,12 @@
 """One local vision route and a cross-process GPU lease shared with OCR."""
-from contextlib import contextmanager
 import json
 import os
-from pathlib import Path
 import subprocess
 import time
 import urllib.request
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 from urllib.parse import urlsplit
 
 MODEL = 'Qwen3-VL-8B-Instruct-Q4_K_M'
@@ -36,7 +37,7 @@ def request(path, body=None, timeout=900):
 
 
 @contextmanager
-def gpu_lease(timeout=1800):
+def gpu_lease(timeout=1800, *, check_cancelled=None):
     """OS releases the file lock on crash; never delete a lock another process holds."""
     path = Path(os.getenv('HRS_GPU_LOCK', str(project_root() / 'state/local-vision/gpu.lock')))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -47,6 +48,8 @@ def gpu_lease(timeout=1800):
             stream.flush()
         deadline = time.monotonic() + timeout
         while True:
+            if check_cancelled:
+                check_cancelled()
             try:
                 stream.seek(0)
                 if os.name == 'nt':
@@ -81,8 +84,6 @@ def prepare_ocr():
     # Called while OCR owns the GPU lease; the broker only unloads its own process.
     return request('/prepare-ocr', {}, timeout=60)
 
-
-from contextvars import ContextVar
 
 task_scope = ContextVar('vision_task_scope', default=None)
 
