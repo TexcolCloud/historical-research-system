@@ -19,15 +19,14 @@ def digest(value):
 class Review:
     def __init__(self, settings, engine):
         self.settings, self.engine = settings, engine
-        self.objects = objects_for(settings)
+        self.objects = objects_for(settings, engine)
 
     def read_json(self, reference):
         return json.loads(self.objects.read_bytes(reference))
 
     def read_cached(self, reference):
-        return self.objects.materialize(
-            reference, self.settings.cache_root / "review-reader" / reference["sha256"]
-        ).read_bytes()
+        from .storage import cached_bytes
+        return cached_bytes(self.objects, reference)
 
     def ocr_draft(self, run):
         from .outputs import Outputs
@@ -151,10 +150,12 @@ class Review:
                     "scope_key": scope,
                     "page": min(value["pages"]),
                     "text_sha256": digest(value["text"]),
-                    "content": self.objects.put_bytes(json.dumps(value, ensure_ascii=False).encode("utf-8")),
+                    "content": self.objects.put_bytes(json.dumps(value, ensure_ascii=False).encode("utf-8"), run_id=run_id),
                 }
             )
         with self.engine.begin() as connection:
+            from .deletion import require_active
+            require_active(connection, run["book_id"])
             current = (
                 connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
                 .mappings()
@@ -239,9 +240,18 @@ class Review:
             "images": [f"/api/v2/runs/{row['run_id']}/artifacts/{name}" for name in body["images"]],
         }
 
+    def issue_run(self, issue_id):
+        with self.engine.connect() as connection:
+            run_id = connection.scalar(select(db.review_issues.c.run_id).where(db.review_issues.c.id == str(issue_id)))
+        if run_id is None:
+            raise HTTPException(404, "核对问题不存在。")
+        return run_id
+
     def save_draft(self, issue_id, request):
-        reference = self.objects.put_bytes(request.text.encode("utf-8"), "text/markdown; charset=utf-8")
+        reference = self.objects.put_bytes(request.text.encode("utf-8"), "text/markdown; charset=utf-8", run_id=self.issue_run(issue_id))
         with self.engine.begin() as connection:
+            from .deletion import require_run_active
+            require_run_active(connection, self.issue_run(issue_id))
             row = (
                 connection.execute(
                     select(db.review_issues).where(db.review_issues.c.id == str(issue_id)).with_for_update()
@@ -251,11 +261,6 @@ class Review:
             )
             if row is None:
                 raise HTTPException(404, "核对问题不存在。")
-            from .deletion import require_active
-
-            require_active(
-                connection, connection.scalar(select(db.runs.c.book_id).where(db.runs.c.id == row["run_id"]))
-            )
             if row["state"] != "pending":
                 raise HTTPException(409, "本项已审核，不能再保存草稿。")
             if row["revision"] == request.expected_revision + 1 and row["draft"] == reference:
@@ -279,7 +284,7 @@ class Review:
         if (request.action == "correct") != (request.text is not None):
             raise HTTPException(422, "修改并确认需要提交正文；直接放行不能附带未确认的修改。")
         replacement = (
-            self.objects.put_bytes(request.text.encode("utf-8"), "text/markdown; charset=utf-8")
+            self.objects.put_bytes(request.text.encode("utf-8"), "text/markdown; charset=utf-8", run_id=self.issue_run(issue_id))
             if request.text is not None
             else None
         )
@@ -301,14 +306,13 @@ class Review:
             )
             if run_id is None:
                 raise HTTPException(404, "核对问题不存在。")
+            from .deletion import require_run_active
+            require_run_active(connection, run_id)
             run = (
                 connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
                 .mappings()
                 .one()
             )
-            from .deletion import require_active
-
-            require_active(connection, run["book_id"])
             issue = (
                 connection.execute(
                     select(db.review_issues).where(db.review_issues.c.id == issue_id).with_for_update()

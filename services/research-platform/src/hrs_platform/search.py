@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
@@ -14,10 +15,13 @@ from time import perf_counter
 from uuid import uuid4
 
 from opensearchpy import OpenSearch, RequestError, helpers
+from opensearchpy.exceptions import TransportError
 from sqlalchemy import select, update
+from temporalio.exceptions import ApplicationError
 
 from . import schema as db
 from .books import get_run
+from .domain.errors import Problem
 from .domain.settings import MODEL_REVISIONS
 from .library import Library
 from .outputs import Outputs, fingerprint
@@ -63,6 +67,50 @@ async def task_search(search, endpoint, run_id, *args, **kwargs):
         raise
     finally:
         retrieval_owner.reset(token)
+
+
+async def recover_retrieval(engine, outputs, run_id, key, operation):
+    """Persist service cooldown independently of paid model request attempts."""
+    run = await asyncio.to_thread(get_run, engine, run_id)
+    epoch = run.get("recovery_attempt", 0)
+    prefix = f"{key}:retrieval-recovery:{epoch}"
+    previous, attempt = None, 1
+    while receipt := await asyncio.to_thread(outputs.get, run_id, f"{prefix}:{attempt}"):
+        previous, attempt = receipt, attempt + 1
+
+    def defer(receipt):
+        exhausted = receipt["attempt"] >= 12
+        raise ApplicationError(
+            "检索服务恢复等待已达上限，进度保留，请稍后重试。"
+            if exhausted
+            else "检索服务暂不可用，保留查询和证据，等待自动恢复。",
+            receipt,
+            type="retrieval_exhausted" if exhausted else "retrieval_wait",
+            non_retryable=True,
+        ) from None
+
+    if previous and (previous["attempt"] >= 12 or previous["retry_at"] > time.time()):
+        defer(previous)
+    try:
+        return await operation()
+    except (Problem, TransportError, ApplicationError) as error:
+        retryable = (
+            isinstance(error, Problem)
+            and error.retryable
+            or isinstance(error, TransportError)
+            and (
+                not isinstance(error.status_code, int)
+                or error.status_code in {404, 408, 409, 429}
+                or error.status_code >= 500
+            )
+            or isinstance(error, ApplicationError)
+            and error.type == "card_index_missing"
+        )
+        if not retryable:
+            raise
+        receipt = {"attempt": attempt, "retry_at": time.time() + min(60 * 2 ** (attempt - 1), 300)}
+        await asyncio.to_thread(outputs.put, run_id, f"{prefix}:{attempt}", receipt, {"key": key})
+        defer(receipt)
 
 
 def calibrated_policy(result):

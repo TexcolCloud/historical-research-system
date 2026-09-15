@@ -315,7 +315,7 @@ class Library:
             group = {**group, 'structure_policy': STRUCTURE_POLICY,
                      'structure': project_structure(structure, group['parts'])}
             identity = str(uuid5(UUID(run_id), f"chapter:{position}"))
-            content = self.review.objects.put_bytes(json.dumps(group, ensure_ascii=False).encode("utf-8"))
+            content = self.review.objects.put_bytes(json.dumps(group, ensure_ascii=False).encode("utf-8"), run_id=run_id)
             rows.append(
                 {
                     "id": identity,
@@ -330,6 +330,8 @@ class Library:
                 }
             )
         with self.engine.begin() as connection:
+            from .deletion import require_active
+            require_active(connection, run["book_id"])
             current = (
                 connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
                 .mappings()
@@ -483,16 +485,16 @@ class Library:
             receipts.append(receipt)
         evidence = {'changes': amendments, 'receipts': receipts, 'machine_review': True, 'human_review': False,
                     'previous_content': originals}
-        evidence_ref = self.review.objects.put_bytes(json.dumps(evidence, ensure_ascii=False).encode())
+        evidence_ref = self.review.objects.put_bytes(json.dumps(evidence, ensure_ascii=False).encode(), run_id=run_id)
         references = {}
         for identity, body in bodies.items():
             body.setdefault('amendments', []).append(evidence_ref)
             for part in body['parts']:
                 if any(p in scopes for p in part['source']['pages']):
                     part['source'].setdefault('amendments', []).append(evidence_ref)
-            references[identity] = self.review.objects.put_bytes(json.dumps(body, ensure_ascii=False).encode())
+            references[identity] = self.review.objects.put_bytes(json.dumps(body, ensure_ascii=False).encode(), run_id=run_id)
         saved = {'pages': sorted(scopes), 'content': references, 'evidence': evidence_ref, 'reindex_required': True}
-        saved_ref = self.review.objects.put_bytes(json.dumps(saved, ensure_ascii=False).encode())
+        saved_ref = self.review.objects.put_bytes(json.dumps(saved, ensure_ascii=False).encode(), run_id=run_id)
         with self.engine.begin() as connection:
             current = connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update()).mappings().one()
             if current['conversion'] != run['conversion'] or current['pending_count']:

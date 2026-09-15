@@ -26,7 +26,7 @@ def fingerprint(value):
 
 class Outputs:
     def __init__(self, settings, engine):
-        self.engine, self.objects = engine, objects_for(settings)
+        self.engine, self.objects = engine, objects_for(settings, engine)
 
     def get(self, run_id, step, dependency=None):
         with self.engine.connect() as connection:
@@ -46,7 +46,7 @@ class Outputs:
         return json.loads(self.objects.read_bytes(row["reference"]))
 
     def put(self, run_id, step, value, dependency):
-        reference = self.objects.put_bytes(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
+        reference = self.objects.put_bytes(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"), run_id=run_id)
         with self.engine.begin() as connection:
             connection.execute(
                 pg_insert(db.stage_outputs)
@@ -72,7 +72,7 @@ class Outputs:
     def node(self, run_id, key, *, kind, label, objective, state="running", parent=None, details=None):
         identity = str(uuid5(UUID(run_id), key))
         reference = (
-            self.objects.put_bytes(json.dumps(details, ensure_ascii=False, default=str).encode("utf-8"))
+            self.objects.put_bytes(json.dumps(details, ensure_ascii=False, default=str).encode("utf-8"), run_id=run_id)
             if details is not None
             else None
         )
@@ -185,7 +185,7 @@ class Outputs:
         }
 
     def reserve_request(self, run_id, step, value, maximum):
-        reference = self.objects.put_bytes(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+        reference = self.objects.put_bytes(json.dumps(value, ensure_ascii=False).encode("utf-8"), run_id=run_id)
         with self.engine.begin() as connection:
             connection.execute(select(db.runs.c.id).where(db.runs.c.id == run_id).with_for_update()).one()
             prior = connection.scalar(

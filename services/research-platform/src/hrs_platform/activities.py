@@ -5,7 +5,7 @@ import os
 import subprocess
 import time
 
-from hrs_runtime.object_storage import S3Objects, file_digest
+from hrs_runtime.object_storage import file_digest
 from pypdf import PdfReader
 from sqlalchemy import func, insert, select, update
 from temporalio import activity
@@ -15,8 +15,10 @@ from . import schema as db
 from .books import get_run
 
 
-def objects_for(settings):
-    return S3Objects(
+def objects_for(settings, engine=None):
+    from .storage import OwnedObjects
+    return OwnedObjects(
+        engine=engine,
         endpoint=settings.s3_endpoint,
         bucket=settings.s3_bucket,
         access_key=settings.s3_access_key.get_secret_value(),
@@ -28,7 +30,7 @@ def objects_for(settings):
 class Activities:
     def __init__(self, settings, engine):
         self.settings, self.engine = settings, engine
-        self.objects = objects_for(settings)
+        self.objects = objects_for(settings, engine)
 
     def report_progress(self, run_id, completed, total):
         # Observability only: never change the content revision or release state.
@@ -53,14 +55,13 @@ class Activities:
 
     def transition(self, run_id, state, stage, **values):
         with self.engine.begin() as connection:
+            from .deletion import require_run_active
+            require_run_active(connection, run_id)
             run = (
                 connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
                 .mappings()
                 .one()
             )
-            from .deletion import require_active
-
-            require_active(connection, run["book_id"])
             connection.execute(
                 update(db.runs)
                 .where(db.runs.c.id == run_id)
@@ -104,6 +105,7 @@ class Activities:
         run = get_run(self.engine, run_id)
         if run["source"].get("sha256"):
             self.objects.verify(run["source"])
+            (self.settings.cache_root / run_id / "source.pdf").unlink(missing_ok=True)
             return {"run_id": run_id}
         source = run["source"]
         destination = self.settings.cache_root / run_id / "source.pdf"
@@ -128,11 +130,12 @@ class Activities:
                     "文件无法作为未加密 PDF 读取，请重新上传。", non_retryable=True
                 ) from error
             temporary.replace(destination)
-            reference = self.objects.put_file(destination, "application/pdf")
+            reference = self.objects.put_file(destination, "application/pdf", run_id=run_id)
             self.transition(run_id, "processing", "conversion", source=reference)
             return {"run_id": run_id}
         finally:
             temporary.unlink(missing_ok=True)
+            destination.unlink(missing_ok=True)
 
     @activity.defn
     def convert_document(self, run_id: str) -> dict:
@@ -162,12 +165,13 @@ class Activities:
         refs = {}
         for path in sorted(output.rglob("*")):
             if path.is_file():
-                refs[path.relative_to(output).as_posix()] = self.objects.put_file(path)
+                refs[path.relative_to(output).as_posix()] = self.objects.put_file(path, run_id=run_id)
                 activity.heartbeat({"stage": "saving_evidence", "files": len(refs)})
         bundle = self.objects.put_bytes(
             json.dumps({"schema_version": 1, "manifest": manifest, "files": refs}, ensure_ascii=False).encode(
                 "utf-8"
-            )
+            ),
+            run_id=run_id,
         )
         # Machine results are preserved. This stage never records a human decision.
         state = (
@@ -216,7 +220,7 @@ class Activities:
             files = {}
             for path in sorted(output.rglob("*")):
                 if path.is_file():
-                    files[path.relative_to(output).as_posix()] = self.objects.put_file(path)
+                    files[path.relative_to(output).as_posix()] = self.objects.put_file(path, run_id=run_id)
                     activity.heartbeat({"stage": "saving_ocr", "files": len(files)})
             outputs.put(run_id, "ocr-evidence", {"files": files}, dependency)
         else:

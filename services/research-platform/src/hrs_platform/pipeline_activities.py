@@ -1,6 +1,8 @@
 """Temporal adapters invoke the same domain use cases as the API."""
 
 import asyncio
+from contextlib import suppress
+from threading import Event
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -11,7 +13,42 @@ from .cards import Cards
 from .library import Library
 from .outputs import Outputs
 from .review import Review
-from .search import Search
+from .search import Search, recover_retrieval, task_search
+
+
+async def isolated(operation):
+    """Keep synchronous domain I/O off the worker loop, drain it on cancellation."""
+    cancelled, control = Event(), {}
+
+    def execute():
+        from .storage import external_heartbeat
+
+        async def run():
+            control.update(loop=asyncio.get_running_loop(), task=asyncio.current_task())
+            if cancelled.is_set():
+                control["task"].cancel()
+            return await operation
+
+        token = external_heartbeat.set(True)
+        try:
+            return asyncio.run(run())
+        finally:
+            external_heartbeat.reset(token)
+
+    running = asyncio.create_task(asyncio.to_thread(execute))
+    try:
+        return await asyncio.shield(running)
+    except asyncio.CancelledError:
+        cancelled.set()
+        if "loop" in control:
+            with suppress(RuntimeError):
+                control["loop"].call_soon_threadsafe(control["task"].cancel)
+        while not running.done():
+            with suppress(Exception, asyncio.CancelledError):
+                await asyncio.shield(running)
+        with suppress(Exception, asyncio.CancelledError):
+            running.result()
+        raise
 
 
 class PipelineActivities:
@@ -25,6 +62,14 @@ class PipelineActivities:
                 await asyncio.sleep(10)
 
         observer = asyncio.create_task(heartbeat())
+        try:
+            return await isolated(self._observe(run_id, operation, blocking=blocking))
+        finally:
+            observer.cancel()
+            with suppress(asyncio.CancelledError):
+                await observer
+
+    async def _observe(self, run_id, operation, *, blocking=False):
         try:
             run = get_run(self.engine, run_id)
             if (run["error"] or {}).get("code") in {"model_transport_wait", "retrieval_wait"}:
@@ -74,11 +119,8 @@ class PipelineActivities:
                         )
                     raise
         finally:
-            observer.cancel()
-            try:
-                await observer
-            except asyncio.CancelledError:
-                pass
+            # Closing an unstarted coroutine avoids leaked work if preflight I/O fails.
+            operation.close()
 
     @activity.defn
     def initialize_review(self, run_id: str) -> dict:
@@ -90,8 +132,11 @@ class PipelineActivities:
 
     @activity.defn
     async def organize_book(self, run_id: str) -> dict:
-        Activities(self.settings, self.engine).transition(run_id, "processing", "organization")
-        result = await self.observe(run_id, Library(self.settings, self.engine).organize(run_id))
+        async def organize():
+            Activities(self.settings, self.engine).transition(run_id, "processing", "organization")
+            return await Library(self.settings, self.engine).organize(run_id)
+
+        result = await self.observe(run_id, organize())
         return {"run_id": run_id, "chapters": len(result["groups"])}
 
     @activity.defn
@@ -100,9 +145,17 @@ class PipelineActivities:
 
     @activity.defn
     async def index_book(self, run_id: str) -> dict:
-        return await self.observe(
-            run_id, asyncio.to_thread(Search(self.settings, self.engine).index, run_id), blocking=True
-        )
+        async def index():
+            search = Search(self.settings, self.engine)
+            return await recover_retrieval(
+                self.engine,
+                search.outputs,
+                run_id,
+                "book-index",
+                lambda: task_search(search.index, self.settings.retrieval_endpoint, run_id, run_id),
+            )
+
+        return await self.observe(run_id, index())
 
     @activity.defn
     def create_card_run(self, run_id: str) -> dict:
@@ -148,7 +201,9 @@ class PipelineActivities:
         previous = run["error"] or {}
         if previous.get("code") in {"model_transport_wait", "retrieval_wait"}:
             error = {
-                "code": "retrieval_exhausted" if previous["code"] == "retrieval_wait" else "model_transport_exhausted",
+                "code": "retrieval_exhausted"
+                if previous["code"] == "retrieval_wait"
+                else "model_transport_exhausted",
                 "stage": run["stage"],
                 "message": "服务恢复等待已达上限，已提交结果保留，请稍后手动重试。",
                 "last_failure": previous,

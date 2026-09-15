@@ -1240,7 +1240,8 @@ class Cards:
             content = self.review.objects.put_bytes(
                 json.dumps(
                     {"candidate": card["candidate"], "units": source["units"]}, ensure_ascii=False
-                ).encode()
+                ).encode(),
+                run_id=run_id,
             )
             verdict = self.review.objects.put_bytes(
                 json.dumps(
@@ -1254,7 +1255,8 @@ class Cards:
                         "human_approval": False,
                     },
                     ensure_ascii=False,
-                ).encode()
+                ).encode(),
+                run_id=run_id,
             )
             rows.append(
                 {

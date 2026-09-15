@@ -55,34 +55,51 @@ async def dispatch_once(engine, client, settings, *, conversion_only=False):
                 ).mappings()
             )
 
-    for event in await asyncio.to_thread(pending):
-        # Serialize dispatch with DELETE's book lock; no stale outbox snapshot may
-        # start a producer after cancellation has already been acknowledged.
-        with engine.begin() as dispatch_connection:
-            owner = dispatch_connection.scalar(
-                select(db.runs.c.book_id).where(db.runs.c.id == event["run_id"])
-            )
-            state = dispatch_connection.scalar(
+    loop = asyncio.get_running_loop()
+
+    def dispatch_locked(event):
+        with engine.begin() as connection:
+            owner = connection.scalar(select(db.runs.c.book_id).where(db.runs.c.id == event["run_id"]))
+            state = connection.scalar(
                 select(db.books.c.state).where(db.books.c.id == owner).with_for_update()
             )
             if state is None or state in DELETING:
-                continue
-            await dispatch_event(engine, client, settings, event, conversion_only=conversion_only)
+                return
+            # Keep SQL locks off the worker loop while Temporal RPCs stay on it.
+            future = asyncio.run_coroutine_threadsafe(
+                dispatch_event(engine, client, settings, event, conversion_only=conversion_only), loop
+            )
+            future.result()
 
-    with engine.connect() as connection:
-        deletions = list(
-            connection.execute(
-                select(db.book_deletions).where(db.book_deletions.c.state == "pending")
-            ).mappings()
-        )
-    for deletion in deletions:
+    for event in await asyncio.to_thread(pending):
+        running = asyncio.create_task(asyncio.to_thread(dispatch_locked, event))
+        try:
+            await asyncio.shield(running)
+        except asyncio.CancelledError:
+            await running
+            raise
+
+    def pending_deletions():
         with engine.connect() as connection:
-            host_required = any(
-                row["stage"] != "verify_upload"
-                for row in connection.execute(
-                    select(db.runs.c.stage).where(db.runs.c.book_id == deletion["book_id"])
+            return list(
+                connection.execute(
+                    select(db.book_deletions).where(db.book_deletions.c.state == "pending")
                 ).mappings()
             )
+
+    deletions = await asyncio.to_thread(pending_deletions)
+    for deletion in deletions:
+
+        def needs_host(deletion=deletion):
+            with engine.connect() as connection:
+                return any(
+                    stage != "verify_upload"
+                    for stage in connection.scalars(
+                        select(db.runs.c.stage).where(db.runs.c.book_id == deletion["book_id"])
+                    )
+                )
+
+        host_required = await asyncio.to_thread(needs_host)
         try:
             await client.start_workflow(
                 DeleteBookWorkflow.run,
@@ -95,30 +112,39 @@ async def dispatch_once(engine, client, settings, *, conversion_only=False):
                 task_queue=settings.task_queue,
                 id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
                 id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                rpc_timeout=timedelta(seconds=30),
             )
         except WorkflowAlreadyStartedError:
             pass
-        with engine.begin() as connection:
-            connection.execute(
-                update(db.book_deletions)
-                .where(
-                    db.book_deletions.c.book_id == deletion["book_id"],
-                    db.book_deletions.c.state == "pending",
-                    db.book_deletions.c.attempt == deletion["attempt"],
+
+        def acknowledge_deletion(deletion=deletion):
+            with engine.begin() as connection:
+                connection.execute(
+                    update(db.book_deletions)
+                    .where(
+                        db.book_deletions.c.book_id == deletion["book_id"],
+                        db.book_deletions.c.state == "pending",
+                        db.book_deletions.c.attempt == deletion["attempt"],
+                    )
+                    .values(state="running")
                 )
-                .values(state="running")
-            )
+
+        await asyncio.to_thread(acknowledge_deletion)
 
 
 async def dispatch_event(engine, client, settings, event, *, conversion_only=False):
     try:
         if event["kind"] == "review_changed":
-            with engine.connect() as connection:
-                attempt = connection.scalar(
-                    select(db.runs.c.recovery_attempt).where(db.runs.c.id == event["run_id"])
-                )
+
+            def current_attempt():
+                with engine.connect() as connection:
+                    return connection.scalar(
+                        select(db.runs.c.recovery_attempt).where(db.runs.c.id == event["run_id"])
+                    )
+
+            attempt = await asyncio.to_thread(current_attempt)
             await client.get_workflow_handle(workflow_id("book", event["run_id"], attempt)).signal(
-                BookWorkflow.review_changed, event["payload"]["revision"]
+                BookWorkflow.review_changed, event["payload"]["revision"], rpc_timeout=timedelta(seconds=30)
             )
         elif event["kind"] in {"retry_run", "start_cards"}:
             kind = event["payload"]["run_kind"]
@@ -129,6 +155,7 @@ async def dispatch_event(engine, client, settings, event, *, conversion_only=Fal
                 task_queue=settings.task_queue,
                 id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
                 id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                rpc_timeout=timedelta(seconds=30),
                 execution_timeout=timedelta(days=365),
             )
         elif event["kind"] == "start_book":
@@ -139,6 +166,7 @@ async def dispatch_event(engine, client, settings, event, *, conversion_only=Fal
                 task_queue=settings.task_queue,
                 id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
                 id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                rpc_timeout=timedelta(seconds=30),
                 execution_timeout=timedelta(days=365),
             )
         else:
@@ -150,14 +178,18 @@ async def dispatch_event(engine, client, settings, event, *, conversion_only=Fal
     except RPCError as error:
         if event["kind"] != "review_changed" or error.status != RPCStatusCode.NOT_FOUND:
             raise
+
         # A duplicated notification can arrive after the book workflow completed.
         # Missing initial dispatch is not acknowledged: the book event must retry first.
-        with engine.connect() as connection:
-            started = connection.scalar(
-                select(db.outbox.c.delivered).where(
-                    db.outbox.c.run_id == event["run_id"], db.outbox.c.kind == "start_book"
+        def was_started():
+            with engine.connect() as connection:
+                return connection.scalar(
+                    select(db.outbox.c.delivered).where(
+                        db.outbox.c.run_id == event["run_id"], db.outbox.c.kind == "start_book"
+                    )
                 )
-            )
+
+        started = await asyncio.to_thread(was_started)
         if not started:
             return
 

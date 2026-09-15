@@ -23,5 +23,5 @@ def test_original_supports_http_range_and_recovers_from_s3_without_its_cache(pla
         url = f"/api/v2/runs/{run}/artifacts/original.pdf"
         response = client.get(url, headers={"Range": "bytes=0-8"})
         assert response.status_code == 206 and response.content == content[:9]
-        (tmp_path / "downloads" / reference["sha256"]).unlink()
+        assert not list(tmp_path.rglob("*"))
         assert client.get(url).content == content
