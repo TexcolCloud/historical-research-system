@@ -4,6 +4,8 @@ import base64
 import json
 from importlib.metadata import version
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from botocore.exceptions import BotoCoreError, ClientError
 from hrs_runtime.local_vision import MODEL, POLICY, chat
@@ -112,10 +114,10 @@ class VisualReview:
                 type="original_missing",
                 non_retryable=True,
             )
+        self.settings.cache_root.mkdir(parents=True, exist_ok=True)
+        temporary = TemporaryDirectory(prefix="original-recovery-", dir=self.settings.cache_root)
         try:
-            path = self.review.objects.materialize(
-                source, self.settings.cache_root / run["id"] / "original-recovery.pdf"
-            )
+            path = self.review.objects.materialize(source, Path(temporary.name) / "original.pdf")
             document = pdfium.PdfDocument(str(path))
             try:
                 if len(document) != manifest["page_count"]:
@@ -134,7 +136,7 @@ class VisualReview:
                                 image.save(buffer, format="PNG")
                             finally:
                                 image.close()
-                            reference = self.review.objects.put_bytes(buffer.getvalue(), "image/png")
+                            reference = self.review.objects.put_bytes(buffer.getvalue(), "image/png", run_id=run["id"])
                     finally:
                         bitmap.close()
                 finally:
@@ -154,6 +156,8 @@ class VisualReview:
                 type="original_missing",
                 non_retryable=True,
             ) from error
+        finally:
+            temporary.cleanup()
         # The content-addressed object can be restored again if it was deleted.
         self.outputs.put(
             run["id"],
@@ -222,7 +226,7 @@ class VisualReview:
                             {
                                 "image_id": original["image_id"] + f"-crop-{index}",
                                 "page": original["page"],
-                                "reference": self.review.objects.put_bytes(content, "image/png"),
+                                "reference": self.review.objects.put_bytes(content, "image/png", run_id=run_id),
                                 "original_sha256": original["reference"]["sha256"],
                                 **crop,
                             }

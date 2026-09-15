@@ -2,24 +2,21 @@
 
 import asyncio
 import json
-import time
 from typing import Literal
 
 from agents import function_tool
-from opensearchpy.exceptions import TransportError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from temporalio.exceptions import ApplicationError
 
 from . import schema as db
 from .books import get_run
-from .domain.errors import Problem
 from .domain.generation_contracts import DigestFact
 from .domain.tokens import estimate_request
 from .outputs import execution_parent, fingerprint
 from .reading import card_model, neighbor_context
 from .retrieval_chunks import source_excerpt
-from .search import Search, task_search
+from .search import Search, recover_retrieval, task_search
 
 PURPOSES = {"support", "counter", "qualify"}
 READ_TOKENS = 10000
@@ -43,51 +40,8 @@ class CardEvidence:
         self.outputs, self.library = outputs, library
         self.search = Search(settings, engine)
 
-    async def recover(self, run_id, key, operation):
-        """Persist service cooldown independently of paid model request attempts."""
-        run = await asyncio.to_thread(get_run, self.engine, run_id)
-        epoch = run.get("recovery_attempt", 0)
-        prefix = f"{key}:retrieval-recovery:{epoch}"
-        previous, attempt = None, 1
-        while receipt := await asyncio.to_thread(self.outputs.get, run_id, f"{prefix}:{attempt}"):
-            previous, attempt = receipt, attempt + 1
-
-        def defer(receipt):
-            exhausted = receipt["attempt"] >= 12
-            raise ApplicationError(
-                "检索服务恢复等待已达上限，进度保留，请稍后重试。"
-                if exhausted
-                else "检索服务暂不可用，保留查询和证据，等待自动恢复。",
-                receipt,
-                type="retrieval_exhausted" if exhausted else "retrieval_wait",
-                non_retryable=True,
-            ) from None
-
-        if previous and (previous["attempt"] >= 12 or previous["retry_at"] > time.time()):
-            defer(previous)
-        try:
-            return await operation()
-        except (Problem, TransportError, ApplicationError) as error:
-            retryable = (
-                isinstance(error, Problem)
-                and error.retryable
-                or isinstance(error, TransportError)
-                and (
-                    not isinstance(error.status_code, int)
-                    or error.status_code in {404, 408, 409, 429}
-                    or error.status_code >= 500
-                )
-                or isinstance(error, ApplicationError)
-                and error.type == "card_index_missing"
-            )
-            if not retryable:
-                raise
-            receipt = {"attempt": attempt, "retry_at": time.time() + min(60 * 2 ** (attempt - 1), 300)}
-            await asyncio.to_thread(self.outputs.put, run_id, f"{prefix}:{attempt}", receipt, {"key": key})
-            defer(receipt)
-
     async def prepare(self, run, snapshot):
-        return await self.recover(
+        return await recover_retrieval(self.engine, self.outputs,
             run["id"], "card-evidence-corpus", lambda: asyncio.to_thread(self.pin, run, snapshot)
         )
 
@@ -309,7 +263,7 @@ class CardEvidence:
             return receipt
 
         async def complete_query(index):
-            return await self.recover(run_id, f"{stage}:search:{index}", lambda: perform_query(index))
+            return await recover_retrieval(self.engine, self.outputs, run_id, f"{stage}:search:{index}", lambda: perform_query(index))
 
         @function_tool(failure_error_function=None)
         async def search_evidence(queries: list[EvidenceQuery]) -> str:

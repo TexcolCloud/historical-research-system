@@ -80,8 +80,9 @@ def test_committed_ocr_draft_and_images_are_readable_before_full_visual_review(p
         page = response.json()
         assert page["text"] == "技术识别底稿，尚未核验。" and page["machine_status"] == "unreviewed-source"
         assert client.get(page["image"]).content == b"technical-image-bytes"
-        for cached in (tmp_path / "review-reader").iterdir():
-            cached.unlink()
+        from hrs_platform.storage import _reader_cache
+        _reader_cache.clear()
+        assert not (tmp_path / "review-reader").exists()
         assert client.get(f"/api/v2/runs/{run}/review-pages/1").json() == page
     with engine.connect() as connection:
         state = connection.execute(select(db.runs).where(db.runs.c.id == run)).mappings().one()

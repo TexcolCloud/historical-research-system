@@ -27,7 +27,7 @@ class Exports:
         saved = self.outputs.get(run_id, "export:book-reading-v1", dependencies)
         if saved is None:
             content = "".join(self.library.chapter(row["id"])["reading_text"] for row in chapters)
-            saved = self.outputs.objects.put_bytes(content.encode("utf-8"), "text/markdown; charset=utf-8")
+            saved = self.outputs.objects.put_bytes(content.encode("utf-8"), "text/markdown; charset=utf-8", run_id=run_id)
             self.outputs.put(run_id, "export:book-reading-v1", saved, dependencies)
         with self.engine.connect() as connection:
             title = connection.scalar(select(db.books.c.title).where(db.books.c.id == str(book_id)))
@@ -104,7 +104,8 @@ class Exports:
                 ]
             )
             saved = self.outputs.objects.put_bytes(
-                "\n".join(parts).encode("utf-8"), "text/markdown; charset=utf-8"
+                "\n".join(parts).encode("utf-8"), "text/markdown; charset=utf-8",
+                run_id=card["run_id"],
             )
             self.outputs.put(card["run_id"], key, saved, dependencies)
         return card["title"], saved

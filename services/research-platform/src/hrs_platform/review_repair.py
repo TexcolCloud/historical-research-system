@@ -106,7 +106,7 @@ def repair_scopes(review, run_id):
                 ],
                 "previous_scopes": [{"id": str(r["id"]), "content": r["content"]} for r in all_rows],
             }
-            ref = review.objects.put_bytes(json.dumps(body, ensure_ascii=False).encode())
+            ref = review.objects.put_bytes(json.dumps(body, ensure_ascii=False).encode(), run_id=run_id)
             with review.engine.begin() as connection:
                 current = (
                     connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
@@ -250,7 +250,7 @@ def refresh_unresolved(review, issues, page, boundary, evidence):
         }
         if updated["reasons"] == body["reasons"]:
             continue
-        ref = review.objects.put_bytes(json.dumps(updated, ensure_ascii=False).encode())
+        ref = review.objects.put_bytes(json.dumps(updated, ensure_ascii=False).encode(), run_id=issue["run_id"])
         with review.engine.begin() as connection:
             connection.execute(
                 update(db.review_issues)
@@ -324,7 +324,7 @@ def recheck_pending(review, run_id, settings, output, *, pages=None, progress=pr
             "machine_review": True,
             "human_review": False,
         }
-        saved = review.objects.put_bytes(json.dumps(receipt, ensure_ascii=False).encode())
+        saved = review.objects.put_bytes(json.dumps(receipt, ensure_ascii=False).encode(), run_id=run_id)
         approved = apply_verified_page(
             review, issues, page, boundaries[number], {"kind": "local-original-recheck", "review": saved}
         )

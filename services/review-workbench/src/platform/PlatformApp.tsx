@@ -61,7 +61,7 @@ export default function PlatformApp() {
   const books = useQuery({
     queryKey: booksKey,
     queryFn: ({ signal }) => readBooks(signal),
-    refetchInterval: connected ? false : 30000,
+    refetchInterval: 30000,
   });
   useEffect(() => {
     const events = new EventSource("/api/v2/events");
@@ -75,7 +75,6 @@ export default function PlatformApp() {
     return () => events.close();
   }, [query]);
   useEffect(() => {
-    if (connected) return;
     const timer = window.setInterval(
       () =>
         void query.invalidateQueries({

@@ -2019,7 +2019,9 @@ export interface operations {
     artifact_api_v2_runs__run_id__artifacts__name__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                Range?: string | null;
+            };
             path: {
                 run_id: string;
                 name: string;

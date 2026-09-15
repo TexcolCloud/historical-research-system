@@ -8,6 +8,7 @@ books are retained. Cleanup is retryable and never reports success before I/O.
 import asyncio
 import json
 import shutil
+import time
 from pathlib import Path
 from uuid import UUID
 
@@ -26,9 +27,17 @@ DELETING = {"deleting", "delete_failed", "deleted"}
 
 
 def require_active(connection, book_id):
+    if book_id is None:
+        raise HTTPException(409, "书籍不存在或已删除。")
     state = connection.scalar(select(db.books.c.state).where(db.books.c.id == str(book_id)).with_for_update())
     if state is None or state in DELETING:
         raise HTTPException(409, "本书正在删除或已删除，不能继续处理。")
+
+
+def require_run_active(connection, run_id):
+    """Acquire lifecycle locks in book -> run -> issue order everywhere."""
+    book = connection.scalar(select(db.runs.c.book_id).where(db.runs.c.id == str(run_id)))
+    require_active(connection, book)
 
 
 def receipt(engine, book_id):
@@ -118,7 +127,7 @@ class DeletionActivities:
         )
         handles = []
         # Cancel every attempt, including manually restarted card tasks.
-        for run in self.runs(book_id):
+        for run in await asyncio.to_thread(self.runs, book_id):
             for attempt in range(run["recovery_attempt"] + 1):
                 handle = client.get_workflow_handle(workflow_id(run["kind"], run["id"], attempt))
                 try:
@@ -139,7 +148,7 @@ class DeletionActivities:
             ]
             if handles:
                 await asyncio.sleep(1)
-        return [run["id"] for run in self.runs(book_id)]
+        return [run["id"] for run in await asyncio.to_thread(self.runs, book_id)]
 
     @activity.defn
     def stop_gpu_requests(self, book_id: str) -> None:
@@ -183,12 +192,24 @@ class DeletionActivities:
                 activity.heartbeat()
         return found
 
+    def owned_references(self, book_id, *, others=False):
+        with self.engine.connect() as connection:
+            query = select(db.object_owners.c.reference).join(db.runs, db.runs.c.id == db.object_owners.c.run_id).where(
+                db.runs.c.book_id != book_id if others else db.runs.c.book_id == book_id)
+            return {ref["key"]: ref for ref in connection.scalars(query)}
+
     @activity.defn
     def erase_book(self, book_id: str) -> dict:
         # Serialize deletions of books which share content; the last owner removes
         # the shared object instead of two concurrent cleaners both retaining it.
         with self.engine.begin() as connection:
-            connection.execute(text("SELECT pg_advisory_xact_lock(1388427266)"))
+            deadline = time.monotonic() + 300
+            while not connection.scalar(text("SELECT pg_try_advisory_xact_lock(1388427266)")):
+                if activity.in_activity():
+                    activity.heartbeat()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Another deletion is still running; retry cleanup.")
+                time.sleep(.1)
             return self._erase_book(book_id)
 
     def _erase_book(self, book_id):
@@ -203,6 +224,9 @@ class DeletionActivities:
             )
         if saved is None:
             refs = self.closure(self.roots(book_id))
+            # Pins may represent failed/in-progress uploads; do not try to read
+            # their JSON. Nested business references are traversed above.
+            refs.update(self.owned_references(book_id))
             with self.engine.begin() as connection:
                 uploads = list(
                     connection.scalars(select(db.uploads.c.id).where(db.uploads.c.book_id == book_id))
@@ -250,7 +274,14 @@ class DeletionActivities:
                 for obj in page.get("Contents", []):
                     client.delete_object(Bucket=bucket, Key=obj["Key"])
         for ref in owned:
-            client.delete_object(Bucket=bucket, Key=ref["key"])
+            from .storage import object_lock
+            with object_lock(self.engine, ref["key"]) as connection:
+                other_owner = connection.scalar(select(db.object_owners.c.run_id)
+                    .join(db.runs, db.runs.c.id == db.object_owners.c.run_id)
+                    .where(db.object_owners.c.key == ref["key"], db.runs.c.book_id != book_id).limit(1))
+                if other_owner:
+                    continue
+                client.delete_object(Bucket=bucket, Key=ref["key"])
             for folder in ("downloads", "review-reader"):
                 (self.settings.cache_root / folder / ref["sha256"]).unlink(missing_ok=True)
             if activity.in_activity():

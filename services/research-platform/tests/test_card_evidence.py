@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from test_card_pipeline import MemoryOutputs, chapter
 
 from hrs_platform import card_evidence as module
 from hrs_platform.card_evidence import CardEvidence
+from hrs_platform.search import recover_retrieval
 from hrs_platform.cards import CardTopic, quote_pages
 from hrs_platform.reading import compact_readings, coverage_batches, reading_units
 
@@ -36,6 +38,7 @@ def research(monkeypatch):
     evidence = CardEvidence(settings, None, outputs, None)
     parent = {"result": {"published": True, "retrieval_generation": "generation"}}
     monkeypatch.setattr(module, "get_run", lambda *_: parent)
+    monkeypatch.setattr("hrs_platform.search.get_run", lambda *_: parent)
     corpus = {
         "book_id": original["book_id"],
         "parent_run_id": "parent",
@@ -289,7 +292,7 @@ def test_retrieval_outage_restores_intents_before_any_new_model_call(research, m
 
     from hrs_platform.domain.errors import Problem
     now, attempts, model_calls = [1000.0], [], []
-    monkeypatch.setattr(module.time, "time", lambda: now[0])
+    monkeypatch.setattr(time, "time", lambda: now[0])
     original = research.search.search
     def flaky(query, *args, **kw):
         attempts.append(query)
@@ -350,19 +353,19 @@ def test_terminal_model_result_is_reused_after_evidence_receipt_write_failure(re
 def test_persistent_retrieval_failures_exhaust_and_explicit_retry_gets_new_epoch(research, monkeypatch):
     from hrs_platform.domain.errors import Problem
     now, calls = [1000.0], []
-    monkeypatch.setattr(module.time, "time", lambda: now[0])
+    monkeypatch.setattr(time, "time", lambda: now[0])
     async def unavailable():
         calls.append(True)
         raise Problem("retrieval_unavailable", "offline", retryable=True)
     for attempt in range(1, 13):
         with pytest.raises(ApplicationError) as error:
-            asyncio.run(research.evidence.recover("run", "probe", unavailable))
+            asyncio.run(recover_retrieval(research.evidence.engine, research.outputs, "run", "probe", unavailable))
         assert error.value.type == ("retrieval_exhausted" if attempt == 12 else "retrieval_wait")
         now[0] = error.value.details[0]["retry_at"]
     with pytest.raises(ApplicationError) as error:
-        asyncio.run(research.evidence.recover("run", "probe", unavailable))
+        asyncio.run(recover_retrieval(research.evidence.engine, research.outputs, "run", "probe", unavailable))
     assert error.value.type == "retrieval_exhausted" and len(calls) == 12
     research.parent["recovery_attempt"] = 1
     async def restored():
         return "ready"
-    assert asyncio.run(research.evidence.recover("run", "probe", restored)) == "ready"
+    assert asyncio.run(recover_retrieval(research.evidence.engine, research.outputs, "run", "probe", restored)) == "ready"

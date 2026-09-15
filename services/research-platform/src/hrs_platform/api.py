@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 
 from . import books, schema
 from .cards import Cards
@@ -45,6 +45,35 @@ from .search import Search
 from .settings import Settings
 
 
+def read_events(engine, position):
+    """Assign delivery order only to committed events, serialized across readers."""
+    with engine.begin() as connection:
+        connection.execute(text("SELECT pg_advisory_xact_lock(1388427267)"))
+        pending = connection.scalars(
+            select(schema.events.c.sequence)
+            .where(schema.events.c.delivery_sequence.is_(None))
+            .order_by(schema.events.c.sequence)
+            .limit(500)
+        ).all()
+        for identity in pending:
+            connection.execute(
+                update(schema.events)
+                .where(schema.events.c.sequence == identity)
+                .values(delivery_sequence=func.nextval("event_delivery_sequence"))
+            )
+        rows = (
+            connection.execute(
+                select(schema.events)
+                .where(schema.events.c.delivery_sequence > position)
+                .order_by(schema.events.c.delivery_sequence)
+                .limit(100)
+            )
+            .mappings()
+            .all()
+        )
+        return [{**row, "sequence": row["delivery_sequence"]} for row in rows]
+
+
 def create_app(settings=None, engine=None):
     settings = settings or Settings.load()
     owned_engine = engine is None
@@ -74,13 +103,13 @@ def create_app(settings=None, engine=None):
 
     def download(value):
         title, ref = value
-        path = review.objects.materialize(ref, settings.cache_root / "downloads" / ref["sha256"])
-        return FileResponse(
-            path,
-            media_type="text/markdown; charset=utf-8",
+        from .storage import object_response
+
+        return object_response(
+            review.objects,
+            ref,
             headers={
                 "Content-Disposition": "attachment; filename*=UTF-8''" + quote(title + ".md", safe=""),
-                "ETag": '"' + ref["sha256"] + '"',
             },
         )
 
@@ -138,14 +167,23 @@ def create_app(settings=None, engine=None):
     ):
         metrics = {}
         result = Search(settings, engine).search(
-            q, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics=metrics, rerank_limit=rerank_limit, diverse=diverse
+            q,
+            book_id,
+            semantic,
+            limit,
+            candidate_limit,
+            context_chars,
+            total_chars,
+            metrics=metrics,
+            rerank_limit=rerank_limit,
+            diverse=diverse,
         )
         response.headers["Server-Timing"] = ", ".join(
             f"{name.removesuffix('_ms')};dur={value:.3f}"
             for name, value in metrics.items()
             if name.endswith("_ms")
         )
-        response.headers['X-Retrieval-Evidence'] = metrics.get('evidence_status', 'unassessed')
+        response.headers["X-Retrieval-Evidence"] = metrics.get("evidence_status", "unassessed")
         return result
 
     @app.get("/api/v2/books/{book_id}/chapters", response_model=list[ChapterSummary])
@@ -226,7 +264,7 @@ def create_app(settings=None, engine=None):
     def review_page(run_id: UUID, page: int):
         return review.page(run_id, page)
 
-    @app.get('/api/v2/runs/{run_id}/structure', response_model=StructureReport)
+    @app.get("/api/v2/runs/{run_id}/structure", response_model=StructureReport)
     def reading_structure(run_id: UUID):
         return library.structure(str(run_id))
 
@@ -239,7 +277,7 @@ def create_app(settings=None, engine=None):
         return review.save_draft(issue_id, request)
 
     @app.get("/api/v2/runs/{run_id}/artifacts/{name:path}")
-    def artifact(run_id: UUID, name: str):
+    def artifact(run_id: UUID, name: str, range_header: str | None = Header(default=None, alias="Range")):
         run = books.get_run(engine, run_id)
         if name == "original.pdf":
             reference = run["source"] if run["source"].get("sha256") else None
@@ -251,18 +289,9 @@ def create_app(settings=None, engine=None):
         if reference is None:
             raise HTTPException(404, "原件或附件尚未生成。")
         if reference["media_type"] == "application/pdf":
-            path = review.objects.materialize(
-                reference, settings.cache_root / "downloads" / reference["sha256"]
-            )
-            return FileResponse(
-                path,
-                media_type="application/pdf",
-                headers={
-                    "ETag": '"' + reference["sha256"] + '"',
-                    "Cache-Control": "private, max-age=3600",
-                    "X-Content-Type-Options": "nosniff",
-                },
-            )
+            from .storage import object_response
+
+            return object_response(review.objects, reference, range_header)
         return Response(
             review.objects.read_bytes(reference),
             media_type=reference["media_type"],
@@ -296,21 +325,10 @@ def create_app(settings=None, engine=None):
         except ValueError as error:
             raise HTTPException(422, "事件游标无效。") from error
 
-        def read_events(position):
-            with engine.connect() as connection:
-                return list(
-                    connection.execute(
-                        select(schema.events)
-                        .where(schema.events.c.sequence > position)
-                        .order_by(schema.events.c.sequence)
-                        .limit(100)
-                    ).mappings()
-                )
-
         async def stream():
             nonlocal cursor
             while not await request.is_disconnected():
-                rows = await asyncio.to_thread(read_events, cursor)
+                rows = await asyncio.to_thread(read_events, engine, cursor)
                 for row in rows:
                     cursor = row["sequence"]
                     payload = json.dumps(dict(row), default=str, ensure_ascii=False)

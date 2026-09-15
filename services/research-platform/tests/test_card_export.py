@@ -69,6 +69,5 @@ def test_candidate_export_keeps_full_contract_exact_quote_pages_and_survives_cac
         exported = json.loads(response.text.split("```json\n")[1].split("\n```")[0])
         assert exported["candidate"] == candidate and exported["units"] == units
         assert exported["machine_checks"] == checks
-        for path in (tmp_path / "downloads").iterdir():
-            path.unlink()
+        assert not (tmp_path / "downloads").exists()
         assert client.get(f"/api/v2/cards/{identity}/export").content == response.content

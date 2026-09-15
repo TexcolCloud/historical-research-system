@@ -51,7 +51,8 @@ class SchedulingTests(unittest.TestCase):
         vision.retrieval_process.is_alive.return_value = True
         vision.retrieval_pipe = Mock()
         vision.retrieval_pipe.poll.return_value = False
-        with patch.object(broker, 'gpu_lease', return_value=nullcontext()), patch.object(vision, 'unload'), patch.object(vision, 'unload_retrieval') as release:
+        with patch.object(broker, 'gpu_lease', return_value=nullcontext()), patch.object(vision, 'unload'), patch.object(vision, 'unload_retrieval') as release, \
+             patch.object(broker.time, 'monotonic', side_effect=[0, 901]):
             with self.assertRaises(TimeoutError):
                 vision.retrieve({'operation': 'embed', 'texts': ['样本']})
             release.assert_called_once()

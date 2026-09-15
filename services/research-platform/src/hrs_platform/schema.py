@@ -58,11 +58,18 @@ events = Table(
     "events",
     metadata,
     Column("sequence", BigInteger, primary_key=True, autoincrement=True),
+    Column("delivery_sequence", BigInteger, nullable=True),
     Column("book_id", UUID(as_uuid=False), ForeignKey("books.id"), nullable=False),
     Column("run_id", UUID(as_uuid=False)),
     Column("kind", String(80), nullable=False),
     Column("payload", JSONB, nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+object_owners = Table(
+    "object_owners", metadata,
+    Column("run_id", UUID(as_uuid=False), ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True),
+    Column("key", Text, primary_key=True),
+    Column("reference", JSONB, nullable=False),
 )
 outbox = Table(
     "outbox",

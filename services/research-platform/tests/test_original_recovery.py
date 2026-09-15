@@ -37,6 +37,7 @@ def originals(platform, tmp_path):
 def test_missing_mapping_renders_exact_physical_page_and_reuses_s3(originals, monkeypatch):
     reviewer, run, bundle, directory = originals
     result = reviewer.prepare(run, bundle, [2])
+    assert not list(directory.rglob("*.pdf"))
     assert result["issues"] == [] and result["machine_approval"] is False
     reference = result["pages"][0]["reference"]
     raw = reviewer.review.objects.read_bytes(reference)
@@ -53,7 +54,7 @@ def test_missing_mapping_renders_exact_physical_page_and_reuses_s3(originals, mo
 
 
 def test_deleted_s3_page_is_restored_without_changing_conversion_manifest(originals):
-    reviewer, run, bundle, _ = originals
+    reviewer, run, bundle, directory = originals
     original = reviewer.review.objects.put_bytes(b"deleted image", "image/png")
     bundle["manifest"]["pages"] = [{"page": 1, "image": "page.png"}]
     bundle["files"]["page.png"] = original
@@ -66,7 +67,7 @@ def test_deleted_s3_page_is_restored_without_changing_conversion_manifest(origin
 
 @pytest.mark.parametrize("problem", ["hash", "count", "page", "missing_pdf"])
 def test_ambiguous_or_missing_original_remains_pending(originals, problem):
-    reviewer, run, bundle, _ = originals
+    reviewer, run, bundle, directory = originals
     number = 1
     if problem == "hash":
         bundle["manifest"]["source_sha256"] = "wrong"
@@ -79,6 +80,7 @@ def test_ambiguous_or_missing_original_remains_pending(originals, problem):
             Bucket=reviewer.review.objects.bucket, Key=run["source"]["key"]
         )
     result = reviewer.prepare(run, bundle, [number])
+    assert not list(directory.rglob("*.pdf"))
     assert not result["pages"] and result["issues"][0]["error_type"] == "original_missing"
 
 

@@ -10,7 +10,10 @@ def engine_for(settings):
     url = make_url(settings.database_url.get_secret_value())
     if url.drivername != "postgresql+psycopg":
         raise ValueError("The platform requires PostgreSQL with psycopg.")
-    return create_engine(url, pool_pre_ping=True, hide_parameters=True, connect_args={"connect_timeout": 5})
+    return create_engine(url, pool_pre_ping=True, hide_parameters=True, connect_args={
+        "connect_timeout": 5,
+        "options": "-cstatement_timeout=30000 -clock_timeout=10000",
+    })
 
 
 def migrate(engine):
