@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1640" height="1750" viewBox="0 0 1640 1750" role="img" aria-labelledby="title desc">
+<title id="title">书籍处理工作流</title><desc id="desc">范围：一次书籍任务及其制卡子任务  ·  按 01 → 02 → 03 阅读，A / B 为阶段连接标记；全部连接线为水平或垂直线段。可放大阅读。</desc>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#516477"/></marker></defs>
+<g font-family="Microsoft YaHei, Noto Sans CJK SC, PingFang SC, sans-serif">
+<rect x="0" y="0" width="1640" height="1750" fill="#ffffff" stroke="#ffffff" stroke-width="1.6"/>
+<text x="40" y="58" font-size="34" fill="#16324a" text-anchor="start" font-weight="700">书籍处理工作流</text>
+<text x="40" y="94" font-size="19" fill="#516477" text-anchor="start">范围：一次书籍任务及其制卡子任务  ·  按 01 → 02 → 03 阅读，A / B 为阶段连接标记</text>
+<text x="40" y="134" font-size="18" fill="#516477" text-anchor="start">图例：矩形＝处理 / 产物   菱形＝判断   圆形＝接续   蓝＝自动   黄＝人工   绿＝可用产物</text>
+<rect x="40" y="165" width="480" height="1365" fill="#fafcfe" stroke="#c9d5df" stroke-width="1.6"/>
+<rect x="40" y="165" width="480" height="62" fill="#eaf0f6" stroke="#c9d5df" stroke-width="1.6"/>
+<text x="60" y="204" font-size="24" fill="#16324a" text-anchor="start" font-weight="700">01  接收与文档转换</text>
+<rect x="580" y="165" width="480" height="1365" fill="#fafcfe" stroke="#c9d5df" stroke-width="1.6"/>
+<rect x="580" y="165" width="480" height="62" fill="#eaf0f6" stroke="#c9d5df" stroke-width="1.6"/>
+<text x="600" y="204" font-size="24" fill="#16324a" text-anchor="start" font-weight="700">02  视觉核验与内容放行</text>
+<rect x="1120" y="165" width="480" height="1365" fill="#fafcfe" stroke="#c9d5df" stroke-width="1.6"/>
+<rect x="1120" y="165" width="480" height="62" fill="#eaf0f6" stroke="#c9d5df" stroke-width="1.6"/>
+<text x="1140" y="204" font-size="24" fill="#16324a" text-anchor="start" font-weight="700">03  入库、索引与研究制卡</text>
+<rect x="70" y="250" width="370" height="110" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="70" y="250" width="5" height="110" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="88" y="282" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">开始：选择并上传 PDF</text>
+<text x="88" y="313" font-size="19" fill="#516477" text-anchor="start">浏览器申请上传许可</text>
+<text x="88" y="339" font-size="19" fill="#516477" text-anchor="start">Uppy 管理分片、进度与续传</text>
+<rect x="70" y="415" width="370" height="110" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="70" y="415" width="5" height="110" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="88" y="447" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">保存原件并登记任务</text>
+<text x="88" y="478" font-size="19" fill="#516477" text-anchor="start">tusd → S3；上传完成 hooks</text>
+<text x="88" y="504" font-size="19" fill="#516477" text-anchor="start">业务事务保存书籍、运行与 outbox</text>
+<polyline points="255,360 255,415" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="263" y="379" width="82" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="270" y="395" font-size="17" fill="#516477" text-anchor="start">上传完成</text>
+<rect x="70" y="580" width="370" height="110" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="70" y="580" width="5" height="110" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="88" y="612" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">验证固定来源</text>
+<text x="88" y="643" font-size="19" fill="#516477" text-anchor="start">Temporal 启动书籍工作流</text>
+<text x="88" y="669" font-size="19" fill="#516477" text-anchor="start">检查 PDF、大小、SHA-256 与页数</text>
+<polyline points="255,525 255,580" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="263" y="543" width="99" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="270" y="559" font-size="17" fill="#516477" text-anchor="start">已提交事件</text>
+<polygon points="255,750 400,815 255,880 110,815" fill="#fff9ed" stroke="#926218" stroke-width="1.8"/>
+<text x="255" y="812" font-size="22" fill="#16324a" text-anchor="middle" font-weight="700">已有有效 OCR？</text>
+<text x="255" y="839" font-size="17" fill="#516477" text-anchor="middle">以源文件摘要绑定检查点</text>
+<polyline points="255,690 255,750" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="263" y="713" width="133" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="270" y="729" font-size="17" fill="#516477" text-anchor="start">检查可恢复产物</text>
+<rect x="70" y="950" width="370" height="120" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="70" y="950" width="5" height="120" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="88" y="982" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">OCR 与结构预处理</text>
+<text x="88" y="1013" font-size="19" fill="#516477" text-anchor="start">Docling + PaddleOCR-VL-1.6</text>
+<text x="88" y="1039" font-size="19" fill="#516477" text-anchor="start">页码清理、标题与续表候选</text>
+<polyline points="255,880 255,950" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="263" y="906" width="111.07" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="270" y="922" font-size="17" fill="#516477" text-anchor="start">无 / 不匹配</text>
+<rect x="70" y="1170" width="370" height="120" fill="#f0f8f4" stroke="#23735d" stroke-width="1.6"/>
+<rect x="70" y="1170" width="5" height="120" fill="#23735d" stroke="#23735d" stroke-width="1.6"/>
+<text x="88" y="1202" font-size="24" fill="#23735d" text-anchor="start" font-weight="700">提交或复用 OCR 证据</text>
+<text x="88" y="1233" font-size="19" fill="#516477" text-anchor="start">Markdown、原页图、物理页范围</text>
+<text x="88" y="1259" font-size="19" fill="#516477" text-anchor="start">原始识别、结构候选与摘要 → S3</text>
+<polyline points="255,1070 255,1170" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="263" y="1108" width="99" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="270" y="1124" font-size="17" fill="#516477" text-anchor="start">提交检查点</text>
+<polyline points="400,815 495,815 495,1230 440,1230" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="400" y="774" width="116" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="407" y="790" font-size="17" fill="#516477" text-anchor="start">有：直接复用</text>
+<circle cx="255" cy="1333" r="18" fill="#fff" stroke="#255f91" stroke-width="1.6"/>
+<text x="255" y="1341" font-size="24" fill="#255f91" text-anchor="middle" font-weight="700">A</text>
+<polyline points="255,1290 255,1315" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<circle cx="795" cy="268" r="18" fill="#fff" stroke="#255f91" stroke-width="1.6"/>
+<text x="795" y="276" font-size="24" fill="#255f91" text-anchor="middle" font-weight="700">A</text>
+<polyline points="795,286 795,330" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="610" y="330" width="370" height="120" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="610" y="330" width="5" height="120" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="628" y="362" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">逐页原图核验</text>
+<text x="628" y="393" font-size="19" fill="#516477" text-anchor="start">Qwen3-VL-8B 对照当前底稿</text>
+<text x="628" y="419" font-size="19" fill="#516477" text-anchor="start">检查事实、数值、表格及内容归属</text>
+<rect x="610" y="525" width="370" height="145" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="610" y="525" width="5" height="145" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="628" y="557" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">按需修正与独立复核</text>
+<text x="628" y="588" font-size="19" fill="#516477" text-anchor="start">唯一定位修正 → 再核对修正页</text>
+<text x="628" y="614" font-size="19" fill="#516477" text-anchor="start">复核通过才写回；其余保留待审</text>
+<text x="628" y="640" font-size="19" fill="#516477" text-anchor="start">原文、补丁、证据摘要一并保存</text>
+<polyline points="795,450 795,525" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="803" y="482" width="133" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="810" y="498" font-size="17" fill="#516477" text-anchor="start">保留已核验页面</text>
+<polygon points="795,720 940,785 795,850 650,785" fill="#fff9ed" stroke="#926218" stroke-width="1.8"/>
+<text x="795" y="782" font-size="22" fill="#16324a" text-anchor="middle" font-weight="700">整书内容已确认？</text>
+<text x="795" y="809" font-size="17" fill="#516477" text-anchor="middle">无未解决 / 未核验内容</text>
+<polyline points="795,670 795,720" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="610" y="935" width="370" height="120" fill="#fff9ed" stroke="#926218" stroke-width="1.6"/>
+<rect x="610" y="935" width="5" height="120" fill="#926218" stroke="#926218" stroke-width="1.6"/>
+<text x="628" y="967" font-size="24" fill="#926218" text-anchor="start" font-weight="700">人工逐项核对</text>
+<text x="628" y="998" font-size="19" fill="#516477" text-anchor="start">对照原页，编辑或确认问题范围</text>
+<text x="628" y="1024" font-size="19" fill="#516477" text-anchor="start">提交决定与新版本，不重算整书</text>
+<polyline points="795,850 795,935" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="803" y="888" width="167" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="810" y="904" font-size="17" fill="#516477" text-anchor="start">否：仅处理待审部分</text>
+<polyline points="980,995 1055,995 1055,785 940,785" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<text x="991" y="861" font-size="16" fill="#516477" text-anchor="start">决定提交后</text>
+<text x="991" y="885" font-size="16" fill="#516477" text-anchor="start">signal 唤醒</text>
+<text x="610" y="1090" font-size="18" fill="#516477" text-anchor="start">保存草稿不放行；既有人工作业不被覆盖。</text>
+<rect x="610" y="1170" width="370" height="120" fill="#f0f8f4" stroke="#23735d" stroke-width="1.6"/>
+<rect x="610" y="1170" width="5" height="120" fill="#23735d" stroke="#23735d" stroke-width="1.6"/>
+<text x="628" y="1202" font-size="24" fill="#23735d" text-anchor="start" font-weight="700">内容门槛通过</text>
+<text x="628" y="1233" font-size="19" fill="#516477" text-anchor="start">全书待审计数为 0</text>
+<text x="628" y="1259" font-size="19" fill="#516477" text-anchor="start">只读取已确认正文与来源关系</text>
+<polyline points="650,785 595,785 595,1230 610,1230" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="592" y="739" width="31" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="599" y="755" font-size="17" fill="#516477" text-anchor="start">是</text>
+<circle cx="795" cy="1333" r="18" fill="#fff" stroke="#255f91" stroke-width="1.6"/>
+<text x="795" y="1341" font-size="24" fill="#255f91" text-anchor="middle" font-weight="700">B</text>
+<polyline points="795,1290 795,1315" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<circle cx="1335" cy="268" r="18" fill="#fff" stroke="#255f91" stroke-width="1.6"/>
+<text x="1335" y="276" font-size="24" fill="#255f91" text-anchor="middle" font-weight="700">B</text>
+<polyline points="1335,286 1335,330" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1150" y="330" width="370" height="110" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="1150" y="330" width="5" height="110" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="1168" y="362" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">组织逻辑章节</text>
+<text x="1168" y="393" font-size="19" fill="#516477" text-anchor="start">复用标题、目录与已核对结构</text>
+<text x="1168" y="419" font-size="19" fill="#516477" text-anchor="start">保留全书覆盖及章节 / 物理页映射</text>
+<rect x="1150" y="495" width="370" height="110" fill="#f0f8f4" stroke="#23735d" stroke-width="1.6"/>
+<rect x="1150" y="495" width="5" height="110" fill="#23735d" stroke="#23735d" stroke-width="1.6"/>
+<text x="1168" y="527" font-size="24" fill="#23735d" text-anchor="start" font-weight="700">发布阅读版与来源</text>
+<text x="1168" y="558" font-size="19" fill="#516477" text-anchor="start">章节、结构关系、脚注 → S3</text>
+<text x="1168" y="584" font-size="19" fill="#516477" text-anchor="start">业务库保存引用；按需对照原件</text>
+<polyline points="1335,440 1335,495" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1343" y="460" width="116" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="1350" y="476" font-size="17" fill="#516477" text-anchor="start">发布固定来源</text>
+<rect x="1150" y="660" width="370" height="110" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="1150" y="660" width="5" height="110" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="1168" y="692" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">建立检索索引</text>
+<text x="1168" y="723" font-size="19" fill="#516477" text-anchor="start">结构分块 → BGE 嵌入 → OpenSearch</text>
+<text x="1168" y="749" font-size="19" fill="#516477" text-anchor="start">重建按摘要复用；检索时按需重排</text>
+<polyline points="1335,605 1335,660" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<polygon points="1335,805 1480,860 1335,915 1190,860" fill="#fff9ed" stroke="#926218" stroke-width="1.8"/>
+<text x="1335" y="867" font-size="22" fill="#16324a" text-anchor="middle" font-weight="700">开启自动制卡？</text>
+<polyline points="1335,770 1335,805" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1150" y="980" width="370" height="110" fill="#f4f8fc" stroke="#255f91" stroke-width="1.6"/>
+<rect x="1150" y="980" width="5" height="110" fill="#255f91" stroke="#255f91" stroke-width="1.6"/>
+<text x="1168" y="1012" font-size="24" fill="#255f91" text-anchor="start" font-weight="700">动态分工、通读与制卡</text>
+<text x="1168" y="1043" font-size="19" fill="#516477" text-anchor="start">规划章节分工 → 保存阅读记录</text>
+<text x="1168" y="1069" font-size="19" fill="#516477" text-anchor="start">通读来源 → 主题、候选与文本核验</text>
+<polyline points="1335,915 1335,980" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1343" y="938" width="31" height="25" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="1350" y="954" font-size="17" fill="#516477" text-anchor="start">是</text>
+<polygon points="1335,1140 1480,1200 1335,1260 1190,1200" fill="#fff9ed" stroke="#926218" stroke-width="1.8"/>
+<text x="1335" y="1197" font-size="22" fill="#16324a" text-anchor="middle" font-weight="700">原图核验通过？</text>
+<text x="1335" y="1224" font-size="17" fill="#516477" text-anchor="middle">本地 Qwen 对照来源</text>
+<polyline points="1335,1090 1335,1140" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<polyline points="1335,1260 1335,1278 1237,1278 1237,1295" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1243" y="1252" width="30" height="24" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="1250" y="1267" font-size="16" fill="#516477" text-anchor="start">是</text>
+<polyline points="1480,1200 1540,1200 1540,1278 1432,1278 1432,1295" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1483" y="1233" width="30" height="24" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="1490" y="1248" font-size="16" fill="#516477" text-anchor="start">否</text>
+<rect x="1150" y="1295" width="175" height="80" fill="#f8fafc" stroke="#23735d" stroke-width="1.6"/>
+<text x="1162" y="1325" font-size="21" fill="#23735d" text-anchor="start" font-weight="700">定稿并采用</text>
+<text x="1162" y="1353" font-size="17" fill="#516477" text-anchor="start">保存卡片与证据</text>
+<rect x="1345" y="1295" width="175" height="80" fill="#f8fafc" stroke="#926218" stroke-width="1.6"/>
+<text x="1357" y="1325" font-size="21" fill="#926218" text-anchor="start" font-weight="700">保留待修订</text>
+<text x="1357" y="1353" font-size="17" fill="#516477" text-anchor="start">不自动采用</text>
+<rect x="1150" y="1435" width="370" height="80" fill="#f0f8f4" stroke="#23735d" stroke-width="1.6"/>
+<rect x="1150" y="1435" width="5" height="80" fill="#23735d" stroke="#23735d" stroke-width="1.6"/>
+<text x="1168" y="1467" font-size="24" fill="#23735d" text-anchor="start" font-weight="700">完成：阅读、检索与导出</text>
+<text x="1168" y="1498" font-size="19" fill="#516477" text-anchor="start">书籍 Markdown；已采用卡片及证据</text>
+<polyline points="1237,1375 1237,1410 1335,1410 1335,1435" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<polyline points="1480,860 1580,860 1580,1475 1520,1475" fill="none" stroke="#516477" stroke-width="2" stroke-linejoin="miter" marker-end="url(#arrow)"/>
+<rect x="1453" y="926" width="110" height="24" fill="#fff" stroke="#fff" stroke-width="1.6"/>
+<text x="1460" y="941" font-size="16" fill="#516477" text-anchor="start">否：跳过制卡</text>
+<rect x="40" y="1570" width="1560" height="140" fill="#f6f8fb" stroke="#c9d5df" stroke-width="1.6"/>
+<text x="60" y="1602" font-size="23" fill="#16324a" text-anchor="start" font-weight="700">恢复与终止规则（适用于相应阶段）</text>
+<text x="60" y="1637" font-size="20" fill="#255f91" text-anchor="start" font-weight="700">服务故障</text>
+<text x="60" y="1665" font-size="18" fill="#516477" text-anchor="start">持久等待与有界重试；耗尽后保留进度。</text>
+<text x="60" y="1693" font-size="18" fill="#516477" text-anchor="start">恢复读取已提交回执，避免重跑完成阶段。</text>
+<text x="590" y="1637" font-size="20" fill="#926218" text-anchor="start" font-weight="700">内容或候选未通过</text>
+<text x="590" y="1665" font-size="18" fill="#516477" text-anchor="start">保留待审 / 待修订，不以失败代替通过。</text>
+<text x="590" y="1693" font-size="18" fill="#516477" text-anchor="start">人工决定、来源与历史修订始终保留。</text>
+<text x="1125" y="1637" font-size="20" fill="#16324a" text-anchor="start" font-weight="700">用户删除任务</text>
+<text x="1125" y="1665" font-size="18" fill="#516477" text-anchor="start">停止任务与 GPU 请求 → 等待退出</text>
+<text x="1125" y="1693" font-size="18" fill="#516477" text-anchor="start">→ 清理所属文件、缓存、索引与记录。</text>
+</g>
+</svg>
