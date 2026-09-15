@@ -4,10 +4,35 @@ import asyncio
 
 import httpx2 as httpx
 import pytest
+from agents import function_tool
 from temporalio.exceptions import ApplicationError
 from test_model_lifecycle import Receipt, setup
 
 from hrs_platform import agents as module
+
+
+def test_tool_history_budget_stops_before_sending_oversized_followup(monkeypatch):
+    calls = []
+
+    def provider(request):
+        calls.append(request)
+        value = success().json()
+        value["output"] = [{"id": "tool", "type": "function_call", "call_id": "read-1",
+                            "name": "read_evidence", "arguments": "{}", "status": "completed"}]
+        return httpx.Response(200, json=value)
+
+    @function_tool
+    async def read_evidence() -> str:
+        """Return synthetic source text."""
+        return "仅为合成测试来源，不可截断。" * 10000
+
+    model, sends = transport_model(monkeypatch, provider)
+    monkeypatch.setattr("hrs_platform.reading.CARD_INPUT_TOKENS", 10000)
+    with pytest.raises(ApplicationError) as failure:
+        asyncio.run(model.run("run", "tool-budget", "test", {}, Receipt, tools=[read_evidence]))
+    assert failure.value.type == "card_input_budget"
+    assert len(calls) == len(sends) == 1
+    assert not any("transport-error" in key for key in model.outputs.values)
 
 
 def transport_model(monkeypatch, handler):

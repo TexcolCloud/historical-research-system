@@ -325,6 +325,16 @@ class Models:
             try:
                 self._check_transport(run_id)
                 body = json.loads((await request.aread()).decode("utf-8"))
+                if tools:
+                    from .domain.tokens import estimate_request
+                    from .reading import CARD_INPUT_TOKENS
+
+                    if estimate_request(body)["input_tokens"] > CARD_INPUT_TOKENS:
+                        raise ApplicationError(
+                            "工具回执累计超过制卡输入预算，保留证据并缩小主题。",
+                            type="card_input_budget",
+                            non_retryable=True,
+                        )
                 requests.append(body)
                 await asyncio.to_thread(
                     self.outputs.reserve_request,

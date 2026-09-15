@@ -14,11 +14,13 @@ from hrs_platform import schema as db
 from hrs_platform.activities import objects_for
 from hrs_platform.cards import Cards
 from hrs_platform.library import Library
+from hrs_platform.search import Search
 
 
 @pytest.mark.skipif(os.environ.get("PLATFORM_TEST_MODELS") != "1", reason="Opt-in actual text-model workflow")
 def test_organization_reading_and_card_protocols_use_complete_synthetic_source(platform):
     settings, engine = platform
+    settings = settings.model_copy(update={"opensearch_index": "test-card-text-" + uuid4().hex})
     with_vision = os.environ.get("PLATFORM_TEST_FULL_MODELS") == "1"
     objects = objects_for(settings)
     book, run = str(uuid4()), str(uuid4())
@@ -61,6 +63,7 @@ def test_organization_reading_and_card_protocols_use_complete_synthetic_source(p
         organization = await library.organize(run)
         assert "".join(part["text"] for group in organization["groups"] for part in group["parts"]) == text
         library.publish(run)
+        await asyncio.to_thread(Search(settings, engine).index, run)
         cards = Cards(settings, engine)
         child = cards.create_run(run)["run_id"]
         result = await cards.generate(child)
@@ -94,6 +97,7 @@ def test_organization_reading_and_card_protocols_use_complete_synthetic_source(p
     try:
         asyncio.run(exercise())
     finally:
+        Search(settings, engine).client.indices.delete(index=settings.opensearch_index, ignore=[404])
         with engine.connect() as connection:
             report = {
                 "test": "synthetic text + local vision + adoption; not historical approval"

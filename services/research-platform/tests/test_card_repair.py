@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import insert
 from temporalio.exceptions import ApplicationError
-from test_card_pipeline import chapter, record, verdict
+from test_card_pipeline import StubEvidence, chapter, record, verdict
 
 from hrs_platform import cards as module
 from hrs_platform import schema as db
@@ -23,6 +23,7 @@ from hrs_platform.visual_review import result_key
 
 @pytest.fixture
 def harness(platform, monkeypatch, request):
+    monkeypatch.setattr(module, "CardEvidence", StubEvidence)
     settings, engine = platform
     book, run = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
@@ -186,6 +187,18 @@ def test_failed_topic_is_isolated_and_explicit_retry_keeps_adopted_cards(harness
 def test_coverage_feedback_supplies_missing_original_before_next_revision(harness):
     cards, run, units, scenario, calls = harness
     scenario.update(combined=True, omission=True)
+    research = cards.evidence.research
+    passes = []
+
+    async def partial(*args, **kwargs):
+        receipt = await research(*args, **kwargs)
+        passes.append(kwargs.get("previous"))
+        if kwargs.get("previous") is None:
+            receipt["units"] = receipt["units"][:1]
+            receipt["assessment"]["source_unit_ids"] = [receipt["units"][0]["unit_id"]]
+        return receipt
+
+    cards.evidence.research = partial
     asyncio.run(cards.generate(run))
     drafts = [payload for key, payload in calls if ":制卡:" in key]
     assert len(drafts) == 2
@@ -194,6 +207,7 @@ def test_coverage_feedback_supplies_missing_original_before_next_revision(harnes
     assert missing in {unit["unit_id"] for unit in drafts[1]["source_units"]}
     generated = cards.outputs.get(run, "generated-cards")
     assert generated["cards"][0]["text_check"]["conclusion"] == "pass"
+    assert len(passes) == 2 and passes[1]["source_checks"]
 
 
 def test_budget_preflight_and_local_vision_have_separate_allowances(harness):

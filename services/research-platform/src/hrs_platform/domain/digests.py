@@ -10,6 +10,8 @@ source_only_unit_ids 标记仅有原文的回退记录：从 candidate_quotes �
 保留所有对研究必要的事件、主体、具体数字与时间、形成者归属、否定和限定、附注、反证及替代解释。
 facts 按具体信息合并重复叙述，每项 source_unit_ids 必须来自本次记录，不能创造新事实。
 quotation_candidates 选择足以支持关键事实和限制的原文，unit_id、quote 与 occurrence 沿用实际记录。
+若记录仅有 has_candidate_quotes 线索而无引文原文，quotation_candidates 留空，不重构引文；
+source_only_unit_ids 没有可用解读时在 questions 中保留对应 source_unit_ids 与需读取原文的具体缺口，后续工具会回读原文。
 不能把一批中的未出现写成全文不存在。结构和跨批接续、页边界及待查问题保持有据可查。
 避免把全部字段再抄一遍；书目信息不展开成大段通用提醒。"""
 )

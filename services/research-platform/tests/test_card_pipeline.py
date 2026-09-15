@@ -26,9 +26,26 @@ from hrs_platform.reading import (
 
 @pytest.fixture(autouse=True)
 def no_original_io(monkeypatch):
+    monkeypatch.setattr(module, "CardEvidence", StubEvidence)
     monkeypatch.setattr("hrs_platform.visual_review.VisualReview.__init__", lambda self, *args: None)
     monkeypatch.setattr("hrs_platform.visual_review.VisualReview.prepare",
                         lambda self, run, bundle, numbers: {"pages": [], "issues": []})
+
+
+class StubEvidence:
+    """Orchestration tests isolate retrieval; actual tool contracts have their own tests."""
+
+    def __init__(self, *args):
+        pass
+
+    def pin(self, run, snapshot):
+        return {"generation": "synthetic"}
+
+    async def research(self, models, run_id, key, corpus, topic, clues, all_units, parent, previous=None):
+        units = [u for u in all_units if u["unit_id"] in topic.unit_ids]
+        return {"assessment": {"sufficient": True, "source_unit_ids": topic.unit_ids,
+                               "findings": "synthetic", "unresolved_questions": []},
+                "units": units, "corpus": corpus, "searches": []}
 
 
 def chapter(text):
@@ -629,7 +646,7 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
         package = cards.outputs.get(run_id, "card-research-package")
         assigned = [uid for topic in package["card_plan"]["topics"] for uid in topic["unit_ids"]]
         assert assigned == [unit["unit_id"] for unit in units]
-        assert len(package["readings"]) == 4
+        assert len(package["readings"]) == 2
         receipt = cards.outputs.get(run_id, "card-topic-plan")
         assert receipt["fallback_stage"] == planning_failure
         assert receipt["machine_approval"] is False

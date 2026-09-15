@@ -17,6 +17,7 @@ from temporalio.exceptions import ApplicationError
 from . import schema as db
 from .activities import Activities
 from .books import get_run
+from .card_evidence import CardEvidence
 from .domain import prompts
 from .domain.generation_contracts import CardDraft, SemanticCheck
 from .domain.tokens import estimate_request
@@ -25,7 +26,10 @@ from .outputs import Outputs, fingerprint
 from .reading import (
     card_model,
     check_candidate_coverage,
+    compact_readings,
     coverage,
+    coverage_batches,
+    neighbor_context,
     passed,
     read_batch,
     reading_units,
@@ -149,29 +153,6 @@ def visual_groups(candidate, units):
         key = "pages-" + ",".join(map(str, pages))
         groups.setdefault(key, {"key": key, "pages": pages, "items": []})["items"].append(item)
     return list(groups.values())
-
-
-def neighbor_context(all_units, selected):
-    """Preserve adjoining text and book-opening provenance across agent assignments."""
-    selected_ids = {unit["unit_id"] for unit in selected}
-    indexes = {i for i, row in enumerate(all_units) if row["unit_id"] in selected_ids}
-    wanted = {0}
-    for index in indexes:
-        wanted.update((index - 1, index + 1))
-    neighbors = [
-        row for index, row in enumerate(all_units) if index in wanted and row["unit_id"] not in selected_ids
-    ]
-    # Linked notes/owners can be far from the selected unit or across reading assignments.
-    supplements = [
-        dict(extra, unit_id=extra["id"])
-        for unit in [*selected, *neighbors]
-        for extra in unit.get("context", [])
-    ]
-    return list(
-        {
-            row["unit_id"]: row for row in [*supplements, *neighbors] if row["unit_id"] not in selected_ids
-        }.values()
-    )
 
 
 def split_topic(topic, all_units):
@@ -315,6 +296,10 @@ class Cards:
 
         return Models(self.settings, self.engine)
 
+    @cached_property
+    def evidence(self):
+        return CardEvidence(self.settings, self.engine, self.outputs, self.library)
+
     async def _plan_topics(self, run_id, readings, units, chapters, parent):
         dependency = {"readings": readings, "units": units, "chapters": chapters}
         receipt = self.outputs.get(run_id, "card-topic-plan", dependency)
@@ -322,7 +307,9 @@ class Cards:
             stage = "digest"
             reason = None
             try:
-                overview = await synthesis_readings(self.models, run_id, "全书主题:v2", readings, units, parent)
+                overview = await synthesis_readings(
+                    self.models, run_id, "全书主题:v2", compact_readings(readings), units, parent
+                )
                 stage = "topic"
                 plan = await card_model(
                     self.models,
@@ -362,7 +349,9 @@ class Cards:
                             objective="按来源顺序研究指定章节的完整内容，保留脚注归属、反证及限定；"
                             "相邻章节仅共享研究范围，不预设它们属于同一事件。",
                             unit_ids=[
-                                unit["unit_id"] for _, rows in groups[offset : offset + width] for unit in rows
+                                unit["unit_id"]
+                                for _, rows in groups[offset : offset + width]
+                                for unit in rows
                             ],
                         )
                         for offset in range(0, len(groups), width)
@@ -418,11 +407,15 @@ class Cards:
                 {"chapters": originals, "reading_rule": "structured-full-coverage-v2"},
             )
         chapters, all_units = snapshot["chapters"], snapshot["units"]
+        corpus = await asyncio.to_thread(self.evidence.pin, run, snapshot)
         if not all_units:
             raise ValueError("No reviewed source text is available for card reading.")
         revision = (run.get("result") or {}).get("card_revision", 0)
+        saved_plan = self.outputs.get(run_id, "card-reading-plan")
         # Preflight is a lower-bound estimate, not permission to exceed the hard cap.
-        minimum = len(all_units) + ceil(len(all_units) / 2) + ceil(len(all_units) / 8) + 4
+        minimum = (
+            len(all_units) + ceil(len(all_units) / (2 if saved_plan else 8)) + ceil(len(all_units) / 8) + 4
+        )
         budget = self.outputs.preflight(run_id, minimum, self.settings.model_max_calls)
         self.outputs.node(
             run_id,
@@ -503,7 +496,6 @@ class Cards:
             return json.dumps(result, ensure_ascii=False)
 
         research = self.outputs.get(run_id, "card-research-package")
-        saved_plan = self.outputs.get(run_id, "card-reading-plan")
         try:
             plan = (
                 ResearchPlan.model_validate(research["plan"])
@@ -594,8 +586,26 @@ class Cards:
                         units = [row for row in all_units if row["chapter_id"] in assignment.chapter_ids]
                         research_state = state(units)
                         readings = []
-                        for offset in range(0, len(units), 2):
-                            batch = units[offset : offset + 2]
+                        batch_key = f"{group}:batches"
+                        batches = self.outputs.get(run_id, batch_key)
+                        if batches is None:
+                            # Existing plans may already have two-unit reading checkpoints.
+                            # Freeze that layout once; new plans use token-packed structural units.
+                            groups = (
+                                [units[i : i + 2] for i in range(0, len(units), 2)]
+                                if saved_plan
+                                else list(coverage_batches(units))
+                            )
+                            batches = self.outputs.put(
+                                run_id,
+                                batch_key,
+                                [[u["unit_id"] for u in batch] for batch in groups],
+                                {"units": units},
+                            )
+                        by_id = {u["unit_id"]: u for u in units}
+                        offset = 0
+                        for identities in batches:
+                            batch = [by_id[identity] for identity in identities]
                             reading = await read_batch(
                                 self.models,
                                 run_id,
@@ -608,6 +618,7 @@ class Cards:
                                 research_state=research_state,
                             )
                             readings.append(reading)
+                            offset += len(batch)
                         self.outputs.put(
                             run_id,
                             f"{group}:readings:{fingerprint(readings)}",
@@ -764,16 +775,12 @@ class Cards:
                             if set(a.chapter_ids) & {u["chapter_id"] for u in units}
                         ],
                     }
-                    source_step = f"{base_group}:sources:{fingerprint(source)}"
-                    self.outputs.put(
-                        run_id, source_step, source, {"topic": topic.model_dump(), "units": available}
-                    )
                     preflight_input = {
                         "instructions": prompts.COMMON + prompts.SYNTHESIZE,
                         "input": {
                             "source_units": units,
                             "context_units": context,
-                            "reading_records": topic_readings,
+                            "reading_records": compact_readings(topic_readings),
                         },
                         "schema": CardDraft.model_json_schema(),
                     }
@@ -786,23 +793,58 @@ class Cards:
                             "主题需要缩小输入与输出范围。", type="card_input_budget", non_retryable=True
                         )
                     synthesis_records = await synthesis_readings(
-                        self.models, run_id, group, topic_readings, units, branch
+                        self.models, run_id, group, compact_readings(topic_readings), units, branch
                     )
-                    # Candidate quotes retain the complete containing unit, preserving notes and attribution.
-                    chosen = {
-                        quote["unit_id"]
-                        for record in synthesis_records
-                        for quote in record.get("quotation_candidates", [])
-                    }
-                    chosen.update(
-                        row["unit_id"]
-                        for record in synthesis_records
-                        for row in record.get("readings", [])
-                        if row["candidate_quotes"]
+                    evidence = await self.evidence.research(
+                        self.models, run_id, group, corpus, topic, synthesis_records, all_units, branch
                     )
+                    if not evidence["assessment"]["sufficient"]:
+                        raise ApplicationError(
+                            "主题证据不足，已保存待补证问题。",
+                            evidence["assessment"],
+                            type="card_evidence_insufficient",
+                            non_retryable=True,
+                        )
+                    chosen = {unit["unit_id"] for unit in evidence["units"]}
+                    available = list(
+                        {unit["unit_id"]: unit for unit in [*available, *evidence["units"]]}.values()
+                    )
+                    context = [unit for unit in available if unit["unit_id"] not in topic.unit_ids]
                     previous = prior_card.get("text_check") if prior_card else None
                     card = CardDraft.model_validate(prior_card["candidate"]) if prior_card else None
+                    if card:
+                        chosen.update(
+                            selection.unit_id for item in card.items for selection in item.selections
+                        )
+                        chosen.update(identity for item in card.items for identity in item.source_unit_ids)
                     for round_number in range(3):
+                        if round_number == 1 and previous and previous["conclusion"] != "pass":
+                            supplement = await self.evidence.research(
+                                self.models,
+                                run_id,
+                                group + ":supplement",
+                                corpus,
+                                topic,
+                                synthesis_records,
+                                all_units,
+                                branch,
+                                previous=previous,
+                            )
+                            evidence = {**supplement, "initial": evidence}
+                            if not supplement["assessment"]["sufficient"]:
+                                raise ApplicationError(
+                                    "补证后仍有未解决问题，保留候选等待修订。",
+                                    supplement["assessment"],
+                                    type="card_evidence_insufficient",
+                                    non_retryable=True,
+                                )
+                            chosen.update(unit["unit_id"] for unit in supplement["units"])
+                            available = list(
+                                {
+                                    unit["unit_id"]: unit for unit in [*available, *supplement["units"]]
+                                }.values()
+                            )
+                            context = [unit for unit in available if unit["unit_id"] not in topic.unit_ids]
                         repair_sources(previous, available, chosen)
                         synthesis_units = [unit for unit in available if unit["unit_id"] in chosen]
                         card = await card_model(
@@ -813,7 +855,8 @@ class Cards:
                             {
                                 "reading_records": synthesis_records,
                                 "source_units": synthesis_units,
-                                "context_units": context,
+                                "evidence_research": evidence["assessment"],
+                                "context_units": [u for u in context if u["unit_id"] not in chosen],
                                 "research_state": research_state,
                                 "previous_check": previous,
                                 "previous_visual_checks": prior_card.get("repair_visual_checks", [])
@@ -828,7 +871,9 @@ class Cards:
                             CardDraft,
                             model=self.settings.reasoning_model,
                             parent=branch,
-                            validate=lambda value, units=available: validate_candidate(value, units),
+                            validate=lambda value, units=[*synthesis_units, *context]: validate_candidate(
+                                value, units
+                            ),
                         )
                         referenced = {
                             selection.unit_id for item in card.items for selection in item.selections
@@ -838,7 +883,8 @@ class Cards:
                             "candidate": card.model_dump(mode="json"),
                             "reading_records": synthesis_records,
                             "source_units": [unit for unit in available if unit["unit_id"] in referenced],
-                            "context_units": context,
+                            "context_units": [u for u in context if u["unit_id"] not in referenced],
+                            "evidence_research": evidence["assessment"],
                             "research_state": research_state,
                         }
                         check = await card_model(
@@ -871,6 +917,14 @@ class Cards:
                             if all(passed(result) for result in source_checks):
                                 break
                             previous["conclusion"] = "needs_revision"
+                    source.update(units=available, evidence_research=evidence)
+                    source_step = f"{base_group}:sources:{fingerprint(source)}"
+                    self.outputs.put(
+                        run_id,
+                        source_step,
+                        source,
+                        {"topic": topic.model_dump(), "units": available, "corpus": corpus},
+                    )
                     produced.append(
                         {
                             "id": identity,
@@ -894,7 +948,12 @@ class Cards:
                         run_id, checkpoint, produced[-1], {"topic": topic.model_dump(), "revision": revision}
                     )
             except ApplicationError as error:
-                if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget"}:
+                if error.type not in {
+                    "model_output_invalid",
+                    "model_output_limit",
+                    "card_input_budget",
+                    "card_evidence_insufficient",
+                }:
                     raise
                 depth = len(path.split(".")) if path else 0
                 children = (
@@ -939,6 +998,7 @@ class Cards:
                         "name": topic.name,
                         "error_type": error.type,
                         "message": str(error)[:500],
+                        "evidence_questions": list(error.details),
                         "unit_ids": topic.unit_ids,
                     }
                 )
@@ -1058,6 +1118,7 @@ class Cards:
                         "source_units": review_units,
                         "original_checks": checks,
                         "research_state": research_state,
+                        "evidence_research": source.get("evidence_research", {}).get("assessment"),
                     }
                     final_check = await card_model(
                         self.models,
