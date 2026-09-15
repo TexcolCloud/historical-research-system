@@ -617,16 +617,35 @@ class Cards:
                         return readings
 
             # Only independent assignments overlap. Their own batches retain previous-reading order.
+            async def guarded_assignment(number, assignment):
+                try:
+                    return await read_assignment(number, assignment)
+                except ApplicationError as error:
+                    if error.type not in {"model_transport_wait", "model_transport_exhausted"}:
+                        raise
+                    # Drain siblings already in flight. Models blocks new provider
+                    # sends until the workflow's cooldown, without faking readings.
+                    return error
+
             try:
                 async with asyncio.TaskGroup() as tasks:
                     jobs = [
-                        tasks.create_task(read_assignment(i, assignment))
+                        tasks.create_task(guarded_assignment(i, assignment))
                         for i, assignment in enumerate(plan.assignments)
                     ]
             except ExceptionGroup as failure:
-                # Preserve the provider's recoverability and useful error message after
-                # TaskGroup has cancelled siblings; keep all failures in the cause.
-                raise failure.exceptions[0] from failure
+                # Do not serialize the giant sibling ExceptionGroup into Temporal.
+                error = failure.exceptions[0]
+                while isinstance(error, ExceptionGroup):
+                    error = error.exceptions[0]
+                raise error from None
+            deferred = [job.result() for job in jobs if isinstance(job.result(), ApplicationError)]
+            if deferred:
+                terminal = next(
+                    (error for error in deferred if error.type == "model_transport_exhausted"), None
+                )
+                error = terminal or max(deferred, key=lambda error: error.details[0]["retry_at"])
+                raise error from None
             readings = [record for job in jobs for record in job.result()]
             card_plan = await self._plan_topics(run_id, readings, all_units, chapters, main)
             self.outputs.put(

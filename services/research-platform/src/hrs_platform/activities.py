@@ -78,7 +78,10 @@ class Activities:
                 # Close nodes left by worker loss or an exception before local cleanup.
                 connection.execute(
                     update(db.execution_nodes)
-                    .where(db.execution_nodes.c.run_id == run_id, db.execution_nodes.c.state == "running")
+                    .where(
+                        db.execution_nodes.c.run_id == run_id,
+                        db.execution_nodes.c.state.in_(["running", "waiting"]),
+                    )
                     .values(state="failed", finished_at=func.now())
                 )
             connection.execute(

@@ -5,6 +5,30 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError, ApplicationError
+
+
+async def execute_with_model_recovery(name, run_id, **options):
+    waited, deferrals = 0.0, 0
+    while True:
+        try:
+            return await workflow.execute_activity(name, run_id, **options)
+        except ActivityError as error:
+            cause = error.cause
+            if not isinstance(cause, ApplicationError) or cause.type != "model_transport_wait":
+                raise
+            # The activity error is non-retryable: only this timer owns network
+            # recovery. Completed steps replay receipts, not paid requests.
+            delay = max(1.0, cause.details[0]["retry_at"] - workflow.now().timestamp())
+            deferrals += 1
+            waited += delay
+            if deferrals > 12 or waited > 3600:
+                raise ApplicationError(
+                    "文本服务恢复等待已达上限，进度保留，请稍后手动重试。",
+                    type="model_transport_exhausted",
+                    non_retryable=True,
+                ) from None
+            await workflow.sleep(delay)
 
 
 @workflow.defn
@@ -22,7 +46,7 @@ class BookWorkflow:
         retry = RetryPolicy(maximum_attempts=3)
 
         async def step(name, *, gpu=False, long=False):
-            return await workflow.execute_activity(
+            return await execute_with_model_recovery(
                 name,
                 run_id,
                 task_queue=request["gpu_queue"] if gpu else workflow.info().task_queue,
@@ -70,7 +94,7 @@ class CardWorkflow:
         run_id = request["run_id"]
 
         async def step(name, gpu=False):
-            return await workflow.execute_activity(
+            return await execute_with_model_recovery(
                 name,
                 run_id,
                 task_queue=request["gpu_queue"] if gpu else workflow.info().task_queue,

@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import time
+from email.utils import parsedate_to_datetime
 
 from agents import (
     Agent,
@@ -13,7 +15,7 @@ from agents import (
     RunConfig,
     Runner,
 )
-from openai import APIConnectionError, AsyncOpenAI, DefaultAsyncHttpxClient
+from openai import APIConnectionError, APIStatusError, AsyncOpenAI, DefaultAsyncHttpxClient
 from temporalio.exceptions import ApplicationError
 
 from .books import get_run
@@ -24,6 +26,26 @@ from .outputs import Outputs, StageInputMismatch, execution_parent, fingerprint
 class Models:
     def __init__(self, settings, engine):
         self.settings, self.outputs = settings, Outputs(settings, engine)
+
+    def _defer(self, run_id, receipt):
+        exhausted = receipt["attempt"] >= 3
+        error = ApplicationError(
+            "文本服务连续不可用，已保留进度，请稍后手动重试。"
+            if exhausted
+            else "文本服务暂不可用，保留进度并等待自动恢复。",
+            receipt,
+            type="model_transport_exhausted" if exhausted else "model_transport_wait",
+            non_retryable=True,
+        )
+        # One activity owns this instance. Stop new sends, but drain requests already
+        # in flight before handing the shared cooldown to the durable workflow timer.
+        self._transport_failure = (run_id, receipt)
+        raise error from None
+
+    def _check_transport(self, run_id):
+        failure = getattr(self, "_transport_failure", None)
+        if failure and failure[0] == run_id:
+            self._defer(run_id, failure[1])
 
     async def run(self, run_id, key, instructions, payload, output_type, **kwargs):
         # Provider schema mode can still return malformed JSON. Reuse the original
@@ -172,6 +194,7 @@ class Models:
             raise ApplicationError("尚未配置 DeepSeek 文本模型密钥。", non_retryable=True)
         attempt = 1
         request_maximum = maximum
+        last_transport = None
         while (
             await asyncio.to_thread(
                 self.outputs.get, run_id, f"{request_prefix}:request:{attempt}", dependency
@@ -179,6 +202,19 @@ class Models:
             is not None
         ):
             output_failure = False
+            deferred = await asyncio.to_thread(
+                self.outputs.get, run_id, f"{request_prefix}:request-deferred:{attempt}"
+            )
+            if deferred and not await asyncio.to_thread(
+                self.outputs.get, run_id, f"{request_prefix}:http-request:{attempt}:1"
+            ):
+                # The shared circuit opened between saving the request intent and
+                # reserving its HTTP send. Reuse that unused slot after cooldown.
+                last_transport = deferred
+                break
+            last_transport = await asyncio.to_thread(
+                self.outputs.get, run_id, f"{request_prefix}:transport-error:{attempt}"
+            )
             previous = None
             response_number = 1
             # A tool round can exhaust its output after earlier completed tool calls.
@@ -254,11 +290,23 @@ class Models:
                         return recovered
             attempt += 1
         if attempt > 3:
+            if last_transport:
+                self._defer(run_id, last_transport)
             raise ApplicationError(
                 "该模型步骤已达到三次请求上限，原始回执保留。",
                 type="model_output_invalid" if output_failure else "model_request_exhausted",
                 non_retryable=True,
             )
+        if last_transport:
+            if last_transport["retry_at"] is None:
+                raise ApplicationError(
+                    "先前请求被拒绝，需修正配置后手动重试。",
+                    type="model_request_rejected",
+                    non_retryable=True,
+                )
+            if time.time() < last_transport["retry_at"]:
+                self._defer(run_id, last_transport)
+        self._check_transport(run_id)
         await asyncio.to_thread(
             self.outputs.put,
             run_id,
@@ -268,19 +316,43 @@ class Models:
         )
         responses = []
         requests = []
+        phase, hook_error, status_code = "request", None, None
+        started = time.monotonic()
 
         async def record_request(request):
-            body = json.loads((await request.aread()).decode("utf-8"))
-            requests.append(body)
-            await asyncio.to_thread(
-                self.outputs.reserve_request,
-                run_id,
-                f"{request_prefix}:http-request:{attempt}:{len(requests)}",
-                body,
-                self.settings.model_max_calls,
-            )
+            nonlocal phase, hook_error
+            phase = "request_save"
+            try:
+                self._check_transport(run_id)
+                body = json.loads((await request.aread()).decode("utf-8"))
+                requests.append(body)
+                await asyncio.to_thread(
+                    self.outputs.reserve_request,
+                    run_id,
+                    f"{request_prefix}:http-request:{attempt}:{len(requests)}",
+                    body,
+                    self.settings.model_max_calls,
+                )
+            except Exception as error:
+                hook_error = error
+                if (
+                    not requests
+                    and isinstance(error, ApplicationError)
+                    and error.type == "model_transport_wait"
+                ):
+                    await asyncio.to_thread(
+                        self.outputs.put,
+                        run_id,
+                        f"{request_prefix}:request-deferred:{attempt}",
+                        error.details[0],
+                        dependency,
+                    )
+                raise
+            phase = "request"
 
         async def capture(response):
+            nonlocal phase, hook_error, status_code
+            phase, status_code = "response_read", response.status_code
             raw = await response.aread()
             # Only protocol bodies are persisted; authorization headers are never serialized.
             try:
@@ -288,13 +360,19 @@ class Models:
             except ValueError:
                 value = {"status_code": response.status_code, "body_sha256": fingerprint(raw.hex())}
             responses.append(value)
-            await asyncio.to_thread(
-                self.outputs.put,
-                run_id,
-                f"{request_prefix}:response:{attempt}:{len(responses)}",
-                value,
-                dependency,
-            )
+            phase = "response_save"
+            try:
+                await asyncio.to_thread(
+                    self.outputs.put,
+                    run_id,
+                    f"{request_prefix}:response:{attempt}:{len(responses)}",
+                    value,
+                    dependency,
+                )
+            except Exception as error:
+                hook_error = error
+                raise
+            phase = "model_execution"
 
         client = AsyncOpenAI(
             api_key=self.settings.deepseek_api_key.get_secret_value(),
@@ -355,13 +433,60 @@ class Models:
                 },
             )
             return value
-        except APIConnectionError as error:
-            # The SDK wraps request-hook exceptions as connection errors. Preserve
-            # our global budget stop instead of turning it into an activity retry.
-            cause = error.__cause__
-            if isinstance(cause, ApplicationError) and cause.type == "model_request_budget":
-                raise cause from None
-            raise
+        except (APIConnectionError, APIStatusError, TimeoutError) as error:
+            # SDK hooks include local S3/SQL work. A wrapped persistence/budget
+            # failure must never open the provider circuit or consume network retries.
+            if hook_error is not None:
+                raise hook_error from None
+            if isinstance(error, TimeoutError) and phase not in {"request", "response_read"}:
+                raise ApplicationError(
+                    "模型执行或本地证据保存超时，已有证据保留。",
+                    {"phase": phase},
+                    type="model_execution_timeout",
+                    non_retryable=True,
+                ) from None
+            status_code = getattr(error, "status_code", status_code)
+            retryable = (
+                not isinstance(error, APIStatusError) or status_code in {408, 409, 429} or status_code >= 500
+            )
+            causes, cause = [], error
+            while cause is not None and len(causes) < 5:
+                causes.append(type(cause).__name__)
+                cause = cause.__cause__
+            delay = 60 if attempt == 1 else 300
+            if isinstance(error, APIStatusError) and retryable:
+                header = error.response.headers.get("retry-after", "")
+                try:
+                    requested = (
+                        float(header)
+                        if header.isdecimal()
+                        else parsedate_to_datetime(header).timestamp() - time.time()
+                    )
+                    delay = max(delay, requested)
+                except (ValueError, TypeError, OverflowError):
+                    pass
+            now = time.time()
+            receipt = {
+                "step": key,
+                "attempt": attempt,
+                "phase": phase,
+                "status_code": status_code,
+                "cause_types": causes,
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+                "failed_at": now,
+                "retry_at": now + delay if retryable and attempt < 3 else None,
+            }
+            await asyncio.to_thread(
+                self.outputs.put, run_id, f"{request_prefix}:transport-error:{attempt}", receipt, dependency
+            )
+            if not retryable:
+                raise ApplicationError(
+                    "文本服务拒绝请求，请检查模型配置、密钥或请求参数。",
+                    receipt,
+                    type="model_request_rejected",
+                    non_retryable=True,
+                ) from None
+            self._defer(run_id, receipt)
         except (ModelBehaviorError, ValueError) as error:
             await asyncio.to_thread(
                 self.outputs.put,
