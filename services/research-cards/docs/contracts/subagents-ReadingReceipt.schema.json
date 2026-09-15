@@ -1,1 +1,0 @@
-{"additionalProperties":false,"properties":{"delegation_ids":{"items":{"type":"string"},"title":"Delegation Ids","type":"array"},"follow_up_points":{"items":{"type":"string"},"title":"Follow Up Points","type":"array"}},"required":["delegation_ids","follow_up_points"],"title":"ReadingReceipt","type":"object"}

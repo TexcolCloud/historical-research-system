@@ -5,7 +5,6 @@
 - [部署、启停和运行检查](services/research-platform/README.md)
 - [前端工作台](services/review-workbench/README.md)
 - [冻结的文档提取模块](services/document-extraction/README.md)
-- [GitHub 基线范围与验证](GITHUB_PREPARATION.md)
 
 根 `docs/`、历史调优档案和评测数据按项目要求仅保留在开发主机，不随 GitHub 基线分发；模块文档中指向这些目录的链接是本地追溯入口。代码、依赖锁、部署脚本、数据库迁移、API 契约和必要测试资源随仓库保存。原书、数据库、S3 数据、模型权重和真实配置需要独立准备。
 
@@ -23,3 +22,12 @@ uv sync --project services/research-platform --locked --group dev --extra retrie
 网页默认 http://127.0.0.1:18156/。人工只处理机器标出的内容问题；草稿保存不代表放行。整书未完成必需核对前，不入库或分块。史料卡保留文本与本地视觉机器核验，核验通过后自动采用。
 
 整体交付验收仍在进行。实际书籍、浏览器续传及完整恢复的状态记录在 `output/refactor-v2/`；通过单元测试或技术样本不等于整书验收完成。历史调优文档保留为追溯资料，不代表现役部署方式。
+
+已移除退役独立服务的评测脚本、构建入口、旧 API 契约及孤立测试；删除前版本可在 Git 提交 `b8bab4a` 中追溯。旧模块目录保留历史说明、验收资料和冻结评测资源。现役回归与 Ragas 工具位于 `services/research-platform`。
+
+两个旧路径仍用于管理当前共享基础设施，保留原 Compose 项目名与卷定义：
+
+- `services/document-ingestion/config/compose.acceptance.yml`：PostgreSQL、S3，及同目录初始化 SQL。
+- `services/document-retrieval/config/compose.yml`：OpenSearch 与快照卷。
+
+这些文件仅提供基础设施，不启动已退役的业务服务。迁移 Compose 管理路径前需要另行验证卷归属与备份恢复；本次清理不操作运行中的容器或业务数据。

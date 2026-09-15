@@ -19,7 +19,7 @@ npm run build
 
 `contracts` 从 Python 的现役 FastAPI 导出 OpenAPI，再通过单独锁定工具环境生成 TypeScript；先安装 V2 Python 环境，并在 `tooling/openapi` 执行 `npm ci`。本地开发 `npm run dev` 使用 18156 端口，请避免与运行中的生产 Web 同时占用该端口。
 
-`check-unused` 检查现役生产入口的未使用代码与依赖。Knip 的唯一依赖例外 `tw-animate-css` 实际由 `src/platform/theme.css` 的 CSS `@import` 加载；不是未使用依赖。旧问题锚点编辑接口与图筛选代码已存档撤除，现役核对编辑器直接编辑当前问题范围。
+`check-unused` 检查现役生产入口及契约导出脚本的未使用代码与依赖。Knip 的唯一依赖例外 `tw-animate-css` 实际由 `src/platform/theme.css` 的 CSS `@import` 加载；不是未使用依赖。旧问题锚点编辑接口与图筛选代码已存档撤除，现役核对编辑器直接编辑当前问题范围。
 
 ## 交互规则
 

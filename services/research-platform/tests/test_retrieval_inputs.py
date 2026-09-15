@@ -18,6 +18,29 @@ class CharacterTokens:
         return SimpleNamespace(ids=list(range(len(text) + len(pair or "") + (4 if pair is not None else 2))))
 
 
+def test_index_chunks_keep_exact_cross_page_sources_after_input_bounding():
+    parts = [
+        {"span_id": "a", "start": 13, "text": "合成第一页正文。" * 20, "source": {"pages": [8]}},
+        {"span_id": "b", "start": 20, "text": "合成第二页正文。" * 20, "source": {"pages": [9]}},
+    ]
+    chapter = {
+        **{key: str(uuid4()) for key in ("id", "book_id", "run_id")},
+        "title": "合成章", "text": "".join(part["text"] for part in parts), "parts": parts,
+    }
+    chunks = list(bounded_chunks(chapter, retrieval_chunks(chapter, "合成书"), CharacterTokens(), limit=80))
+    assert len(chunks) > 1
+    assert {page for row in chunks for page in row["pages"]} == {8, 9}
+    assert {i for row in chunks for i in range(row["start"], row["end"])} == set(range(len(chapter["text"])))
+    originals = {part["span_id"]: part for part in parts}
+    for row in chunks:
+        assert row["text"] == chapter["text"][row["start"]:row["end"]]
+        for source in row["sources"]:
+            part = originals[source["span_id"]]
+            assert row["text"][source["unit_start"]:source["unit_end"]] == part["text"][
+                source["start"] - part["start"]:source["end"] - part["start"]
+            ]
+
+
 def test_bounded_projection_does_not_reintroduce_image_paths_from_supplements():
     text = '正文[^a]。' * 40 + '\n\n[^a]: 图见![部署图](C:/cache/private-image.png)。'
     chapter = {**{k: str(uuid4()) for k in ('id', 'book_id', 'run_id')}, 'title': '书',
