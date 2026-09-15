@@ -1,0 +1,250 @@
+"""Synthetic tool and recovery checks; no paid text/vision requests or historical verdicts."""
+
+import asyncio
+import json
+from copy import deepcopy
+from types import SimpleNamespace
+
+import pytest
+from agents.tool_context import ToolContext
+from temporalio.exceptions import ApplicationError
+from test_card_pipeline import MemoryOutputs, chapter
+
+from hrs_platform import card_evidence as module
+from hrs_platform.card_evidence import CardEvidence
+from hrs_platform.cards import CardTopic, quote_pages
+from hrs_platform.reading import compact_readings, coverage_batches, reading_units
+
+
+@pytest.fixture
+def research(monkeypatch):
+    original = chapter("# 运输\n\n运输120吨，不包括水运①。\n\n# 注释\n\n① 仓库登记110吨，口径不同。")
+    units = reading_units(original, size=30)
+    outputs, calls = MemoryOutputs(), []
+    settings = SimpleNamespace(reasoning_model="synthetic", opensearch_index="index")
+    search = SimpleNamespace(client=SimpleNamespace(indices=SimpleNamespace(exists=lambda **_: True)))
+    hits = [{**u, "generation": "generation", "score": 1} for u in units]
+
+    def query(text, book_id, **kwargs):
+        assert book_id == original["book_id"]
+        assert kwargs["decompose"] is False
+        calls.append((text, kwargs))
+        return deepcopy(hits)
+
+    search.search = query
+    monkeypatch.setattr(module, "Search", lambda *_: search)
+    evidence = CardEvidence(settings, None, outputs, None)
+    parent = {"result": {"published": True, "retrieval_generation": "generation"}}
+    monkeypatch.setattr(module, "get_run", lambda *_: parent)
+    corpus = {
+        "book_id": original["book_id"],
+        "parent_run_id": "parent",
+        "generation": "generation",
+        "index": "index",
+        "retrieval_policy": None,
+    }
+    topic = CardTopic(name="运输", objective="比较运输与仓库记录", unit_ids=[units[0]["unit_id"]])
+    return SimpleNamespace(
+        evidence=evidence,
+        corpus=corpus,
+        topic=topic,
+        units=units,
+        hits=hits,
+        calls=calls,
+        outputs=outputs,
+        search=search,
+        parent=parent,
+    )
+
+
+async def invoke(tool, **arguments):
+    encoded = json.dumps(arguments)
+    context = ToolContext(context=None, tool_name=tool.name, tool_call_id="synthetic", tool_arguments=encoded)
+    return json.loads(await tool.on_invoke_tool(context, encoded))
+
+
+def execute(fixture, run):
+    return asyncio.run(
+        fixture.evidence.research(
+            SimpleNamespace(run=run),
+            "run",
+            "topic",
+            fixture.corpus,
+            fixture.topic,
+            [],
+            fixture.units,
+            "parent",
+        )
+    )
+
+
+async def use_tools(output_type, kwargs):
+    search, read = kwargs["tools"]
+    hits = await invoke(
+        search,
+        queries=[{"query": purpose, "purpose": purpose} for purpose in ["support", "counter", "qualify"]],
+    )
+    identities = list(dict.fromkeys(u for row in hits for hit in row["hits"] for u in hit["unit_ids"]))
+    return await invoke(read, unit_ids=identities)
+
+
+def test_real_tools_map_search_ranges_to_frozen_originals_and_reuse_receipts(research):
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        receipt = await use_tools(output_type, kwargs)
+        unit = next(u for u in receipt["units"] if "120" in u["text"])
+        assert quote_pages(unit, {"quote": "120吨"}) == [1]
+        assert any("口径不同" in u["text"] for u in receipt["units"])
+        value = output_type(
+            source_unit_ids=[unit["unit_id"]],
+            findings=[dict(category="limitation", text="统计口径不同", source_unit_ids=[unit["unit_id"]])],
+            unresolved_questions=[],
+            sufficient=True,
+        )
+        kwargs["validate"](value)
+        return value
+
+    result = execute(research, model)
+    assert len(research.calls) == 3 and len(result["searches"]) == 3
+    assert research.calls[0][1]["chapter_ids"]
+    assert research.calls[1][1]["chapter_ids"] is None
+    assert all(hit["preview_only"] for r in result["searches"] for hit in r["hits"])
+    assert execute(research, lambda *a, **k: pytest.fail("Repeated model call")) == result
+    assert len(research.calls) == 3
+
+
+@pytest.mark.parametrize(
+    "failure", ["wrong_book", "wrong_generation", "wrong_text", "changed_during_search", "deleted_index"]
+)
+def test_foreign_stale_or_missing_index_never_becomes_empty_evidence(research, failure):
+    if failure == "wrong_book":
+        research.hits[0]["book_id"] = "other"
+    elif failure == "wrong_generation":
+        research.hits[0]["generation"] = "old"
+    elif failure == "wrong_text":
+        research.hits[0]["text"] = "invented"
+    elif failure == "deleted_index":
+        research.search.client.indices.exists = lambda **_: False
+    else:
+        search = research.search.search
+
+        def change(*args, **kwargs):
+            hits = search(*args, **kwargs)
+            research.parent["result"]["retrieval_generation"] = "new"
+            return hits
+
+        research.search.search = change
+
+    async def model(*args, **kwargs):
+        await invoke(kwargs["tools"][0], queries=[{"query": "运输", "purpose": "support"}])
+        pytest.fail("Invalid corpus reached synthesis")
+
+    with pytest.raises(ApplicationError) as error:
+        execute(research, model)
+    assert error.value.type in {"card_corpus_changed", "card_index_missing"}
+    assert not research.outputs.values
+
+
+def test_mid_research_disconnect_reuses_completed_queries_and_reads(research):
+    search = research.search.search
+    broken = True
+
+    def flaky(query, *args, **kwargs):
+        if query == "counter" and broken:
+            raise OSError("synthetic disconnect")
+        return search(query, *args, **kwargs)
+
+    research.search.search = flaky
+
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        receipt = await use_tools(output_type, kwargs)
+        value = output_type(
+            source_unit_ids=[receipt["units"][0]["unit_id"]],
+            findings=[dict(category="event", text="恢复", source_unit_ids=[receipt["units"][0]["unit_id"]])],
+            unresolved_questions=[],
+            sufficient=True,
+        )
+        kwargs["validate"](value)
+        return value
+
+    with pytest.raises(OSError, match="disconnect"):
+        execute(research, model)
+    assert len(research.calls) == 1
+    broken = False
+    assert execute(research, model)["assessment"]["sufficient"]
+    assert [query for query, _ in research.calls] == ["support", "counter", "qualify"]
+
+
+def test_empty_search_uses_known_sources_and_never_claims_absence(research):
+    research.hits.clear()
+
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        search, read = kwargs["tools"]
+        results = await invoke(search, queries=[{"query": p, "purpose": p} for p in module.PURPOSES])
+        assert all(not row["hits"] for row in results)
+        assert "不证明" in instructions
+        receipt = await invoke(read, unit_ids=research.topic.unit_ids)
+        assert receipt["units"]
+        value = output_type(
+            source_unit_ids=research.topic.unit_ids,
+            findings=[
+                dict(category="limitation", text="仅当前原文", source_unit_ids=research.topic.unit_ids)
+            ],
+            unresolved_questions=["尚不能确定两组数据是否同口径"],
+            sufficient=False,
+        )
+        kwargs["validate"](value)
+        return value
+
+    result = execute(research, model)
+    assert not result["assessment"]["sufficient"]
+    assert len(research.calls) == 4  # one bounded whole-book retry for empty chapter support
+
+
+def test_preview_only_citations_and_foreign_read_ids_are_rejected(research):
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        search, read = kwargs["tools"]
+        await invoke(search, queries=[{"query": p, "purpose": p} for p in module.PURPOSES])
+        assert "error" in await invoke(read, unit_ids=["other-book-unit"])
+        value = output_type(
+            source_unit_ids=research.topic.unit_ids,
+            findings=[dict(category="event", text="preview", source_unit_ids=research.topic.unit_ids)],
+            unresolved_questions=[],
+            sufficient=True,
+        )
+        kwargs["validate"](value)
+
+    with pytest.raises(ValueError, match="actually read"):
+        execute(research, model)
+
+
+def test_budgets_survive_model_retry_without_truncating_source(research, monkeypatch):
+    original = deepcopy(research.units)
+    monkeypatch.setattr(module, "READ_TOKENS", 1)
+
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        search, read = kwargs["tools"]
+        await invoke(search, queries=[{"query": p, "purpose": p} for p in module.PURPOSES])
+        assert "budget" in (await invoke(search, queries=[{"query": "extra", "purpose": "support"}]))["error"]
+        assert "token budget" in (await invoke(read, unit_ids=research.topic.unit_ids))["error"]
+        raise ValueError("retry model output")
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match="retry"):
+            execute(research, model)
+    assert len(research.calls) == 3
+    assert research.units == original
+    assert not any(":read:" in key for key in research.outputs.values)
+
+
+def test_token_packing_and_compact_clues_keep_every_source_and_original_reading():
+    units = [{"unit_id": str(i), "text": "正文"} for i in range(19)]
+    batches = list(coverage_batches(units))
+    assert [u for batch in batches for u in batch] == units
+    assert [len(b) for b in batches] == [8, 8, 3]
+    record = {
+        "readings": [{"unit_id": "1", "candidate_quotes": ["原文"], "negations_and_limits": ["不含水运"]}]
+    }
+    clues = compact_readings([record])
+    assert clues[0]["readings"][0]["negations_and_limits"] == ["不含水运"]
+    assert "candidate_quotes" not in clues[0]["readings"][0]
+    assert record["readings"][0]["candidate_quotes"] == ["原文"]

@@ -396,6 +396,7 @@ class Search:
         min_top_score=None,
         use_calibration=True,
         decompose=True,
+        chapter_ids=None,
     ):
         metrics = metrics if metrics is not None else {}
         try:
@@ -405,9 +406,9 @@ class Search:
                     return self.search_parts(parts, book_id, limit, context_chars, total_chars, metrics, trace,
                         candidate_limit=candidate_limit, rerank_limit=rerank_limit, fusion=fusion,
                         lane_quota=lane_quota, min_rerank_score=min_rerank_score,
-                        min_top_score=min_top_score, use_calibration=use_calibration)
+                        min_top_score=min_top_score, use_calibration=use_calibration, chapter_ids=chapter_ids)
                 return self._search(
-                    query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion, lane_quota, min_rerank_score, trace, min_top_score, use_calibration
+                    query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion, lane_quota, min_rerank_score, trace, min_top_score, use_calibration, chapter_ids
                 )
         finally:
             logger.info("retrieval.search %s", json.dumps(metrics))
@@ -433,11 +434,13 @@ class Search:
             calibration_applied=any(t.get('calibration_applied') for t in timings))
         return result
 
-    def _search(self, query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion, lane_quota, min_rerank_score, trace, min_top_score, use_calibration):
+    def _search(self, query, book_id, semantic, limit, candidate_limit, context_chars, total_chars, metrics, rerank_limit, diverse, fusion, lane_quota, min_rerank_score, trace, min_top_score, use_calibration, chapter_ids=None):
         name = self.settings.opensearch_index
         if not self.client.indices.exists(index=name):
             return []
         scope = self.active_scope(book_id)
+        if chapter_ids is not None:
+            scope.append({"terms": {"chapter_id": list(chapter_ids)}})
         policy = getattr(self, '_policy', {}) if semantic and use_calibration else {}
         candidate_limit = candidate_limit if candidate_limit is not None else policy.get('candidate_limit', 50)
         rerank_limit = rerank_limit if rerank_limit is not None else policy.get('rerank_limit', 30)

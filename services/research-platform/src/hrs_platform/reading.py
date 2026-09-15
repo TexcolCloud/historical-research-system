@@ -71,6 +71,29 @@ def reading_units(chapter, size=5000):
     return units
 
 
+def neighbor_context(all_units, selected):
+    """Preserve adjoining text and book-opening provenance across agent assignments."""
+    selected_ids = {unit["unit_id"] for unit in selected}
+    indexes = {i for i, row in enumerate(all_units) if row["unit_id"] in selected_ids}
+    wanted = {0}
+    for index in indexes:
+        wanted.update((index - 1, index + 1))
+    neighbors = [
+        row for index, row in enumerate(all_units) if index in wanted and row["unit_id"] not in selected_ids
+    ]
+    # Linked notes/owners can be far from the selected unit or across reading assignments.
+    supplements = [
+        dict(extra, unit_id=extra["id"])
+        for unit in [*selected, *neighbors]
+        for extra in unit.get("context", [])
+    ]
+    return list(
+        {
+            row["unit_id"]: row for row in [*supplements, *neighbors] if row["unit_id"] not in selected_ids
+        }.values()
+    )
+
+
 def scoped_check(identities):
     """Constrain the provider contract to the same source scope we validate."""
     if not identities:
@@ -285,6 +308,23 @@ async def read_batch(
         if failed_output:
             return await source_fallback(accepted, problems, "review_output_failed")
     return await source_fallback(accepted, problems, "content_repairs_exhausted")
+
+
+def compact_readings(readings):
+    """Keep source-linked clues, without copying quotations already in frozen sources."""
+    return [
+        {
+            **record,
+            "readings": [
+                {
+                    **{key: value for key, value in row.items() if key != "candidate_quotes"},
+                    "has_candidate_quotes": bool(row.get("candidate_quotes")),
+                }
+                for row in record.get("readings", [])
+            ],
+        }
+        for record in readings
+    ]
 
 
 async def synthesis_readings(models, run_id, key, readings, units, parent):

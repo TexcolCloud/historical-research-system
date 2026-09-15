@@ -53,6 +53,9 @@ SYNTHESIZE = (
     + PERSPECTIVES
     + """依据完整阅读记录、所列原始来源单元、实际已得补查与固定书目，形成一篇通用史料卡。
 reading_records 中 source_only_unit_ids 表示撤下未通过的模型解读后仅保留原文；不是已核验的解释。
+reading_records 和 evidence_research 是研究线索，不是原文证据。仅从实际提供的 source_units/context_units 摘录引文。
+evidence_research 中列出的反证、限定与 unresolved_questions 必须逐项处理：有原文支持则引用并解释，未解决则如实保留，不能静默删除。
+检索无命中不证明不存在，同书不同章节也不必然是独立互证；章节全文核验仍会检查未引用的重要事实。
 这类单元仍按完整 source_units 研究并接受后续核验，不把程序回退、模型报错或空的解读字段写成史料缺失或历史局限。
 覆盖客户模板：研究对象概览、形成背景、文本结构、核心主题、关键原文、史料性质及来源层次、
 研究价值和证据边界、具体论证、局限与待查。用 kind=section 的完整条目承载各栏目，section 使用
