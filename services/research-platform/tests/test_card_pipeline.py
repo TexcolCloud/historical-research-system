@@ -12,7 +12,7 @@ from temporalio.exceptions import ApplicationError
 
 from hrs_platform import cards as module
 from hrs_platform.cards import CardPlan, Cards, ResearchPlan, neighbor_context, validate_topics
-from hrs_platform.domain.generation_contracts import CardDraft, ReadingRecord
+from hrs_platform.domain.generation_contracts import CardDraft, CardRepair, ReadingRecord
 from hrs_platform.outputs import StageInputMismatch, fingerprint
 from hrs_platform.reading import (
     card_model,
@@ -345,13 +345,12 @@ def test_local_repair_reuses_only_unchanged_checks_and_preserves_verified_record
             else:
                 assert [u["unit_id"] for u in payload["source_units"]] == ["a", "b"]
                 assert payload["context_units"] == []
-                row = payload["reading_record"]["readings"][0]
-                value = output_type.model_validate(
-                    verdict(
-                        payload["required_object_ids"],
-                        failed=row["unit_id"] == "b" and row["attribution"] != "译注",
-                    )
-                )
+                rows = payload["reading_record"]["readings"]
+                failed = any(row["unit_id"] == "b" and row["attribution"] != "译注" for row in rows)
+                check = verdict(payload["required_object_ids"], failed=failed)
+                if failed:
+                    check["findings"][0]["object_id"] = "b"
+                value = output_type.model_validate(check)
             cache[key] = value.model_dump(mode="json")
         kwargs["validate"](value)
         return value
@@ -361,10 +360,8 @@ def test_local_repair_reuses_only_unchanged_checks_and_preserves_verified_record
     )
     assert result["readings"][1]["attribution"] == "译注"
     assert result["readings"][0] == record(batch[0])
-    assert len([p for k, p in calls if ":check:" in k and p["required_object_ids"] == ["a"]]) == (
-        2 if change_summary else 1
-    )
-    assert len([k for k, _ in calls if ":check:" in k]) == (4 if change_summary else 3)
+    targets = [p["required_object_ids"] for k, p in calls if ":check:" in k]
+    assert targets == [["a", "b"], ["a", "b"] if change_summary else ["b"]]
 
 
 def test_candidate_windows_declare_whole_scope_but_only_review_window_targets():
@@ -482,8 +479,9 @@ def test_global_failures_and_cancellation_do_not_become_source_fallback(error):
 
 @pytest.mark.parametrize("planning_failure", [None, "digest", "topic"])
 @pytest.mark.parametrize("fallback", [False, True])
+@pytest.mark.parametrize("repair", [False, True])
 def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resumes_without_api(
-    monkeypatch, fallback, planning_failure
+    monkeypatch, fallback, planning_failure, repair
 ):
     originals = [
         chapter(
@@ -590,6 +588,10 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
                     questions=[],
                     boundary_observations=[],
                 )
+            elif output_type is CardRepair:
+                previous = payload["previous_candidate"]
+                value = output_type(items=[{**previous["items"][0], "attribution": "已修正归属"}],
+                                    remove_item_ids=[], metadata=None)
             elif output_type is CardDraft:
                 value = output_type(
                     title=payload["objective"],
@@ -619,7 +621,9 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
                 ]
                 value = output_type.model_validate(
                     verdict(
-                        ids, failed=fallback and "reading_record" in payload and ids == [units[0]["unit_id"]]
+                        ids, failed=(fallback and "reading_record" in payload and units[0]["unit_id"] in ids)
+                        or (repair and "candidate" in payload
+                            and payload["candidate"]["items"][0]["attribution"] != "已修正归属")
                     )
                 )
             cache[key] = (value.model_dump(mode="json"), dependency)
@@ -651,6 +655,9 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
         assert receipt["fallback_stage"] == planning_failure
         assert receipt["machine_approval"] is False
     assert all(row["text_check"]["source_checks"] for row in saved)
+    if repair:
+        assert all(row["candidate"]["items"][0]["attribution"] == "已修正归属" for row in saved)
+        assert any(p.get("previous_candidate") for _, p in calls)
     if fallback:
         assert any("fallback" in key for key, _ in cards.outputs.events)
         assert any(record.get("source_only_unit_ids") for record in first_source["readings"])

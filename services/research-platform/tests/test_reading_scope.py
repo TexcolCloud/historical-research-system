@@ -1,10 +1,73 @@
+import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from agents import AgentOutputSchema
 from pydantic import ValidationError
+from test_card_pipeline import MemoryOutputs, record, verdict
 
-from hrs_platform.reading import coverage, scoped_check
+from hrs_platform.domain.generation_contracts import ReadingRecord
+from hrs_platform.reading import coverage, read_batch, scoped_check, source_payload
+
+
+def test_reading_batch_checks_sources_once_and_repairs_only_missing_verdicts():
+    batch = [{"unit_id": str(i), "text": f"来源{i}，数量不得混同。"} for i in range(5)]
+    checks = []
+
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        if output_type is ReadingRecord:
+            value = output_type(readings=[record(u) for u in batch], themes=[], structure=[],
+                                questions=[], boundary_observations=[])
+        else:
+            checks.append(payload["required_object_ids"])
+            ids = payload["required_object_ids"]
+            value = output_type.model_validate(verdict(ids[:-1] if len(ids) > 1 else ids))
+        kwargs["validate"](value)
+        return value
+
+    result = asyncio.run(read_batch(SimpleNamespace(run=model, outputs=MemoryOutputs()),
+                                   "run", "batch", batch, "scope", None))
+    assert checks == [[str(i) for i in range(5)], ["4"]]
+    assert result["readings"] == [record(u) for u in batch]
+
+
+def test_source_packet_deduplicates_text_but_keeps_note_owner_links():
+    from copy import deepcopy
+    note = {"id": "note", "text": "译者指出：仅指本地区。" * 200,
+            "role": "note_owner", "sources": [{"pages": [4]}]}
+    units = [{"unit_id": str(i), "text": f"正文{i}①", "context": [note]} for i in range(5)]
+    payload = {"source_units": units, "context_units": [{**note, "unit_id": "note"}, units[0]]}
+    original = deepcopy(payload)
+    result = source_payload(payload)
+    assert payload == original
+    assert [u["unit_id"] for u in result["source_units"]] == [str(i) for i in range(5)]
+    assert result["context_units"] == [{**note, "unit_id": "note"}]
+    assert all(u["context"] == [{"unit_id": "note", "role": "note_owner"}] for u in result["source_units"])
+    assert len(json.dumps(result)) < len(json.dumps(payload)) * 0.3
+    assert source_payload(result) == result
+    payload["context_units"][0] = {**note, "unit_id": "note", "text": "伪造"}
+    with pytest.raises(ValueError, match="different evidence"):
+        source_payload(payload)
+
+
+def test_unlocated_batch_failure_never_approves_individual_readings():
+    batch = [{"unit_id": "a", "text": "合成原文"}, {"unit_id": "b", "text": "限定范围"}]
+
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        if output_type is ReadingRecord:
+            value = output_type(readings=[record(u) for u in batch], themes=[], structure=[],
+                                questions=[], boundary_observations=[])
+        else:
+            value = output_type.model_validate({**verdict(payload["required_object_ids"]),
+                                                "conclusion": "insufficient_evidence"})
+        kwargs["validate"](value)
+        return value
+
+    result = asyncio.run(read_batch(SimpleNamespace(run=model, outputs=MemoryOutputs()),
+                                   "run", "batch", batch, "scope", None))
+    assert result["source_only_unit_ids"] == ["a", "b"]
+    assert all(not row["main_records"] for row in result["readings"])
 
 
 def test_context_ids_are_excluded_from_both_model_schema_and_validated_receipts():
