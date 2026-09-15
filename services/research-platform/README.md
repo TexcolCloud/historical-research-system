@@ -1,247 +1,167 @@
-# Research Platform V2
+# Research Platform
 
-统一业务后端已覆盖上传、转换、逐项核对、章节组织、连续阅读、检索、动态研究制卡与机器采用。**整体交付验收仍在进行**：真实书籍已完成审核、入库及嵌入，整书制卡与最终采用仍待实测通过。技术样本不能代替实际书籍验收。
+统一业务后端：上传、转换、内容核对、章节入库、混合检索和研究制卡。部署面向 Windows NVIDIA GPU 主机与 Docker Desktop；真实整书内容验收、完整灾难恢复及公网多用户边界仍需单独验证。
 
-## 文本模型断连恢复
+[首次安装](../../README.md#快速开始) · [模型准备](../../models/README.md) · [前端](../review-workbench/README.md) · [OpenAPI](openapi.json)
 
-连接中断、请求/响应读取超时及 HTTP 408/409/429/5xx 会保留回执并进入等待恢复。
-同一固定输入仍共用最多三次生成尝试（包括内容修复）；SDK 不自行重试，工具轮次仍受原有限制，
-每次实际 HTTP 发送沿用全任务调用预算，不自动增加预算。默认两次等待分别为 60、300 秒；
-服务返回更长的 `Retry-After` 时遵守该时间。等待由 Temporal 定时器持久保存，不占用活动进程，
-关闭页面或重启 worker 后可继续，删除/取消任务可中止等待。
+## 运行与配置
 
-一个分工断连后，同一活动暂停新请求，允许其他在途请求完成并保存检查点。
-重启活动只补未完成步骤，不把部分阅读当成全书完成。三次尝试仍失败，或一个阶段累计等待
-超过 1 小时 / 12 次，会保留进度并转为可手动重试的失败状态；不会无限循环发送。
-没有收到响应不能证明服务端未处理该请求，重发仍可能产生费用。
+首次安装、模型下载和初始化统一使用根 README。本页命令均在项目根目录运行，使用已经安装的环境：
 
-执行页显示等待与预计重试时间。诊断回执只记录步骤、尝试次数、请求/响应阶段、HTTP 状态、
-耗时和底层异常类型，不记录密钥、代理地址或原始异常消息。认证/参数拒绝不作网络重试，
-本地 S3/SQL 保存失败及调用预算耗尽保持原有失败语义，取消不转成内容回退。
+```powershell
+$platformPython = '.cache/engineering-envs/research-platform/Scripts/python.exe'
+& $platformPython scripts/hrs_v2.py status
+& $platformPython scripts/hrs_v2.py doctor
+```
 
-## 运行结构
+[启动器](../../scripts/hrs_v2.py) 的 `init` 创建专用数据库、配置 Temporal 并应用迁移；`up --build` 构建应用并保持主机 GPU 进程受管；`stop` 等待主机进程退出后停止应用容器。共享 PostgreSQL、S3 和 OpenSearch 由独立 Compose 管理，不随应用停止。修改配置后需重新启动相应进程。
 
-- FastAPI / Pydantic / SQLAlchemy / Alembic：统一接口、事务与迁移。
-- Uppy / Golden Retriever / tusd：可恢复上传与许可，文件直接进入现有 SeaweedFS S3。
-- Temporal：书籍主流程、制卡子流程、活动重试和人工持久等待。数据库 outbox 只发送已提交事件，不重复调度业务阶段。
-- CPU worker：章节组织、DeepSeek 文本研究、CPU BGE 向量检索与重排。GPU worker：冻结的 Docling + PaddleOCR-VL-1.6 和本地 Qwen3-VL-8B；共享 GPU broker 及系统互斥。
-- PostgreSQL 保存业务记录与产物引用；S3 保存原件、OCR、原图、章节、模型回执、草稿及导出；OpenSearch 是可重建索引。
-- React Router / TanStack Query / openapi-fetch：书籍、待办、史料卡和书籍内工作区；Tiptap、React Flow/Dagre 按需加载。
+### 准备共享存储
 
-领域规则已移入 hrs_platform/domain，新后端不再依赖旧 ingestion/retrieval/cards 整包。来源与摘要见 output/refactor-v2/domain-retention.json。原 OCR CLI 不变；新增 document_extraction.stages 仅拆开现有转换和核验步骤，未调整识别规则或模型。
+已有满足配置的存储服务时跳过。新主机可使用仓库保留的基础设施 Compose；先填写根配置模板中的 `INGEST_DEV_DB_PASSWORD`、S3 bucket 和凭据，再执行：
 
-## 内容与恢复规则
+```powershell
+docker compose --env-file .env -f services/document-ingestion/config/compose.acceptance.yml up -d --wait
+docker compose -f services/document-retrieval/config/compose.yml up -d --wait
+```
 
-1. 上传完成后验证 PDF 格式、大小和摘要，幂等创建运行。
-2. 新 GPU 活动完成 OCR 后先提交 S3 的 ocr-evidence，再执行全量视觉核验。计算缓存丢失时恢复已提交 OCR，不重复识别。
-3. 本地模型修正经过独立原图复核且无未解决问题后自动写回，保留原文、修改和机器凭据；审核范围按修改前后的实际差异定位，无变化的上下文不扩大为待办。跨段重组或归属不明的边界插入仍保留整体核对。未完成核验、疑难及无法定位的范围进入问题清单。保存草稿不会放行，机器也不覆盖人工决定或草稿。全部必审范围处理完才允许入库和分块。
-4. 单问题确认只提交局部版本、决定、计数和 outbox，响应返回下一问题；不等待整书重算或固定轮询。
-5. 自动组织章节，保留全书字符覆盖及逻辑章节/物理页映射，不增加文章结构人工批准。
-6. 制卡先冻结已审核章节的全文阅读快照，重试复用同一来源。Agent 按章节动态分工，最多两个独立分工并发，各自的阅读批次按顺序接续；逐单元核验后再按全书阅读记录规划卡片主题。主题可跨分工合并、同一分工可拆多卡，每个原文单元恰好归属一个主题，上下文可共享。候选仍对主题完整来源复核，不用 Top-K 检索替代通读。
-7. 原文/原表、译者/编者更正和研究者推断分别保留归属、引文与限制，不能静默以译注替换原表。本地 Qwen 原件核验后，将页区观察交给最终文本复核；修订分析时固定已核验引文、来源锚点、正文和释读。分析发生改变后，重新检查完整来源中的未引用限制。初次文本、原图、最终文本及必要的来源复核均通过才采用；失败保持候选状态，不新增常规人工制卡确认。
+前者提供 PostgreSQL 和 SeaweedFS S3，后者提供 OpenSearch。数据库用户、端口、bucket 与根配置必须一致；确认 S3 bucket 可访问后再运行平台 `init`。这些路径保留原项目名和卷归属，不代表旧业务服务仍在使用。已有部署不要随意改项目名或删除卷。
 
-模型原始请求/响应及中间结果持久保存。同一固定输入在一个恢复轮次内最多三次发送，整个运行受调用预算约束；恢复先核对输入再复用已完成回执。上游修订改变输入时使用输入摘要隔离保存，旧回执不覆盖、不误用；输入未变时保留原来的请求上限。显式重试增加恢复轮次，不能把失败或不确定状态当作机器通过。请求保存、初始化、预算耗尽与取消均由统一执行节点作用域收尾；任务终止失败还会关闭遗留运行节点。
+### 配置优先级
 
-制卡规划、综合和文本核验默认使用 DeepSeek V4.1 Flash（API 名称 `deepseek-flash`）；逐段阅读使用同一模型。显式选择推理模型的调用首轮使用 high/32000，默认阅读调用首轮使用 low/16000，职责不由两个模型名称是否相等判断。只有实际回执为 `incomplete/max_output_tokens`，下一次请求才将该次额度翻倍，默认最多 64000；推理 token 同样占用输出预算。不解析或采用截断 JSON，不根据字符串猜测截断，也不反复按同一已耗尽额度重试。包含工具调用的步骤检查最后一条回执。每个步骤仍最多三次请求尝试，到达封顶或耗尽尝试即终止，防止工作流再次隐式重试。
+| 配置入口                                          | 当前行为                                                                                                                                                                     |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 根 `.env` 与进程环境变量                          | 主机 [Settings.load](src/hrs_platform/settings.py) 先读文件，再以同名进程变量覆盖；优先读取 `PLATFORM_*` 字段，缺失时兼容部分 `INGEST_*`、`CARDS_*` 和 `DEEPSEEK_*` 字段     |
+| [应用 Compose](../../deploy/platform/compose.yml) | 显式将根配置映射到容器；例如 `CARDS_REASONING_MODEL` 映射成容器的 `PLATFORM_REASONING_MODEL`。不能假定任意主机变量都自动进入容器                                             |
+| 文本模型                                          | Settings 与 Compose 未配置时均使用 `deepseek-flash`；但当前 [配置模板](../../.env.platform.example) 显式设置 `CARDS_REASONING_MODEL=deepseek-v4-pro`，复制模板后会覆盖默认值 |
+| 自动制卡                                          | `PLATFORM_AUTO_CARDS_ENABLED=false` 使书籍在索引后结束；不取消已创建任务，也不禁用独立手动制卡                                                                               |
+| GPU 检索                                          | `PLATFORM_RETRIEVAL_DEVICE=cuda` 为默认，经主机 broker 执行；CPU 必须显式选择 `cpu`，不会静默回退                                                                            |
+| 输出与调用预算                                    | 阅读首轮 16000、推理首轮 32000、输出封顶 64000 tokens；文本与视觉调用预算默认分别为 4096，实际以配置和回执为准                                                               |
 
-可用 `PLATFORM_READING_MAX_OUTPUT`、`PLATFORM_REASONING_MAX_OUTPUT` 和 `PLATFORM_MODEL_MAX_OUTPUT_CEILING` 配置首轮及封顶额度，Compose 与本地 Settings 使用相同配置。首轮不得高于封顶；本项目允许配置至 384000 token（官方标注最大输出 384K），默认不直接放到 API 最大值，以控制单步等待与费用；现有请求超时和任务请求总数限制仍生效。重试额度从持久回执恢复，实际发送额度保存在 HTTP 请求证据中，原始输入摘要仍记录首轮预算。该接口无服务端会话存储，本实现不进行流式临界 handoff 或拼接半截输出，始终要求完整结构化结果。参见 [官方模型说明](https://api-docs.deepseek.com/quick_start/pricing/) 与 [Responses API](https://api-docs.deepseek.com/api/create-response/)。
+要统一使用 Flash，在根 `.env` 设置两项 `CARDS_REASONING_MODEL=deepseek-flash`、`CARDS_READING_MODEL=deepseek-flash`；同时核对是否有更高优先级的 `PLATFORM_REASONING_MODEL` 或 `PLATFORM_READING_MODEL`。此说明不代表对用户现有配置作了修改。
 
-引用校验错误持久记录单元 ID、引文序号及错误文本，下一次请求要求从对应原文重新摘录，保留换行、标点与字形，不用删除关键引文来规避错误；输出格式与引用校验反馈均在恢复执行后可用。阅读提示词要求精简重复分析和引文，保留有研究价值的事实、限定与来源。精确引用校验和后续语义/原件审核仍须通过，增强提示词不代表真实模型必然成功。原件核验继续使用本地 Qwen3-VL-8B，不自动回退到 Pro，也不依赖旧公告推断 Pro 的路由或计费。
+## 处理流程与数据职责
 
-逐单元核验保留完整批次 source_units，用 required_object_ids 限定本轮目标；共享概括的批次成员不因拆分核验而变成旁读上下文。局部修复由程序恢复已核验的固定单元记录，再重新核验发生变化的输入；模型无需靠逐字段重写来维持已通过内容。整卡来源窗口同时声明完整候选的来源单元范围，不能把窗口外的候选内容误判为全卡无来源。前端按同一任务比较事件版本，终态事件刷新执行图而不覆盖入库状态。
+| 阶段     | 完成条件与恢复方式                                                                               |
+| -------- | ------------------------------------------------------------------------------------------------ |
+| 上传     | tusd 将文件写入 S3；平台校验 PDF、大小和摘要后幂等创建运行                                       |
+| OCR      | Docling + 单路 PaddleOCR-VL；完成后先保存 S3 OCR 证据，后续恢复可复用，不因视觉失败重做 OCR      |
+| 内容核对 | 本地 Qwen 全量对照原图；唯一定位的修正经独立原图复核通过后写回。不确定、不可读或未完成部分交人工 |
+| 人工处理 | 保存草稿不放行；局部确认提交版本、决定与计数，响应提供下一问题；保留人工决定和编辑内容           |
+| 章节入库 | 整书无未解决或未核验内容后组织章节；文章结构不增加人工批准步骤。保留全文覆盖和物理页映射         |
+| 检索索引 | 从已发布章节构造检索投影；完整一代索引写入后切换生效版本，中途失败保留此前有效代                 |
+| 研究制卡 | 冻结完整来源并通读、规划、综合；文本、本地原图和必要的最终来源核验通过后自动采用                 |
 
-阅读修订必须原样保留已核验单元记录；单元核验按完整输入摘要复用，原文、旁读上下文或共享概括改变就失效。整卡语义核验和完整来源核验也按输入摘要区分回执，不能凭条目 ID 沿用旧批准。提要使用已有 DeepSeek tokenizer 的 6000-token 估算阈值；制卡输入（提示、载荷、输出 schema）保守估算上限 48000 tokens，超出时在发送前停止并保留证据，不截断原子表格或伪报完成。超大主题会按原文单元边界局部再规划；拆分达到上限或原子结构仍超限时保留待处理。
+SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页图、章节、草稿、模型回执和导出；OpenSearch 保存可重建索引。本地仅保留权重、诊断日志和可恢复计算缓存。
 
-全书提要和主题规划的内容输出修复耗尽、输入超限，或提要经过 4 轮仍不能收敛时，按固定来源的章节顺序建立基础主题，不再要求先完成一份全书提要。完整分组阅读记录与成功的模型提要回执保留。初始基础主题最多 64 个；目录更长时只将相邻章节组合为研究范围，不推定同一事件，为既有局部拆分预留容量。每个来源单元恰好分配一次，正文、表格与脚注不截断。规划回执单独持久保存，重试先核对固定输入再复用；执行图展示回退阶段与原因，并明确不代表内容核验通过。逐主题综合、完整来源复核、本地原图与最终文本核验继续执行；本次回退不增加全书主题合并的模型调用。全局预算、网络、鉴权、存储故障及取消仍按原有任务恢复机制处理。
+原文、译者／编者修正与研究推断须区分归属。机器通过不等于用户人工审核，也不证明历史论断真实；缺失原图或不可读内容不能强制转为通过。
 
-逐段阅读增加局部回退：三轮内容修订后仍未通过（包括 minor 但结论为 needs_revision），或该阅读/核验步骤耗尽输出修复机会，不再取消其他阅读分工。保留本轮已核验的单元记录；撤下未通过单元的模型解读以及共享概括，改为从固定已审核正文逐字提取完整单元原文，无额外模型调用，不截断表格、脚注或来源。回退记录使用 source_only_unit_ids 标识，仅提供原文，不声称语义审核通过；提要、主题分配及综合仍覆盖这些来源，最终卡片仍须独立语义、完整来源及本地原图核验。该回退针对派生阅读记录，不回退或修改已审核的 OCR 正文，不将错误解读作为轻微问题直接放行。
+## 检索与来源
 
-每个批次按原文、上下文、前批结果、任务目标及阅读/核验规则保存完成检查点（含原文回退）。相同输入恢复时直接复用，输入变化使用不同键，旧结果和模型回执保留。执行图通过已有组件节点展示“原文回退（未采用模型解读）”，详情保存受影响单元、原因、核验结论及来源摘要。原有失败尝试仍保留为历史证据，不伪改为成功。总请求预算耗尽使用独立 model_request_budget 终态，鉴权、存储、网络和取消不会被解释为内容回退；这些全局故障仍停止执行并使用已有显式重试入口。规划、提要或最终制卡阶段的失败也不伪造候选卡继续通过。
+当前分块规则为 `structure-1400-160-v6-evidence-scopes`，见 [retrieval_chunks.py](src/hrs_platform/retrieval_chunks.py)。已发布章节是正文与字符坐标的权威来源，索引不改写它。
 
-首次真实制卡已暴露批次范围、异常收尾、重复截断与局部语义修订耗尽问题；回退修复使用保存回执和合成离线测试，没有追加模型调用，不能据此声明实际卡片质量已验收。原文回退可能增加后续阅读负担，但无未核验解读被自动采用，既有预算与输入长度限制继续生效。
+- 正文以 1400 字符为目标、最多 160 字符重叠；连续标题携带首段。
+- 表格按完整行组处理，保留表头、合并单元格及表前范围说明；脚注保留正文归属，不猜测歧义链接。
+- 书名、章节路径、表头和脚注加入检索投影；图片路径及通用占位符不进入嵌入文本。
+- BGE 输入按实际 tokenizer 限制至 6144 tokens；超长结构在投影层划窗，保留原文坐标。重排按问题与文段总 token 数划窗。
+- 默认每路召回 50、重排 30、返回 8 条；单条上下文预算 6000 字符、整次 24000 字符，实际参数见 [API 路由](src/hrs_platform/api.py)。
+- 相交证据合并，必要标题、脚注与限定信息随结果返回；共享统计量不能因分行而被误归属。
 
-正文—脚注采用同一组原文字符范围，供阅读器双向跳转和检索上下文使用。支持明确的 Markdown 脚注及同一原件页内唯一配对的圈号；重号按物理页隔离，缺失或歧义注号保留原文，不按最近段落猜归属。注释与译者署名保留原位置，渲染链接不改正文、字符偏移或页面路由。Docling 图片通过既有 S3 原件接口读取，不使用 Windows 本地图片路径。
+索引检查点按文本、模型与规则指纹复用，只有变化或缺失输入重算。运行结果的 `retrieval_metrics` 记录计算／复用量；搜索的 `Server-Timing` 区分召回、嵌入、重排和上下文组装耗时。
 
-旧待办可在配置好的计算环境运行 `python scripts/repair_pending_reviews.py RUN_ID` 修复定位及合并重复页级待办；加 `--recheck` 用现有 OCR 底稿重新进行本地视觉核验，`--pages 54 75` 可限制核验页码。每次写回使用现有版本检查和局部决定事务，保留人审记录、草稿和原始范围；不重新 OCR，也不处理已发布书籍。
+### 重建索引
 
-新业务只使用 historical_research_v2、Temporal 专用数据库及 S3 hrs/v2/，不迁移或读取旧业务文件。模型权重、诊断日志、.cache/platform-compute 计算缓存可留在主机，均不作为业务文件的权威存储。
+环境必须能访问对应 SQL、S3、OpenSearch 和检索模型。在根目录把下面 UUID 替换为实际已发布运行：
 
-## 部署
+```powershell
+& $platformPython -m hrs_platform.cli reindex --run-id '<书籍运行UUID>'
+```
 
-当前验证配置：Windows GPU 主机 + Docker Desktop。API、CPU worker、Web、Temporal、tusd 使用 deploy/platform/compose.yml；GPU worker/broker 使用受控 Windows 进程。未声称支持未经验证的 GPU 容器。
+重建不重复 OCR、不绕过审核。少量已发布文本勘误另有 `amend-library`：仅支持唯一定位、等长、单页且同一来源片段内的改动，经本地原图核验后提交；不覆盖明确人工修改。输入列表包含 `chapter_id`、`expected_content_sha256`、`changes[{start,before,after}]`。修改后必须重建索引，期间旧检索代停用。非等长或跨页修订需要新的来源版本，不能推算偏移。
 
-先启动已有 PostgreSQL 55436、SeaweedFS S3 58333 和 OpenSearch 19260。根 .env 使用现有 INGEST_DATABASE_URL、INGEST_DEV_DB_PASSWORD、INGEST_S3_* 基础设施配置以及 DEEPSEEK_API_KEY；这里只复用存储凭据，不读取旧业务命名空间。
+### 评测
 
-~~~powershell
-$env:UV_PROJECT_ENVIRONMENT="$PWD/.cache/engineering-envs/research-platform"
-uv sync --project services/research-platform --locked --group dev --extra retrieval
-.cache/engineering-envs/research-platform/Scripts/python.exe scripts/hrs_v2.py init
-.cache/engineering-envs/research-platform/Scripts/python.exe scripts/hrs_v2.py up --build
-~~~
+- `evaluate --run-id UUID --cases dataset.json [--semantic]`：评测已发布书籍，题目格式由 [retrieval_evaluation.py](src/hrs_platform/retrieval_evaluation.py) 定义。
+- `evaluate-offline --cases dataset.json`：创建独立 `hrs-offline-*` 临时索引比较候选策略，见 [离线评测实现](src/hrs_platform/retrieval_offline.py)。
+- [Ragas 操作说明](evaluation/tools/ragas/README.md)：冻结真实检索上下文，再运行离线回答与模型评分。
 
-init 幂等创建业务、测试、Temporal、visibility 四个专用数据库并应用官方迁移，不重置已有数据。up 先迁移再启动 Compose 应用与本机 GPU 进程；端口被其他进程占用时拒绝切换。
+评测数据与报告留在本地或 S3。单书、合成输入及同书新页段的结果不能推断跨书泛化；开发机器评审不能冒充人工金标。
 
-默认网页 http://127.0.0.1:18156/，API 18170；/platform.html 与 / 使用同一新入口。PLATFORM_API_PORT、PLATFORM_WEB_PORT 可用于隔离验收。本配置只发布回环端口，尚未执行用户授权的全项目多用户权限/边界验收。
+## 制卡、回退与重试
 
-~~~powershell
-.cache/engineering-envs/research-platform/Scripts/python.exe scripts/hrs_v2.py status
-.cache/engineering-envs/research-platform/Scripts/python.exe scripts/hrs_v2.py doctor
-~~~
+制卡使用完整来源，不能用 Top-K 召回代替通读。阅读单元以 5000 字符为目标、无重叠并验证全字符覆盖。主 Agent 动态分工，最多两个阅读分工并行，各分工内部顺序推进；主题可跨章节合并或拆分，不预设一本书的卡片数量。
 
-doctor 分别检查数据库、S3、OpenSearch、worker 和 broker；GPU 满载时检查 Temporal 心跳，不因暂停取任务而误报离线。它不会加载模型或修改内容。API 的 /health/ready 不等于内容验收通过。
+| 情况                       | 当前处理                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------- |
+| 引用或结构校验失败         | 保留错误与来源，反馈后有界重试；不删除关键引文来规避校验                                        |
+| 输出被截断                 | 只有真实 `incomplete/max_output_tokens` 回执才提高下一次额度，至配置封顶；不拼接或采用半截 JSON |
+| 局部阅读修订耗尽           | 保留已核验单元，未通过单元退回完整来源原文；撤下失败解读，明确标记原文回退，最终卡片仍需核验    |
+| 提要／主题规划不收敛       | 按章节来源建立基础主题，并保留完整单元覆盖；不声称规划回退等于内容通过                          |
+| 输入过大                   | 按来源单元局部再规划；不可拆原子结构仍超限则保留失败状态，不截断原表                            |
+| 连接中断、408/409/429/5xx  | 暂停新请求、保存已完成检查点，由 Temporal 定时等待后恢复                                        |
+| 鉴权、参数、存储或预算错误 | 保留失败证据，修正原因后使用显式重试，不作为内容问题吞掉                                        |
+| 取消或删除                 | 中止对应执行与等待，不转换成内容回退                                                            |
 
-在 up 终端 Ctrl+C，或从另一终端执行 `scripts/hrs_v2.py stop`，先退出 GPU worker/broker，再停止 V2 Compose 服务，不使用 down -v。启动器跟踪自己的解释器与模型子进程；API/Web 端口尚在释放时最多等待 30 秒，仍占用则拒绝启动。日志位于 .cache/platform-diagnostics/。
+同一固定输入最多三次生成尝试，网络与内容修复共用预算；默认等待 60、300 秒，尊重更长的 `Retry-After`。阶段累计超过 1 小时或 12 次等待会失败并保留进度。SDK 不额外重试。未收到响应不证明服务端未处理，重发仍可能计费。
 
-2026-09-13 已切换至独立 V2 启动器：API/Web/CPU worker 容器就绪，GPU worker 心跳正常。真实书籍恢复时 481 页全部命中识别缓存、OCR 调用为 0，已进入本地 Qwen 全量视觉核验。原件、识别缓存和阶段回执保留；这不是整书内容通过声明。
+检查点绑定完整输入、来源和规则；输入改变不能复用旧批准。关闭网页不终止工作流；服务恢复后由 Temporal 接续。执行页展示等待原因和预计重试时间。具体预算与恢复判断见 [工作流](src/hrs_platform/workflows.py) 和 [研究调用实现](src/hrs_platform/agents.py)。
 
-## 规划与原件恢复
+## 运维
 
-- 工具读取最多执行 4 轮；耗尽时持久保存 SDK 已完成的工具历史，撤下工具并用已有信息进行结构化收尾。收尾沿用最多三次请求尝试、输入上限和累计调用硬预算，重启后直接恢复收尾。收尾输出仍失败时，研究分工按现有目录顺序回退，完整覆盖所有章节；此处仅分配阅读工作，不是内容批准。凭据、连接、存储或总预算失败不转成目录回退。
-- 主题综合前估算原文、关联上下文、阅读记录、提示词和结果结构；超过 24000-token 预检目标时预留后续修订空间并拆分。实际输入超限或输出封顶也触发同一局部拆分。优先在章节/小节边界划分，否则沿现有原文单元边界划分，单元本身、脚注关系和出处不改写。子主题保留父主题研究目标，独立生成和核验；最多 4 层、全书最多 256 个叶主题，未能继续拆分的范围明确待处理。拆分决定、子主题身份和检查点持久保存，重启不重新分配已完成卡片；被替代的失败父卡保留历史但退出当前列表。
-- 制卡前逐页校验 S3 原图对象。缺失映射/对象或完整性错误时，只有转换记录的 source_sha256、原 PDF 的哈希、总页数和物理页号全部匹配，才用 PDFium 以 216 dpi 重新渲染对应页，保存新的 S3 引用、源 PDF 哈希和渲染记录。原 OCR、转换包和人工决定保持不变，不把重建页图当作机器内容批准。视觉阶段使用恢复页图仍须本地 Qwen 核验。
-- S3 临时读取错误沿用 SDK 有界重试，耗尽后给出可恢复的 original_unavailable；无法确认来源或源 PDF 也缺失则给出 original_missing，记录页码与恢复要求，仅阻止受影响卡片采用，其他卡片继续。恢复后的页图可复用，不重复 OCR；缺失页图被再次删除时可从同一固定 PDF 再次恢复。
+### 常见故障
 
-## 制卡失败恢复
+| 现象                 | 先检查                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| 网页不能访问         | 启动器 `status`、18156 端口、Docker 应用状态                                         |
+| 长时间停在 OCR／视觉 | GPU worker 与 broker 日志、模型安装记录、显存占用；`doctor` 健康不代表模型推理已成功 |
+| 有底稿却未入库       | 内容核对页是否还有未解决／未核验范围；草稿保存不算通过                               |
+| 检索缺少结果         | 书籍是否已发布、索引是否完成、SQL 中生效代及 OpenSearch 状态                         |
+| 制卡等待或失败       | 执行页的阶段、请求预算与重试时间；修复配置或连接后重试同一任务                       |
+| 删除失败             | 对应执行是否停止、清理回执中的失败原因；修复后重试删除，不手工删除共享 S3 对象       |
 
-- 文本与本地视觉分别受 `PLATFORM_MODEL_MAX_CALLS` / `PLATFORM_VISION_MAX_CALLS` 限制，默认各 4096 次；历史和显式恢复请求仍累计，预算不会自动无限增加。制卡前展示基础调用下界与已用/剩余额度，不足时在付费调用前停止。此估算不含修订、额外工具轮次和超长主题带来的开销，不能作为价格或必定完成的保证。完整来源核验按最多 8 个单元、6000-token 来源预算组批，保留每个原文单元的独立身份及全量覆盖。
-- 通读完成后固定研究分工、阅读记录和主题计划。每个主题与最终定稿分别保存检查点；模型输出、输入超限和视觉格式失败保留为局部待修订，其余独立主题继续。连接、存储、凭据、全局预算和取消仍交给现有工作流恢复，不伪装成内容通过。
-- `needs_revision` 制卡运行可以通过进度页或执行图的现有重试按钮恢复。显式恢复开启新的卡片修订版本，已采用卡片保持不变，仅重做未采用/失败主题；同一卡片 ID 更新当前内容和检查引用，旧候选、原图核验和回执仍保存在 S3。失败的活动自动重试不另开卡片版本。没有候选或仍有失败主题时，不允许报告整书完成。
-- 完整来源核验发现遗漏后，将定位到的原文单元和关联上下文补入下一轮修订；最终定稿同样补入遗漏来源。原图失败反馈随失败卡片重新生成传入，每个新候选版本单独核验，不能复用上版的原图通过或失败判定。
-- 已提交缓存仍先按当前校验验证；失效时保留旧证据及拒绝原因，使用一个独立修复槽位和有界反馈重试。校验语义再次变化时应更新调用方的 `validation_version`，不能反复创建匿名修复版本。带工具的步骤仅复用完整、无待执行工具调用且通过校验的终态回执。
+主机日志位于 `.cache/platform-diagnostics/`，缓存位于 `.cache/platform-compute/`。诊断时保留运行 ID、阶段与脱敏错误，勿把模型原文或密钥提交仓库。
 
-这些是合成输入与故障注入验证，不是历史内容批准；真实整书运行仍需独立监控验收。超大原子表格/主题尚无自动再规划，缺少原图证据或模型持续不能校验时仍保留未完成状态，不能通过反复点击重试强制放行。
+### 备份与恢复
 
-## 接口与开发
+[备份实现](src/hrs_platform/backups.py) 使用 Docker 容器内的 PostgreSQL 工具，默认数据库容器名为 `historical-ingestion-acceptance-postgres-1`；其他容器名需设置进程变量 `PLATFORM_POSTGRES_CONTAINER`。数据库用户须有相应备份／建库权限。外部 PostgreSQL 和 S3 必须继续运行。
 
-### 结构化检索分块
+先停止上传与应用，并等待启动器退出。备份命令会检查应用／Temporal 容器及主机端口是否已停，但该检查不能替代对自定义部署的协调停写：
 
-已审阅章节仍是正文和来源的权威记录。检索使用 `structure-1400-160-v5-heading-note-units`：连续标题随其首段组织，同节正文在预算内合并；长正文采用 1400 字符目标和最多 160 字符重叠。表格按完整行组拆分，HTML 跨行单元格、列表项、代码和注释保留完整结构，必要时允许超长块。已定位脚注及单独排版的署名组成一个来源范围；Markdown 脚注和同页印刷注号沿用阅读器的归属规则，不猜测歧义关系。书名、章节路径、对应表头及脚注只加入检索投影，不改写正文和引用坐标。图片地址与通用 Image 占位符不进入嵌入文本，有意义的图片说明和原件来源仍保留。
+```powershell
+& $platformPython scripts/hrs_v2.py stop
+& $platformPython -m hrs_platform.cli backup | Set-Content -Encoding utf8 backup-reference.json
+```
 
-检索先召回，再按需进行本地 BGE 重排；返回阶段合并相交证据，补充同节上下文与来源映射。搜索接口默认每路候选 50 条、重排 30 条、返回 8 条，每条上下文总预算 6000 字符、全次查询预算 24000 字符，接口可分别调整。预算同时预留命中正文及来源关联的必要补充，放不下的完整证据不作为完整结果返回。
+备份三个固定数据库：`historical_research_v2`、`hrs_temporal_v2`、`hrs_temporal_visibility_v2`。dump 和清单保存到 S3，返回文件只是清单对象引用，应在仓库外独立保管。**同一 S3 内的数据库备份不能抵御 S3 自身丢失**，还需独立 bucket／卷备份。
 
-检索投影使用本地 BGE tokenizer 验证，控制在 6144 tokens 内。超长原子结构仅在检索输入中划分为连续来源窗口（每窗最多 6000 字符），优先换行或句末边界；章节原文不改写。较短表头随窗口保留，放不下的完整补充仍保存在来源映射中供展开阅读。重排按实际“问题＋文段”的 token 数划窗，对同一候选取最高窗口得分，不让超长候选导致整个查询失败。常规 1400 字符分块无需改变。
+恢复创建新的 `hrs_restore_*` 数据库，同名目标会拒绝覆盖。下面的后缀必须换成新的小写字母／数字／下划线值，最长 20 字符：
 
-索引缓存依赖章节内容摘要、标题、分块规则、输入窗口规则、来源结构报告摘要和嵌入模型版本。重建时重新投影已核对的结构关系，无需重新发布章节。续表仅在来源唯一定位、相关页面已通过审核、列归属完整且候选保留每个单元格时共享表头；页内闭合的 rowspan 可以保留，跨页未闭合或丢失数值的候选不采用。表格脚注命中也携带该表头。向量按实际检索文本摘要复用，同一书籍运行中仅计算变化或缺失的文本；每 8 个唯一输入提交一次 S3 批次回执。新一代完整写入后切换 SQL 中的生效版本，再清理旧索引文档；中途失败继续读取上一代。首次入库自动使用当前策略。已发布书籍可从配置了平台环境和检索模型的 CPU worker 执行：
+```powershell
+$backupReference = Get-Content -Raw backup-reference.json
+& $platformPython -m hrs_platform.cli restore --manifest-reference $backupReference --restore-suffix drill_example
+```
 
-~~~sh
-python -m hrs_platform.cli reindex --run-id <书籍运行UUID>
-~~~
+输出原库与新库的映射；失败创建的新库保留检查。核对记录、运行状态及 S3 引用后，再在维护窗口调整业务和 Temporal 连接。完整生产协调切换与 S3 灾难恢复仍需演练，不以单次测试库恢复宣称完成。
 
-该命令只重建检索，不重复 OCR，也不绕过整书核验。制卡完整遍历章节，复用结构化解析、脚注归属、表头和合并单元格口径，采用 5000 字符目标、无重叠的阅读单元并校验全字符覆盖；检索投影不会作为原文引证。合成结构与故障恢复测试不能替代真实书籍的检索质量评测。
+## 开发参考与验证
 
-调试检索时可设置 `PLATFORM_AUTO_CARDS_ENABLED=false` 并重启 API/CPU worker：书籍索引完成后直接完成书籍流程，不创建自动制卡任务。默认值为 true；独立手动制卡入口不受此开关影响，已经创建的制卡任务不会被此开关撤销。
+| 入口                                                                                           | 职责                                                                                                            |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| [api.py](src/hrs_platform/api.py)、[OpenAPI](openapi.json)                                     | HTTP 路由与生成契约                                                                                             |
+| [cli.py](src/hrs_platform/cli.py)                                                              | `migrate/api/namespace/worker/gpu-worker/doctor/backup/restore/reindex/amend-library/evaluate/evaluate-offline` |
+| [workflows.py](src/hrs_platform/workflows.py)、[activities.py](src/hrs_platform/activities.py) | Temporal 编排与实际阶段                                                                                         |
+| [domain/](src/hrs_platform/domain/)                                                            | 来源、研究合同与模型适配规则                                                                                    |
+| [migrations/](src/hrs_platform/migrations/)                                                    | 版本化数据库迁移                                                                                                |
+| [tests/](tests/)                                                                               | 行为与故障恢复回归                                                                                              |
 
-本轮已审核书籍的固定基线及对照结果见 [检索调优记录](RETRIEVAL_TUNING.md)。包含原文的评测输入、旧索引向量及证据回执存放在 S3，不提交 Git。
+接口变更后使用根 README 的 `npm run contracts` 命令同步后端 OpenAPI 与前端类型。API 导出不连接业务库；不手工维护另一份前端契约草案。
 
-索引耗时、计算数与复用数保存在运行结果的 `retrieval_metrics` 中（失败也记录）；检索响应的 `Server-Timing` 分别提供关键词召回、查询向量计算、向量召回、重排及上下文组装耗时。分块耗时包含章节读取和 tokenizer 初始化，不应误当作纯解析耗时。
+常规测试使用专用测试 SQL、S3 和 OpenSearch；完整配置见 [CI](../../.github/workflows/engineering.yml) 和 [测试 Compose](../../deploy/platform/compose.test.yml)。不要对业务库设置测试连接。
 
-小规模评测复用真实检索接口实现，输入 JSON 数组，每项为 `{"query":"运输量","expected":[{"chapter_id":"章节UUID","start":10,"end":30}]}`；范围为已发布章节的零起点字符坐标，结束位置不包含。运行：
+```powershell
+& $platformPython -m pytest services/research-platform/tests services/runtime-support/tests -q
+& $platformPython -m pytest scripts --collect-only -q
+& $platformPython -m ruff check services/research-platform/src scripts/hrs_v2.py
+```
 
-~~~sh
-python -m hrs_platform.cli evaluate --run-id <书籍运行UUID> --cases cases.json --limit 10
-# 加 --semantic 使用本地向量召回与重排。
-~~~
-
-输出包含完整预期证据范围的召回比例、累积结果首次覆盖证据的倒数排名、来源坐标一致性、P50/P95 耗时及输入摘要。相同题集和原文摘要才适合版本对照；少量样本的 P95 只是观察值。合成题集、机器标注以及来源一致性均不代表人类金标准或史实正确性。未发布书籍不能通过评测入口绕过审核。
-
-/api/v2 提供 books、uploads、runs/retry、reviews/draft/decisions、chapters、search、cards、executions、exports 和 SSE。原件支持 HTTP Range。Markdown 导出保存于 S3，删除下载缓存后仍可读取；卡片导出保留完整日期、实体、证据关系和核验记录。
-
-史料卡查看页展示形成/事件时间及其依据、人物地点身份依据、原文陈述归属、推断/分歧状态、上下文、表格口径、限制、其他解释和待查问题。引用证据、日期依据与论证关系可在卡内双向定位；跳转不改写路由片段。卡片选择写入 URL，支持返回历史与缓存切换，切卡清除上一张的出处面板。
-
-详情接口的 `quote_locations` 按条目及引文序号返回来源单元内的 Unicode 码点范围（左闭右开）与实际 PDF 物理页，复用导出的引文定位逻辑；重复引文按 occurrence 定位，跨页保留全部命中页。网页在原始 Markdown 文本摘录中高亮指定引文，完整渲染正文可另外展开。缺少正文或页码依据时明确提示，不用来源单元首页冒充引文页码。新增定位数据按需读取计算，不修改既有卡片、审核记录或原文。
-
-~~~powershell
-.cache/engineering-envs/research-platform/Scripts/python.exe -m hrs_platform.export_openapi
-node services/review-workbench/tooling/openapi/node_modules/openapi-typescript/bin/cli.js services/research-platform/openapi.json -o services/review-workbench/src/platform/schema.d.ts
-npm --prefix services/review-workbench run build
-~~~
-
-接口导出不连接业务库、不加载 Agent SDK。生成器使用单独锁定的 TypeScript 5 工具包；应用继续使用 TypeScript 7，不绕过 peer 依赖约束。
-
-## 验证与交付差距
-
-数据库测试只允许 historical_research_v2_test 的唯一临时 schema。技术测试、合成材料和 GPT 开发评审都不是用户人工批准。
-
-~~~powershell
-.cache/engineering-envs/research-platform/Scripts/python.exe -m pytest services/research-platform/tests services/runtime-support/tests --basetemp .scratch/pytest-platform-current
-# 按需启用 PLATFORM_TEST_MODELS=1、PLATFORM_TEST_TEMPORAL=1。
-# 实际工作运行期间，不要启用 PLATFORM_TEST_RESTART_TEMPORAL。
-~~~
-
-output/refactor-v2 保存 Tus/S3 续传、幂等入站、Temporal 人工等待与恢复、局部决定和草稿、来源覆盖、CPU 检索重排、繁简查询、缓存丢失与索引重建、实际 DeepSeek 文本候选、浏览器布局及容器健康检查证据。最新代码持续回归，实际结果以对应日志为准。
-
-浏览器实际完成 17 MB 技术文件的暂停、刷新、重新选取和从 8 MB 继续上传；没有创建第二个上传对象。旧前端 111 个文件、旧后端及适配/脚本 288 个文件和旧 Python 打包入口已存档撤除。新的独立 PostgreSQL/S3 CI 环境通过现役回归。
-
-数据库备份恢复的独立测试库演练已通过，操作和限制见 [运维说明](../../docs/platform-operations.md)。本地 Qwen 视觉门禁实际识别合成原图中的 120 吨，并拒绝 130 吨误引；对应机器采用与回执复用通过测试。该测试用固定文本回执隔离视觉门禁，不等于全书生成质量验收。
-
-待完成：实际整书视觉/用户人工/卡片验收；完整生产协调恢复与独立 S3 备份部署。现有检查不代替这些验收，本说明不是全部完成声明。
-
-现行进度及运行故障修复证据统一见 [V2 当前记录](../../docs/refactor-delivery-status-20260913.md)。真实书籍可在处理进展页查看初轮有效核验页数；不可用响应不计入该数字，机器结果仍不等于人工通过。
-
-书籍任务删除使用 `DELETE /api/v2/books/{book_id}` 和现有 Temporal 工作进程。先停止执行再清理，失败保留回执并允许重试；不删除其他书籍仍引用的对象。实施与验证见 [删除说明](../../docs/book-task-deletion-20260913.md)。
-
-### GPU 检索与独立评测（2026-09-14）
-
-研究检索默认关键词与向量各召回 50 条，RRF 融合后最多重排 30 条，返回 8 组证据。
-`semantic=false` 为快速查词，`diverse=true` 用于跨章节综合；这些是可调起始值。
-必要脚注、表头、表注先于低排名结果分配预算。无法完整容纳必要信息的证据组不返回，
-继续检查后续候选补足结果，并记录 `budget_rejected`；不会将删掉限定条件的数字当作完整证据。
-跨章节综合只在重排前 `2 * limit` 条中轮转，防止远端弱相关章节被优先提升。
-
-超长表格按完整行及 rowspan 组限制输入。单个不可分割行组仍超限时，保持完整原文范围，
-只将模型使用的文本视图拆成有独立索引 ID 的窗口；`atomic_source_oversized` 标明这种情况。
-这类完整证据若超过返回预算仍会被明确淘汰，不冒充完整且可容纳的片段。
-长脚注优先按段落拆分，保留正文归属。输入规则版本变化会触发可恢复的重新索引，不重做 OCR。
-嵌入检查点按 token 长度排序组批；模型适配器按真实 token 长度组批并恢复输入顺序，OOM 缩批策略保留。
-
-`PLATFORM_RETRIEVAL_DEVICE=cuda` 通过主机现有 GPU broker 运行嵌入和重排。
-`PLATFORM_RETRIEVAL_ENDPOINT` 默认 `http://127.0.0.1:18160/retrieval`，容器使用
-`host.docker.internal`。主机需要安装 research-platform 的 `retrieval` extra CUDA 环境；
-不可使用仅供测试的轻量 CPU 环境启动生产 broker。
-请求取得共享 GPU 锁后卸载视觉模型，使用一个自有检索子进程。两个检索模型可连续驻留；
-下一次 OCR 或视觉请求先释放检索进程。错误及超时释放该进程，返回可重试错误。
-CPU 运行必须显式设置 `PLATFORM_RETRIEVAL_DEVICE=cpu`，不会静默回退。
-当前长时间机审结束后重启主机 broker，才启用新调度代码。
-模型冷启动默认允许 600 秒，可用 `HRS_VISION_START_TIMEOUT` 调整（30–900 秒）。
-`vision_loading` 事件记录本次上限，超过上限仍返回可恢复错误，不把启动失败当成内容审核通过。
-
-`hrs-platform evaluate-offline --cases dataset.json` 使用独立 `hrs-offline-*` 临时索引，
-对比关键词、旧候选策略（每路 20 条直接重排）、新融合策略、50 条重排及每路保留 3 条候选，
-不写入文献库或改变审核状态。
-JSON 包含 `title`、`chapters`、`cases`。章节沿用原文及来源映射，并带有
-`development_review`：`text_sha256`、`image_sha256`、`original_first=true`、
-`human_review=false`。问题包含 `query` 和 `expected`（chapter_id/start/end）；空 expected
-表示无答案，报告其返回候选数量，不将候选视为确认答案。标准输出为评测报告。
-各组共享当前分块及上下文规则，比较的是候选策略，不是完整历史实现。
-可用 `variants: [["名称", true, {"rerank_limit": 50, "lane_quota": 3}]]` 指定对照；
-`min_rerank_score` 仅供内部检索/离线标定试验，默认不启用，不暴露为用户百分比置信度。
-报告提供分类召回率和 `threshold_diagnostics`（有答案保留率/无答案拒绝率），
-需在独立数据上验证后才可启用阈值；诊断本身不会改变正式问答策略。
-
-运行 `python scripts/build_retrieval_benchmark.py --output output/retrieval-fixtures.json`，
-可生成 40 个合成章节、100 个问题（80 个可回答、20 个无答案），包含表格、脚注、
-跨章节、相近年份/地点/军用运输干扰项。生成器不附带机器批准，需先核对原件并补齐上述证据。
-合成回归与真实书籍评测分开报告，不能把模板题的高召回当作真实书籍准确率。
-开发样本不构成生产放行；需要保留未参与调参的书籍才能判断泛化收益。
-
-### 证据装配与已发布文本勘误
-
-检索规则 `structure-1400-160-v6-evidence-scopes` 保留小节前明确引出下文的段落、
-续表首表的事件说明及表头；共用单元格通过 `SearchHit.table_scopes` 返回原 HTML
-派生的行列范围，不能把共用统计量分配给单独一行。附属正文仍带不可变来源坐标。
-完整段落不再自动附带相邻背景；切断的段落、标题后的正文、脚注和必要限定仍保留。
-正文字符预算不含派生范围元数据；离线评测另记录模型实际收到的总上下文字符数。
-
-已发布书籍的少量等长勘误可用 `hrs-platform amend-library --run-id UUID --amendments changes.json`。
-输入为列表，每项包含 `chapter_id`、`expected_content_sha256`、`changes`；每个改动包含
-`start`（章节 Unicode 字符偏移）、`before`、`after`。一个章节只提交一项请求。
-仅支持唯一定位、等长、单页、同一来源片段内的修订；不覆盖明确人工修改。
-该主机命令复用 document-extraction 的 `.venv` 与现有本地视觉服务，逐处对原图独立核验；
-失败不修改正文，通过后正文引用、事件和恢复检查点在同一 SQL 事务提交。
-旧 S3 正文与核验记录保留。随后必须执行 `hrs-platform reindex --run-id UUID`，
-修订至重建完成期间该书旧检索 generation 停用，避免混用旧索引和新原文。
-非等长或跨页修改需要重新生成来源版本及下游分块，不能用此命令推算偏移。
-这不是重新 OCR 或更改人工放行状态的入口，生产容器不额外安装 OCR 依赖。
-
-Ragas 使用独立依赖环境，运行方式见 [评测工具说明](evaluation/tools/ragas/README.md)，
-已冻结的实测结果与边界见 [评测报告](RAGAS_EVALUATION.md)。
+`PLATFORM_TEST_TEMPORAL`、`PLATFORM_TEST_BACKUP`、`PLATFORM_TEST_MODELS`、`PLATFORM_TEST_SEARCH`、`PLATFORM_TEST_VISION` 为显式开启的集成检查；真实模型测试可能产生费用或占用 GPU。运行真实任务时不启用 `PLATFORM_TEST_RESTART_TEMPORAL`。测试结果以本次日志和 CI 为准，不在操作文档中固定历史通过数。

@@ -61,4 +61,12 @@ for name, revision in MODEL_REVISIONS.items():
 - `scripts/local_vision.py` 协调 OCR、Qwen 和检索模型的 GPU 使用。当前以阶段切换为主，不以多个模型同时驻留作为运行前提。
 - Docker 中的平台按现有 Compose 只读挂载 `models/document-retrieval/`，Windows broker 从主机模型目录加载。修改目录时同时核对两侧路径。
 
+### 切换与排障
+
+OCR 申请共享锁后，broker 先释放检索进程；空闲显存不足时再卸载视觉模型。视觉请求先释放检索；检索请求先卸载视觉。只管理本启动器拥有的进程，不终止其他应用来腾显存。
+
+broker 默认预留 1.5 GiB，OCR、视觉、检索的准入预算分别为 6、9、6 GiB，配置变量见 [local_vision.py](../scripts/local_vision.py)。这些是调度阈值，不是测得峰值；OCR 配置中的 15 GB 上限属于另一个层面的设备约束，不应混为模型实际占用。显存不足会返回错误，仍须根据真实输入测量后调整预算。
+
+视觉服务冷启动默认允许 600 秒，`HRS_VISION_START_TIMEOUT` 可在 30–900 秒范围调整。排查时查看 `state/local-vision/events.jsonl` 和 `llama.log`，结合 NVIDIA 显存状态区分模型加载、排队和推理。一次健康响应不代表整书核验已完成；超时不作为内容通过。
+
 不要将模型权重、下载临时文件或本机 `installation.json` 提交 Git；模型许可证以各上游仓库为准。

@@ -1,9 +1,7 @@
-# 史料卡：退役模块记录
+# research-cards（退役入口）
 
-现役实现、API、运行方式和有效测试见 [Research Platform](../research-platform/README.md)。本目录不再提供独立业务服务。
+当前业务接口、运行和测试统一见 [Research Platform](../research-platform/README.md)。不要使用旧独立模块的命令或 API 草案启动业务。
 
-已清理不能独立运行的旧评测脚本、旧 API 契约及构建入口。删除前文件可查看 [Git 快照 b8bab4a](https://github.com/TexcolCloud/historical-research-system/tree/b8bab4a/services/research-cards)；更早实现通过 Git 历史追溯。保留的历史文档描述当时的规则、路径和命令，不作为当前操作指南。
+该目录只保留退役入口说明，现役制卡由统一平台的工作流与 Agent 实现。
 
-本目录保留历史设计与验收说明。
-
-本地被忽略的评测结果、原件与业务文件不在此次删除范围内；未迁移或清除数据库、S3 对象及模型权重。
+历史设计、操作和验收资料仅保留在本地，不随 Git 分发。历史实现可从 [Git 快照](https://github.com/TexcolCloud/historical-research-system/tree/b8bab4a/services/research-cards) 追溯；这些记录不表示当前部署行为。
