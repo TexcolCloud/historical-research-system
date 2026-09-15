@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hrs-runtime"
 version = "0.1.0"
-description = "Small shared HTTP diagnostics for Historical Research System"
+description = "Shared S3 storage, GPU scheduling and source-layout helpers"
 requires-python = ">=3.11"
 dependencies = ["boto3>=1.40,<2"]
 

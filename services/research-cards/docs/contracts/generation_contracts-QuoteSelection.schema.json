@@ -1,1 +1,0 @@
-{"additionalProperties":false,"properties":{"occurrence":{"default":0,"minimum":0,"title":"Occurrence","type":"integer"},"quote":{"minLength":1,"title":"Quote","type":"string"},"unit_id":{"title":"Unit Id","type":"string"}},"required":["unit_id","quote"],"title":"QuoteSelection","type":"object"}

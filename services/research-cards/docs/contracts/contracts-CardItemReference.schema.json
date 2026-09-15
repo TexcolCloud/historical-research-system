@@ -1,1 +1,0 @@
-{"additionalProperties":false,"properties":{"card_id":{"title":"Card Id","type":"string"},"card_revision_id":{"title":"Card Revision Id","type":"string"},"item_id":{"title":"Item Id","type":"string"}},"required":["card_id","card_revision_id","item_id"],"title":"CardItemReference","type":"object"}

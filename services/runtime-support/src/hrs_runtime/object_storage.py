@@ -36,12 +36,6 @@ class S3Objects:
             config=Config(signature_version='s3v4',connect_timeout=5,read_timeout=30,
                 retries={'max_attempts':3,'mode':'standard'},s3={'addressing_style':'path'}))
 
-    @classmethod
-    def from_environment(cls):
-        return cls(endpoint=os.environ.get('INGEST_S3_ENDPOINT_URL'),
-            bucket=os.environ.get('INGEST_S3_BUCKET'),access_key=os.environ.get('INGEST_S3_ACCESS_KEY'),
-            secret_key=os.environ.get('INGEST_S3_SECRET_KEY'),region=os.environ.get('INGEST_S3_REGION','us-east-1'))
-
     def check(self):
         self.client.head_bucket(Bucket=self.bucket)
 
@@ -105,12 +99,3 @@ class S3Objects:
         finally:
             temporary.unlink(missing_ok=True)
         return destination
-
-
-def configured_objects():
-    mode=os.environ.get('HRS_OBJECT_STORAGE','local')
-    if mode=='s3':
-        return S3Objects.from_environment()
-    if mode=='local':
-        return None
-    raise ObjectStorageError('Unknown object storage mode; refusing to guess.')

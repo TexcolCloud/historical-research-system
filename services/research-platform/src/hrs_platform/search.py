@@ -9,7 +9,6 @@ from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from opensearchpy import OpenSearch, RequestError, helpers
 from sqlalchemy import select, update
 
@@ -18,7 +17,7 @@ from .books import get_run
 from .domain.settings import MODEL_REVISIONS
 from .library import Library
 from .outputs import Outputs, fingerprint
-from .retrieval_chunks import CHUNK_RULE, expand_hits, retrieval_chunks, source_excerpt
+from .retrieval_chunks import CHUNK_RULE, expand_hits, retrieval_chunks
 from .retrieval_inputs import INPUT_RULE, bounded_chunks, ranking_windows, tokenizer_for
 from .retrieval_ranking import candidates_for_rerank, fuse, lexical_query, multipart_queries
 from .structure_views import POLICY as STRUCTURE_POLICY
@@ -103,23 +102,6 @@ def remote_compute(endpoint, operation, texts, **options):
         if 'identity' in value:
             result['identity'] = value['identity']
     return result
-
-
-def chapter_chunks(chapter, size=1400, overlap=160):
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=size,
-        chunk_overlap=overlap,
-        separators=["\n\n", "\n", "。", "；", "！", "？", " ", ""],
-        keep_separator="end",
-        strip_whitespace=False,
-        add_start_index=True,
-    )
-    for item in splitter.create_documents([chapter["text"]]):
-        start = item.metadata["start_index"]
-        end = start + len(item.page_content)
-        if start < 0 or chapter["text"][start:end] != item.page_content:
-            raise ValueError("The chunk could not be located in its immutable chapter.")
-        yield source_excerpt(chapter, start, end)
 
 
 class Search:
