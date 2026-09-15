@@ -3,6 +3,7 @@
 import asyncio
 
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from .activities import Activities
 from .books import get_run
@@ -25,6 +26,11 @@ class PipelineActivities:
 
         observer = asyncio.create_task(heartbeat())
         try:
+            run = get_run(self.engine, run_id)
+            if (run["error"] or {}).get("code") == "model_transport_wait":
+                Activities(self.settings, self.engine).transition(
+                    run_id, "processing", run["stage"], error=None
+                )
             name = activity.info().activity_type
             label = {
                 "organize_book": "章节组织",
@@ -45,6 +51,26 @@ class PipelineActivities:
                         await running
                     finally:
                         raise
+                except ApplicationError as error:
+                    if error.type in {
+                        "model_transport_wait",
+                        "model_transport_exhausted",
+                        "model_request_rejected",
+                        "model_execution_timeout",
+                    }:
+                        run = get_run(self.engine, run_id)
+                        Activities(self.settings, self.engine).transition(
+                            run_id,
+                            "processing",
+                            run["stage"],
+                            error={
+                                "code": error.type,
+                                "stage": run["stage"],
+                                "message": error.message,
+                                "recovery": error.details[0] if error.details else {},
+                            },
+                        )
+                    raise
         finally:
             observer.cancel()
             try:
@@ -117,14 +143,30 @@ class PipelineActivities:
     @activity.defn
     def record_pipeline_failure(self, run_id: str) -> dict:
         run = get_run(self.engine, run_id)
+        previous = run["error"] or {}
+        if previous.get("code") == "model_transport_wait":
+            error = {
+                "code": "model_transport_exhausted",
+                "stage": run["stage"],
+                "message": "文本服务恢复等待已达上限，已提交结果保留，请稍后手动重试。",
+                "last_failure": previous,
+            }
+        elif previous.get("code") in {
+            "model_transport_exhausted",
+            "model_request_rejected",
+            "model_execution_timeout",
+        }:
+            error = previous
+        else:
+            error = {
+                "code": "pipeline_failed",
+                "stage": run["stage"],
+                "message": "本阶段未完成，已提交结果及原始证据保留，可手动重试。",
+            }
         Activities(self.settings, self.engine).transition(
             run_id,
             "failed",
             run["stage"],
-            error={
-                "code": "pipeline_failed",
-                "stage": run["stage"],
-                "message": "本阶段未完成，已提交结果及原始证据保留。",
-            },
+            error=error,
         )
         return {"run_id": run_id, "stage": run["stage"]}

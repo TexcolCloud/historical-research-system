@@ -2,10 +2,12 @@
 
 import asyncio
 import os
+import time
 from uuid import uuid4
 
 import pytest
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 from temporalio.worker import Worker
 
 from hrs_platform.settings import Settings
@@ -89,5 +91,74 @@ def test_review_wait_survives_worker_restart_and_resumes_only_after_committed_re
             assert "check_card_images" not in executed
             assert "adopt_cards" not in executed
             assert executed[-1] == "finish_book"
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_card_outage_timer_survives_worker_restart_and_can_be_cancelled(cancel):
+    async def exercise():
+        client = await connect(Settings.load())
+        identity = str(uuid4())
+        queue = "test-card-outage-" + identity
+        calls, downstream = [], []
+
+        @activity.defn(name="generate_cards")
+        async def generate(run_id: str) -> dict:
+            calls.append(time.monotonic())
+            if len(calls) < 3:
+                raise ApplicationError(
+                    "synthetic disconnect",
+                    {"retry_at": time.time() + 2},
+                    type="model_transport_wait",
+                    non_retryable=True,
+                )
+            return {"run_id": run_id}
+
+        def operation(name):
+            @activity.defn(name=name)
+            async def call(run_id: str) -> dict:
+                downstream.append(name)
+                return {"state": "completed"}
+
+            return call
+
+        activities = [generate] + [
+            operation(name) for name in ("check_card_images", "adopt_cards", "record_pipeline_failure")
+        ]
+        async with Worker(client, task_queue=queue, workflows=[CardWorkflow], activities=activities):
+            handle = await client.start_workflow(
+                CardWorkflow.run,
+                {"run_id": identity, "gpu_queue": queue},
+                id="test-card-outage/" + identity,
+                task_queue=queue,
+            )
+
+            async def timer_started():
+                while True:
+                    history = await handle.fetch_history()
+                    if any(event.HasField("timer_started_event_attributes") for event in history.events):
+                        return
+                    await asyncio.sleep(0.05)
+
+            await asyncio.wait_for(timer_started(), 30)
+            assert len(calls) == 1 and downstream == []
+        # The first worker is gone. Temporal owns the timer, not an asyncio sleeper.
+        if cancel:
+            await handle.cancel()
+        async with Worker(client, task_queue=queue, workflows=[CardWorkflow], activities=activities):
+            if cancel:
+                from temporalio.client import WorkflowFailureError
+                from temporalio.exceptions import CancelledError
+
+                with pytest.raises(WorkflowFailureError) as failure:
+                    await asyncio.wait_for(handle.result(), 30)
+                assert isinstance(failure.value.cause, CancelledError)
+                assert len(calls) == 1 and downstream == []
+            else:
+                assert (await asyncio.wait_for(handle.result(), 30))["state"] == "completed"
+                assert len(calls) == 3
+                assert all(b - a >= 2 for a, b in zip(calls, calls[1:]))
+                assert downstream == ["check_card_images", "adopt_cards"]
 
     asyncio.run(exercise())

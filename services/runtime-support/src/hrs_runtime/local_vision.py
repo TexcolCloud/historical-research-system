@@ -102,22 +102,3 @@ def chat(messages, *, schema=None, max_tokens=4096, timeout=900):
     if choice.get('finish_reason') != 'stop':
         raise ValueError('Local vision output incomplete; not a review pass')
     return result
-
-
-def response_input(messages):
-    """Translate image/text Responses inputs, keeping ordering and original bytes."""
-    converted = []
-    for row in messages:
-        content = row['content']
-        if isinstance(content, list):
-            parts = []
-            for part in content:
-                if part['type'] == 'input_text':
-                    parts.append({'type': 'text', 'text': part['text']})
-                elif part['type'] == 'input_image':
-                    parts.append({'type': 'image_url', 'image_url': {'url': part['image_url']}})
-                else:
-                    raise ValueError('Unsupported local vision input')
-            content = parts
-        converted.append({'role': row['role'], 'content': content})
-    return converted

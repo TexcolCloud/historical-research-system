@@ -44,6 +44,8 @@ jobs:
       - run: docker compose -f deploy/platform/compose.test.yml up -d --wait
       - run: .cache/engineering-envs/research-platform/bin/python scripts/platform_test_infra.py
       - run: .cache/engineering-envs/research-platform/bin/python -m ruff check services/research-platform/src scripts/hrs_v2.py
+      - name: Check standalone tool test imports
+        run: .cache/engineering-envs/research-platform/bin/python -m pytest scripts --collect-only -q --basetemp "${{ runner.temp }}/tool-collection"
       - run: npm --prefix services/review-workbench run contracts
       - run: .cache/engineering-envs/research-platform/bin/python -m pytest services/research-platform/tests services/runtime-support/tests --basetemp "${{ runner.temp }}/platform-ci" --junitxml=reports/platform.xml
       - name: Check conversion review policy without OCR model weights

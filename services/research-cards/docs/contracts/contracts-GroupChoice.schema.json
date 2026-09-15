@@ -1,1 +1,0 @@
-{"additionalProperties":false,"properties":{"action":{"enum":["adopt","keep_current"],"title":"Action","type":"string"},"change_group_id":{"title":"Change Group Id","type":"string"},"reason":{"default":"","title":"Reason","type":"string"}},"required":["change_group_id","action"],"title":"GroupChoice","type":"object"}

@@ -30,6 +30,14 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
     runs.data?.find((run) => run.kind === "cards")?.id ||
     runs.data?.[0]?.id;
   const activeRun = runs.data?.find((run) => run.id === id);
+  const waiting =
+    activeRun?.state === "processing" &&
+    activeRun.error?.code === "model_transport_wait";
+  const recovery = activeRun?.error?.recovery;
+  const retryAt =
+    recovery && typeof recovery === "object" && "retry_at" in recovery
+      ? recovery.retry_at
+      : undefined;
   return (
     <section className="platform-executions">
       <label>
@@ -48,6 +56,19 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
         </select>
       </label>
       {runs.isError && <p role="alert">{runs.error.message}</p>}
+      {waiting && (
+        <p role="status">
+          等待文本服务恢复，已完成结果保留。
+          {typeof retryAt === "number" &&
+            Number.isFinite(retryAt) &&
+            `预计 ${new Date(retryAt * 1000).toLocaleString("zh-CN")} 自动重试。`}
+          无需重复点击，关闭页面不影响恢复。
+        </p>
+      )}
+      {activeRun?.state === "failed" &&
+        typeof activeRun.error?.message === "string" && (
+          <p role="alert">{activeRun.error.message}</p>
+        )}
       {activeRun &&
         (activeRun.state === "failed" ||
           (activeRun.kind === "cards" &&

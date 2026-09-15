@@ -213,6 +213,13 @@ models/                  # 本地权重与缓存；大文件不入 Git
 
 部分模块文档保留了历史实验和本地追溯链接。根 `docs/`、`output/`、调优档案及个人开发指令不随 Git 分发；其中的历史记录不替代当前配置与运行行为。
 
+旧业务实现已退役，但以下路径仍管理当前共享基础设施，保留原 Compose 项目名与卷定义：
+
+- [PostgreSQL 与 S3](services/document-ingestion/config/compose.acceptance.yml)，以及同目录初始化 SQL。
+- [OpenSearch 与快照卷](services/document-retrieval/config/compose.yml)。
+
+这些文件不启动旧业务服务。迁移其管理路径前需验证卷归属和备份恢复；历史代码可从 Git 记录追溯，现役回归与 Ragas 工具位于 `services/research-platform`。
+
 ## 常见问题
 
 <details>
