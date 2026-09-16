@@ -220,4 +220,3 @@ def list_runs(engine, book_id):
                 .order_by(db.runs.c.created_at.desc())
             ).mappings()
         )
-
