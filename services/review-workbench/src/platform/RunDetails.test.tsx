@@ -12,7 +12,7 @@ import { respondWith } from "./test-responses";
 
 afterEach(cleanup);
 
-test.each(["model_transport_wait", "retrieval_wait"])("execution view distinguishes %s from manual retry", async (code) => {
+test.each(["model_transport_wait", "retrieval_wait", "vision_service_wait"])("execution view distinguishes %s from manual retry", async (code) => {
   const run = {
     id: "card-run",
     book_id: "book",
@@ -34,7 +34,7 @@ test.each(["model_transport_wait", "retrieval_wait"])("execution view distinguis
     </QueryClientProvider>,
   );
   expect((await screen.findByRole("status")).textContent).toContain(
-    code === "retrieval_wait" ? "等待检索服务恢复" : "等待文本服务恢复",
+    code === "retrieval_wait" ? "等待检索服务恢复" : code === "vision_service_wait" ? "等待本地视觉服务恢复" : "等待文本服务恢复",
   );
   expect(screen.getByRole("status").textContent).toContain("已完成结果保留");
   expect(screen.queryByRole("button", { name: "重试本阶段" })).toBeNull();

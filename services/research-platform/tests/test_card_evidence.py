@@ -115,6 +115,25 @@ def test_real_tools_map_search_ranges_to_frozen_originals_and_reuse_receipts(res
     assert len(research.calls) == 3
 
 
+def test_read_recombinations_do_not_spend_new_slots_and_resume_context_is_available(research):
+    async def model(run_id, key, instructions, payload, output_type, **kwargs):
+        await use_tools(output_type, kwargs)
+        count = len([key for key in research.outputs.values if ":read:" in key])
+        identities = [u["unit_id"] for u in research.units]
+        for i in range(8):
+            receipt = await invoke(kwargs["tools"][1], unit_ids=identities[:1] if i % 2 else identities[-1:])
+            assert receipt["units"] and receipt["remaining_input_tokens"] > 0
+        assert len([key for key in research.outputs.values if ":read:" in key]) == count
+        restored = kwargs["resume_context"]()["resumed_evidence"]
+        assert len(restored["searches"]) == 3 and restored["originals"]
+        uid = identities[0]
+        result = output_type(source_unit_ids=[uid], findings=[dict(category="event", text="合成", source_unit_ids=[uid])],
+                             unresolved_questions=[], sufficient=True)
+        kwargs["validate"](result)
+        return result
+    assert execute(research, model)["assessment"]["sufficient"]
+
+
 def test_planned_queries_supply_originals_without_model_tool_round_trips(research):
     research.topic.queries = [module.EvidenceQuery(query=p, purpose=p)
                              for p in ("support", "counter", "qualify")]
@@ -418,7 +437,7 @@ def test_terminal_model_result_is_reused_after_evidence_receipt_write_failure(re
     assert len(sends) == 1 and len(research.calls) == 3
 
 
-def test_persistent_retrieval_failures_exhaust_and_explicit_retry_gets_new_epoch(research, monkeypatch):
+def test_persistent_retrieval_failures_wait_and_recover_without_manual_epoch(research, monkeypatch):
     from hrs_platform.domain.errors import Problem
     now, calls = [1000.0], []
     monkeypatch.setattr(time, "time", lambda: now[0])
@@ -428,12 +447,12 @@ def test_persistent_retrieval_failures_exhaust_and_explicit_retry_gets_new_epoch
     for attempt in range(1, 13):
         with pytest.raises(ApplicationError) as error:
             asyncio.run(recover_retrieval(research.evidence.engine, research.outputs, "run", "probe", unavailable))
-        assert error.value.type == ("retrieval_exhausted" if attempt == 12 else "retrieval_wait")
+        assert error.value.type == "retrieval_wait"
         now[0] = error.value.details[0]["retry_at"]
     with pytest.raises(ApplicationError) as error:
         asyncio.run(recover_retrieval(research.evidence.engine, research.outputs, "run", "probe", unavailable))
-    assert error.value.type == "retrieval_exhausted" and len(calls) == 12
-    research.parent["recovery_attempt"] = 1
+    assert error.value.type == "retrieval_wait" and len(calls) == 13
+    now[0] = error.value.details[0]["retry_at"]
     async def restored():
         return "ready"
     assert asyncio.run(recover_retrieval(research.evidence.engine, research.outputs, "run", "probe", restored)) == "ready"

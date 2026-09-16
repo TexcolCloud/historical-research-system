@@ -234,6 +234,7 @@ async def run_worker(settings, gpu=False):
                 pipeline.create_card_run,
                 pipeline.generate_cards,
                 pipeline.adopt_cards,
+                pipeline.schedule_card_repair,
                 pipeline.record_pipeline_failure,
                 pipeline.finish_book,
             ],

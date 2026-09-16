@@ -8,14 +8,14 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
 
-async def execute_with_service_recovery(name, run_id, **options):
+async def execute_with_service_recovery(name, run_id, *, resume=None, **options):
     waited, deferrals = 0.0, 0
     while True:
         try:
             return await workflow.execute_activity(name, run_id, **options)
         except ActivityError as error:
             cause = error.cause
-            if not isinstance(cause, ApplicationError) or cause.type not in {"model_transport_wait", "retrieval_wait"}:
+            if not isinstance(cause, ApplicationError) or cause.type not in {"model_transport_wait", "retrieval_wait", "vision_service_wait"}:
                 raise
             # The activity error is non-retryable: only this timer owns network
             # recovery. Completed steps replay receipts, not paid requests.
@@ -23,6 +23,9 @@ async def execute_with_service_recovery(name, run_id, **options):
             deferrals += 1
             waited += delay
             if deferrals > 12 or waited > 3600:
+                if resume is not None:
+                    await workflow.sleep(delay)
+                    workflow.continue_as_new(resume)
                 raise ApplicationError(
                     "服务恢复等待已达上限，进度保留，请稍后手动重试。",
                     type="retrieval_exhausted" if cause.type == "retrieval_wait" else "model_transport_exhausted",
@@ -92,11 +95,13 @@ class CardWorkflow:
     @workflow.run
     async def run(self, request: dict) -> dict:
         run_id = request["run_id"]
+        incremental = workflow.patched("card-incremental-v1")
 
-        async def step(name, gpu=False):
+        async def step(name, gpu=False, value=None):
             return await execute_with_service_recovery(
                 name,
-                run_id,
+                value if value is not None else run_id,
+                resume=request if incremental else None,
                 task_queue=request["gpu_queue"] if gpu else workflow.info().task_queue,
                 start_to_close_timeout=timedelta(hours=24),
                 heartbeat_timeout=timedelta(seconds=60),
@@ -105,6 +110,30 @@ class CardWorkflow:
             )
 
         try:
+            if incremental:
+                # A continuation carries the committed batch through service outages;
+                # it cannot accidentally generate the next batch before adopting this one.
+                phase = request.get("phase", "generate")
+                batch = request.get("batch")
+                if phase == "generate":
+                    batch = await step("generate_cards", value={"run_id": run_id})
+                    if "batch_key" not in batch:
+                        workflow.continue_as_new({"run_id": run_id, "gpu_queue": request["gpu_queue"]})
+                request = {**request, "phase": "vision", "batch": batch}
+                if phase in {"generate", "vision"}:
+                    await step("check_card_images", gpu=True, value=batch)
+                request = {**request, "phase": "adopt"}
+                result = await step("adopt_cards", value=batch)
+                next_request = {"run_id": run_id, "gpu_queue": request["gpu_queue"]}
+                if batch["more"]:
+                    workflow.continue_as_new(next_request)
+                if result["state"] == "needs_revision":
+                    repair = await step("schedule_card_repair", value={"run_id": run_id, "revision": result["revision"]})
+                    if repair["retry"]:
+                        workflow.continue_as_new(next_request)
+                return result
+            # Compatibility for histories which scheduled the old string activities.
+            # Remove after no pre-card-incremental-v1 execution remains open.
             await step("generate_cards")
             await step("check_card_images", gpu=True)
             return await step("adopt_cards")

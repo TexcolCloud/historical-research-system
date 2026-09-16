@@ -144,12 +144,14 @@ class CardEvidence:
             )
             return saved
         known = {u["unit_id"]: u for u in all_units}
-        # Fixed slots survive model retries, activity retries and process restarts.
+        # Query slots and the append-only read ledger survive worker restarts.
         searches = [
             await asyncio.to_thread(self.outputs.get, run_id, f"{stage}:search:{i}") for i in range(3)
         ]
         intents = [await asyncio.to_thread(self.outputs.get, run_id, f"{stage}:intent:{i}") for i in range(3)]
-        reads = [await asyncio.to_thread(self.outputs.get, run_id, f"{stage}:read:{i}") for i in range(3)]
+        reads = []
+        while receipt := await asyncio.to_thread(self.outputs.get, run_id, f"{stage}:read:{len(reads)}"):
+            reads.append(receipt)
 
         def allowed():
             return (
@@ -299,7 +301,7 @@ class CardEvidence:
             """Read complete original units with required linked notes/owners and headers.
 
             Accepts returned search IDs or assigned topic IDs for direct-source fallback.
-            At most three distinct reads. Related neighbor IDs can be read explicitly; originals are never truncated.
+            Repeated/subset reads reuse originals. Only new content consumes the token budget.
             """
             async with tool_lock:
                 identities = sorted(set(unit_ids))
@@ -308,12 +310,6 @@ class CardEvidence:
                 cached = next((r for r in reads if r and r["requested_ids"] == identities), None)
                 if cached:
                     return cached
-                if all(reads):
-                    raise ApplicationError(
-                        "读取次数不足以容纳主题证据，需拆分主题。",
-                        type="card_input_budget",
-                        non_retryable=True,
-                    )
                 selected = [known[i] for i in identities]
                 expanded = {
                     u["unit_id"]: {k: v for k, v in u.items() if k != "context"}
@@ -347,11 +343,14 @@ class CardEvidence:
                     for u in neighbor_context(all_units, selected)
                     if u["unit_id"] in known and u["unit_id"] not in expanded
                 ]
-                index = reads.index(None)
+                if set(expanded) <= read_units().keys():
+                    return receipt
+                index = len(reads)
                 tool_key = f"{stage}:read:{index}"
-                reads[index] = await asyncio.to_thread(
+                receipt = await asyncio.to_thread(
                     self.outputs.put, run_id, tool_key, receipt, dependency
                 )
+                reads.append(receipt)
                 self.outputs.node(
                     run_id,
                     tool_key,
@@ -369,11 +368,12 @@ class CardEvidence:
                 return receipt
             packed = source_payload({"source_units": receipt["units"]})
             return {"units": [*packed["source_units"], *packed["context_units"]],
-                    "related_unit_ids": receipt["related_unit_ids"]}
+                    "related_unit_ids": receipt["related_unit_ids"],
+                    "remaining_input_tokens": max(0, READ_TOKENS - estimate_request(list(read_units().values()))["input_tokens"])}
 
         @function_tool(failure_error_function=None)
         async def read_evidence(unit_ids: list[str]) -> str:
-            """Read complete original units and linked notes; at most three distinct reads."""
+            """Read complete originals and linked notes; cached content costs no additional allowance."""
             return json.dumps(read_view(await read_sources(unit_ids)), ensure_ascii=False)
 
         def validate(value):
@@ -432,6 +432,15 @@ class CardEvidence:
                      "originals": originals}, dependency,
                 )
 
+        # Restarts and validation repairs receive actual saved evidence, not only
+        # a fresh instruction to repeat the same tool sequence.
+        def resume_context():
+            included = {u["unit_id"] for u in (initial or {}).get("originals", {}).get("units", [])}
+            return {"resumed_evidence": {
+                "searches": [] if initial else [{k: row[k] for k in ("request", "hits")} for row in searches if row],
+                "originals": [u for identity, u in read_units().items() if identity not in included],
+                "remaining_input_tokens": max(0, READ_TOKENS - estimate_request(list(read_units().values()))["input_tokens"]),
+            }}
         result = await card_model(
             models,
             run_id,
@@ -442,6 +451,7 @@ class CardEvidence:
             "检查人物、时间、数量口径、作者/译者归属、反证和限定。findings 每条绑定实际已读来源 ID，"
             "分类记录具体发现，区分原文事实与推断；source_unit_ids 恰为这些发现使用的来源并集。"
             "预算不足或关键证据无法确定时 sufficient=false 并列出 unresolved_questions，不强行闭合。"
+            "resumed_evidence 是已完成的真实检索与已读原文；复用这些结果，只补充尚缺证据。"
             "若有 initial_evidence，三类检索已经完成，originals.units 是程序已读取的完整原文。"
             "优先据此直接评估，不重复检索和读取；只有原文尚未取得或需要更多相关原文时才调用工具。"
             "预装配不保证证据充分；预览提示尚未读取的反证或口径差异时，必须补读或明确保留未决问题。",
@@ -457,6 +467,7 @@ class CardEvidence:
             parent=parent,
             tools=[search_evidence, read_evidence],
             validate=validate,
+            resume_context=resume_context,
         )
         receipt = {
             "assessment": result.model_dump(),

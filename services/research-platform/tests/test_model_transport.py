@@ -11,6 +11,27 @@ from test_model_lifecycle import Receipt, setup
 from hrs_platform import agents as module
 
 
+@pytest.mark.parametrize("kind", ["card_input_budget", "retrieval_wait", "card_corpus_changed"])
+def test_real_sdk_preserves_tool_control_errors(monkeypatch, kind):
+    def provider(request):
+        value = success().json()
+        value["output"] = [{"id": "tool", "type": "function_call", "call_id": "read-1",
+                            "name": "read_evidence", "arguments": "{}", "status": "completed"}]
+        return httpx.Response(200, json=value)
+
+    @function_tool(failure_error_function=None)
+    async def read_evidence() -> str:
+        """Read synthetic evidence."""
+        raise ApplicationError("synthetic control", {"retry_at": 1234}, type=kind, non_retryable=True)
+
+    model, sends = transport_model(monkeypatch, provider)
+    with pytest.raises(ApplicationError) as failure:
+        asyncio.run(model.run("run", "control", "test", {}, Receipt, tools=[read_evidence]))
+    assert failure.value.type == kind
+    assert failure.value.details == ({"retry_at": 1234},)
+    assert len(sends) == 1
+
+
 def test_tool_history_budget_stops_before_sending_oversized_followup(monkeypatch):
     calls = []
 
@@ -125,7 +146,7 @@ def test_continuous_outage_keeps_cooldown_and_send_limit_across_restarts(monkeyp
             break
         with pytest.raises(ApplicationError) as failure:
             asyncio.run(model.run("run", "step", "test", {}, Receipt))
-        assert failure.value.type == ("model_transport_wait" if attempt < 3 else "model_transport_exhausted")
+        assert failure.value.type == "model_transport_wait"
         assert len(sends) == len(calls) == attempt
         # A fresh worker arriving before the persisted deadline cannot send early.
         with pytest.raises(ApplicationError):
@@ -134,6 +155,25 @@ def test_continuous_outage_keeps_cooldown_and_send_limit_across_restarts(monkeyp
         if attempt < 3:
             now[0] = failure.value.details[0]["retry_at"]
     assert len(calls) == 3
+
+
+def test_long_outage_resumes_without_spending_output_validation_attempts(monkeypatch):
+    now, calls = [1000.0], []
+    monkeypatch.setattr(module.time, "time", lambda: now[0])
+    def provider(request):
+        calls.append(True)
+        if len(calls) <= 8:
+            raise httpx.ConnectError("offline", request=request)
+        return success()
+    model, _ = transport_model(monkeypatch, provider)
+    for _ in range(8):
+        with pytest.raises(ApplicationError) as error:
+            asyncio.run(restart(model).run("run", "long", "test", {}, Receipt))
+        assert error.value.type == "model_transport_wait"
+        now[0] = error.value.details[0]["retry_at"]
+    assert now[0] - 1000 > 3600
+    assert asyncio.run(restart(model).run("run", "long", "test", {}, Receipt)).acknowledgement == "ready"
+    assert len(calls) == 9
 
 
 @pytest.mark.parametrize("status", [408, 409, 429, 500, 503])

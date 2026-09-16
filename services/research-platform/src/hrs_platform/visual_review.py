@@ -2,10 +2,12 @@
 
 import base64
 import json
+import time
 from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.error import HTTPError, URLError
 
 from botocore.exceptions import BotoCoreError, ClientError
 from hrs_runtime.local_vision import MODEL, POLICY, chat
@@ -184,10 +186,37 @@ class VisualReview:
                 label="原件视觉核验",
                 objective=f"对照原件 {group['pages']} 页",
                 parent=card["parent_node"],
-                state="failed",
+                state="waiting" if isinstance(error, ApplicationError) and error.type == "vision_service_wait" else "failed",
                 details={"error_type": type(error).__name__},
             )
             raise
+
+    def _response(self, run_id, request_key, response_key, request, messages):
+        """Separate local service outages from invalid visual verdict attempts."""
+        epoch = 0
+        while previous := self.outputs.get(run_id, response_key + f":transport:{epoch}"):
+            if previous["retry_at"] > time.time():
+                raise ApplicationError("本地视觉服务暂不可用，保留证据等待恢复。", previous, type="vision_service_wait", non_retryable=True)
+            epoch += 1
+        suffix = f":service:{epoch}" if epoch else ""
+        response = self.outputs.get(run_id, response_key + suffix)
+        if response is not None:
+            return response
+        if self.outputs.get(run_id, request_key + suffix):
+            return None  # Unknown outcome remains spent, never counted as approval.
+        self.outputs.reserve_request(run_id, request_key + suffix, request, self.settings.vision_max_calls)
+        try:
+            response = chat(messages, schema=ImageCheck.model_json_schema(), max_tokens=8000)
+        except (HTTPError, URLError, TimeoutError, ConnectionError) as error:
+            if isinstance(error, HTTPError) and error.code not in {408, 429} and error.code < 500:
+                raise ApplicationError("本地视觉服务拒绝请求，请检查配置。", type="vision_request_rejected", non_retryable=True) from None
+            receipt = {"attempt": epoch + 1, "retry_at": time.time() + min(60 * 2 ** min(epoch, 5), 1800)}
+            self.outputs.put(run_id, response_key + f":transport:{epoch}", receipt, request)
+            raise ApplicationError("本地视觉服务暂不可用，保留证据等待恢复。", receipt, type="vision_service_wait", non_retryable=True) from None
+        except ValueError:
+            response = {"invalid_output": True}
+        self.outputs.put(run_id, response_key + suffix, response, request)
+        return response
 
     def _check(self, run, bundle, card, group):
         run_id = run["id"]
@@ -249,9 +278,6 @@ class VisualReview:
                 if response is None:
                     # A recorded request with no response is an uncertain external call.
                     # Its allowance remains spent; recovery uses the next bounded attempt.
-                    if self.outputs.get(run_id, request_key):
-                        continue
-                    self.outputs.reserve_request(run_id, request_key, request, self.settings.vision_max_calls)
                     content = []
                     for image in evidence:
                         ref = image["reference"]
@@ -277,12 +303,10 @@ class VisualReview:
                             ),
                         }
                     )
-                    response = chat(
-                        [{"role": "system", "content": prompts.VISION}, {"role": "user", "content": content}],
-                        schema=ImageCheck.model_json_schema(),
-                        max_tokens=8000,
-                    )
-                    self.outputs.put(run_id, response_key, response, request)
+                    response = self._response(run_id, request_key, response_key, request,
+                        [{"role": "system", "content": prompts.VISION}, {"role": "user", "content": content}])
+                    if response is None:
+                        continue
                 try:
                     verdict = ImageCheck.model_validate_json(response["choices"][0]["message"]["content"])
                     identities = [item.item_id for item in verdict.items]

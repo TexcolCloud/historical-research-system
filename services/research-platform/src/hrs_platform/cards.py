@@ -10,7 +10,7 @@ from uuid import UUID, uuid5
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from temporalio.exceptions import ApplicationError
 
@@ -39,7 +39,6 @@ from .reading import (
 from .review import Review
 
 TOPIC_PREFLIGHT_TOKENS = 24000
-MAX_TOPIC_SPLIT_DEPTH = 4
 MAX_CARD_TOPICS = 256
 
 
@@ -185,7 +184,8 @@ def split_topic(topic, all_units):
         if (units[i].get("chapter_id"), units[i].get("section_path"))
         != (units[i - 1].get("chapter_id"), units[i - 1].get("section_path"))
     ]
-    middle = min(boundaries or range(1, len(units)), key=lambda i: abs(i - len(units) / 2))
+    weights = [estimate_request(unit)["input_tokens"] for unit in units]
+    middle = min(boundaries or range(1, len(units)), key=lambda i: abs(sum(weights[:i]) - sum(weights) / 2))
     return [
         CardTopic(
             name=f"{topic.name} · {i + 1}",
@@ -379,6 +379,21 @@ class Cards:
                         for offset in range(0, len(groups), width)
                     ],
                 )
+                # The fallback is already executable, rather than handing whole
+                # long chapters to evidence collection and waiting for overflow.
+                bounded = deque(plan.topics)
+                packed = []
+                while bounded:
+                    topic = bounded.popleft()
+                    selected = [u for u in units if u["unit_id"] in topic.unit_ids]
+                    children = split_topic(topic, units) if (
+                        len(selected) > 8 or estimate_request(selected)["input_tokens"] > 6000
+                    ) else []
+                    if children and len(packed) + len(bounded) + len(children) <= MAX_CARD_TOPICS:
+                        bounded.extendleft(reversed(children))
+                    else:
+                        packed.append(topic)
+                plan.topics = packed
             validate_topics(plan, units)
             receipt = self.outputs.put(
                 run_id,
@@ -406,14 +421,14 @@ class Cards:
             )
         return plan
 
-    async def generate(self, run_id):
+    async def generate(self, run_id, *, incremental=False):
         from agents import function_tool
 
         run = get_run(self.engine, run_id)
         generated_key = card_stage(run, "generated-cards")
         cached = self.outputs.get(run_id, generated_key)
         if cached:
-            return {"run_id": run_id, "candidates": len(cached["cards"])}
+            return {"run_id": run_id, "candidates": len(cached["cards"]), "batch_key": generated_key, "more": False}
         snapshot = self.outputs.get(run_id, "card-reading-sources:v2")
         if snapshot is None:
             chapters = [
@@ -434,9 +449,12 @@ class Cards:
             raise ValueError("No reviewed source text is available for card reading.")
         revision = (run.get("result") or {}).get("card_revision", 0)
         saved_plan = self.outputs.get(run_id, "card-reading-plan")
+        policy = self.outputs.get(run_id, "card-reading-policy")
+        if policy is None:
+            policy = self.outputs.put(run_id, "card-reading-policy", {"legacy_pairs": bool(saved_plan)}, {})
         # Preflight is a lower-bound estimate, not permission to exceed the hard cap.
         minimum = (
-            2 * ceil(len(all_units) / (2 if saved_plan else 8)) + ceil(len(all_units) / 8) + 4
+            2 * ceil(len(all_units) / (2 if policy["legacy_pairs"] else 8)) + ceil(len(all_units) / 8) + 4
         )
         budget = self.outputs.preflight(run_id, minimum, self.settings.model_max_calls)
         self.outputs.node(
@@ -448,7 +466,7 @@ class Cards:
             state="completed",
             details=budget,
         )
-        prior_cards, adopted_ids = {}, set()
+        prior_cards, prior_pending, adopted_ids = {}, {}, set()
         if revision:
             prior_run = {**run, "result": {**(run.get("result") or {}), "card_revision": revision - 1}}
             prior = (
@@ -457,6 +475,7 @@ class Cards:
                 or {"cards": []}
             )
             prior_cards = {row["id"]: row for row in prior["cards"]}
+            prior_pending = {(row["topic_index"], row.get("topic_path", "")): row for row in prior.get("pending_topics", [])}
             with self.engine.connect() as connection:
                 adopted_ids = set(
                     map(
@@ -593,6 +612,7 @@ class Cards:
             card_plan = CardPlan.model_validate(research["card_plan"])
         else:
             semaphore = asyncio.Semaphore(2)
+            remaining_reads = [8] if incremental else None
 
             async def read_assignment(number, assignment):
                 group = f"研究分工:v2:{number}"
@@ -615,7 +635,7 @@ class Cards:
                             # Freeze that layout once; new plans use token-packed structural units.
                             groups = (
                                 [units[i : i + 2] for i in range(0, len(units), 2)]
-                                if saved_plan
+                                if policy["legacy_pairs"]
                                 else list(coverage_batches(units))
                             )
                             batches = self.outputs.put(
@@ -628,17 +648,25 @@ class Cards:
                         offset = 0
                         for identities in batches:
                             batch = [by_id[identity] for identity in identities]
-                            reading = await read_batch(
-                                self.models,
-                                run_id,
-                                f"{group}:阅读:{offset}",
-                                batch,
-                                assignment.objective,
-                                branch,
-                                readings[-1] if readings else None,
-                                context=neighbor_context(all_units, batch),
-                                research_state=research_state,
-                            )
+                            reading_key = f"{group}:completed-batch:{offset}"
+                            reading = self.outputs.get(run_id, reading_key)
+                            if reading is None:
+                                if remaining_reads is not None:
+                                    if remaining_reads[0] == 0:
+                                        raise ApplicationError("阅读进度已保存，交还队列。", type="card_batch_yield", non_retryable=True)
+                                    remaining_reads[0] -= 1
+                                reading = await read_batch(
+                                    self.models,
+                                    run_id,
+                                    f"{group}:阅读:{offset}",
+                                    batch,
+                                    assignment.objective,
+                                    branch,
+                                    readings[-1] if readings else None,
+                                    context=neighbor_context(all_units, batch),
+                                    research_state=research_state,
+                                )
+                                self.outputs.put(run_id, reading_key, reading, {"units": batch, "assignment": assignment.model_dump()})
                             readings.append(reading)
                             offset += len(batch)
                         self.outputs.put(
@@ -654,7 +682,7 @@ class Cards:
                 try:
                     return await read_assignment(number, assignment)
                 except ApplicationError as error:
-                    if error.type not in {"model_transport_wait", "model_transport_exhausted"}:
+                    if error.type not in {"model_transport_wait", "model_transport_exhausted", "card_batch_yield"}:
                         raise
                     # Drain siblings already in flight. Models blocks new provider
                     # sends until the workflow's cooldown, without faking readings.
@@ -672,13 +700,15 @@ class Cards:
                 while isinstance(error, ExceptionGroup):
                     error = error.exceptions[0]
                 raise error from None
-            deferred = [job.result() for job in jobs if isinstance(job.result(), ApplicationError)]
+            deferred = [job.result() for job in jobs if isinstance(job.result(), ApplicationError) and job.result().type != "card_batch_yield"]
             if deferred:
                 terminal = next(
                     (error for error in deferred if error.type == "model_transport_exhausted"), None
                 )
                 error = terminal or max(deferred, key=lambda error: error.details[0]["retry_at"])
                 raise error from None
+            if any(isinstance(job.result(), ApplicationError) for job in jobs):
+                return {"run_id": run_id, "more": True, "stage": "reading"}
             readings = [record for job in jobs for record in job.result()]
             card_plan = await self._plan_topics(run_id, readings, all_units, chapters, main)
             self.outputs.put(
@@ -694,6 +724,7 @@ class Cards:
         produced, pending = [], []
         queue = deque((number, "", topic, main) for number, topic in enumerate(card_plan.topics))
         total_topics = len(queue)
+        processed = 0
         # Reserve all persisted descendants before permitting any new split. A
         # later sibling's old division must not consume an allowance twice.
         known = deque((f"卡片主题:v2:{number}", "") for number in range(len(card_plan.topics)))
@@ -707,6 +738,8 @@ class Cards:
                     (root, f"{path}.{i}" if path else str(i)) for i in range(len(division["topics"]))
                 )
         while queue:
+            if incremental and processed >= 1:
+                break
             number, path, topic, parent = queue.popleft()
             group = f"卡片主题:v2:{number}" + (f":split:{path}" if path else "")
             base_group = group
@@ -716,8 +749,14 @@ class Cards:
             if saved:
                 produced.append(saved)
                 continue
+            saved_pending = self.outputs.get(run_id, f"{base_group}:pending-result:{revision}")
+            if saved_pending:
+                pending.append(saved_pending)
+                continue
             prior_card = prior_cards.get(identity)
-            if identity in adopted_ids and prior_card:
+            repair = run.get("result") or {}
+            deferred = repair.get("auto_repair_deferred_ids", []) if repair.get("auto_repair_revision") == revision else []
+            if prior_card and (identity in adopted_ids or identity in deferred):
                 produced.append({**prior_card, "retained": True})
                 continue
             division = self.outputs.get(run_id, f"{base_group}:division")
@@ -732,6 +771,7 @@ class Cards:
                 continue
             if revision:
                 group += f":repair:{revision}"
+            processed += 1
             if prior_card:
                 from .visual_review import result_key
 
@@ -818,7 +858,8 @@ class Cards:
                         self.models, run_id, group, compact_readings(topic_readings), units, branch
                     )
                     evidence = await self.evidence.research(
-                        self.models, run_id, group, corpus, topic, synthesis_records, all_units, branch
+                        self.models, run_id, group, corpus, topic, synthesis_records, all_units, branch,
+                        previous=prior_pending.get((number, path)),
                     )
                     if not evidence["assessment"]["sufficient"]:
                         raise ApplicationError(
@@ -987,13 +1028,13 @@ class Cards:
                     "model_output_limit",
                     "card_input_budget",
                     "card_evidence_insufficient",
+                    "model_request_exhausted",
                 }:
                     raise
                 depth = len(path.split(".")) if path else 0
                 children = (
                     split_topic(topic, all_units)
                     if error.type in {"model_output_limit", "card_input_budget"}
-                    and depth < MAX_TOPIC_SPLIT_DEPTH
                     and total_topics < MAX_CARD_TOPICS
                     else []
                 )
@@ -1036,26 +1077,23 @@ class Cards:
                         "unit_ids": topic.unit_ids,
                     }
                 )
-                self.outputs.put(
-                    run_id,
-                    f"{base_group}:pending:{revision}:{fingerprint(pending[-1])}",
-                    pending[-1],
-                    {"topic": topic.model_dump()},
-                )
+                self.outputs.put(run_id, f"{base_group}:pending-result:{revision}", pending[-1], {"topic": topic.model_dump()})
+        batch = {"cards": produced, "pending_topics": pending, "complete": not queue}
+        batch_key = generated_key if not queue else generated_key + ":batch:" + fingerprint(batch)
         self.outputs.put(
             run_id,
-            generated_key,
-            {"cards": produced, "pending_topics": pending},
+            batch_key,
+            batch,
             {"reading_plan": plan.model_dump(), "card_plan": card_plan.model_dump()},
         )
         Activities(self.settings, self.engine).transition(run_id, "processing", "vision")
-        return {"run_id": run_id, "candidates": len(produced)}
+        return {"run_id": run_id, "candidates": len(produced), "batch_key": batch_key, "more": bool(queue)}
 
-    def check_images(self, run_id):
+    def check_images(self, run_id, batch_key=None):
         from .visual_review import VisualReview
 
         run = get_run(self.engine, run_id)
-        generated = self.outputs.get(run_id, card_stage(get_run(self.engine, run_id), "generated-cards"))
+        generated = self.outputs.get(run_id, batch_key or card_stage(run, "generated-cards"))
         bundle = self.review.read_json(run["conversion"])
         reviewer = VisualReview(self.settings, self.engine)
         for card in generated["cards"]:
@@ -1077,14 +1115,15 @@ class Cards:
                     )
         return {"run_id": run_id}
 
-    async def finalize(self, run_id):
+    async def finalize(self, run_id, batch_key=None):
         """Reconcile narrative with original checks; keep quotations, anchors and readings immutable."""
         from .visual_review import result_key
 
-        if self.outputs.get(run_id, card_stage(get_run(self.engine, run_id), "finalized-cards")):
+        final_stage = batch_key + ":finalized" if batch_key else card_stage(get_run(self.engine, run_id), "finalized-cards")
+        if self.outputs.get(run_id, final_stage):
             return {"run_id": run_id}
         Activities(self.settings, self.engine).transition(run_id, "processing", "finalization")
-        generated = self.outputs.get(run_id, card_stage(get_run(self.engine, run_id), "generated-cards"))
+        generated = self.outputs.get(run_id, batch_key or card_stage(get_run(self.engine, run_id), "generated-cards"))
         sources = {card["id"]: self.outputs.get(run_id, card["source_step"]) for card in generated["cards"]}
         snapshot = self.outputs.get(run_id, "card-reading-sources:v2")
         all_assigned = (
@@ -1222,7 +1261,7 @@ class Cards:
                     }
                 )
             except ApplicationError as error:
-                if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget"}:
+                if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget", "model_request_exhausted"}:
                     raise
                 finalized.append(
                     {**card, "processing_error": {"error_type": error.type, "message": str(error)[:500]}}
@@ -1230,17 +1269,17 @@ class Cards:
             self.outputs.put(run_id, final_key, finalized[-1], {"card": card, "checks": checks})
         self.outputs.put(
             run_id,
-            card_stage(get_run(self.engine, run_id), "finalized-cards"),
-            {"cards": finalized, "pending_topics": generated.get("pending_topics", [])},
+            final_stage,
+            {"cards": finalized, "pending_topics": generated.get("pending_topics", []), "complete": generated.get("complete", True)},
             {"generated": generated},
         )
         return {"run_id": run_id}
 
-    def adopt(self, run_id):
+    def adopt(self, run_id, batch_key=None):
         from .visual_review import result_key
 
         run = get_run(self.engine, run_id)
-        generated = self.outputs.get(run_id, card_stage(get_run(self.engine, run_id), "finalized-cards"))
+        generated = self.outputs.get(run_id, batch_key + ":finalized" if batch_key else card_stage(run, "finalized-cards"))
         if generated is None:
             raise ValueError(
                 "Final text review must incorporate original-image observations before adoption."
@@ -1319,10 +1358,14 @@ class Cards:
             if rows and not generated.get("pending_topics") and all(row["state"] == "adopted" for row in rows)
             else "needs_revision"
         )
+        if not generated.get("complete", True):
+            state = "processing"
+        elif batch_key:
+            self.outputs.put(run_id, card_stage(run, "finalized-cards"), generated, {"batch_key": batch_key})
         Activities(self.settings, self.engine).transition(
             run_id,
             state,
-            "complete" if state == "completed" else "machine_review",
+            "complete" if state == "completed" else "planning" if state == "processing" else "machine_review",
             result={
                 **(run.get("result") or {}),
                 "pending_topics": generated.get("pending_topics", []),
@@ -1336,6 +1379,61 @@ class Cards:
             "cards": len(rows),
             "adopted": sum(row["state"] == "adopted" for row in rows),
         }
+
+    def schedule_repair(self, run_id, revision):
+        """Advance only actionable failures, with durable idempotency and no-progress bounds."""
+        run = get_run(self.engine, run_id)
+        current = (run.get("result") or {}).get("card_revision", 0)
+        if current > revision:
+            return {"retry": True}
+        if current != revision or run["state"] != "needs_revision":
+            return {"retry": False}
+        generated = self.outputs.get(run_id, card_stage(run, "finalized-cards"))
+        actionable = []
+        deferred = []
+        for topic in generated.get("pending_topics", []):
+            if topic["error_type"] in {"model_output_invalid", "model_output_limit", "card_input_budget", "model_request_exhausted", "card_evidence_insufficient"}:
+                actionable.append({k: topic[k] for k in ("unit_ids", "error_type")})
+        with self.engine.connect() as connection:
+            rows = list(connection.execute(select(db.cards).where(db.cards.c.run_id == run_id, db.cards.c.state == "needs_revision")).mappings())
+        for row in rows:
+            checks = self.review.read_json(row["checks"])
+            visual = checks.get("visual", [])
+            missing_check = not visual or any(not check for check in visual)
+            failure_type = (checks.get("processing_error") or {}).get("error_type")
+            if (failure_type == "original_missing"
+                or (missing_check and failure_type != "visual_output_invalid")
+                or any(item["result"] in {"unreadable", "not_located", "not_checked"}
+                       for check in visual if check for item in check["items"])):
+                deferred.append(str(row["id"]))
+                continue
+            actionable.append({"id": str(row["id"]), "content": row["content"]["sha256"],
+                               "processing_error": checks.get("processing_error"),
+                               "findings": [(f.get("object_id"), f.get("code")) for f in checks["text"].get("findings", [])]})
+        signature = fingerprint(actionable)
+        with self.engine.begin() as connection:
+            from .deletion import require_run_active
+            require_run_active(connection, run_id)
+            fresh = connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update()).mappings().one()
+            result = dict(fresh["result"] or {})
+            if result.get("card_revision", 0) > revision:
+                return {"retry": True}
+            if fresh["state"] != "needs_revision":
+                return {"retry": False}
+            history = result.get("auto_repair_signatures", [])
+            retry = bool(actionable) and len(history) < 2 and signature not in history
+            result["auto_repair_status"] = "scheduled" if retry else "manual_required"
+            if retry:
+                result.update(card_revision=revision + 1, auto_repair_signatures=[*history, signature],
+                              auto_repair_revision=revision + 1, auto_repair_deferred_ids=deferred)
+            values = {"result": result, "revision": fresh["revision"] + 1, "updated_at": func.now()}
+            if retry:
+                values.update(state="processing", stage="planning")
+            connection.execute(update(db.runs).where(db.runs.c.id == run_id).values(**values))
+            connection.execute(insert(db.events).values(book_id=fresh["book_id"], run_id=run_id,
+                kind="run.changed", payload={"run_kind": "cards", "state": values.get("state", fresh["state"]),
+                "stage": values.get("stage", fresh["stage"]), "revision": values["revision"]}))
+        return {"retry": retry}
 
     def _supersede(self, identity):
         with self.engine.begin() as connection:

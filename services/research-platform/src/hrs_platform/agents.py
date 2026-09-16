@@ -14,6 +14,7 @@ from agents import (
     OpenAIResponsesModel,
     RunConfig,
     Runner,
+    UserError,
 )
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, DefaultAsyncHttpxClient
 from temporalio.exceptions import ApplicationError
@@ -28,13 +29,10 @@ class Models:
         self.settings, self.outputs = settings, Outputs(settings, engine)
 
     def _defer(self, run_id, receipt):
-        exhausted = receipt["attempt"] >= 3
         error = ApplicationError(
-            "文本服务连续不可用，已保留进度，请稍后手动重试。"
-            if exhausted
-            else "文本服务暂不可用，保留进度并等待自动恢复。",
+            "文本服务暂不可用，保留进度并等待自动恢复。",
             receipt,
-            type="model_transport_exhausted" if exhausted else "model_transport_wait",
+            type="model_transport_wait",
             non_retryable=True,
         )
         # One activity owns this instance. Stop new sends, but drain requests already
@@ -49,7 +47,8 @@ class Models:
 
     async def run(self, run_id, key, instructions, payload, output_type, **kwargs):
         # Provider schema mode can still return malformed JSON. Reuse the original
-        # source and durable response feedback, with a bounded total of three sends.
+        # source and durable response feedback, with three content attempts.
+        # Transport outages are separately paced by durable workflow timers.
         parent = kwargs.pop("parent", None) or execution_parent.get()
         close_dependency = {
             "instructions": instructions,
@@ -103,6 +102,16 @@ class Models:
                     return await close(history)
                 except StageInputMismatch:
                     raise
+                except UserError as error:
+                    # Agents SDK wraps tool exceptions. Preserve typed domain control
+                    # signals (split, service wait, source conflict), not arbitrary errors.
+                    cause, seen = error.__cause__, set()
+                    while cause is not None and id(cause) not in seen:
+                        if isinstance(cause, ApplicationError):
+                            raise cause from None
+                        seen.add(id(cause))
+                        cause = cause.__cause__
+                    raise
                 except (ModelBehaviorError, ValueError) as error:
                     if attempt == 2:
                         raise ApplicationError(
@@ -124,6 +133,7 @@ class Models:
         parent=None,
         validate=None,
         validation_version="1",
+        resume_context=None,
     ):
         # Callers explicitly select the reasoning model for planning/synthesis.
         # Model-name equality cannot distinguish roles when both use Flash.
@@ -195,6 +205,7 @@ class Models:
         attempt = 1
         request_maximum = maximum
         last_transport = None
+        failed_outputs = 0
         while (
             await asyncio.to_thread(
                 self.outputs.get, run_id, f"{request_prefix}:request:{attempt}", dependency
@@ -288,12 +299,12 @@ class Models:
                             details={"recovered_response_id": previous.get("id"), "model": model},
                         )
                         return recovered
+            if not last_transport and not deferred:
+                failed_outputs += 1
             attempt += 1
-        if attempt > 3:
-            if last_transport:
-                self._defer(run_id, last_transport)
+        if failed_outputs >= 3:
             raise ApplicationError(
-                "该模型步骤已达到三次请求上限，原始回执保留。",
+                "该模型步骤已达到三次内容校验或未知结果尝试上限，原始回执保留。",
                 type="model_output_invalid" if output_failure else "model_request_exhausted",
                 non_retryable=True,
             )
@@ -415,12 +426,13 @@ class Models:
             # HTTP requests retain their own timeout. Tool queue/inference time is
             # bounded by the tool, not charged against a whole multi-turn run.
             async with asyncio.timeout(None if tools else self.settings.model_timeout_seconds) as deadline:
+                model_input = {**payload, **resume_context()} if resume_context else payload
                 result = await Runner.run(
                     agent,
                     input=json.dumps(
-                        {"task": payload, "validation_feedback": validation_feedback}
+                        {"task": model_input, "validation_feedback": validation_feedback}
                         if validation_feedback
-                        else payload,
+                        else model_input,
                         ensure_ascii=False,
                         default=str,
                     ),
@@ -469,7 +481,7 @@ class Models:
             while cause is not None and len(causes) < 5:
                 causes.append(type(cause).__name__)
                 cause = cause.__cause__
-            delay = 60 if attempt == 1 else 300
+            delay = min(60 * 2 ** min(attempt - 1, 5), 1800)
             if isinstance(error, APIStatusError) and retryable:
                 header = error.response.headers.get("retry-after", "")
                 try:
@@ -490,7 +502,7 @@ class Models:
                 "cause_types": causes,
                 "elapsed_seconds": round(time.monotonic() - started, 3),
                 "failed_at": now,
-                "retry_at": now + delay if retryable and attempt < 3 else None,
+                "retry_at": now + delay if retryable else None,
             }
             await asyncio.to_thread(
                 self.outputs.put, run_id, f"{request_prefix}:transport-error:{attempt}", receipt, dependency
