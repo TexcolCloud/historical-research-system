@@ -10,11 +10,21 @@ import {
 import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents.ts";
 const UploadPanel = lazy(() => import("@/features/uploads/UploadPanel.tsx"));
 
+export type WorkspaceContext = {
+  upload: () => void;
+  filter: string;
+  setFilter: (value: string) => void;
+  search: string;
+  setSearch: (value: string) => void;
+};
+
 export default function AppShell() {
   const location = useLocation();
   const connected = useWorkspaceEvents();
   const [open, setOpen] = useState(false);
   const [started, setStarted] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
   function upload() {
     setStarted(true);
     setOpen(true);
@@ -72,7 +82,17 @@ export default function AppShell() {
           </span>
         </header>
         <main>
-          <Outlet context={{ upload }} />
+          <Outlet
+            context={
+              {
+                upload,
+                filter,
+                setFilter,
+                search,
+                setSearch,
+              } satisfies WorkspaceContext
+            }
+          />
         </main>
       </div>
       {started && (

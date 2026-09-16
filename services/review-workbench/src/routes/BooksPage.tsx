@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { BookOpen, Upload, Search, ArrowUpRight } from "lucide-react";
@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import { readBooks } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
 import DeleteBookButton from "@/features/books/DeleteBookButton.tsx";
+import type { WorkspaceContext } from "@/app/AppShell.tsx";
 const states: Record<string, string> = {
   uploading: "正在上传",
   queued: "等待处理",
@@ -22,13 +23,11 @@ const states: Record<string, string> = {
 
 export default function BooksPage() {
   const navigate = useNavigate();
-  const { upload } = useOutletContext<{ upload: () => void }>();
-  const [filter, setFilter] = useState("all"),
-    [search, setSearch] = useState("");
+  const { upload, filter, setFilter, search, setSearch } =
+    useOutletContext<WorkspaceContext>();
   const books = useQuery({
     queryKey: booksKey,
     queryFn: ({ signal }) => readBooks(signal),
-    refetchInterval: 30000,
   });
   const visible = useMemo(
     () =>

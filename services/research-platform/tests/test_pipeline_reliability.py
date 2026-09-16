@@ -160,7 +160,7 @@ def test_unpublished_shared_object_survives_other_book_deletion(platform, tmp_pa
         bucket="fake", client=SimpleNamespace(delete_object=lambda **kw: present.pop(kw["Key"], None))
     )
     monkeypatch.setattr(
-        "hrs_platform.services.deletion.search_client",
+        "hrs_platform.jobs.deletion.search_client",
         lambda _: SimpleNamespace(indices=SimpleNamespace(exists=lambda **_: False)),
     )
     assert cleanup.erase_book(a)["state"] == "completed"
@@ -273,7 +273,7 @@ def test_slow_upload_allows_deletion_request_and_other_book_writes(platform, tmp
         bucket="fake", client=SimpleNamespace(delete_object=lambda **kw: present.pop(kw["Key"], None))
     )
     monkeypatch.setattr(
-        "hrs_platform.services.deletion.search_client",
+        "hrs_platform.jobs.deletion.search_client",
         lambda _: SimpleNamespace(indices=SimpleNamespace(exists=lambda **_: False)),
     )
     with ThreadPoolExecutor(max_workers=3) as pool:
