@@ -79,17 +79,14 @@ async def recover_retrieval(engine, outputs, run_id, key, operation):
         previous, attempt = receipt, attempt + 1
 
     def defer(receipt):
-        exhausted = receipt["attempt"] >= 12
         raise ApplicationError(
-            "检索服务恢复等待已达上限，进度保留，请稍后重试。"
-            if exhausted
-            else "检索服务暂不可用，保留查询和证据，等待自动恢复。",
+            "检索服务暂不可用，保留查询和证据，等待自动恢复。",
             receipt,
-            type="retrieval_exhausted" if exhausted else "retrieval_wait",
+            type="retrieval_wait",
             non_retryable=True,
         ) from None
 
-    if previous and (previous["attempt"] >= 12 or previous["retry_at"] > time.time()):
+    if previous and previous["retry_at"] > time.time():
         defer(previous)
     try:
         return await operation()
@@ -108,7 +105,7 @@ async def recover_retrieval(engine, outputs, run_id, key, operation):
         )
         if not retryable:
             raise
-        receipt = {"attempt": attempt, "retry_at": time.time() + min(60 * 2 ** (attempt - 1), 300)}
+        receipt = {"attempt": attempt, "retry_at": time.time() + min(60 * 2 ** min(attempt - 1, 5), 1800)}
         await asyncio.to_thread(outputs.put, run_id, f"{prefix}:{attempt}", receipt, {"key": key})
         defer(receipt)
 

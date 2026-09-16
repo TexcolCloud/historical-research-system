@@ -271,6 +271,50 @@ def test_worker_failure_keeps_completed_topic_checkpoint(harness):
     assert [payload["objective"] for key, payload in calls if ":制卡:" in key] == ["topic-1", "topic-2"]
 
 
+def test_incremental_delivery_survives_later_topic_failure_and_auto_repairs_once(harness):
+    cards, run, _, scenario, calls = harness
+    first = asyncio.run(cards.generate(run, incremental=True))
+    assert first["more"] and first["candidates"] == 1
+    cards.check_images(run, first["batch_key"])
+    asyncio.run(cards.finalize(run, first["batch_key"]))
+    result = cards.adopt(run, first["batch_key"])
+    assert result["state"] == "processing" and result["adopted"] == 1
+    adopted = cards.list()[0]
+    scenario["fail_topic"] = "topic-1"
+    while True:
+        batch = asyncio.run(cards.generate(run, incremental=True))
+        cards.check_images(run, batch["batch_key"])
+        asyncio.run(cards.finalize(run, batch["batch_key"]))
+        result = cards.adopt(run, batch["batch_key"])
+        if not batch["more"]:
+            break
+    assert result["state"] == "needs_revision" and result["adopted"] == 2
+    assert cards.schedule_repair(run, 0) == {"retry": True}
+    assert cards.schedule_repair(run, 0) == {"retry": True}
+    assert get_run(cards.engine, run)["result"]["card_revision"] == 1
+    # Same deterministic failure cannot launch infinite automatic revisions.
+    result = finish(cards, run)
+    assert result["adopted"] == 2
+    assert cards.schedule_repair(run, 1) == {"retry": False}
+    assert next(row for row in cards.list() if row["id"] == adopted["id"])["content"] == adopted["content"]
+
+
+@pytest.mark.parametrize("harness", [80], indirect=True)
+def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(harness, monkeypatch):
+    cards, run, units, _, calls = harness
+    async def plan(*args):
+        return CardPlan(rationale="synthetic", topics=[dict(name=f"topic-{i}", objective=f"topic-{i}", unit_ids=[u["unit_id"]]) for i, u in enumerate(units)])
+    monkeypatch.setattr(cards, "_plan_topics", plan)
+    first = asyncio.run(cards.generate(run, incremental=True))
+    assert first == {"run_id": run, "more": True, "stage": "reading"}
+    reading_calls = [(key, payload) for key, payload in calls if ":reading:" in key]
+    assert len(reading_calls) == 8
+    calls.clear()
+    second = asyncio.run(cards.generate(run, incremental=True))
+    assert second["batch_key"] and second["more"]
+    assert len([key for key, _ in calls if ":reading:" in key]) == 2
+
+
 def test_generation_refuses_insufficient_budget_before_any_model(harness):
     cards, run, _, _, calls = harness
     cards.settings.model_max_calls = 1
@@ -350,11 +394,11 @@ def test_atomic_overflow_stays_pending_without_recursive_retries(harness):
     assert len(pending) == 1 and pending[0]["topic_path"] == ""
 
 
-def test_topic_preflight_splits_before_draft_calls_and_depth_is_bounded(harness, monkeypatch):
+def test_topic_preflight_splits_before_draft_calls_and_total_is_bounded(harness, monkeypatch):
     cards, run, units, scenario, calls = harness
     scenario["combined"] = True
     monkeypatch.setattr(module, "TOPIC_PREFLIGHT_TOKENS", 1)
-    monkeypatch.setattr(module, "MAX_TOPIC_SPLIT_DEPTH", 1)
+    monkeypatch.setattr(module, "MAX_CARD_TOPICS", 2)
     result = finish(cards, run)
     assert result["state"] == "needs_revision" and result["cards"] == 0
     pending = get_run(cards.engine, run)["result"]["pending_topics"]

@@ -1,6 +1,7 @@
 """Small SQL references to immutable S3 outputs and actual execution events."""
 
 import json
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from uuid import UUID, uuid5
@@ -14,6 +15,7 @@ from .activities import objects_for
 from .review import digest
 
 execution_parent = ContextVar("execution_parent", default=None)
+execution_progress = ContextVar("execution_progress", default=None)
 
 
 class StageInputMismatch(ValueError):
@@ -67,10 +69,14 @@ class Outputs:
                 or existing["reference"]["sha256"] != reference["sha256"]
             ):
                 raise RuntimeError("Stage output conflicts with already committed evidence.")
+        if progress := execution_progress.get():
+            progress.update(step=step, last_commit=time.monotonic())
         return value
 
     def node(self, run_id, key, *, kind, label, objective, state="running", parent=None, details=None):
         identity = str(uuid5(UUID(run_id), key))
+        if progress := execution_progress.get():
+            progress.update(step=label, state=state)
         reference = (
             self.objects.put_bytes(json.dumps(details, ensure_ascii=False, default=str).encode("utf-8"), run_id=run_id)
             if details is not None
@@ -133,7 +139,7 @@ class Outputs:
         try:
             yield identity
         except BaseException as error:
-            waiting = isinstance(error, ApplicationError) and error.type in {"model_transport_wait", "retrieval_wait"}
+            waiting = isinstance(error, ApplicationError) and error.type in {"model_transport_wait", "retrieval_wait", "vision_service_wait", "card_batch_yield"}
             self.node(
                 run_id,
                 key,
