@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from hrs_platform.retrieval_chunks import source_excerpt
-from hrs_platform.retrieval_evaluation import evaluate_cases
+from hrs_platform.services.retrieval_chunks import source_excerpt
+from hrs_platform.services.retrieval_evaluation import evaluate_cases
 
 
 def test_complete_rank_requires_all_evidence_and_reports_where_a_range_is_lost():

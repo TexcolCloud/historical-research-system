@@ -10,9 +10,9 @@ from dotenv import dotenv_values, set_key
 from psycopg import sql
 from sqlalchemy.engine import make_url
 
-from .database import engine_for, migrate
-from .settings import Settings
-from .worker import connect, register_namespace
+from hrs_platform.core.config import Settings
+from hrs_platform.core.db import engine_for, migrate
+from hrs_platform.jobs.worker import connect, register_namespace
 
 
 def bootstrap():

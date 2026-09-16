@@ -13,15 +13,16 @@ from temporalio.exceptions import ApplicationError
 from test_card_evidence import invoke
 from tokenizers import Tokenizer, models, pre_tokenizers
 
-from hrs_platform import schema as db
-from hrs_platform import search as module
-from hrs_platform.api import create_app
-from hrs_platform.books import get_run
-from hrs_platform.card_evidence import CardEvidence
-from hrs_platform.cards import Cards, CardTopic
-from hrs_platform.reading import reading_units
-from hrs_platform.retrieval_evaluation import evaluate
-from hrs_platform.search import Search
+from hrs_platform import models as db
+from hrs_platform.services import search as module
+from hrs_platform.main import create_app
+from hrs_platform.services.books import get_run
+from hrs_platform.services.card_evidence import CardEvidence
+from hrs_platform.services.cards import Cards
+from hrs_platform.services.cards import CardTopic
+from hrs_platform.services.reading import reading_units
+from hrs_platform.services.retrieval_evaluation import evaluate
+from hrs_platform.services.search import Search
 
 
 def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_vectors(platform, monkeypatch):

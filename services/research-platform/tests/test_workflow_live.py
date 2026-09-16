@@ -14,11 +14,12 @@ from sqlalchemy import select, update
 from temporalio import activity
 from temporalio.worker import Worker
 
-from hrs_platform import schema
-from hrs_platform.activities import Activities
-from hrs_platform.api import create_app
-from hrs_platform.worker import connect, dispatch_once
-from hrs_platform.workflows import ConversionWorkflow
+from hrs_platform import models as schema
+from hrs_platform.jobs.conversion import Activities
+from hrs_platform.main import create_app
+from hrs_platform.jobs.worker import connect
+from hrs_platform.jobs.worker import dispatch_once
+from hrs_platform.jobs.workflows import ConversionWorkflow
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("PLATFORM_TEST_TEMPORAL") != "1", reason="Opt in to the local Temporal/S3 integration test"

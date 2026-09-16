@@ -10,10 +10,13 @@ from temporalio import activity
 from temporalio.worker import Worker
 from test_book_deletion import seed
 
-from hrs_platform.books import list_books
-from hrs_platform.deletion import DeletionActivities, request_deletion
-from hrs_platform.worker import connect, dispatch_once
-from hrs_platform.workflows import BookWorkflow, DeleteBookWorkflow
+from hrs_platform.services.books import list_books
+from hrs_platform.jobs.deletion import DeletionActivities
+from hrs_platform.services.deletion import request_deletion
+from hrs_platform.jobs.worker import connect
+from hrs_platform.jobs.worker import dispatch_once
+from hrs_platform.jobs.workflows import BookWorkflow
+from hrs_platform.jobs.workflows import DeleteBookWorkflow
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("PLATFORM_TEST_TEMPORAL") != "1", reason="Local Temporal integration opt-in"

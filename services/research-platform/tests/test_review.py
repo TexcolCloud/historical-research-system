@@ -4,9 +4,10 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy import insert, select
 
-from hrs_platform import schema as db
-from hrs_platform.api import create_app
-from hrs_platform.review import Review, digest
+from hrs_platform import models as db
+from hrs_platform.main import create_app
+from hrs_platform.services.review import Review
+from hrs_platform.services.review import digest
 
 
 def seed(engine):
@@ -63,7 +64,7 @@ def test_confirmation_only_updates_one_issue_and_replays_receipt(platform, monke
 
     monkeypatch.setattr(review.objects, "put_bytes", forbidden)
     monkeypatch.setattr(review.objects, "read_bytes", forbidden)
-    from hrs_platform.contracts import ReviewDecision
+    from hrs_platform.schemas import ReviewDecision
 
     request = ReviewDecision(
         decision_id=uuid4(), expected_revision=1, expected_text_sha256=digest("unchanged"), action="confirm"

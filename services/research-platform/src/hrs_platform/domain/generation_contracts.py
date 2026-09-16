@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from .base import Contract, HistoricalDate
+from hrs_platform.domain.base import Contract, HistoricalDate
 
 
 class QuoteSelection(Contract):

@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import insert, select
 from test_review import seed
 
-from hrs_platform import schema as db
-from hrs_platform.api import create_app
+from hrs_platform import models as db
+from hrs_platform.main import create_app
 
 
 def test_lists_return_all_pages_without_duplicates(platform):

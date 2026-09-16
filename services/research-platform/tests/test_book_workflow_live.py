@@ -12,9 +12,11 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
 from temporalio.worker import Replayer, UnsandboxedWorkflowRunner, Worker
 
-from hrs_platform.settings import Settings
-from hrs_platform.worker import connect
-from hrs_platform.workflows import BookWorkflow, CardWorkflow, execute_with_service_recovery
+from hrs_platform.core.config import Settings
+from hrs_platform.jobs.worker import connect
+from hrs_platform.jobs.workflows import BookWorkflow
+from hrs_platform.jobs.workflows import CardWorkflow
+from hrs_platform.jobs.workflows import execute_with_service_recovery
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("PLATFORM_TEST_TEMPORAL") != "1", reason="Requires local Temporal"

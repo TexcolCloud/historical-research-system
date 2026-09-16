@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from pydantic import SecretStr
 
-from hrs_platform import chapter_content as module
+from hrs_platform.services import chapter_content as module
 
 
 def settings(bucket='one'):
@@ -46,8 +46,8 @@ def test_cached_chapter_still_checks_current_sql_reference_and_deletion(platform
     from fastapi import HTTPException
     from sqlalchemy import delete, insert, update
 
-    from hrs_platform import schema as db
-    from hrs_platform.library import Library
+    from hrs_platform import models as db
+    from hrs_platform.services.library import Library
 
     settings, engine = platform
     library = Library(settings, engine)

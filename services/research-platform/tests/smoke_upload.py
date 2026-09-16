@@ -10,9 +10,9 @@ import httpx
 from hrs_runtime.object_storage import S3Objects
 from sqlalchemy import select
 
-from hrs_platform import schema
-from hrs_platform.database import engine_for
-from hrs_platform.settings import Settings
+from hrs_platform import models as schema
+from hrs_platform.core.db import engine_for
+from hrs_platform.core.config import Settings
 
 
 def main():

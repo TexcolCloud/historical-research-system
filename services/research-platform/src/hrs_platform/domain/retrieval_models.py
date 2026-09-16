@@ -12,8 +12,8 @@ from transformers import (
     AutoTokenizer,
 )
 
-from .errors import Problem
-from .settings import MODEL_REVISIONS
+from hrs_platform.domain.errors import Problem
+from hrs_platform.domain.settings import MODEL_REVISIONS
 
 QWEN_INSTRUCTION = "Given a historical research question, retrieve source passages relevant to the question."
 QWEN_RANK_PREFIX = '<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n'

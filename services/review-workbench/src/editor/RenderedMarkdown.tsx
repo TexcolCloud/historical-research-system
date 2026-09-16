@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useId, useMemo } from "react";
-import { withFootnotes, type FootnoteLink } from "./footnotes";
+import { withFootnotes, type FootnoteLink } from "@/editor/footnotes.ts";
 
 function safeHtml(markdown: string) {
   return DOMPurify.sanitize(marked.parse(markdown, { async: false }), {

@@ -29,7 +29,19 @@ npm run dev
 | 执行关系图          | React Flow + Dagre，节点和连线由实际运行记录生成          |
 | 界面基础            | Radix UI、Tailwind、Lucide；复用现有组件                  |
 
-入口为 [PlatformApp.tsx](src/platform/PlatformApp.tsx)，书籍页为 [BookPage.tsx](src/platform/BookPage.tsx)。问题详情、原件、章节和卡片详情按需读取，书架不加载整书正文。
+目录参考 [Full Stack FastAPI Template 前端职责划分](https://github.com/fastapi/full-stack-fastapi-template/tree/cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7/frontend/src)，沿用已有 React Router、TanStack Query 和 openapi-fetch。
+
+| 位置 | 职责 |
+| --- | --- |
+| [main.tsx](src/main.tsx) | 创建根节点、QueryClient 和 Router provider |
+| [app/App.tsx](src/app/App.tsx)、[app/AppShell.tsx](src/app/AppShell.tsx) | 路由装配及跨页面外壳；上传会话随外壳存活，切换页面不会销毁正在上传的任务 |
+| `routes/` | 书架、单书、待办和卡片集合页面，组合对应功能；页面懒加载 |
+| `features/` | 上传、书籍管理、内容核对、阅读、卡片、搜索、运行与执行图；测试与功能同目录 |
+| `hooks/` | 全应用唯一的 SSE 订阅、断线显示、补充刷新与查询缓存更新 |
+| [client/api.ts](src/client/api.ts)、[client/schema.d.ts](src/client/schema.d.ts) | 类型化客户端、分页读取与生成的 API 契约 |
+| `components/`、`editor/`、`styles/` | 跨功能的基础界面、编辑器、布局与主题样式 |
+
+功能通过客户端访问后端，不依赖应用装配文件；共享外壳不承载书架筛选和卡片列表查询。问题详情、原件、章节和卡片详情按需读取，书架不加载整书正文。现有 URL、API 和缓存键保持兼容，旧 `src/platform/` 目录已移除。
 
 ## 交互约定
 
@@ -42,7 +54,7 @@ npm run dev
 
 ## 契约与检查
 
-`npm run contracts` 使用 [export-contracts.ts](scripts/export-contracts.ts)，先运行现役 FastAPI 的导出器，再生成 [schema.d.ts](src/platform/schema.d.ts)。契约工具依赖独立锁定，应用与工具的 TypeScript 版本不需要混装。修改接口时同时提交后端 OpenAPI 与前端类型。
+`npm run contracts` 使用 [export-contracts.ts](scripts/export-contracts.ts)，先运行现役 FastAPI 的导出器，再生成 [schema.d.ts](src/client/schema.d.ts)。契约工具依赖独立锁定，应用与工具的 TypeScript 版本不需要混装。修改接口时同时提交后端 OpenAPI 与前端类型。
 
 ```powershell
 npm run typecheck

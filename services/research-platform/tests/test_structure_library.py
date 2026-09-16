@@ -5,10 +5,10 @@ from sqlalchemy import select, update
 from test_review import seed
 from test_structure_views import table
 
-from hrs_platform import schema as db
-from hrs_platform.api import create_app
-from hrs_platform.exports import Exports
-from hrs_platform.library import Library
+from hrs_platform import models as db
+from hrs_platform.main import create_app
+from hrs_platform.services.exports import Exports
+from hrs_platform.services.library import Library
 
 
 def seed_structure_book(settings, engine):
@@ -82,8 +82,8 @@ def test_structure_read_api_cache_and_published_reader_share_checked_sources(pla
 def test_confirm_without_replacement_and_correction_both_prepare_for_ingestion(platform):
     from uuid import uuid4
 
-    from hrs_platform.contracts import ReviewDecision
-    from hrs_platform.review import digest
+    from hrs_platform.schemas import ReviewDecision
+    from hrs_platform.services.review import digest
 
     settings, engine = platform
     run, library = seed_structure_book(settings, engine)

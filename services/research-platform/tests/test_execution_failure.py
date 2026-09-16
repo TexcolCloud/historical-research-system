@@ -1,8 +1,10 @@
+from hrs_platform.services.lifecycle import RunLifecycle
 import pytest
 from temporalio.exceptions import ApplicationError
 from test_review import seed
 
-from hrs_platform.outputs import Outputs, execution_parent
+from hrs_platform.services.outputs import Outputs
+from hrs_platform.services.outputs import execution_parent
 
 
 def test_total_request_budget_is_not_a_local_output_error(platform):
@@ -41,7 +43,7 @@ def test_failed_research_branch_stops_showing_running_and_restores_parent(platfo
 
 
 def test_terminal_run_closes_abandoned_nodes_without_rewriting_completed_work(platform):
-    from hrs_platform.pipeline_activities import PipelineActivities
+    from hrs_platform.jobs.pipeline import PipelineActivities
 
     settings, engine = platform
     run, _ = seed(engine)
@@ -61,18 +63,18 @@ def test_service_recovery_is_visible_and_cleared_when_activity_resumes(platform,
     import asyncio
     from types import SimpleNamespace
 
-    from hrs_platform.activities import Activities
-    from hrs_platform.books import get_run
-    from hrs_platform.pipeline_activities import PipelineActivities
+    from hrs_platform.jobs.conversion import Activities
+    from hrs_platform.services.books import get_run
+    from hrs_platform.jobs.pipeline import PipelineActivities
 
     settings, engine = platform
     run, _ = seed(engine)
     pipeline = PipelineActivities(settings, engine)
     monkeypatch.setattr(
-        "hrs_platform.pipeline_activities.activity.info",
+        "hrs_platform.jobs.pipeline.activity.info",
         lambda: SimpleNamespace(activity_type="generate_cards"),
     )
-    monkeypatch.setattr("hrs_platform.pipeline_activities.activity.heartbeat", lambda *_: None)
+    monkeypatch.setattr("hrs_platform.jobs.pipeline.activity.heartbeat", lambda *_: None)
 
     async def offline():
         raise ApplicationError(
@@ -91,7 +93,7 @@ def test_service_recovery_is_visible_and_cleared_when_activity_resumes(platform,
     assert asyncio.run(pipeline.observe(run, done())) == {"complete": True}
     assert get_run(engine, run)["error"] is None
     assert Outputs(settings, engine).list_nodes(run)[0]["state"] == "completed"
-    Activities(settings, engine).transition(run, "processing", "planning", error=saved["error"])
+    RunLifecycle(engine).transition(run, "processing", "planning", error=saved["error"])
     pipeline.record_pipeline_failure(run)
     stopped = get_run(engine, run)
     assert stopped["state"] == "failed" and stopped["error"]["code"] == "model_transport_exhausted"

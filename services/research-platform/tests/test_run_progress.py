@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 
-from hrs_platform import schema as db
-from hrs_platform.activities import Activities
-from hrs_platform.api import create_app
+from hrs_platform import models as db
+from hrs_platform.services.lifecycle import RunLifecycle
+from hrs_platform.main import create_app
 from test_review import seed
 
 
@@ -14,7 +14,7 @@ def test_page_progress_is_observational_and_does_not_release_content(platform):
         connection.execute(
             update(db.runs).where(db.runs.c.id == run).values(state="processing", stage="vision")
         )
-    activities = Activities(settings, engine)
+    activities = RunLifecycle(engine)
     activities.report_progress(run, 12, 481)
     activities.report_progress(run, 12, 481)
     with engine.connect() as connection:

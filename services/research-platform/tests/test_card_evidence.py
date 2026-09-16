@@ -11,11 +11,14 @@ from agents.tool_context import ToolContext
 from temporalio.exceptions import ApplicationError
 from test_card_pipeline import MemoryOutputs, chapter
 
-from hrs_platform import card_evidence as module
-from hrs_platform.card_evidence import CardEvidence
-from hrs_platform.cards import CardTopic, quote_pages
-from hrs_platform.reading import compact_readings, coverage_batches, reading_units
-from hrs_platform.search import recover_retrieval
+from hrs_platform.services import card_evidence as module
+from hrs_platform.services.card_evidence import CardEvidence
+from hrs_platform.services.cards import CardTopic
+from hrs_platform.services.cards import quote_pages
+from hrs_platform.services.reading import compact_readings
+from hrs_platform.services.reading import coverage_batches
+from hrs_platform.services.reading import reading_units
+from hrs_platform.services.search import recover_retrieval
 
 
 @pytest.fixture
@@ -38,7 +41,7 @@ def research(monkeypatch):
     evidence = CardEvidence(settings, None, outputs, None)
     parent = {"result": {"published": True, "retrieval_generation": "generation"}}
     monkeypatch.setattr(module, "get_run", lambda *_: parent)
-    monkeypatch.setattr("hrs_platform.search.get_run", lambda *_: parent)
+    monkeypatch.setattr("hrs_platform.services.search.get_run", lambda *_: parent)
     corpus = {
         "book_id": original["book_id"],
         "parent_run_id": "parent",

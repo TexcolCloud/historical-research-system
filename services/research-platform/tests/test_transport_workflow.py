@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from temporalio.exceptions import ActivityError, ApplicationError
 
-from hrs_platform import workflows as module
+from hrs_platform.jobs import workflows as module
 
 
 @pytest.mark.parametrize("kind", ["model_transport", "retrieval"])

@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from hrs_platform.activities import Activities
+from hrs_platform.jobs.conversion import Activities
 
 
 def test_modified_markdown_or_missing_page_cannot_reuse_success_manifest(tmp_path):

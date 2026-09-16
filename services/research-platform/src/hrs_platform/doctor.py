@@ -10,10 +10,10 @@ from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 
-from .activities import objects_for
-from .database import engine_for
-from .search import search_client
-from .worker import connect
+from hrs_platform.core.db import engine_for
+from hrs_platform.jobs.worker import connect
+from hrs_platform.services.search import search_client
+from hrs_platform.services.storage import objects_for
 
 
 async def inspect(settings, *, gpu=True):

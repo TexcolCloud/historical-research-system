@@ -3,9 +3,9 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy import func, insert, select
 
-from hrs_platform import schema as db
-from hrs_platform.api import create_app
-from hrs_platform.recovery import workflow_id
+from hrs_platform import models as db
+from hrs_platform.main import create_app
+from hrs_platform.services.recovery import workflow_id
 
 
 def test_repeated_retry_only_starts_one_new_attempt_and_preserves_published_book(platform):
@@ -40,7 +40,7 @@ def test_repeated_retry_only_starts_one_new_attempt_and_preserves_published_book
 def test_parent_recovery_reuses_child_and_only_grants_one_request_epoch(platform):
     from sqlalchemy import update
 
-    from hrs_platform.cards import Cards
+    from hrs_platform.services.cards import Cards
 
     settings, engine = platform
     book, parent = str(uuid4()), str(uuid4())

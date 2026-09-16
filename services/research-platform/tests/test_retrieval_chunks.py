@@ -4,7 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from hrs_platform.retrieval_chunks import blocks, expand_hits, retrieval_chunks
+from hrs_platform.services.retrieval_chunks import blocks
+from hrs_platform.services.retrieval_chunks import expand_hits
+from hrs_platform.services.retrieval_chunks import retrieval_chunks
 
 
 def chapter(text):
@@ -184,7 +186,7 @@ def test_continued_table_keeps_event_intro_and_shared_cell_scope():
 def test_complete_paragraph_does_not_pull_optional_background():
     source = chapter('# 第一节\n\n直接答案。\n\n无关背景。')
     start=source['text'].index('直接答案')
-    from hrs_platform.retrieval_chunks import source_excerpt
+    from hrs_platform.services.retrieval_chunks import source_excerpt
     hit={**source_excerpt(source,start,start+len('直接答案。\n\n')),'score':1,'context':[]}
     result=expand_hits([hit],lambda _:source)
     assert all('无关背景' not in c['text'] for c in result[0]['context'])

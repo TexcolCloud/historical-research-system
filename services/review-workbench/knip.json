@@ -1,8 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/platform/main.tsx!", "scripts/export-contracts.ts!"],
+  "entry": ["src/main.tsx!", "scripts/export-contracts.ts!"],
   "project": ["src/**/*.{ts,tsx}!", "!src/**/*.test.{ts,tsx}!", "scripts/**/*.ts!"],
   "vite": false,
   "ignoreDependencies": ["tw-animate-css"],
-  "ignore": ["src/platform/schema.d.ts", "src/platform/test-responses.ts"]
+  "ignore": ["src/client/schema.d.ts", "src/test/responses.ts"]
 }

@@ -10,25 +10,30 @@ from uuid import uuid4
 import pytest
 from temporalio.exceptions import ApplicationError
 
-from hrs_platform import cards as module
-from hrs_platform.cards import CardPlan, Cards, ResearchPlan, neighbor_context, validate_topics
-from hrs_platform.domain.generation_contracts import CardDraft, CardRepair, ReadingRecord
-from hrs_platform.outputs import StageInputMismatch, fingerprint
-from hrs_platform.reading import (
-    card_model,
-    check_candidate_coverage,
-    read_batch,
-    reading_units,
-    scoped_check,
-    synthesis_readings,
-)
+from hrs_platform.services import cards as module
+from hrs_platform.services.cards import CardPlan
+from hrs_platform.services.cards import Cards
+from hrs_platform.services.cards import ResearchPlan
+from hrs_platform.services.cards import neighbor_context
+from hrs_platform.services.cards import validate_topics
+from hrs_platform.domain.generation_contracts import CardDraft
+from hrs_platform.domain.generation_contracts import CardRepair
+from hrs_platform.domain.generation_contracts import ReadingRecord
+from hrs_platform.services.outputs import StageInputMismatch
+from hrs_platform.services.outputs import fingerprint
+from hrs_platform.services.reading import card_model
+from hrs_platform.services.reading import check_candidate_coverage
+from hrs_platform.services.reading import read_batch
+from hrs_platform.services.reading import reading_units
+from hrs_platform.services.reading import scoped_check
+from hrs_platform.services.reading import synthesis_readings
 
 
 @pytest.fixture(autouse=True)
 def no_original_io(monkeypatch):
     monkeypatch.setattr(module, "CardEvidence", StubEvidence)
-    monkeypatch.setattr("hrs_platform.visual_review.VisualReview.__init__", lambda self, *args: None)
-    monkeypatch.setattr("hrs_platform.visual_review.VisualReview.prepare",
+    monkeypatch.setattr("hrs_platform.services.visual_review.VisualReview.__init__", lambda self, *args: None)
+    monkeypatch.setattr("hrs_platform.services.visual_review.VisualReview.prepare",
                         lambda self, run, bundle, numbers: {"pages": [], "issues": []})
 
 
@@ -172,7 +177,7 @@ def test_topic_plan_rejects_uncovered_duplicate_or_unknown_units(assigned):
 
 
 def test_oversized_requests_stop_before_model_and_preserve_atomic_sources(monkeypatch):
-    monkeypatch.setattr("hrs_platform.reading.CARD_INPUT_TOKENS", 1)
+    monkeypatch.setattr("hrs_platform.services.reading.CARD_INPUT_TOKENS", 1)
     models = SimpleNamespace(run=lambda *a, **k: pytest.fail("Oversize input reached a model"))
     with pytest.raises(ApplicationError, match="超过输入预算"):
         asyncio.run(
@@ -228,7 +233,7 @@ def test_digest_four_round_limit_routes_to_topic_recovery(monkeypatch, shrinks_o
         # request is still below the 48k hard input ceiling.
         return {"input_tokens": 1 if shrinks_on_last_round and len(calls) == 4 else 7000}
 
-    monkeypatch.setattr("hrs_platform.reading.estimate_request", estimate)
+    monkeypatch.setattr("hrs_platform.services.reading.estimate_request", estimate)
 
     async def run(run_id, key, instructions, payload, output_type, **kwargs):
         calls.append(key)
@@ -509,11 +514,11 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
     )
     transitions = []
     monkeypatch.setattr(
-        module, "Activities", lambda *_: SimpleNamespace(transition=lambda *args: transitions.append(args))
+        module, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: transitions.append(args))
     )
     monkeypatch.setattr("agents.Runner.run", lambda *a, **k: pytest.fail("Real model API called"))
     monkeypatch.setattr(
-        "hrs_platform.visual_review.VisualReview.check", lambda *a, **k: pytest.fail("Vision API called")
+        "hrs_platform.services.visual_review.VisualReview.check", lambda *a, **k: pytest.fail("Vision API called")
     )
     calls, cache, active, maximum, fail_topic = [], {}, 0, 0, True
     first_reads_ready = asyncio.Event()
@@ -695,7 +700,7 @@ def test_failed_assignment_drains_transport_siblings_but_cancels_on_global_error
             read_json=lambda _: {"manifest": {"pages": [], "page_count": 1}, "files": {}}
         ),
     )
-    monkeypatch.setattr(module, "Activities", lambda *_: SimpleNamespace(transition=lambda *args: None))
+    monkeypatch.setattr(module, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: None))
 
     async def plan(*args, **kwargs):
         assert args[4] is ResearchPlan

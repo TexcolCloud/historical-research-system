@@ -3,10 +3,10 @@ import json
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 
-from hrs_platform import schema as db
-from hrs_platform.activities import objects_for
-from hrs_platform.api import create_app
-from hrs_platform.outputs import Outputs
+from hrs_platform import models as db
+from hrs_platform.services.storage import objects_for
+from hrs_platform.main import create_app
+from hrs_platform.services.outputs import Outputs
 from test_review import seed
 
 
@@ -80,7 +80,7 @@ def test_committed_ocr_draft_and_images_are_readable_before_full_visual_review(p
         page = response.json()
         assert page["text"] == "技术识别底稿，尚未核验。" and page["machine_status"] == "unreviewed-source"
         assert client.get(page["image"]).content == b"technical-image-bytes"
-        from hrs_platform.storage import _reader_cache
+        from hrs_platform.services.storage import _reader_cache
         _reader_cache.clear()
         assert not (tmp_path / "review-reader").exists()
         assert client.get(f"/api/v2/runs/{run}/review-pages/1").json() == page

@@ -3,15 +3,14 @@ import json
 from sqlalchemy import select, update
 from test_review import seed
 
-from hrs_platform import schema as db
-from hrs_platform.contracts import ReviewDraft
-from hrs_platform.review import Review, digest
-from hrs_platform.review_repair import (
-    apply_verified_page,
-    machine_decision,
-    refresh_unresolved,
-    repair_scopes,
-)
+from hrs_platform import models as db
+from hrs_platform.schemas import ReviewDraft
+from hrs_platform.services.review import Review
+from hrs_platform.services.review import digest
+from hrs_platform.services.review_repair import apply_verified_page
+from hrs_platform.services.review_repair import machine_decision
+from hrs_platform.services.review_repair import refresh_unresolved
+from hrs_platform.services.review_repair import repair_scopes
 
 
 def prepared(platform, text, parts, concerns):
@@ -215,8 +214,8 @@ def test_pending_recheck_uses_only_pending_scope_and_preserves_approved_text(pla
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / 'document-extraction/src'))
     from document_extraction import semantic_completion
 
-    from hrs_platform.books import get_run
-    from hrs_platform.review_repair import recheck_pending
+    from hrs_platform.services.books import get_run
+    from hrs_platform.services.review_repair import recheck_pending
     review, run, ids = prepared(platform, '甲段。\n乙段。', ['甲段。', '乙段。'], [])
     assert machine_decision(review, review.get(ids[1]), '乙段人工定稿。', {'kind':'test'})
     approved_before = review.get(ids[1])['replacement']

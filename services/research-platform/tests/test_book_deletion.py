@@ -1,5 +1,6 @@
 """Real PostgreSQL/S3 ownership and recoverable deletion, using unique synthetic bytes."""
 
+from hrs_platform.services.lifecycle import RunLifecycle
 import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -9,12 +10,14 @@ from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from sqlalchemy import insert, select
 
-from hrs_platform import schema as db
-from hrs_platform.activities import Activities
-from hrs_platform.api import create_app
-from hrs_platform.books import list_books
-from hrs_platform.deletion import DeletionActivities, remove_cache, request_deletion
-from hrs_platform.search import search_client
+from hrs_platform import models as db
+from hrs_platform.jobs.conversion import Activities
+from hrs_platform.main import create_app
+from hrs_platform.services.books import list_books
+from hrs_platform.jobs.deletion import DeletionActivities
+from hrs_platform.jobs.deletion import remove_cache
+from hrs_platform.services.deletion import request_deletion
+from hrs_platform.services.search import search_client
 
 
 def seed(engine, *, source=None, stage="verify_upload"):
@@ -42,7 +45,7 @@ def test_delete_is_immediate_idempotent_and_blocks_recovery(platform):
         with engine.connect() as connection:
             assert connection.scalar(select(db.outbox.c.delivered)) is True
         with pytest.raises(Exception, match="正在删除"):
-            Activities(settings, engine).transition(run, "processing", "conversion")
+            RunLifecycle(engine).transition(run, "processing", "conversion")
 
 
 def test_unfinished_upload_without_run_can_be_deleted(platform, monkeypatch):
@@ -62,7 +65,7 @@ def test_unfinished_upload_without_run_can_be_deleted(platform, monkeypatch):
         }
         stopped = []
         monkeypatch.setattr(
-            "hrs_platform.upload_cleanup.terminate_upload",
+            "hrs_platform.services.upload_cleanup.terminate_upload",
             lambda settings, identity, session: stopped.append(identity),
         )
         assert api.post(

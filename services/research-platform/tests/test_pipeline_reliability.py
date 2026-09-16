@@ -10,10 +10,10 @@ import pytest
 from pypdf import PdfWriter
 from sqlalchemy import insert, select, update
 
-from hrs_platform import schema as db
-from hrs_platform.activities import Activities
-from hrs_platform.deletion import request_deletion
-from hrs_platform.review import Review
+from hrs_platform import models as db
+from hrs_platform.jobs.conversion import Activities
+from hrs_platform.services.deletion import request_deletion
+from hrs_platform.services.review import Review
 from test_book_deletion import seed
 
 
@@ -73,10 +73,11 @@ def test_verified_upload_releases_temporary_pdf(tmp_path, monkeypatch):
         put_file=lambda *a, **k: {"sha256": "saved"},
     )
     monkeypatch.setattr(
-        "hrs_platform.activities.get_run",
+        "hrs_platform.jobs.conversion.get_run",
         lambda *a: {"source": {"upload_key": "fake", "byte_length": len(data)}},
     )
-    activity.transition = lambda *a, **k: None
+    monkeypatch.setattr("hrs_platform.jobs.conversion.RunLifecycle",
+                        lambda *_: SimpleNamespace(transition=lambda *a, **k: None))
     for _ in range(2):
         activity.verify_upload(str(uuid4()))
     assert not list(tmp_path.rglob("*.pdf"))
@@ -84,7 +85,7 @@ def test_verified_upload_releases_temporary_pdf(tmp_path, monkeypatch):
 
 
 def test_delivery_cursor_keeps_late_commits(platform):
-    from hrs_platform.api import read_events
+    from hrs_platform.services.events import read_events
 
     _, engine = platform
     book, _ = seed(engine)
@@ -105,7 +106,7 @@ def test_delivery_cursor_keeps_late_commits(platform):
 
 
 def test_isolated_stage_does_not_block_heartbeat():
-    from hrs_platform.pipeline_activities import isolated
+    from hrs_platform.jobs.pipeline import isolated
 
     async def scenario():
         ticks = []
@@ -127,8 +128,8 @@ def test_isolated_stage_does_not_block_heartbeat():
 
 
 def test_unpublished_shared_object_survives_other_book_deletion(platform, tmp_path, monkeypatch):
-    from hrs_platform.activities import objects_for
-    from hrs_platform.deletion import DeletionActivities
+    from hrs_platform.services.storage import objects_for
+    from hrs_platform.jobs.deletion import DeletionActivities
     from hrs_runtime.object_storage import S3Objects
     import hashlib
 
@@ -159,7 +160,7 @@ def test_unpublished_shared_object_survives_other_book_deletion(platform, tmp_pa
         bucket="fake", client=SimpleNamespace(delete_object=lambda **kw: present.pop(kw["Key"], None))
     )
     monkeypatch.setattr(
-        "hrs_platform.deletion.search_client",
+        "hrs_platform.services.deletion.search_client",
         lambda _: SimpleNamespace(indices=SimpleNamespace(exists=lambda **_: False)),
     )
     assert cleanup.erase_book(a)["state"] == "completed"
@@ -172,10 +173,10 @@ def test_unpublished_shared_object_survives_other_book_deletion(platform, tmp_pa
 
 
 def test_index_uses_owned_requests_and_durable_recovery(platform, monkeypatch):
-    from hrs_platform.pipeline_activities import PipelineActivities
-    from hrs_platform.search import remote_compute
+    from hrs_platform.jobs.pipeline import PipelineActivities
+    from hrs_platform.services.search import remote_compute
     from hrs_platform.domain.errors import Problem
-    from hrs_platform.outputs import Outputs
+    from hrs_platform.services.outputs import Outputs
     from temporalio.exceptions import ApplicationError
 
     settings, engine = platform
@@ -188,7 +189,7 @@ def test_index_uses_owned_requests_and_durable_recovery(platform, monkeypatch):
         return remote_compute("http://fixture.invalid/retrieval", "embed", ["fixture"])
 
     search = SimpleNamespace(index=index, outputs=Outputs(settings, engine))
-    monkeypatch.setattr("hrs_platform.pipeline_activities.Search", lambda *_: search)
+    monkeypatch.setattr("hrs_platform.jobs.pipeline.Search", lambda *_: search)
 
     async def observe(run, operation, **kwargs):
         return await operation
@@ -211,7 +212,7 @@ def test_index_uses_owned_requests_and_durable_recovery(platform, monkeypatch):
 
 def test_isolated_cancellation_drains_real_operation():
     from threading import Event
-    from hrs_platform.pipeline_activities import isolated
+    from hrs_platform.jobs.pipeline import isolated
 
     started, drained = Event(), Event()
 
@@ -241,8 +242,8 @@ def test_slow_upload_allows_deletion_request_and_other_book_writes(platform, tmp
     from threading import Event
     import hashlib
     from hrs_runtime.object_storage import S3Objects
-    from hrs_platform.activities import objects_for
-    from hrs_platform.deletion import DeletionActivities
+    from hrs_platform.services.storage import objects_for
+    from hrs_platform.jobs.deletion import DeletionActivities
 
     settings, engine = platform
     settings = settings.model_copy(update={"cache_root": tmp_path})
@@ -272,7 +273,7 @@ def test_slow_upload_allows_deletion_request_and_other_book_writes(platform, tmp
         bucket="fake", client=SimpleNamespace(delete_object=lambda **kw: present.pop(kw["Key"], None))
     )
     monkeypatch.setattr(
-        "hrs_platform.deletion.search_client",
+        "hrs_platform.services.deletion.search_client",
         lambda _: SimpleNamespace(indices=SimpleNamespace(exists=lambda **_: False)),
     )
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -300,13 +301,13 @@ def test_reentered_upload_removes_old_source_cache(tmp_path, monkeypatch):
     activity = Activities.__new__(Activities)
     activity.settings, activity.engine = SimpleNamespace(cache_root=tmp_path), None
     activity.objects = SimpleNamespace(verify=lambda _: None)
-    monkeypatch.setattr("hrs_platform.activities.get_run", lambda *_: {"source": {"sha256": "saved"}})
+    monkeypatch.setattr("hrs_platform.jobs.conversion.get_run", lambda *_: {"source": {"sha256": "saved"}})
     activity.verify_upload(run)
     assert not path.exists()
 
 
 def test_publish_cannot_resurrect_deleting_book(platform, monkeypatch):
-    from hrs_platform.library import Library
+    from hrs_platform.services.library import Library
     from fastapi import HTTPException
 
     settings, engine = platform
@@ -324,8 +325,8 @@ def test_publish_cannot_resurrect_deleting_book(platform, monkeypatch):
 
 def test_delivery_migration_preserves_issued_cursors(platform):
     from sqlalchemy import text
-    from hrs_platform.database import migrate
-    from hrs_platform.api import read_events
+    from hrs_platform.core.db import migrate
+    from hrs_platform.services.events import read_events
 
     _, engine = platform
     book, _ = seed(engine)
@@ -352,8 +353,8 @@ def test_async_activity_lock_wait_keeps_heartbeats_on_worker_loop(platform):
     from threading import get_ident
     from sqlalchemy import text
     from temporalio.testing import ActivityEnvironment
-    from hrs_platform.pipeline_activities import PipelineActivities
-    from hrs_platform.storage import object_lock
+    from hrs_platform.jobs.pipeline import PipelineActivities
+    from hrs_platform.services.storage import object_lock
 
     settings, engine = platform
     _, run = seed(engine)

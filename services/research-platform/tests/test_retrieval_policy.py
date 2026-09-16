@@ -1,4 +1,6 @@
-from hrs_platform.search import EVIDENCE_RULE, MODEL_REVISIONS, calibrated_policy
+from hrs_platform.services.search import EVIDENCE_RULE
+from hrs_platform.services.search import MODEL_REVISIONS
+from hrs_platform.services.search import calibrated_policy
 
 
 def test_calibration_expires_when_source_or_model_changes():

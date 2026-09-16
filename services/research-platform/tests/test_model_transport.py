@@ -8,7 +8,7 @@ from agents import function_tool
 from temporalio.exceptions import ApplicationError
 from test_model_lifecycle import Receipt, setup
 
-from hrs_platform import agents as module
+from hrs_platform.services import agents as module
 
 
 @pytest.mark.parametrize("kind", ["card_input_budget", "retrieval_wait", "card_corpus_changed"])
@@ -48,7 +48,7 @@ def test_tool_history_budget_stops_before_sending_oversized_followup(monkeypatch
         return "仅为合成测试来源，不可截断。" * 10000
 
     model, sends = transport_model(monkeypatch, provider)
-    monkeypatch.setattr("hrs_platform.reading.CARD_INPUT_TOKENS", 10000)
+    monkeypatch.setattr("hrs_platform.services.reading.CARD_INPUT_TOKENS", 10000)
     with pytest.raises(ApplicationError) as failure:
         asyncio.run(model.run("run", "tool-budget", "test", {}, Receipt, tools=[read_evidence]))
     assert failure.value.type == "card_input_budget"

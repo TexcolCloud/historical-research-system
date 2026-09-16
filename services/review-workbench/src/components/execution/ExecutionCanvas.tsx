@@ -11,12 +11,12 @@ import {
   useUpdateNodeInternals,
 } from "@xyflow/react";
 import type { Node, NodeProps, Edge, ReactFlowInstance } from "@xyflow/react";
-import { layoutGraph } from "./agent-graph.ts";
+import { layoutGraph } from "@/components/execution/agent-graph.ts";
 import type {
   ExecutionNode,
   ExecutionEdge,
   Position as Point,
-} from "./agent-graph.ts";
+} from "@/components/execution/agent-graph.ts";
 import "@xyflow/react/dist/style.css";
 
 type RuntimeNode = Node<

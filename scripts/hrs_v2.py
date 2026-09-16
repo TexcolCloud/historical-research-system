@@ -173,8 +173,8 @@ def main():
     elif args.command == "status":
         compose("ps")
     elif args.command == "doctor":
+        from hrs_platform.core.config import Settings
         from hrs_platform.doctor import run
-        from hrs_platform.settings import Settings
 
         raise SystemExit(run(Settings.load(ROOT)))
     else:

@@ -2,7 +2,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RenderedMarkdown } from "./RenderedMarkdown";
+import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 
 afterEach(() => {
   cleanup();
