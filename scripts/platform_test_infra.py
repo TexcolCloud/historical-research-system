@@ -1,8 +1,8 @@
 """Wait for only the explicitly isolated platform CI object store."""
 import time
 
-from hrs_platform.activities import objects_for
-from hrs_platform.settings import Settings
+from hrs_platform.services.storage import objects_for
+from hrs_platform.core.config import Settings
 
 
 def main():

@@ -8,8 +8,8 @@ import pytest
 from pydantic import BaseModel
 from sqlalchemy import delete, insert
 
-from hrs_platform import schema as db
-from hrs_platform.agents import Models
+from hrs_platform import models as db
+from hrs_platform.services.agents import Models
 
 
 class Receipt(BaseModel):

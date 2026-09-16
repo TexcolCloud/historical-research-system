@@ -31,7 +31,7 @@ docker compose -f services/document-retrieval/config/compose.yml up -d --wait
 
 | 配置入口                                          | 当前行为                                                                                                                                                                     |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 根 `.env` 与进程环境变量                          | 主机 [Settings.load](src/hrs_platform/settings.py) 先读文件，再以同名进程变量覆盖；优先读取 `PLATFORM_*` 字段，缺失时兼容部分 `INGEST_*`、`CARDS_*` 和 `DEEPSEEK_*` 字段     |
+| 根 `.env` 与进程环境变量                          | 主机 [Settings.load](src/hrs_platform/core/config.py) 先读文件，再以同名进程变量覆盖；优先读取 `PLATFORM_*` 字段，缺失时兼容部分 `INGEST_*`、`CARDS_*` 和 `DEEPSEEK_*` 字段     |
 | [应用 Compose](../../deploy/platform/compose.yml) | 显式将根配置映射到容器；例如 `CARDS_REASONING_MODEL` 映射成容器的 `PLATFORM_REASONING_MODEL`。不能假定任意主机变量都自动进入容器                                             |
 | 文本模型                                          | Settings 与 Compose 未配置时均使用 `deepseek-flash`；但当前 [配置模板](../../.env.platform.example) 显式设置 `CARDS_REASONING_MODEL=deepseek-v4-pro`，复制模板后会覆盖默认值 |
 | 自动制卡                                          | `PLATFORM_AUTO_CARDS_ENABLED=false` 使书籍在索引后结束；不取消已创建任务，也不禁用独立手动制卡                                                                               |
@@ -39,6 +39,26 @@ docker compose -f services/document-retrieval/config/compose.yml up -d --wait
 | 输出与调用预算                                    | 阅读首轮 16000、推理首轮 32000、输出封顶 64000 tokens；文本与视觉调用预算默认分别为 4096，实际以配置和回执为准                                                               |
 
 要统一使用 Flash，在根 `.env` 设置两项 `CARDS_REASONING_MODEL=deepseek-flash`、`CARDS_READING_MODEL=deepseek-flash`；同时核对是否有更高优先级的 `PLATFORM_REASONING_MODEL` 或 `PLATFORM_READING_MODEL`。此说明不代表对用户现有配置作了修改。
+
+## 分层与职责
+
+目录职责参考 [Full Stack FastAPI Template 的固定版本](https://github.com/fastapi/full-stack-fastapi-template/tree/cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7/backend/app)，采用应用装配、分组路由、依赖注入和核心配置的组织方式。本项目的长任务逻辑独立于 HTTP 入口，保留既有 SQLAlchemy、S3 与 Temporal，不引入重复的 ORM、存储库包装层或模板中的用户／邮件业务。
+
+| 位置 | 唯一职责 |
+| --- | --- |
+| [main.py](src/hrs_platform/main.py) | 装配 FastAPI、异常处理与应用资源生命周期；外部注入的数据库连接池由调用方管理 |
+| [api/main.py](src/hrs_platform/api/main.py)、`api/routes/` | 按书籍、史料卡、运行、核对、检索、上传、事件和健康检查注册路由；负责请求校验、响应及 HTTP 头 |
+| [api/deps.py](src/hrs_platform/api/deps.py) | 提供应用级资源和可覆盖的请求依赖，测试可以替换业务服务而不启动模型 |
+| `services/` | 业务用例及其数据操作：上传事务、内容审阅、入库、检索、制卡、删除请求、导出；跨入口复用同一实现 |
+| [services/lifecycle.py](src/hrs_platform/services/lifecycle.py)、[services/events.py](src/hrs_platform/services/events.py) | 共享任务状态事务及已提交事件的分发次序，不依赖 HTTP 路由或 worker |
+| `jobs/` | Temporal 工作流、活动适配器、worker 注册／派发及转换 CLI 调用；不定义第二份业务状态规则 |
+| `core/config.py`、`core/db.py` | 配置加载、数据库连接与迁移入口 |
+| [models.py](src/hrs_platform/models.py)、[schemas.py](src/hrs_platform/schemas.py) | SQL 表结构与公开请求／响应模型，迁移历史保留在 `migrations/` |
+| `domain/` | 已有文本、结构、token 与模型数据契约和算法；不依赖应用装配、路由或 worker |
+
+依赖方向是 `main → api → services → core/models/domain`，`jobs → services`；业务代码不得反向导入 `main/api/jobs`。SQL 事务留在有业务含义的服务中，S3 对象归属保护由 `services/storage.py` 实现。既有异常的 HTTP 状态和响应格式保持兼容。Python 内部导入全部迁移到新位置，不保留空转的旧模块转发层；Temporal 工作流和活动名称、检查点键及 CLI 命令保持兼容。
+
+`tests/test_app_composition.py` 验证依赖替换、应用资源隔离、生命周期及分层方向；其余测试继续覆盖原业务链路。离线回归使用合成内容和模拟模型响应，默认不启用真实文本／视觉模型测试。
 
 ## 处理流程与数据职责
 
@@ -58,13 +78,13 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 ## 检索与来源
 
-当前分块规则为 `structure-1400-160-v6-evidence-scopes`，见 [retrieval_chunks.py](src/hrs_platform/retrieval_chunks.py)。已发布章节是正文与字符坐标的权威来源，索引不改写它。
+当前分块规则为 `structure-1400-160-v6-evidence-scopes`，见 [retrieval_chunks.py](src/hrs_platform/services/retrieval_chunks.py)。已发布章节是正文与字符坐标的权威来源，索引不改写它。
 
 - 正文以 1400 字符为目标、最多 160 字符重叠；连续标题携带首段。
 - 表格按完整行组处理，保留表头、合并单元格及表前范围说明；脚注保留正文归属，不猜测歧义链接。
 - 书名、章节路径、表头和脚注加入检索投影；图片路径及通用占位符不进入嵌入文本。
 - BGE 输入按实际 tokenizer 限制至 6144 tokens；超长结构在投影层划窗，保留原文坐标。重排按问题与文段总 token 数划窗。
-- 默认每路召回 50、重排 30、返回 8 条；单条上下文预算 6000 字符、整次 24000 字符，实际参数见 [API 路由](src/hrs_platform/api.py)。
+- 默认每路召回 50、重排 30、返回 8 条；单条上下文预算 6000 字符、整次 24000 字符，实际参数见 [API 路由](src/hrs_platform/main.py)。
 - 相交证据合并，必要标题、脚注与限定信息随结果返回；共享统计量不能因分行而被误归属。
 
 索引检查点按文本、模型与规则指纹复用，只有变化或缺失输入重算。运行结果的 `retrieval_metrics` 记录计算／复用量；搜索的 `Server-Timing` 区分召回、嵌入、重排和上下文组装耗时。
@@ -81,8 +101,8 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 ### 评测
 
-- `evaluate --run-id UUID --cases dataset.json [--semantic]`：评测已发布书籍，题目格式由 [retrieval_evaluation.py](src/hrs_platform/retrieval_evaluation.py) 定义。
-- `evaluate-offline --cases dataset.json`：创建独立 `hrs-offline-*` 临时索引比较候选策略，见 [离线评测实现](src/hrs_platform/retrieval_offline.py)。
+- `evaluate --run-id UUID --cases dataset.json [--semantic]`：评测已发布书籍，题目格式由 [retrieval_evaluation.py](src/hrs_platform/services/retrieval_evaluation.py) 定义。
+- `evaluate-offline --cases dataset.json`：创建独立 `hrs-offline-*` 临时索引比较候选策略，见 [离线评测实现](src/hrs_platform/services/retrieval_offline.py)。
 - [Ragas 操作说明](evaluation/tools/ragas/README.md)：冻结真实检索上下文，再运行离线回答与模型评分。
 
 评测数据与报告留在本地或 S3。单书、合成输入及同书新页段的结果不能推断跨书泛化；开发机器评审不能冒充人工金标。
@@ -95,7 +115,7 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 模型输入按来源 ID 去重，关联脚注与表头通过 ID/role 指向保留的完整原文，不以摘要替换证据。上一批阅读线索和综合输入去除重复候选引文。局部制卡修订只输出变更条目及必要元数据；程序合并后检查引用关系，仍对完整候选执行独立语义、主题全文覆盖和本地原图核验。未按条目建立可靠影响范围前，不跳过整卡最终核验。
 
-主题研究复用 [OpenSearch 检索](src/hrs_platform/search.py) 和 [证据工具](src/hrs_platform/card_evidence.py)：
+主题研究复用 [OpenSearch 检索](src/hrs_platform/services/search.py) 和 [证据工具](src/hrs_platform/services/card_evidence.py)：
 
 1. 新主题规划同时生成支持、反证、限定三类查询，程序先执行检索、去重与原文装配，模型可直接评估证据。旧检查点中未含查询的主题、规划回退及定向补证仍由 Agent 调用 `search_evidence`。支持材料先查主题章节，无命中时扩大到本书；反证与限定查全书。沿用混合召回、重排和校准。
 2. `read_evidence` 读取固定来源原文，并保留必需的关联脚注、归属和表头；邻文返回可选 ID，需要时显式读取。预览、线索与模型概括不能作为引用；工具不能读取其他书籍或任意文件。
@@ -126,7 +146,7 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 检索工具进度不进入模型输入指纹，最终阶段保存失败可复用已完成模型结果。GPU 排队超过 60 秒交回持久化恢复；工具等待不消耗文本模型请求超时，HTTP 请求仍独立限时。取消检索携带任务和请求标识，终止所属 GPU 工作并等待底层线程结束；取消接口断连时也要等原调用退出，不能提前释放活动名额。
 
-检查点绑定完整输入、来源和规则；输入改变不能复用旧批准。关闭网页不终止工作流；服务恢复后由 Temporal 接续。执行页展示等待原因和预计重试时间。具体预算与恢复判断见 [工作流](src/hrs_platform/workflows.py) 和 [研究调用实现](src/hrs_platform/agents.py)。
+检查点绑定完整输入、来源和规则；输入改变不能复用旧批准。关闭网页不终止工作流；服务恢复后由 Temporal 接续。执行页展示等待原因和预计重试时间。具体预算与恢复判断见 [工作流](src/hrs_platform/jobs/workflows.py) 和 [研究调用实现](src/hrs_platform/services/agents.py)。
 
 制卡活动心跳包含当前步骤及距最近检查点的时间。超过 30 分钟（或两倍文本请求超时，取较大值）没有新检查点会中止该次活动并按有限活动重试恢复；取消等待底层请求退出，避免占用尚未释放就重复启动。不把持续心跳视为业务进展。合成故障测试覆盖 SDK 异常包装、长期断连、视觉服务等待、分批采用、检查点恢复和自动修订去重；真实卡片准确度仍须另行验证。
 
@@ -147,7 +167,7 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 ### 备份与恢复
 
-[备份实现](src/hrs_platform/backups.py) 使用 Docker 容器内的 PostgreSQL 工具，默认数据库容器名为 `historical-ingestion-acceptance-postgres-1`；其他容器名需设置进程变量 `PLATFORM_POSTGRES_CONTAINER`。数据库用户须有相应备份／建库权限。外部 PostgreSQL 和 S3 必须继续运行。
+[备份实现](src/hrs_platform/services/backups.py) 使用 Docker 容器内的 PostgreSQL 工具，默认数据库容器名为 `historical-ingestion-acceptance-postgres-1`；其他容器名需设置进程变量 `PLATFORM_POSTGRES_CONTAINER`。数据库用户须有相应备份／建库权限。外部 PostgreSQL 和 S3 必须继续运行。
 
 先停止上传与应用，并等待启动器退出。备份命令会检查应用／Temporal 容器及主机端口是否已停，但该检查不能替代对自定义部署的协调停写：
 
@@ -171,9 +191,9 @@ $backupReference = Get-Content -Raw backup-reference.json
 
 | 入口                                                                                           | 职责                                                                                                            |
 | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| [api.py](src/hrs_platform/api.py)、[OpenAPI](openapi.json)                                     | HTTP 路由与生成契约                                                                                             |
+| [api.py](src/hrs_platform/main.py)、[OpenAPI](openapi.json)                                     | HTTP 路由与生成契约                                                                                             |
 | [cli.py](src/hrs_platform/cli.py)                                                              | `migrate/api/namespace/worker/gpu-worker/doctor/backup/restore/reindex/amend-library/evaluate/evaluate-offline` |
-| [workflows.py](src/hrs_platform/workflows.py)、[activities.py](src/hrs_platform/activities.py) | Temporal 编排与实际阶段                                                                                         |
+| [workflows.py](src/hrs_platform/jobs/workflows.py)、[activities.py](src/hrs_platform/jobs/conversion.py) | Temporal 编排与实际阶段                                                                                         |
 | [domain/](src/hrs_platform/domain/)                                                            | 来源、研究合同与模型适配规则                                                                                    |
 | [migrations/](src/hrs_platform/migrations/)                                                    | 版本化数据库迁移                                                                                                |
 | [tests/](tests/)                                                                               | 行为与故障恢复回归                                                                                              |

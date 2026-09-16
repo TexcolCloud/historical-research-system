@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from hrs_platform.activities import Activities
+from hrs_platform.jobs.conversion import Activities
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows venv interpreter process ownership")
@@ -35,8 +35,8 @@ def test_conversion_cancellation_reaps_its_owned_interpreter_child(platform, tmp
         if pid_file.exists():
             raise InterruptedError("technical Temporal cancellation")
 
-    monkeypatch.setattr("hrs_platform.activities.subprocess.Popen", launch)
-    monkeypatch.setattr("hrs_platform.activities.activity.heartbeat", heartbeat)
+    monkeypatch.setattr("hrs_platform.jobs.conversion.subprocess.Popen", launch)
+    monkeypatch.setattr("hrs_platform.jobs.conversion.activity.heartbeat", heartbeat)
     with pytest.raises(InterruptedError, match="technical Temporal cancellation"):
         Activities(settings, engine)._extract(
             "fixture", tmp_path / "source.pdf", tmp_path / "conversion", phase="review"

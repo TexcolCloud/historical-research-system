@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { splitMarkdown } from "./markdown.ts";
+import { splitMarkdown } from "@/editor/markdown.ts";
 
 test("splitting keeps Markdown, embedded HTML and uncommon Unicode exact", () => {
   const original =

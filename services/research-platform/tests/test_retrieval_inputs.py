@@ -6,11 +6,13 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import insert, select
 
-from hrs_platform import schema as db
-from hrs_platform import search as module
-from hrs_platform.retrieval_chunks import retrieval_chunks
-from hrs_platform.retrieval_inputs import bounded_chunks, ranking_windows, windows
-from hrs_platform.search import Search
+from hrs_platform import models as db
+from hrs_platform.services import search as module
+from hrs_platform.services.retrieval_chunks import retrieval_chunks
+from hrs_platform.services.retrieval_inputs import bounded_chunks
+from hrs_platform.services.retrieval_inputs import ranking_windows
+from hrs_platform.services.retrieval_inputs import windows
+from hrs_platform.services.search import Search
 
 
 class CharacterTokens:

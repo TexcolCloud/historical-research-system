@@ -1,5 +1,5 @@
-from . import prompts
-from .tokens import estimate_request
+from hrs_platform.domain import prompts
+from hrs_platform.domain.tokens import estimate_request
 
 DIGEST_INSTRUCTIONS = (
     prompts.COMMON

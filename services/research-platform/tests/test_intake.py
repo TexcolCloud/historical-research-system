@@ -3,9 +3,9 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from hrs_platform import schema
-from hrs_platform.api import create_app
-from hrs_platform.database import migrate
+from hrs_platform import models as schema
+from hrs_platform.main import create_app
+from hrs_platform.core.db import migrate
 
 
 def test_duplicate_finish_commits_one_run_without_temporal(platform):

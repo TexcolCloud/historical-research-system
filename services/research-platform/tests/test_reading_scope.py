@@ -8,7 +8,10 @@ from pydantic import ValidationError
 from test_card_pipeline import MemoryOutputs, record, verdict
 
 from hrs_platform.domain.generation_contracts import ReadingRecord
-from hrs_platform.reading import coverage, read_batch, scoped_check, source_payload
+from hrs_platform.services.reading import coverage
+from hrs_platform.services.reading import read_batch
+from hrs_platform.services.reading import scoped_check
+from hrs_platform.services.reading import source_payload
 
 
 def test_reading_batch_checks_sources_once_and_repairs_only_missing_verdicts():

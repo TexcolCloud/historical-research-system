@@ -8,10 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import insert
 
-from hrs_platform import schema as db
-from hrs_platform.activities import objects_for
-from hrs_platform.api import create_app
-from hrs_platform.search import Search
+from hrs_platform import models as db
+from hrs_platform.services.storage import objects_for
+from hrs_platform.main import create_app
+from hrs_platform.services.search import Search
 
 
 @pytest.mark.skipif(

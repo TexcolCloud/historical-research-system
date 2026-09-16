@@ -5,10 +5,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import insert
 
-from hrs_platform import schema as db
-from hrs_platform.cards import Cards, validate_final_candidate
+from hrs_platform import models as db
+from hrs_platform.services.cards import Cards
+from hrs_platform.services.cards import validate_final_candidate
 from hrs_platform.domain.generation_contracts import CardDraft
-from hrs_platform.visual_review import result_key
+from hrs_platform.services.visual_review import result_key
 
 
 def draft():

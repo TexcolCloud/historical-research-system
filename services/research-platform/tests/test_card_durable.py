@@ -8,8 +8,8 @@ import pytest
 from temporalio.exceptions import ActivityError, ApplicationError
 from test_card_pipeline import MemoryOutputs
 
-from hrs_platform import visual_review as visual
-from hrs_platform import workflows as workflows
+from hrs_platform.services import visual_review as visual
+from hrs_platform.jobs import workflows as workflows
 
 
 class Continued(BaseException):
@@ -99,7 +99,7 @@ def test_local_vision_outage_uses_service_epochs_and_saved_response(monkeypatch)
 
 
 def test_business_stall_is_not_hidden_by_live_worker_heartbeats(monkeypatch):
-    from hrs_platform import pipeline_activities as module
+    from hrs_platform.jobs import pipeline as module
     pipeline = module.PipelineActivities(SimpleNamespace(model_timeout_seconds=10), None)
     values = iter([0, 1900])
     monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: next(values, 1900)))
@@ -108,7 +108,7 @@ def test_business_stall_is_not_hidden_by_live_worker_heartbeats(monkeypatch):
     monkeypatch.setattr(module.activity, "heartbeat", lambda value: beats.append(value))
     failures = []
     monkeypatch.setattr(module, "get_run", lambda *args: {"stage": "planning"})
-    monkeypatch.setattr(module, "Activities", lambda *args: SimpleNamespace(transition=lambda *args, **kwargs: failures.append(kwargs)))
+    monkeypatch.setattr(module, "RunLifecycle", lambda *args: SimpleNamespace(transition=lambda *args, **kwargs: failures.append(kwargs)))
     async def observe(*args, **kwargs):
         await asyncio.Event().wait()
     monkeypatch.setattr(pipeline, "_observe", observe)

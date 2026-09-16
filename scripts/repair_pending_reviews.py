@@ -3,10 +3,11 @@
 import argparse
 import json
 
-from hrs_platform.database import engine_for
-from hrs_platform.review import Review
-from hrs_platform.review_repair import recheck_pending, repair_scopes
-from hrs_platform.settings import Settings
+from hrs_platform.core.db import engine_for
+from hrs_platform.services.review import Review
+from hrs_platform.services.review_repair import recheck_pending
+from hrs_platform.services.review_repair import repair_scopes
+from hrs_platform.core.config import Settings
 
 
 def main():

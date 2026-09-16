@@ -7,8 +7,9 @@ from psycopg import sql
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
-from hrs_platform.activities import objects_for
-from hrs_platform.backups import dump_database, restore_database
+from hrs_platform.services.storage import objects_for
+from hrs_platform.services.backups import dump_database
+from hrs_platform.services.backups import restore_database
 
 
 @pytest.mark.skipif(os.environ.get("PLATFORM_TEST_BACKUP") != "1", reason="Opt-in real pg_dump/S3/pg_restore drill")

@@ -1,7 +1,7 @@
 import argparse
 
-from .database import engine_for, migrate
-from .settings import Settings
+from hrs_platform.core.config import Settings
+from hrs_platform.core.db import engine_for, migrate
 
 
 def main():
@@ -40,7 +40,7 @@ def main():
         from pathlib import Path
         from uuid import UUID
 
-        from .library import Library
+        from hrs_platform.services.library import Library
         if not args.run_id or not args.amendments:
             parser.error('amend-library requires --run-id and --amendments')
         settings = Settings.load()
@@ -56,7 +56,7 @@ def main():
         import json
         from pathlib import Path
 
-        from .retrieval_offline import evaluate_offline
+        from hrs_platform.services.retrieval_offline import evaluate_offline
         if not args.cases:
             parser.error('evaluate-offline requires --cases dataset.json')
         settings = Settings.load()
@@ -70,7 +70,7 @@ def main():
         import json
         from uuid import UUID
 
-        from .search import Search
+        from hrs_platform.services.search import Search
 
         if not args.run_id:
             parser.error(f"{args.command} requires --run-id")
@@ -87,7 +87,7 @@ def main():
             if args.command == "evaluate":
                 from pathlib import Path
 
-                from .retrieval_evaluation import evaluate
+                from hrs_platform.services.retrieval_evaluation import evaluate
 
                 result = evaluate(
                     search,
@@ -105,7 +105,7 @@ def main():
     if args.command in {"backup", "restore"}:
         import json
 
-        from .backups import backup, restore
+        from hrs_platform.services.backups import backup, restore
 
         if args.command == "restore" and (not args.manifest_reference or not args.restore_suffix):
             parser.error("restore requires --manifest-reference and --restore-suffix")
@@ -117,7 +117,7 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     if args.command == "doctor":
-        from .doctor import run
+        from hrs_platform.doctor import run
 
         raise SystemExit(run(Settings.load()))
     if args.command == "migrate":
@@ -130,7 +130,7 @@ def main():
         import uvicorn
 
         uvicorn.run(
-            "hrs_platform.api:create_app",
+            "hrs_platform.main:create_app",
             factory=True,
             host=args.host,
             port=args.port,
@@ -139,7 +139,7 @@ def main():
     else:
         import asyncio
 
-        from .worker import register_namespace, run_worker
+        from hrs_platform.jobs.worker import register_namespace, run_worker
 
         settings = Settings.load()
         import signal

@@ -22,7 +22,7 @@ execFileSync(
     ),
     resolve(root, "services/research-platform/openapi.json"),
     "-o",
-    resolve(root, "services/review-workbench/src/platform/schema.d.ts"),
+    resolve(root, "services/review-workbench/src/client/schema.d.ts"),
   ],
   { cwd: root, stdio: "inherit" },
 );

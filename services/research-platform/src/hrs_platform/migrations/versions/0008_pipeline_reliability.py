@@ -3,7 +3,7 @@
 import sqlalchemy as sa
 from alembic import op
 
-from hrs_platform.schema import object_owners
+from hrs_platform.models import object_owners
 
 revision = "0008_pipeline_reliability"
 down_revision = "0007_book_deletions"

@@ -10,15 +10,19 @@ from sqlalchemy import delete, insert
 from temporalio.exceptions import ApplicationError
 from test_card_pipeline import StubEvidence, chapter, record, verdict
 
-from hrs_platform import cards as module
-from hrs_platform import schema as db
-from hrs_platform.books import get_run
-from hrs_platform.cards import CardPlan, Cards, ResearchPlan
-from hrs_platform.domain.generation_contracts import CardDraft, CardRepair, ReadingRecord
-from hrs_platform.outputs import fingerprint
-from hrs_platform.reading import reading_units
-from hrs_platform.recovery import retry_run
-from hrs_platform.visual_review import result_key
+from hrs_platform.services import cards as module
+from hrs_platform import models as db
+from hrs_platform.services.books import get_run
+from hrs_platform.services.cards import CardPlan
+from hrs_platform.services.cards import Cards
+from hrs_platform.services.cards import ResearchPlan
+from hrs_platform.domain.generation_contracts import CardDraft
+from hrs_platform.domain.generation_contracts import CardRepair
+from hrs_platform.domain.generation_contracts import ReadingRecord
+from hrs_platform.services.outputs import fingerprint
+from hrs_platform.services.reading import reading_units
+from hrs_platform.services.recovery import retry_run
+from hrs_platform.services.visual_review import result_key
 
 
 @pytest.fixture
@@ -153,9 +157,9 @@ def harness(platform, monkeypatch, request):
             {},
         )
 
-    monkeypatch.setattr("hrs_platform.visual_review.VisualReview.check", lambda self, *args: vision(*args))
+    monkeypatch.setattr("hrs_platform.services.visual_review.VisualReview.check", lambda self, *args: vision(*args))
     monkeypatch.setattr(
-        "hrs_platform.visual_review.VisualReview.prepare",
+        "hrs_platform.services.visual_review.VisualReview.prepare",
         lambda self, run, bundle, numbers: {"pages": [], "issues": []},
     )
     monkeypatch.setattr("agents.Runner.run", lambda *a, **k: pytest.fail("Real model API called"))

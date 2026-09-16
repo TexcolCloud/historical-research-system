@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from .api import create_app
+from hrs_platform.main import create_app
 
 
 def main():

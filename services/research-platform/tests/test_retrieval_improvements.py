@@ -3,9 +3,12 @@ from uuid import uuid4
 
 import pytest
 
-from hrs_platform.retrieval_chunks import expand_hits, retrieval_chunks
-from hrs_platform.retrieval_ranking import diverse_order, fuse, lexical_query
-from hrs_platform.search import Search
+from hrs_platform.services.retrieval_chunks import expand_hits
+from hrs_platform.services.retrieval_chunks import retrieval_chunks
+from hrs_platform.services.retrieval_ranking import diverse_order
+from hrs_platform.services.retrieval_ranking import fuse
+from hrs_platform.services.retrieval_ranking import lexical_query
+from hrs_platform.services.search import Search
 
 
 def chapter(text):
@@ -52,7 +55,7 @@ def test_diversity_is_opt_in_and_preserves_all_candidates():
 
 
 def test_hybrid_retrieval_widens_candidates_but_bounds_reranking(monkeypatch):
-    from hrs_platform import search as module
+    from hrs_platform.services import search as module
 
     source = chapter("运输记录。")
     chunk = next(retrieval_chunks(source, "书"))
@@ -94,7 +97,7 @@ def test_hybrid_retrieval_widens_candidates_but_bounds_reranking(monkeypatch):
 
 
 def test_offline_unreviewed_sample_is_rejected_before_storage_or_inference():
-    from hrs_platform.retrieval_offline import evaluate_offline
+    from hrs_platform.services.retrieval_offline import evaluate_offline
 
     source = {**chapter("未核对正文"), "development_review": {}}
     with pytest.raises(ValueError, match="original-first"):
@@ -102,7 +105,7 @@ def test_offline_unreviewed_sample_is_rejected_before_storage_or_inference():
 
 
 def test_embedding_windows_reserve_linked_footnote_budget():
-    from hrs_platform.retrieval_inputs import bounded_chunks
+    from hrs_platform.services.retrieval_inputs import bounded_chunks
 
     source = chapter("运输登记。" * 50 + "[^a]\n\n[^a]: 不包括乙地。\n")
     tokenizer = SimpleNamespace(encode=lambda text: SimpleNamespace(ids=list(text)))
@@ -129,7 +132,7 @@ def test_diversity_does_not_promote_a_remote_weak_chapter():
 
 
 def test_candidate_reservation_keeps_single_lane_evidence_and_budget():
-    from hrs_platform.retrieval_ranking import candidates_for_rerank
+    from hrs_platform.services.retrieval_ranking import candidates_for_rerank
     def row(i):
         return {'_id':i, '_source':{'id':i}}
     lanes = [[row('lexical'), row('shared1'), row('shared2')],
@@ -139,7 +142,7 @@ def test_candidate_reservation_keeps_single_lane_evidence_and_budget():
 
 
 def test_only_explicit_two_part_requests_are_split_without_rewriting_facts():
-    from hrs_platform.retrieval_ranking import multipart_queries
+    from hrs_platform.services.retrieval_ranking import multipart_queries
     assert multipart_queries('请分别指出甲军调动的日期，以及乙地税率所据的月份。') == ['甲军调动的日期', '乙地税率所据的月份']
     assert multipart_queries('分别找出甲地部队的人数，以及乙地部队的番号？') == ['甲地部队的人数', '乙地部队的番号']
     for query in ['两支部队分别有多少人？', '请分别指出日期，以及人数。',
@@ -172,7 +175,7 @@ def test_two_part_search_retains_each_clause_and_respects_shared_budget():
 
 
 def test_structured_table_windows_preserve_rowspans_and_long_notes_keep_owner():
-    from hrs_platform.retrieval_inputs import bounded_chunks
+    from hrs_platform.services.retrieval_inputs import bounded_chunks
     tokenizer = SimpleNamespace(encode=lambda text: SimpleNamespace(ids=list(text)))
     text = '<table><tr><th>地</th><th>量</th></tr>' + ''.join(
         '<tr><td rowspan="2">甲</td><td>120</td></tr><tr><td>130</td></tr>' for _ in range(8)) + '</table>'
@@ -189,7 +192,7 @@ def test_structured_table_windows_preserve_rowspans_and_long_notes_keep_owner():
 
 
 def test_no_answer_thresholds_are_diagnostics_not_probabilities():
-    from hrs_platform.retrieval_evaluation import threshold_diagnostics
+    from hrs_platform.services.retrieval_evaluation import threshold_diagnostics
     result = threshold_diagnostics([
         {'unanswerable':False, 'timing':{'top_rerank_score':3}},
         {'unanswerable':True, 'timing':{'top_rerank_score':1}},

@@ -8,9 +8,9 @@ import {
   TableCell,
   TableHeader,
 } from "@tiptap/extension-table";
-import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
+import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import DOMPurify from "dompurify";
-import { splitMarkdown } from "./markdown.ts";
+import { splitMarkdown } from "@/editor/markdown.ts";
 
 /** Reject structures the visual editor cannot preserve. Source mode remains available. */
 export function tableEditProblem(raw: string): string | null {

@@ -2,7 +2,7 @@
 
 from alembic import op
 
-from hrs_platform.schema import book_deletions
+from hrs_platform.models import book_deletions
 
 revision = "0007_book_deletions"
 down_revision = "0006_review_drafts"

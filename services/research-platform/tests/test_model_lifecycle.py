@@ -11,10 +11,11 @@ from pydantic import BaseModel, SecretStr
 from temporalio.exceptions import ApplicationError
 from test_card_pipeline import MemoryOutputs, record, verdict
 
-from hrs_platform import agents as module
-from hrs_platform.outputs import Outputs, execution_parent
-from hrs_platform.reading import read_batch
-from hrs_platform.settings import Settings
+from hrs_platform.services import agents as module
+from hrs_platform.services.outputs import Outputs
+from hrs_platform.services.outputs import execution_parent
+from hrs_platform.services.reading import read_batch
+from hrs_platform.core.config import Settings
 
 
 class Receipt(BaseModel):

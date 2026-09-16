@@ -7,8 +7,8 @@ from pydantic import SecretStr
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
-from hrs_platform.database import migrate
-from hrs_platform.settings import Settings
+from hrs_platform.core.db import migrate
+from hrs_platform.core.config import Settings
 
 
 @pytest.fixture

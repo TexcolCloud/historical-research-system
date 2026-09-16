@@ -2,7 +2,7 @@ import io
 
 from PIL import Image
 
-from .records import sha256
+from hrs_platform.domain.records import sha256
 
 
 def original_crops(raw):

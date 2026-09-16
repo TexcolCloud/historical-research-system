@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 from temporalio.exceptions import ApplicationError
 from test_review import seed
 
-from hrs_platform.visual_review import VisualReview
+from hrs_platform.services.visual_review import VisualReview
 
 
 @pytest.fixture

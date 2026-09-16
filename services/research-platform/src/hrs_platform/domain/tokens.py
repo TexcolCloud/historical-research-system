@@ -5,8 +5,8 @@ from pathlib import Path
 
 from tokenizers import Tokenizer
 
-from .errors import Problem
-from .records import json_text, read_json, sha256
+from hrs_platform.domain.errors import Problem
+from hrs_platform.domain.records import json_text, read_json, sha256
 
 
 @lru_cache(maxsize=1)
