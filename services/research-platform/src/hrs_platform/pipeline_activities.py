@@ -76,6 +76,15 @@ class PipelineActivities:
                 await asyncio.gather(running, return_exceptions=True)
                 await observer
             return await running
+        except ApplicationError as error:
+            if error.type == "card_progress_stalled":
+                run = get_run(self.engine, run_id)
+                Activities(self.settings, self.engine).transition(
+                    run_id, "processing", run["stage"],
+                    error={"code": error.type, "stage": run["stage"], "message": error.message,
+                           "step": progress["step"]},
+                )
+            raise
         except asyncio.CancelledError:
             running.cancel()
             await asyncio.gather(running, return_exceptions=True)
@@ -89,7 +98,7 @@ class PipelineActivities:
     async def _observe(self, run_id, operation, *, blocking=False):
         try:
             run = get_run(self.engine, run_id)
-            if (run["error"] or {}).get("code") in {"model_transport_wait", "retrieval_wait", "vision_service_wait"}:
+            if (run["error"] or {}).get("code") in {"model_transport_wait", "retrieval_wait", "vision_service_wait", "card_progress_stalled"}:
                 Activities(self.settings, self.engine).transition(
                     run_id, "processing", run["stage"], error=None
                 )
@@ -246,6 +255,7 @@ class PipelineActivities:
             "model_execution_timeout",
             "vision_request_rejected",
             "model_request_budget",
+            "card_progress_stalled",
         }:
             error = previous
         else:

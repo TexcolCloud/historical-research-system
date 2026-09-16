@@ -10,7 +10,7 @@ from uuid import UUID, uuid5
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from temporalio.exceptions import ApplicationError
 
@@ -449,9 +449,12 @@ class Cards:
             raise ValueError("No reviewed source text is available for card reading.")
         revision = (run.get("result") or {}).get("card_revision", 0)
         saved_plan = self.outputs.get(run_id, "card-reading-plan")
+        policy = self.outputs.get(run_id, "card-reading-policy")
+        if policy is None:
+            policy = self.outputs.put(run_id, "card-reading-policy", {"legacy_pairs": bool(saved_plan)}, {})
         # Preflight is a lower-bound estimate, not permission to exceed the hard cap.
         minimum = (
-            2 * ceil(len(all_units) / (2 if saved_plan else 8)) + ceil(len(all_units) / 8) + 4
+            2 * ceil(len(all_units) / (2 if policy["legacy_pairs"] else 8)) + ceil(len(all_units) / 8) + 4
         )
         budget = self.outputs.preflight(run_id, minimum, self.settings.model_max_calls)
         self.outputs.node(
@@ -632,7 +635,7 @@ class Cards:
                             # Freeze that layout once; new plans use token-packed structural units.
                             groups = (
                                 [units[i : i + 2] for i in range(0, len(units), 2)]
-                                if saved_plan
+                                if policy["legacy_pairs"]
                                 else list(coverage_batches(units))
                             )
                             batches = self.outputs.put(
@@ -751,7 +754,9 @@ class Cards:
                 pending.append(saved_pending)
                 continue
             prior_card = prior_cards.get(identity)
-            if identity in adopted_ids and prior_card:
+            repair = run.get("result") or {}
+            deferred = repair.get("auto_repair_deferred_ids", []) if repair.get("auto_repair_revision") == revision else []
+            if prior_card and (identity in adopted_ids or identity in deferred):
                 produced.append({**prior_card, "retained": True})
                 continue
             division = self.outputs.get(run_id, f"{base_group}:division")
@@ -1072,12 +1077,6 @@ class Cards:
                         "unit_ids": topic.unit_ids,
                     }
                 )
-                self.outputs.put(
-                    run_id,
-                    f"{base_group}:pending:{revision}:{fingerprint(pending[-1])}",
-                    pending[-1],
-                    {"topic": topic.model_dump()},
-                )
                 self.outputs.put(run_id, f"{base_group}:pending-result:{revision}", pending[-1], {"topic": topic.model_dump()})
         batch = {"cards": produced, "pending_topics": pending, "complete": not queue}
         batch_key = generated_key if not queue else generated_key + ":batch:" + fingerprint(batch)
@@ -1262,7 +1261,7 @@ class Cards:
                     }
                 )
             except ApplicationError as error:
-                if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget"}:
+                if error.type not in {"model_output_invalid", "model_output_limit", "card_input_budget", "model_request_exhausted"}:
                     raise
                 finalized.append(
                     {**card, "processing_error": {"error_type": error.type, "message": str(error)[:500]}}
@@ -1391,6 +1390,7 @@ class Cards:
             return {"retry": False}
         generated = self.outputs.get(run_id, card_stage(run, "finalized-cards"))
         actionable = []
+        deferred = []
         for topic in generated.get("pending_topics", []):
             if topic["error_type"] in {"model_output_invalid", "model_output_limit", "card_input_budget", "model_request_exhausted", "card_evidence_insufficient"}:
                 actionable.append({k: topic[k] for k in ("unit_ids", "error_type")})
@@ -1398,14 +1398,22 @@ class Cards:
             rows = list(connection.execute(select(db.cards).where(db.cards.c.run_id == run_id, db.cards.c.state == "needs_revision")).mappings())
         for row in rows:
             checks = self.review.read_json(row["checks"])
-            if any(item["result"] in {"unreadable", "not_located", "not_checked"}
-                   for check in checks.get("visual", []) if check for item in check["items"]):
+            visual = checks.get("visual", [])
+            missing_check = not visual or any(not check for check in visual)
+            failure_type = (checks.get("processing_error") or {}).get("error_type")
+            if (failure_type == "original_missing"
+                or (missing_check and failure_type != "visual_output_invalid")
+                or any(item["result"] in {"unreadable", "not_located", "not_checked"}
+                       for check in visual if check for item in check["items"])):
+                deferred.append(str(row["id"]))
                 continue
             actionable.append({"id": str(row["id"]), "content": row["content"]["sha256"],
                                "processing_error": checks.get("processing_error"),
                                "findings": [(f.get("object_id"), f.get("code")) for f in checks["text"].get("findings", [])]})
         signature = fingerprint(actionable)
         with self.engine.begin() as connection:
+            from .deletion import require_run_active
+            require_run_active(connection, run_id)
             fresh = connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update()).mappings().one()
             result = dict(fresh["result"] or {})
             if result.get("card_revision", 0) > revision:
@@ -1416,8 +1424,9 @@ class Cards:
             retry = bool(actionable) and len(history) < 2 and signature not in history
             result["auto_repair_status"] = "scheduled" if retry else "manual_required"
             if retry:
-                result.update(card_revision=revision + 1, auto_repair_signatures=[*history, signature])
-            values = {"result": result, "revision": fresh["revision"] + 1}
+                result.update(card_revision=revision + 1, auto_repair_signatures=[*history, signature],
+                              auto_repair_revision=revision + 1, auto_repair_deferred_ids=deferred)
+            values = {"result": result, "revision": fresh["revision"] + 1, "updated_at": func.now()}
             if retry:
                 values.update(state="processing", stage="planning")
             connection.execute(update(db.runs).where(db.runs.c.id == run_id).values(**values))

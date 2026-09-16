@@ -304,7 +304,7 @@ class Models:
             attempt += 1
         if failed_outputs >= 3:
             raise ApplicationError(
-                "该模型步骤已达到三次请求上限，原始回执保留。",
+                "该模型步骤已达到三次内容校验或未知结果尝试上限，原始回执保留。",
                 type="model_output_invalid" if output_failure else "model_request_exhausted",
                 non_retryable=True,
             )

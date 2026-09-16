@@ -175,7 +175,10 @@ class Outputs:
 
     def preflight(self, run_id, minimum_total, maximum):
         used = self.request_count(run_id)
-        if minimum_total > maximum or used >= maximum:
+        # Estimates only reject a fresh start. Historical layouts can overestimate
+        # remaining work; receipts remain recoverable even at the request limit.
+        # reserve_request alone authorizes new paid calls under the database lock.
+        if minimum_total > maximum and used == 0:
             raise ApplicationError(
                 f"文本调用预算不足：基础处理预计至少 {minimum_total} 次，已使用 {used} 次，"
                 f"上限 {maximum} 次。请调整 PLATFORM_MODEL_MAX_CALLS 后重试；已有结果保留。",

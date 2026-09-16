@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import insert
+from sqlalchemy import delete, insert
 from temporalio.exceptions import ApplicationError
 from test_card_pipeline import StubEvidence, chapter, record, verdict
 
@@ -88,7 +88,7 @@ def harness(platform, monkeypatch, request):
         elif output_type in {CardDraft, CardRepair}:
             if scenario.get("fail_topic") == payload.get("objective"):
                 raise ApplicationError(
-                    "synthetic exhausted output", type="model_output_invalid", non_retryable=True
+                    "synthetic exhausted output", type=scenario.get("draft_error", "model_output_invalid"), non_retryable=True
                 )
             value = CardDraft(
                 title=payload["objective"],
@@ -119,10 +119,10 @@ def harness(platform, monkeypatch, request):
             if (
                 scenario.get("final_failure")
                 and key.startswith("原图后定稿")
-                and payload["candidate"]["title"] == "topic-1"
+                and payload["candidate"]["title"] == scenario.get("final_topic", "topic-1")
             ):
                 raise ApplicationError(
-                    "synthetic final invalid", type="model_output_invalid", non_retryable=True
+                    "synthetic final invalid", type=scenario.get("final_error", "model_output_invalid"), non_retryable=True
                 )
             ids = payload.get("required_object_ids") or [
                 item["item_id"] for item in payload["candidate"]["items"]
@@ -139,6 +139,8 @@ def harness(platform, monkeypatch, request):
         return value
 
     def vision(run_row, bundle, card, group):
+        if scenario.get("original_missing"):
+            raise ApplicationError("Missing source", type="original_missing", non_retryable=True)
         if scenario.get("visual_failure") and card["candidate"]["title"] == "topic-1":
             raise ApplicationError(
                 "synthetic visual invalid", type="visual_output_invalid", non_retryable=True
@@ -146,7 +148,8 @@ def harness(platform, monkeypatch, request):
         return cards.outputs.put(
             run,
             result_key(card["id"], group["key"], card.get("visual_revision")),
-            {"items": [dict(item_id=item["item_id"], result="verified") for item in group["items"]]},
+            {"items": [dict(item_id=item["item_id"], result=(scenario.get("visual_result", "verified")
+                if scenario.get("visual_topic", card["candidate"]["title"]) == card["candidate"]["title"] else "verified")) for item in group["items"]]},
             {},
         )
 
@@ -220,6 +223,8 @@ def test_budget_preflight_and_local_vision_have_separate_allowances(harness):
     assert not calls
     cards.outputs.reserve_request(run, "视觉核对:card:http-request:0:0", {}, 1)
     cards.outputs.reserve_request(run, "read:http-request:1:1", {}, 1)
+    assert cards.outputs.preflight(run, 1, 1)["remaining_calls"] == 0
+    assert cards.outputs.preflight(run, 1348, 1)["remaining_calls"] == 0
     with pytest.raises(ApplicationError):
         cards.outputs.reserve_request(run, "read:recovery:1:http-request:1:1", {}, 1)
     assert cards.outputs.request_count(run) == cards.outputs.request_count(run, vision=True) == 1
@@ -299,9 +304,82 @@ def test_incremental_delivery_survives_later_topic_failure_and_auto_repairs_once
     assert next(row for row in cards.list() if row["id"] == adopted["id"])["content"] == adopted["content"]
 
 
+def test_automatic_repair_completes_without_regenerating_adopted_cards(harness):
+    cards, run, _, scenario, calls = harness
+    scenario["fail_topic"] = "topic-1"
+    assert finish(cards, run)["adopted"] == 2
+    adopted = {row["id"]: row["content"] for row in cards.list()}
+    assert cards.schedule_repair(run, 0)["retry"]
+    scenario.clear()
+    calls.clear()
+    assert finish(cards, run)["state"] == "completed"
+    assert all(row["content"] == adopted[row["id"]] for row in cards.list() if row["id"] in adopted)
+    assert [payload["objective"] for key, payload in calls if ":制卡:" in key] == ["topic-1"]
+
+
+@pytest.mark.parametrize("result", ["unreadable", "not_located", "not_checked"])
+def test_uncertain_original_evidence_waits_for_human_without_auto_repair(harness, result):
+    cards, run, _, scenario, _ = harness
+    scenario["visual_result"] = result
+    assert finish(cards, run)["state"] == "needs_revision"
+    assert cards.schedule_repair(run, 0) == {"retry": False}
+    assert get_run(cards.engine, run)["result"].get("card_revision", 0) == 0
+
+
+def test_automatic_repair_leaves_other_unclear_candidates_unchanged(harness):
+    cards, run, _, scenario, calls = harness
+    scenario.update(visual_result="unreadable", visual_topic="topic-0", fail_topic="topic-1")
+    assert finish(cards, run)["state"] == "needs_revision"
+    unclear = next(row for row in cards.list() if row["title"] == "topic-0")
+    assert cards.schedule_repair(run, 0)["retry"]
+    scenario.clear()
+    calls.clear()
+    assert finish(cards, run)["state"] == "needs_revision"
+    preserved = next(row for row in cards.list() if row["id"] == unclear["id"])
+    assert preserved["content"] == unclear["content"] and preserved["checks"] == unclear["checks"]
+    assert preserved["state"] == "needs_revision"
+    assert [payload["objective"] for key, payload in calls if ":制卡:" in key] == ["topic-1"]
+    assert not cards.schedule_repair(run, 1)["retry"]
+
+
+def test_missing_original_is_not_repaired_by_paid_text_regeneration(harness):
+    cards, run, _, scenario, _ = harness
+    scenario["original_missing"] = True
+    assert finish(cards, run)["state"] == "needs_revision"
+    assert not cards.schedule_repair(run, 0)["retry"]
+
+
+def test_automatic_repair_limit_survives_different_failure_fingerprints(harness):
+    cards, run, _, scenario, _ = harness
+    scenario["fail_topic"] = "topic-1"
+    for revision, kind in enumerate(["model_output_invalid", "model_output_limit", "card_input_budget"]):
+        scenario["draft_error"] = kind
+        assert finish(cards, run)["state"] == "needs_revision"
+        assert cards.schedule_repair(run, revision)["retry"] is (revision < 2)
+    assert len(get_run(cards.engine, run)["result"]["auto_repair_signatures"]) == 2
+
+
+def test_exhausted_finalization_is_local_and_later_batches_still_deliver(harness):
+    cards, run, _, scenario, _ = harness
+    scenario.update(final_failure=True, final_error="model_request_exhausted", final_topic="topic-0")
+    while True:
+        batch = asyncio.run(cards.generate(run, incremental=True))
+        cards.check_images(run, batch["batch_key"])
+        asyncio.run(cards.finalize(run, batch["batch_key"]))
+        result = cards.adopt(run, batch["batch_key"])
+        if not batch["more"]:
+            break
+    assert result["state"] == "needs_revision" and result["adopted"] == 2
+    assert cards.schedule_repair(run, 0)["retry"]
+    scenario.clear()
+    assert finish(cards, run)["state"] == "completed"
+
+
 @pytest.mark.parametrize("harness", [80], indirect=True)
-def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(harness, monkeypatch):
+@pytest.mark.parametrize("legacy_migration", [False, True])
+def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(harness, monkeypatch, legacy_migration):
     cards, run, units, _, calls = harness
+    cards.settings.model_max_calls = 40  # Packed-plan estimate must not turn into legacy pairs on resume.
     async def plan(*args):
         return CardPlan(rationale="synthetic", topics=[dict(name=f"topic-{i}", objective=f"topic-{i}", unit_ids=[u["unit_id"]]) for i, u in enumerate(units)])
     monkeypatch.setattr(cards, "_plan_topics", plan)
@@ -309,6 +387,12 @@ def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(h
     assert first == {"run_id": run, "more": True, "stage": "reading"}
     reading_calls = [(key, payload) for key, payload in calls if ":reading:" in key]
     assert len(reading_calls) == 8
+    if legacy_migration:
+        # Previous versions persisted packed batches without the policy receipt.
+        with cards.engine.begin() as connection:
+            connection.execute(delete(db.stage_outputs).where(db.stage_outputs.c.run_id == run,
+                                                             db.stage_outputs.c.step == "card-reading-policy"))
+        cards.outputs.reserve_request(run, "synthetic:http-request:1:1", {}, 40)
     calls.clear()
     second = asyncio.run(cards.generate(run, incremental=True))
     assert second["batch_key"] and second["more"]

@@ -8,8 +8,8 @@ import pytest
 from temporalio.exceptions import ActivityError, ApplicationError
 from test_card_pipeline import MemoryOutputs
 
-from hrs_platform import workflows as workflows
 from hrs_platform import visual_review as visual
+from hrs_platform import workflows as workflows
 
 
 class Continued(BaseException):
@@ -106,6 +106,9 @@ def test_business_stall_is_not_hidden_by_live_worker_heartbeats(monkeypatch):
     monkeypatch.setattr(module.activity, "info", lambda: SimpleNamespace(activity_type="generate_cards"))
     beats = []
     monkeypatch.setattr(module.activity, "heartbeat", lambda value: beats.append(value))
+    failures = []
+    monkeypatch.setattr(module, "get_run", lambda *args: {"stage": "planning"})
+    monkeypatch.setattr(module, "Activities", lambda *args: SimpleNamespace(transition=lambda *args, **kwargs: failures.append(kwargs)))
     async def observe(*args, **kwargs):
         await asyncio.Event().wait()
     monkeypatch.setattr(pipeline, "_observe", observe)
@@ -117,5 +120,6 @@ def test_business_stall_is_not_hidden_by_live_worker_heartbeats(monkeypatch):
             asyncio.run(pipeline.observe("run", op))
         assert failure.value.type == "card_progress_stalled"
         assert beats[0]["idle_seconds"] == 1900
+        assert failures[0]["error"]["code"] == "card_progress_stalled"
     finally:
         op.close()

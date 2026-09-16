@@ -3,20 +3,96 @@
 import asyncio
 import os
 import time
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from temporalio import activity
+from temporalio import activity, workflow
+from temporalio.common import RetryPolicy
 from temporalio.exceptions import ApplicationError
-from temporalio.worker import Worker
+from temporalio.worker import Replayer, UnsandboxedWorkflowRunner, Worker
 
 from hrs_platform.settings import Settings
 from hrs_platform.worker import connect
-from hrs_platform.workflows import BookWorkflow, CardWorkflow
+from hrs_platform.workflows import BookWorkflow, CardWorkflow, execute_with_service_recovery
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("PLATFORM_TEST_TEMPORAL") != "1", reason="Requires local Temporal"
 )
+
+
+@workflow.defn(name="CardWorkflow")
+class LegacyCardWorkflow:
+    """Pre-patch wire commands, retained only to prove old history compatibility."""
+    @workflow.run
+    async def run(self, request: dict) -> dict:
+        for name in ("generate_cards", "check_card_images", "adopt_cards"):
+            result = await execute_with_service_recovery(
+                name, request["run_id"], task_queue=request["gpu_queue"],
+                start_to_close_timeout=timedelta(hours=24), heartbeat_timeout=timedelta(seconds=60),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+                cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+            )
+        return result
+
+
+def test_pre_incremental_card_history_replays_with_new_workflow():
+    async def exercise():
+        client = await connect(Settings.load())
+        identity = str(uuid4())
+        queue = "test-card-legacy-" + identity
+        def operation(name):
+            @activity.defn(name=name)
+            async def call(run_id: str) -> dict:
+                assert run_id == identity
+                return {"state": "completed"}
+            return call
+        async with Worker(client, task_queue=queue, workflows=[LegacyCardWorkflow],
+                          workflow_runner=UnsandboxedWorkflowRunner(),
+                          activities=[operation(n) for n in ("generate_cards", "check_card_images", "adopt_cards")]):
+            handle = await client.start_workflow(LegacyCardWorkflow.run,
+                {"run_id": identity, "gpu_queue": queue}, id=queue, task_queue=queue)
+            assert (await asyncio.wait_for(handle.result(), 30))["state"] == "completed"
+        await Replayer(workflows=[CardWorkflow]).replay_workflow(await handle.fetch_history())
+
+    asyncio.run(exercise())
+
+
+def test_incremental_card_delivery_continues_history_and_replays():
+    async def exercise():
+        client = await connect(Settings.load())
+        identity = str(uuid4())
+        queue = "test-card-batches-" + identity
+        calls, runs = [], []
+
+        @activity.defn(name="generate_cards")
+        async def generate(request: dict) -> dict:
+            runs.append(activity.info().workflow_run_id)
+            batch = len(runs)
+            calls.append(("generate", batch))
+            return {"run_id": identity, "batch_key": str(batch), "more": batch < 3}
+
+        @activity.defn(name="check_card_images")
+        async def check(request: dict) -> dict:
+            calls.append(("vision", int(request["batch_key"])))
+            return {}
+
+        @activity.defn(name="adopt_cards")
+        async def adopt(request: dict) -> dict:
+            calls.append(("adopt", int(request["batch_key"])))
+            return {"state": "processing" if request["more"] else "completed", "revision": 0}
+
+        async with Worker(client, task_queue=queue, workflows=[CardWorkflow], activities=[generate, check, adopt]):
+            handle = await client.start_workflow(CardWorkflow.run,
+                {"run_id": identity, "gpu_queue": queue}, id=queue, task_queue=queue)
+            assert (await asyncio.wait_for(handle.result(), 30))["state"] == "completed"
+        assert calls == [(phase, batch) for batch in range(1, 4) for phase in ("generate", "vision", "adopt")]
+        assert len(set(runs)) == 3
+        for run in runs:
+            history = await client.get_workflow_handle(queue, run_id=run).fetch_history()
+            await Replayer(workflows=[CardWorkflow]).replay_workflow(history)
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("auto_cards", [True, False])
@@ -31,8 +107,11 @@ def test_review_wait_survives_worker_restart_and_resumes_only_after_committed_re
 
         def operation(name):
             @activity.defn(name=name)
-            async def call(run_id: str) -> dict:
+            async def call(request: str | dict) -> dict:
+                run_id = request["run_id"] if isinstance(request, dict) else request
                 executed.append(name)
+                if name == "generate_cards":
+                    return {"run_id": run_id, "batch_key": "synthetic", "more": False}
                 if name == "initialize_review":
                     waiting.set()
                     return dict(committed)
@@ -104,7 +183,7 @@ def test_card_outage_timer_survives_worker_restart_and_can_be_cancelled(cancel):
         calls, downstream = [], []
 
         @activity.defn(name="generate_cards")
-        async def generate(run_id: str) -> dict:
+        async def generate(request: dict) -> dict:
             calls.append(time.monotonic())
             if len(calls) < 3:
                 raise ApplicationError(
@@ -113,11 +192,11 @@ def test_card_outage_timer_survives_worker_restart_and_can_be_cancelled(cancel):
                     type="model_transport_wait",
                     non_retryable=True,
                 )
-            return {"run_id": run_id}
+            return {"run_id": request["run_id"], "batch_key": "synthetic", "more": False}
 
         def operation(name):
             @activity.defn(name=name)
-            async def call(run_id: str) -> dict:
+            async def call(request: str | dict) -> dict:
                 downstream.append(name)
                 return {"state": "completed"}
 
