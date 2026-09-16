@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import insert, select
 
 from hrs_platform import models as db
-from hrs_platform.jobs.conversion import Activities
 from hrs_platform.main import create_app
 from hrs_platform.services.books import list_books
 from hrs_platform.jobs.deletion import DeletionActivities

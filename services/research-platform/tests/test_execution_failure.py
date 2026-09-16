@@ -63,7 +63,6 @@ def test_service_recovery_is_visible_and_cleared_when_activity_resumes(platform,
     import asyncio
     from types import SimpleNamespace
 
-    from hrs_platform.jobs.conversion import Activities
     from hrs_platform.services.books import get_run
     from hrs_platform.jobs.pipeline import PipelineActivities
 
