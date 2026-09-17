@@ -504,6 +504,7 @@ def complete_document(pages, settings, output, *, reviewer=None, target_pages=No
                and (target_pages is None or p['page'] in target_pages)]
     write_json(output / 'review-routing.json', {
         'policy':ROUTING_POLICY, 'total_pages':len(current), 'deepseek_pages':len(targets),
+        'native_passed_pages':sum(p['review_route'] == 'native-pass' for p in current),
         'rule_passed_pages':sum(p['review_route'] == 'rule-pass' and
             (target_pages is None or p['page'] in target_pages) for p in current),
         'preserved_pages':sum(target_pages is not None and p['page'] not in target_pages for p in current),
@@ -645,7 +646,8 @@ def complete_document(pages, settings, output, *, reviewer=None, target_pages=No
             'deferred_article_pages':sum(p['review_route']=='deferred-article' for p in current),
             'deepseek_pages':len(targets),
             'preserved_pages':sum(target_pages is not None and p['page'] not in target_pages for p in current),
-            'rule_passed_pages':sum(rule_passed(p) for p in current),
+            'rule_passed_pages':sum(p['review_route'] == 'rule-pass' and rule_passed(p) for p in current),
+            'native_passed_pages':sum(p['review_route'] == 'native-pass' and rule_passed(p) for p in current),
             'unknown_confidence_pages':sum('recognition-confidence-unknown' in d['reasons'] for d in decisions),
             'model_review_tasks':len(first)},
         "human_review": False,

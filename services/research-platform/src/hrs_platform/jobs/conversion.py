@@ -137,8 +137,17 @@ class Activities:
         outputs = Outputs(self.settings, self.engine)
         config = self.settings.project_root / "services/document-extraction/config/default.json"
         dependency = {"source": file_digest(source)[0], "config": file_digest(config)[0]}
-        saved = outputs.get(run_id, "ocr-evidence", dependency)
+        # The immutable checkpoint and its frozen config belong to the run, not
+        # today's deployment defaults. Source binding is rechecked by the CLI.
+        saved = outputs.get(run_id, "ocr-evidence")
         if saved is None:
+            frozen = outputs.get(run_id, 'conversion-config', {'source': dependency['source']})
+            if frozen is None:
+                frozen = outputs.put(run_id, 'conversion-config', json.loads(config.read_text('utf-8')),
+                                     {'source': dependency['source']})
+            output.mkdir(parents=True, exist_ok=True)
+            (output / 'conversion-config.json').write_text(json.dumps(frozen, ensure_ascii=False), encoding='utf-8')
+            dependency['config'] = file_digest(output / 'conversion-config.json')[0]
             RunLifecycle(self.engine).transition(run_id, "processing", "ocr")
             self._extract(run_id, source, output, phase="ocr")
             files = {}
@@ -157,8 +166,18 @@ class Activities:
 
     def _extract(self, run_id, source, output, *, phase):
         root = self.settings.project_root
+        output.mkdir(parents=True, exist_ok=True)
         python = root / "services/document-extraction/.venv/Scripts/python.exe"
         config = root / "services/document-extraction/config/default.json"
+        if (output / 'conversion-config.json').exists():
+            config = output / 'conversion-config.json'
+        elif phase == 'review':
+            # v1 checkpoints predate native extraction; keep their full VLM gate.
+            values = json.loads(config.read_text('utf-8'))
+            values.pop('native_pdf', None)
+            values['vision_review']['review_mode'] = 'full'
+            config = output / 'legacy-review-config.json'
+            config.write_text(json.dumps(values, ensure_ascii=False), encoding='utf-8')
         values = json.loads(config.read_text(encoding="utf-8"))
         if values["vision_review"]["review_mode"] != "full":
             raise ApplicationError("新书必须使用完整视觉核验配置。", non_retryable=True)
@@ -176,6 +195,13 @@ class Activities:
             nonlocal last_reported
             if not total:
                 return
+            try:
+                routing = json.loads((output / 'review-routing.json').read_text('utf-8'))
+                for decision in routing['decisions']:
+                    if decision['route'] == 'native-pass':
+                        observed.add(f"completion-{decision['page']:03d}-initial.json")
+            except (OSError, ValueError, KeyError):
+                pass
             # The retained converter owns these immutable per-page receipts. This
             # count is initial-pass telemetry, never a final acceptance decision.
             for path in (output / "reviews").glob("completion-*-initial.json"):

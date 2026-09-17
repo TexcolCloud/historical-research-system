@@ -691,6 +691,13 @@ export interface components {
             image: string;
             /** Machine Status */
             machine_status: string;
+            /**
+             * Extraction Method
+             * @default ocr
+             */
+            extraction_method: string;
+            /** Acceptance Basis */
+            acceptance_basis?: string | null;
             /** Footnotes */
             footnotes?: components["schemas"]["FootnoteLink"][];
         };

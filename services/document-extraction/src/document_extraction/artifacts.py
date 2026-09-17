@@ -21,13 +21,16 @@ RELEASE_POLICY = 'deepseek-errors-only-block-v1'
 def block_text_hints(page):
     """Character offsets are exact only for a unique match; image location stays page-level."""
     hints = []
-    for index, block in enumerate((page.get('ocr_evidence') or {}).get('blocks', [])):
+    native = page.get('extraction_method') == 'native_pdf'
+    blocks = ([dict(line, label='text') for line in page['native_evidence']['lines']] if native
+              else (page.get('ocr_evidence') or {}).get('blocks', []))
+    for index, block in enumerate(blocks):
         value = block.get('text', '')
         start = page['text'].index(value) if value and page['text'].count(value)==1 else None
         hints.append({'block_index':index, 'label':block.get('label'), 'order':block.get('order'),
             'text_sha256':text_hash(value), 'start':start, 'end':start+len(value) if start is not None else None,
             'offset_basis':'page_candidate_unicode_codepoints', 'page_text_sha256':text_hash(page['text']),
-            'provider_bbox':block.get('bbox'), 'coordinate_basis':'provider-layout-frame-pixels',
+            'provider_bbox':block.get('bbox'), 'coordinate_basis':'pdf-points-top-left' if native else 'provider-layout-frame-pixels',
             'image_localization':'page', 'basis':'unique-exact-text' if start is not None else 'unmapped-provider-block'})
     return hints
 
@@ -460,6 +463,8 @@ def write_outputs(
                 "image_sha256": sha256(output / r.image),
                 "status": r.status,
                 "ocr_similarity": None,
+                "extraction_method": by_page[r.page].get('extraction_method', 'ocr'),
+                "acceptance_basis": by_page[r.page].get('review_route', 'deepseek'),
             }
             for r in results
         ],
@@ -472,6 +477,8 @@ def write_outputs(
         "artifact-manifest.json",
     ]
     evidence_files.extend(f"reviews/page-{r.page:03d}.json" for r in results)
+    evidence_files.extend(sorted({p['restructure_evidence']['artifact'] for p in completion['pages']
+                                 if p.get('restructure_evidence')}))
     if (output / 'paddle-restructure.json').is_file():
         manifest['paddle_restructure'] = 'paddle-restructure.json'
         evidence_files.append('paddle-restructure.json')

@@ -7,7 +7,7 @@ name = "historical-document-extraction-service"
 version = "0.1.0"
 description = "Docling PDF/image conversion with one recognizer and semantic review"
 requires-python = ">=3.11,<3.12"
-dependencies = ["docling==2.123.0", "Pillow>=10", "hrs-runtime==0.1.0"]
+dependencies = ["docling==2.123.0", "Pillow>=10", "hrs-runtime==0.1.0", "pdfplumber==0.11.10"]
 
 [project.optional-dependencies]
 paddle = [
@@ -24,6 +24,9 @@ gpu-cu129 = ["torch==2.8.0", "torchvision==0.23.0"]
 
 [project.scripts]
 history-extract = "document_extraction.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pypdf>=6,<7"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
