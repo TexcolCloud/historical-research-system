@@ -15,7 +15,7 @@ from pathlib import Path
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'services/runtime-support/src'))
+sys.path.insert(0, str(ROOT / 'packages/runtime-support/src'))
 from hrs_runtime.local_vision import (  # noqa: E402 - script bootstrap
     MODEL,
     POLICY,

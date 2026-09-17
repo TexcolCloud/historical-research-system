@@ -8,7 +8,7 @@ import time
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'services/runtime-support/src'))
+sys.path.insert(0, str(ROOT / 'packages/runtime-support/src'))
 from hrs_runtime.local_vision import chat
 
 source = ROOT / 'state/workbench-conversion/761a23d9-4a60-4fcd-8431-217b691f7b26/ocr-checkpoint'

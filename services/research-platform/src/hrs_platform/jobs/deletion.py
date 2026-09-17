@@ -11,8 +11,9 @@ from temporalio.client import Client, WorkflowExecutionStatus
 from temporalio.service import RPCError, RPCStatusCode
 
 from hrs_platform import models as db
-from hrs_platform.services.recovery import workflow_id
-from hrs_platform.services.search import search_client
+from hrs_platform.jobs.errors import activity_errors
+from hrs_platform.services.retrieval.compute import search_client
+from hrs_platform.services.runs.recovery import workflow_id
 from hrs_platform.services.storage import objects_for
 
 
@@ -50,6 +51,7 @@ class DeletionActivities:
             return list(connection.execute(select(db.runs).where(db.runs.c.book_id == book_id)).mappings())
 
     @activity.defn
+    @activity_errors
     async def stop_book(self, book_id: str) -> list[str]:
         client = await Client.connect(
             self.settings.temporal_address, namespace=self.settings.temporal_namespace
@@ -80,12 +82,14 @@ class DeletionActivities:
         return [run["id"] for run in await asyncio.to_thread(self.runs, book_id)]
 
     @activity.defn
+    @activity_errors
     def stop_gpu_requests(self, book_id: str) -> None:
         from hrs_runtime.local_vision import request
 
         request("/cancel-tasks", {"task_ids": [run["id"] for run in self.runs(book_id)]}, timeout=60)
 
     @activity.defn
+    @activity_errors
     def clean_gpu_cache(self, run_ids: list[str]) -> None:
         remove_cache(self.settings.cache_root, run_ids)
         remove_cache(self.settings.project_root / "state/local-vision/receipts", run_ids)
@@ -128,6 +132,7 @@ class DeletionActivities:
             return {ref["key"]: ref for ref in connection.scalars(query)}
 
     @activity.defn
+    @activity_errors
     def erase_book(self, book_id: str) -> dict:
         # Serialize deletions of books which share content; the last owner removes
         # the shared object instead of two concurrent cleaners both retaining it.
@@ -249,6 +254,7 @@ class DeletionActivities:
         return {"book_id": book_id, "state": "completed", "error": None}
 
     @activity.defn
+    @activity_errors
     def deletion_failed(self, book_id: str) -> None:
         with self.engine.begin() as connection:
             connection.execute(update(db.books).where(db.books.c.id == book_id).values(state="delete_failed"))

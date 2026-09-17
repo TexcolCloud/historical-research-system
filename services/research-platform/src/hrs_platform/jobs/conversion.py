@@ -1,5 +1,4 @@
 """Adapt the retained extraction CLI; business artifacts are committed to S3."""
-
 import json
 import os
 import subprocess
@@ -10,8 +9,9 @@ from pypdf import PdfReader
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from hrs_platform.jobs.errors import activity_errors
 from hrs_platform.services.books import get_run
-from hrs_platform.services.lifecycle import RunLifecycle
+from hrs_platform.services.runs.lifecycle import RunLifecycle
 from hrs_platform.services.storage import objects_for
 
 
@@ -23,6 +23,7 @@ class Activities:
 
 
     @activity.defn
+    @activity_errors
     def verify_upload(self, run_id: str) -> dict:
         run = get_run(self.engine, run_id)
         if run["source"].get("sha256"):
@@ -60,8 +61,9 @@ class Activities:
             destination.unlink(missing_ok=True)
 
     @activity.defn
+    @activity_errors
     def convert_document(self, run_id: str) -> dict:
-        from hrs_platform.services.outputs import Outputs
+        from hrs_platform.services.runs.outputs import Outputs
 
         with Outputs(self.settings, self.engine).operation(
             run_id, "component:convert_document", "文档转换与原件核验"
@@ -130,7 +132,7 @@ class Activities:
             return False
 
     def _ocr_checkpoint(self, run_id, source, output):
-        from hrs_platform.services.outputs import Outputs
+        from hrs_platform.services.runs.outputs import Outputs
 
         outputs = Outputs(self.settings, self.engine)
         config = self.settings.project_root / "services/document-extraction/config/default.json"
@@ -243,6 +245,7 @@ class Activities:
                         process.wait()
 
     @activity.defn
+    @activity_errors
     def record_conversion_failure(self, run_id: str):
         RunLifecycle(self.engine).transition(
             run_id,

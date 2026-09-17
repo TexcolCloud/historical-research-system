@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
-for folder in ['runtime-support', 'document-extraction']:
-    sys.path.insert(0, str(ROOT / 'services' / folder / 'src'))
+for folder in ['packages/runtime-support', 'services/document-extraction']:
+    sys.path.insert(0, str(ROOT / folder / 'src'))
 import local_vision as broker
 from hrs_runtime import local_vision as client
 

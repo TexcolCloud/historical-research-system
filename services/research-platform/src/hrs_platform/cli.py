@@ -2,6 +2,7 @@ import argparse
 
 from hrs_platform.core.config import Settings
 from hrs_platform.core.db import engine_for, migrate
+from hrs_platform.services.retrieval.indexing import BookIndexer
 
 
 def main():
@@ -40,7 +41,7 @@ def main():
         from pathlib import Path
         from uuid import UUID
 
-        from hrs_platform.services.library import Library
+        from hrs_platform.services.documents.library import Library
         if not args.run_id or not args.amendments:
             parser.error('amend-library requires --run-id and --amendments')
         settings = Settings.load()
@@ -56,7 +57,7 @@ def main():
         import json
         from pathlib import Path
 
-        from hrs_platform.services.retrieval_offline import evaluate_offline
+        from hrs_platform.services.retrieval.offline import evaluate_offline
         if not args.cases:
             parser.error('evaluate-offline requires --cases dataset.json')
         settings = Settings.load()
@@ -70,7 +71,7 @@ def main():
         import json
         from uuid import UUID
 
-        from hrs_platform.services.search import Search
+        from hrs_platform.services.retrieval.search import Search
 
         if not args.run_id:
             parser.error(f"{args.command} requires --run-id")
@@ -87,7 +88,7 @@ def main():
             if args.command == "evaluate":
                 from pathlib import Path
 
-                from hrs_platform.services.retrieval_evaluation import evaluate
+                from hrs_platform.services.retrieval.evaluation import evaluate
 
                 result = evaluate(
                     search,
@@ -97,7 +98,7 @@ def main():
                     limit=args.limit,
                 )
             else:
-                result = search.index(run_id)
+                result = BookIndexer(search).index(run_id)
             print(json.dumps(result, ensure_ascii=False, indent=2))
         finally:
             engine.dispose()

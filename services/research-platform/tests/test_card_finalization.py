@@ -7,9 +7,9 @@ from sqlalchemy import insert
 
 from hrs_platform import models as db
 from hrs_platform.services.cards import Cards
-from hrs_platform.services.cards import validate_final_candidate
+from hrs_platform.domain.card_rules import validate_final_candidate
 from hrs_platform.domain.generation_contracts import CardDraft
-from hrs_platform.services.visual_review import result_key
+from hrs_platform.services.models.vision import result_key
 
 
 def draft():

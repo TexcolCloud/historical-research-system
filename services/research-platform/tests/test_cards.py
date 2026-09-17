@@ -1,11 +1,11 @@
 import pytest
 from test_card_finalization import draft
 
-from hrs_platform.services.cards import ResearchPlan
-from hrs_platform.services.cards import apply_card_repair
-from hrs_platform.services.cards import neighbor_context
-from hrs_platform.services.cards import quote_pages
-from hrs_platform.services.cards import validate_plan
+from hrs_platform.domain.card_rules import ResearchPlan
+from hrs_platform.domain.card_rules import apply_card_repair
+from hrs_platform.services.cards.reading import neighbor_context
+from hrs_platform.domain.card_rules import quote_pages
+from hrs_platform.domain.card_rules import validate_plan
 from hrs_platform.domain.generation_contracts import CardRepair
 
 

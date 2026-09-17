@@ -1,4 +1,4 @@
-from hrs_platform.services.footnotes import resolve_footnotes
+from hrs_platform.services.documents.footnotes import resolve_footnotes
 
 
 def source_parts(*pages):
@@ -57,7 +57,7 @@ def test_separate_translator_signature_stays_with_note_not_next_body():
 def test_retrieval_uses_same_page_scoping_for_printed_notes():
     from uuid import uuid4
 
-    from hrs_platform.services.retrieval_chunks import retrieval_chunks
+    from hrs_platform.services.retrieval.chunks import retrieval_chunks
 
     pages = ["甲地记录①。\n\n① 不包括乙地。\n\n", "丙地记录①。\n\n① 仅计本年。\n"]
     parts = [{**p, "span_id": str(i), "start": 0} for i, p in enumerate(source_parts(*pages))]

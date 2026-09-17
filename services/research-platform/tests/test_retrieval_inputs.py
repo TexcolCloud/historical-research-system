@@ -1,4 +1,5 @@
 """Independent synthetic input-budget and restart checks; no model downloads."""
+from hrs_platform.services.retrieval.indexing import BookIndexer
 
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -7,12 +8,12 @@ import pytest
 from sqlalchemy import insert, select
 
 from hrs_platform import models as db
-from hrs_platform.services import search as module
-from hrs_platform.services.retrieval_chunks import retrieval_chunks
-from hrs_platform.services.retrieval_inputs import bounded_chunks
-from hrs_platform.services.retrieval_inputs import ranking_windows
-from hrs_platform.services.retrieval_inputs import windows
-from hrs_platform.services.search import Search
+from hrs_platform.services.retrieval import indexing as module
+from hrs_platform.services.retrieval.chunks import retrieval_chunks
+from hrs_platform.services.retrieval.inputs import bounded_chunks
+from hrs_platform.services.retrieval.inputs import ranking_windows
+from hrs_platform.services.retrieval.inputs import windows
+from hrs_platform.services.retrieval.search import Search
 
 
 class CharacterTokens:
@@ -131,7 +132,7 @@ def test_failed_embedding_resumes_completed_batches_and_only_recomputes_changed_
     monkeypatch.setattr(search, "compute", compute)
     chunks = [{"retrieval_text": f"合成内容 {i}"} for i in range(5)]
     with pytest.raises(OSError, match="embedding failure"):
-        search.embed_cached(run, chunks, {})
+        BookIndexer(search).embed_cached(run, chunks, {})
     with engine.connect() as connection:
         assert (
             len(
@@ -144,17 +145,17 @@ def test_failed_embedding_resumes_completed_batches_and_only_recomputes_changed_
     fail = False
     calls.clear()
     metrics = {}
-    result = search.embed_cached(run, chunks, metrics)
+    result = BookIndexer(search).embed_cached(run, chunks, metrics)
     assert len(result["chunks"]) == 5
     assert [text for batch in calls for text in batch] == [row["retrieval_text"] for row in chunks[2:]]
     assert metrics["reused_vectors"] == 2 and metrics["computed_vectors"] == 3
     calls.clear()
     changed = [{**row, "retrieval_text": "仅这一段修改"} if i == 2 else row for i, row in enumerate(chunks)]
-    search.embed_cached(run, changed, {})
+    BookIndexer(search).embed_cached(run, changed, {})
     assert calls == [["仅这一段修改"]]
     calls.clear()
     monkeypatch.setattr(
         module, "EMBEDDING_IDENTITY", {**module.EMBEDDING_IDENTITY, "adapter": "test-new-model"}
     )
-    search.embed_cached(run, changed, {})
+    BookIndexer(search).embed_cached(run, changed, {})
     assert len([text for batch in calls for text in batch]) == 5

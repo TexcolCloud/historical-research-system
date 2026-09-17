@@ -8,10 +8,10 @@ from pydantic import ValidationError
 from test_card_pipeline import MemoryOutputs, record, verdict
 
 from hrs_platform.domain.generation_contracts import ReadingRecord
-from hrs_platform.services.reading import coverage
-from hrs_platform.services.reading import read_batch
-from hrs_platform.services.reading import scoped_check
-from hrs_platform.services.reading import source_payload
+from hrs_platform.services.cards.reading import coverage
+from hrs_platform.services.cards.reading import read_batch
+from hrs_platform.services.cards.reading import scoped_check
+from hrs_platform.services.cards.reading import source_payload
 
 
 def test_reading_batch_checks_sources_once_and_repairs_only_missing_verdicts():
@@ -75,7 +75,7 @@ def test_unlocated_batch_failure_never_approves_individual_readings():
 
 @pytest.mark.parametrize("fail_at", ["batch-verdict", "unit-fanout", "fallback-fanout"])
 def test_completed_batch_is_replayed_after_storage_failure_without_new_model_scope(fail_at):
-    from temporalio.exceptions import ApplicationError
+    from hrs_platform.domain.errors import TaskError
     batch = [{"unit_id": str(i), "text": f"合成原文{i}"}
              for i in range(2 if fail_at == "fallback-fanout" else 3)]
     outputs, cache, checks = MemoryOutputs(), {}, []
@@ -100,7 +100,7 @@ def test_completed_batch_is_replayed_after_storage_failure_without_new_model_sco
                                 questions=[], boundary_observations=[])
         else:
             if fail_at == "fallback-fanout" and len(payload["required_object_ids"]) > 1:
-                raise ApplicationError("Cached aggregate output exhausted", type="model_output_invalid",
+                raise TaskError("Cached aggregate output exhausted", type="model_output_invalid",
                                        non_retryable=True)
             checks.append(payload["required_object_ids"])
             value = output_type.model_validate(verdict(payload["required_object_ids"]))

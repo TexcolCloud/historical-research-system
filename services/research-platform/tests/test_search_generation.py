@@ -1,4 +1,5 @@
 """Real SQL/S3/OpenSearch publication; deterministic vectors isolate indexing from models."""
+from hrs_platform.services.retrieval.indexing import BookIndexer
 
 import asyncio
 import json
@@ -9,20 +10,21 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import insert, select, update
-from temporalio.exceptions import ApplicationError
+from hrs_platform.domain.errors import TaskError
 from test_card_evidence import invoke
 from tokenizers import Tokenizer, models, pre_tokenizers
 
 from hrs_platform import models as db
-from hrs_platform.services import search as module
+from hrs_platform.services.retrieval import search as module
+from hrs_platform.services.retrieval import indexing
 from hrs_platform.main import create_app
 from hrs_platform.services.books import get_run
-from hrs_platform.services.card_evidence import CardEvidence
+from hrs_platform.services.cards.evidence import CardEvidence
 from hrs_platform.services.cards import Cards
-from hrs_platform.services.cards import CardTopic
-from hrs_platform.services.reading import reading_units
-from hrs_platform.services.retrieval_evaluation import evaluate
-from hrs_platform.services.search import Search
+from hrs_platform.domain.card_rules import CardTopic
+from hrs_platform.services.cards.reading import reading_units
+from hrs_platform.services.retrieval.evaluation import evaluate
+from hrs_platform.services.retrieval.search import Search
 
 
 def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_vectors(platform, monkeypatch):
@@ -68,20 +70,20 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
     tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
     monkeypatch.setattr(Search, "tokenizer", lambda self, model: tokenizer)
-    bulk = module.helpers.bulk
+    bulk = indexing.helpers.bulk
     try:
         with engine.begin() as connection:
             connection.execute(update(db.runs).where(db.runs.c.id == run).values(result={}))
         with pytest.raises(ValueError, match="published book"):
-            search.index(run)
+            BookIndexer(search).index(run)
         assert embeddings == []
         with engine.begin() as connection:
             connection.execute(update(db.runs).where(db.runs.c.id == run).values(result={"published": True}))
         search.outputs.put(run, "retrieval-chunks", {"chunks": ["obsolete"]}, {"legacy": True})
-        first = search.index(run)
+        first = BookIndexer(search).index(run)
         assert all(text.startswith("独立运输样本\n") for text in embeddings[0])
         assert len(embeddings) == 1
-        assert search.index(run) == first
+        assert BookIndexer(search).index(run) == first
         assert len(embeddings) == 1
         hits = search.search("糧食", book, context_chars=6000)
         assert hits and all(h["generation"] == first["generation"] for h in hits)
@@ -95,7 +97,7 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         evidence_tools = CardEvidence(settings, engine, search.outputs, search.library)
         wrong_provenance = deepcopy(snapshot)
         wrong_provenance["units"][0]["sources"][0]["pages"] = [99]
-        with pytest.raises(ApplicationError) as wrong_pages:
+        with pytest.raises(TaskError) as wrong_pages:
             evidence_tools.pin(get_run(engine, child), wrong_provenance)
         assert wrong_pages.value.type == "card_corpus_changed"
         corpus = evidence_tools.pin(get_run(engine, child), snapshot)
@@ -170,32 +172,32 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         assert search.search('粮食',book,semantic=False)
         assert search.search('粮食',book,use_calibration=False)
         assert search.search('粮食')  # A global search must not inherit a book threshold.
-        monkeypatch.setattr(module, "CHUNK_RULE", module.CHUNK_RULE + "-test-new-version")
+        monkeypatch.setattr(indexing, "CHUNK_RULE", indexing.CHUNK_RULE + "-test-new-version")
 
         def partial(client, actions, **kwargs):
             bulk(client, [next(iter(actions))], **kwargs)
             raise OSError("injected partial index failure")
 
-        monkeypatch.setattr(module.helpers, "bulk", partial)
+        monkeypatch.setattr(indexing.helpers, "bulk", partial)
         with pytest.raises(OSError, match="partial index"):
-            search.index(run)
+            BookIndexer(search).index(run)
         with engine.connect() as connection:
             metrics = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == run))[
                 "retrieval_metrics"
             ]
             assert metrics["status"] == "failed" and metrics["total_ms"] > 0
         assert all(h["generation"] == first["generation"] for h in search.search("粮食", book, use_calibration=False))
-        monkeypatch.setattr(module.helpers, "bulk", bulk)
-        second = search.index(run)
+        monkeypatch.setattr(indexing.helpers, "bulk", bulk)
+        second = BookIndexer(search).index(run)
         assert second["generation"] != first["generation"]
-        with pytest.raises(ApplicationError) as changed:
+        with pytest.raises(TaskError) as changed:
             evidence_tools.pin(get_run(engine, child), snapshot)
         assert changed.value.type == "card_corpus_changed"
         assert len(embeddings) == count_before_rebuild
         assert all(h["generation"] == second["generation"] for h in search.search("粮食", book))
         assert search.client.count(index=settings.opensearch_index)["count"] == second["chunks"]
         search.client.indices.delete(index=settings.opensearch_index)
-        assert search.index(run) == second
+        assert BookIndexer(search).index(run) == second
         assert len(embeddings) == count_before_rebuild
     finally:
         search.client.indices.delete(index=settings.opensearch_index, ignore=[404])

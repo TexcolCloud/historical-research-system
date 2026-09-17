@@ -13,7 +13,7 @@ from sqlalchemy import insert, select, update
 from hrs_platform import models as db
 from hrs_platform.jobs.conversion import Activities
 from hrs_platform.services.deletion import request_deletion
-from hrs_platform.services.review import Review
+from hrs_platform.services.documents.review import Review
 from test_book_deletion import seed
 
 
@@ -45,9 +45,9 @@ def test_initialize_cannot_resurrect_deleting_book(platform, monkeypatch):
         ),
     )
     monkeypatch.setattr(review.objects, "read_bytes", lambda _: b"fixture")
-    from fastapi import HTTPException
+    from hrs_platform.domain.errors import ServiceError
 
-    with pytest.raises(HTTPException, match="409"):
+    with pytest.raises(ServiceError, match="409"):
         review.initialize(run)
     with engine.connect() as c:
         assert c.scalar(select(db.books.c.state).where(db.books.c.id == book)) == "deleting"
@@ -174,9 +174,9 @@ def test_unpublished_shared_object_survives_other_book_deletion(platform, tmp_pa
 
 def test_index_uses_owned_requests_and_durable_recovery(platform, monkeypatch):
     from hrs_platform.jobs.pipeline import PipelineActivities
-    from hrs_platform.services.search import remote_compute
+    from hrs_platform.services.retrieval.compute import remote_compute
     from hrs_platform.domain.errors import Problem
-    from hrs_platform.services.outputs import Outputs
+    from hrs_platform.services.runs.outputs import Outputs
     from temporalio.exceptions import ApplicationError
 
     settings, engine = platform
@@ -190,6 +190,7 @@ def test_index_uses_owned_requests_and_durable_recovery(platform, monkeypatch):
 
     search = SimpleNamespace(index=index, outputs=Outputs(settings, engine))
     monkeypatch.setattr("hrs_platform.jobs.pipeline.Search", lambda *_: search)
+    monkeypatch.setattr("hrs_platform.jobs.pipeline.BookIndexer", lambda _: search)
 
     async def observe(run, operation, **kwargs):
         return await operation
@@ -307,8 +308,8 @@ def test_reentered_upload_removes_old_source_cache(tmp_path, monkeypatch):
 
 
 def test_publish_cannot_resurrect_deleting_book(platform, monkeypatch):
-    from hrs_platform.services.library import Library
-    from fastapi import HTTPException
+    from hrs_platform.services.documents.library import Library
+    from hrs_platform.domain.errors import ServiceError
 
     settings, engine = platform
     book, run = seed(engine)
@@ -317,7 +318,7 @@ def test_publish_cannot_resurrect_deleting_book(platform, monkeypatch):
     monkeypatch.setattr(library.outputs, "get", lambda *a: {"groups": []})
     monkeypatch.setattr(library, "structure", lambda _: {})
     request_deletion(engine, book)
-    with pytest.raises(HTTPException):
+    with pytest.raises(ServiceError):
         library.publish(run)
     with engine.connect() as connection:
         assert connection.scalar(select(db.books.c.state).where(db.books.c.id == book)) == "deleting"

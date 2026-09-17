@@ -1,4 +1,5 @@
 """Real CPU retrieval, OpenSearch, S3 export and cache-loss recovery over technical text."""
+from hrs_platform.services.retrieval.indexing import BookIndexer
 
 import json
 import os
@@ -11,7 +12,7 @@ from sqlalchemy import insert
 from hrs_platform import models as db
 from hrs_platform.services.storage import objects_for
 from hrs_platform.main import create_app
-from hrs_platform.services.search import Search
+from hrs_platform.services.retrieval.search import Search
 
 
 @pytest.mark.skipif(
@@ -58,7 +59,7 @@ def test_real_search_retains_source_scopes_and_exports_after_cache_loss(platform
             )
         )
     try:
-        assert search.index(run)["chunks"] == 1
+        assert BookIndexer(search).index(run)["chunks"] == 1
         assert search.search("倉儲", book)[0]["text"] == source
         assert search.search("粮食入库数量", book, semantic=True)[0]["pages"] == [7]
         assert search.search("粮食", str(uuid4())) == []
@@ -73,6 +74,6 @@ def test_real_search_retains_source_scopes_and_exports_after_cache_loss(platform
         monkeypatch.setattr(
             search, "compute", lambda *a, **k: pytest.fail("Index recovery must reuse S3 vectors.")
         )
-        assert search.index(run)["chunks"] == 1
+        assert BookIndexer(search).index(run)["chunks"] == 1
     finally:
         search.client.indices.delete(index=name, ignore=[404])

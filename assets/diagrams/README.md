@@ -16,7 +16,7 @@
 | 阶段顺序、人工信号等待、自动制卡开关、删除任务 | [workflows.py](../../services/research-platform/src/hrs_platform/jobs/workflows.py) |
 | OCR 检查点、模型核验与阶段产物 | [activities.py](../../services/research-platform/src/hrs_platform/jobs/conversion.py) |
 | 工作流注册、队列、outbox 派发 | [worker.py](../../services/research-platform/src/hrs_platform/jobs/worker.py) |
-| 查询嵌入、重排与索引代际 | [search.py](../../services/research-platform/src/hrs_platform/services/search.py) |
+| 查询嵌入、重排与索引代际 | [search.py](../../services/research-platform/src/hrs_platform/services/retrieval/search.py) |
 | 容器、数据库与主机端点 | [compose.yml](../../deploy/platform/compose.yml)、[nginx.conf](../../deploy/platform/nginx.conf) |
 | OCR 隔离进程、视觉服务与共享 GPU 准入 | [local_vision.py](../../scripts/local_vision.py) |
 

@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 
 from hrs_platform import models as db
-from hrs_platform.services.lifecycle import RunLifecycle
+from hrs_platform.services.runs.lifecycle import RunLifecycle
 from hrs_platform.main import create_app
 from test_review import seed
 

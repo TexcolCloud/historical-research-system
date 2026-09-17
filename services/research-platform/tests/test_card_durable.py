@@ -6,9 +6,10 @@ from urllib.error import URLError
 
 import pytest
 from temporalio.exceptions import ActivityError, ApplicationError
+from hrs_platform.domain.errors import TaskError
 from test_card_pipeline import MemoryOutputs
 
-from hrs_platform.services import visual_review as visual
+from hrs_platform.services.models import vision as visual
 from hrs_platform.jobs import workflows as workflows
 
 
@@ -85,11 +86,11 @@ def test_local_vision_outage_uses_service_epochs_and_saved_response(monkeypatch)
         return {"choices": ["saved"]}
     monkeypatch.setattr(visual, "chat", chat)
     for _ in range(4):
-        with pytest.raises(ApplicationError) as failure:
+        with pytest.raises(TaskError) as failure:
             reviewer._response("run", "http-request:0", "response:0", {}, [])
         assert failure.value.type == "vision_service_wait"
         count = len(sends)
-        with pytest.raises(ApplicationError):
+        with pytest.raises(TaskError):
             reviewer._response("run", "http-request:0", "response:0", {}, [])
         assert len(sends) == count
         now[0] = failure.value.details[0]["retry_at"]

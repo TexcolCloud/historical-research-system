@@ -6,7 +6,7 @@ from fastapi.responses import Response
 from hrs_platform.api.deps import EngineDep, LibraryDep, OutputsDep, ReviewDep
 from hrs_platform.schemas import ExecutionNode, RecoveryRequest, RunSummary, StructureReport
 from hrs_platform.services import books
-from hrs_platform.services.recovery import retry_run
+from hrs_platform.services.runs.recovery import retry_run
 
 router = APIRouter(tags=["runs"])
 
@@ -43,7 +43,7 @@ def artifact(
 ):
     reference = review.artifact(run_id, name)
     if reference["media_type"] == "application/pdf":
-        from hrs_platform.services.storage import object_response
+        from hrs_platform.api.files import object_response
 
         return object_response(review.objects, reference, range_header)
     return Response(

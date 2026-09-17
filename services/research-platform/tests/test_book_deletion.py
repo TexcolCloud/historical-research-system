@@ -1,6 +1,6 @@
 """Real PostgreSQL/S3 ownership and recoverable deletion, using unique synthetic bytes."""
 
-from hrs_platform.services.lifecycle import RunLifecycle
+from hrs_platform.services.runs.lifecycle import RunLifecycle
 import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -16,7 +16,7 @@ from hrs_platform.services.books import list_books
 from hrs_platform.jobs.deletion import DeletionActivities
 from hrs_platform.jobs.deletion import remove_cache
 from hrs_platform.services.deletion import request_deletion
-from hrs_platform.services.search import search_client
+from hrs_platform.services.retrieval.compute import search_client
 
 
 def seed(engine, *, source=None, stage="verify_upload"):

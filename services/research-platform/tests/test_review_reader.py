@@ -6,7 +6,7 @@ from sqlalchemy import select, update
 from hrs_platform import models as db
 from hrs_platform.services.storage import objects_for
 from hrs_platform.main import create_app
-from hrs_platform.services.outputs import Outputs
+from hrs_platform.services.runs.outputs import Outputs
 from test_review import seed
 
 

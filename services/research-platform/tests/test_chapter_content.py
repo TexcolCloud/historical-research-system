@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from pydantic import SecretStr
 
-from hrs_platform.services import chapter_content as module
+from hrs_platform.services.documents import chapter_content as module
 
 
 def settings(bucket='one'):
@@ -43,11 +43,11 @@ def test_cached_chapter_still_checks_current_sql_reference_and_deletion(platform
     from uuid import uuid4
 
     import pytest
-    from fastapi import HTTPException
+    from hrs_platform.domain.errors import ServiceError
     from sqlalchemy import delete, insert, update
 
     from hrs_platform import models as db
-    from hrs_platform.services.library import Library
+    from hrs_platform.services.documents.library import Library
 
     settings, engine = platform
     library = Library(settings, engine)
@@ -69,6 +69,6 @@ def test_cached_chapter_still_checks_current_sql_reference_and_deletion(platform
     assert library.chapter(chapter)['title']=='新标题'
     with engine.begin() as conn:
         conn.execute(delete(db.chapters).where(db.chapters.c.id==chapter))
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(ServiceError) as error:
         library.chapter(chapter)
     assert error.value.status_code==404

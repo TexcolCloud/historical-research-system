@@ -6,8 +6,8 @@ from sqlalchemy import insert, select
 
 from hrs_platform import models as db
 from hrs_platform.main import create_app
-from hrs_platform.services.review import Review
-from hrs_platform.services.review import digest
+from hrs_platform.services.documents.review import Review
+from hrs_platform.services.documents.review import digest
 
 
 def seed(engine):

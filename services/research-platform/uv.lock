@@ -394,7 +394,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.19.2,<2" },
     { name = "fastapi", specifier = ">=0.141.1,<0.142" },
     { name = "filelock", specifier = ">=3.32,<4" },
-    { name = "hrs-runtime", editable = "../runtime-support" },
+    { name = "hrs-runtime", editable = "../../packages/runtime-support" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "langchain-text-splitters", specifier = ">=0.3,<2" },
     { name = "markdown-it-py", specifier = ">=3,<5" },
@@ -429,7 +429,7 @@ dev = [
 [[package]]
 name = "hrs-runtime"
 version = "0.1.0"
-source = { editable = "../runtime-support" }
+source = { editable = "../../packages/runtime-support" }
 dependencies = [
     { name = "boto3" },
 ]

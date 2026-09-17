@@ -20,7 +20,6 @@ node_modules/
 /GITHUB_PREPARATION.md
 docs/
 # Historical reports remain local; current operating instructions live in README files.
-/services/document-retrieval/evaluation/README.md
 /services/research-platform/RETRIEVAL_TUNING.md
 /services/research-platform/RAGAS_EVALUATION.md
 /文档提取管道调优文档案/
@@ -34,7 +33,6 @@ docs/
 *.sqlite-wal
 *.sqlite-shm
 .env.*
-!.env.example
 !.env.platform.example
 build/
 dist/

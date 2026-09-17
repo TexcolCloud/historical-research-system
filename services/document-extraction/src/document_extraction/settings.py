@@ -6,13 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-
-def project_root() -> Path:
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "AGENTS.md").exists():
-            return parent
-    raise RuntimeError("无法定位主项目根目录")
+from hrs_runtime.local_vision import project_root
 
 
 def load_dotenv(path: Path | None = None) -> Path:

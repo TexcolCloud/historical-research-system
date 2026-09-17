@@ -8,17 +8,17 @@ from types import SimpleNamespace
 
 import pytest
 from agents.tool_context import ToolContext
-from temporalio.exceptions import ApplicationError
+from hrs_platform.domain.errors import TaskError
 from test_card_pipeline import MemoryOutputs, chapter
 
-from hrs_platform.services import card_evidence as module
-from hrs_platform.services.card_evidence import CardEvidence
-from hrs_platform.services.cards import CardTopic
-from hrs_platform.services.cards import quote_pages
-from hrs_platform.services.reading import compact_readings
-from hrs_platform.services.reading import coverage_batches
-from hrs_platform.services.reading import reading_units
-from hrs_platform.services.search import recover_retrieval
+from hrs_platform.services.cards import evidence as module
+from hrs_platform.services.cards.evidence import CardEvidence
+from hrs_platform.domain.card_rules import CardTopic
+from hrs_platform.domain.card_rules import quote_pages
+from hrs_platform.services.cards.reading import compact_readings
+from hrs_platform.services.cards.reading import coverage_batches
+from hrs_platform.services.cards.reading import reading_units
+from hrs_platform.services.retrieval.recovery import recover_retrieval
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def research(monkeypatch):
     evidence = CardEvidence(settings, None, outputs, None)
     parent = {"result": {"published": True, "retrieval_generation": "generation"}}
     monkeypatch.setattr(module, "get_run", lambda *_: parent)
-    monkeypatch.setattr("hrs_platform.services.search.get_run", lambda *_: parent)
+    monkeypatch.setattr("hrs_platform.services.retrieval.recovery.get_run", lambda *_: parent)
     corpus = {
         "book_id": original["book_id"],
         "parent_run_id": "parent",
@@ -231,7 +231,7 @@ def test_foreign_stale_or_missing_index_never_becomes_empty_evidence(research, f
         await invoke(kwargs["tools"][0], queries=[{"query": "运输", "purpose": "support"}])
         pytest.fail("Invalid corpus reached synthesis")
 
-    with pytest.raises(ApplicationError) as error:
+    with pytest.raises(TaskError) as error:
         execute(research, model)
     assert error.value.type == ("retrieval_wait" if failure == "deleted_index" else "card_corpus_changed")
     assert not any(":search:" in key and "retrieval-recovery" not in key or ":read:" in key
@@ -324,7 +324,7 @@ def test_budgets_survive_model_retry_without_truncating_source(research, monkeyp
         await invoke(read, unit_ids=[u["unit_id"] for u in research.units] if multiple else research.topic.unit_ids)
 
     for _ in range(2):
-        with pytest.raises(ApplicationError) as failure:
+        with pytest.raises(TaskError) as failure:
             execute(research, model)
         assert failure.value.type == "card_input_budget"
     assert len(research.calls) == 3
@@ -402,7 +402,7 @@ def test_retrieval_outage_restores_intents_before_any_new_model_call(research, m
         return value
     for at in (1000, 1001, 1060, 1180):
         now[0] = at
-        with pytest.raises(ApplicationError) as error:
+        with pytest.raises(TaskError) as error:
             execute(research, model)
         assert error.value.type == "retrieval_wait"
         assert len(model_calls) == 1
@@ -448,11 +448,11 @@ def test_persistent_retrieval_failures_wait_and_recover_without_manual_epoch(res
         calls.append(True)
         raise Problem("retrieval_unavailable", "offline", retryable=True)
     for attempt in range(1, 13):
-        with pytest.raises(ApplicationError) as error:
+        with pytest.raises(TaskError) as error:
             asyncio.run(recover_retrieval(research.evidence.engine, research.outputs, "run", "probe", unavailable))
         assert error.value.type == "retrieval_wait"
         now[0] = error.value.details[0]["retry_at"]
-    with pytest.raises(ApplicationError) as error:
+    with pytest.raises(TaskError) as error:
         asyncio.run(recover_retrieval(research.evidence.engine, research.outputs, "run", "probe", unavailable))
     assert error.value.type == "retrieval_wait" and len(calls) == 13
     now[0] = error.value.details[0]["retry_at"]

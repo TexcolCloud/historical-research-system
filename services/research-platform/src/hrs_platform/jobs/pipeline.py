@@ -1,5 +1,4 @@
 """Temporal adapters invoke the same domain use cases as the API."""
-
 import asyncio
 import time
 from contextlib import suppress
@@ -8,13 +7,18 @@ from threading import Event
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from hrs_platform.domain.errors import TaskError
+from hrs_platform.jobs.errors import activity_errors
 from hrs_platform.services.books import get_run
 from hrs_platform.services.cards import Cards
-from hrs_platform.services.library import Library
-from hrs_platform.services.lifecycle import RunLifecycle
-from hrs_platform.services.outputs import Outputs, execution_progress
-from hrs_platform.services.review import Review
-from hrs_platform.services.search import Search, recover_retrieval, task_search
+from hrs_platform.services.documents.library import Library
+from hrs_platform.services.documents.review import Review
+from hrs_platform.services.retrieval.compute import task_search
+from hrs_platform.services.retrieval.indexing import BookIndexer
+from hrs_platform.services.retrieval.recovery import recover_retrieval
+from hrs_platform.services.retrieval.search import Search
+from hrs_platform.services.runs.lifecycle import RunLifecycle
+from hrs_platform.services.runs.outputs import Outputs, execution_progress
 
 
 async def isolated(operation):
@@ -22,7 +26,7 @@ async def isolated(operation):
     cancelled, control = Event(), {}
 
     def execute():
-        from hrs_platform.services.storage import external_heartbeat
+        from hrs_platform.services.storage import storage_heartbeat
 
         async def run():
             control.update(loop=asyncio.get_running_loop(), task=asyncio.current_task())
@@ -30,11 +34,11 @@ async def isolated(operation):
                 control["task"].cancel()
             return await operation
 
-        token = external_heartbeat.set(True)
+        token = storage_heartbeat.set(None)
         try:
             return asyncio.run(run())
         finally:
-            external_heartbeat.reset(token)
+            storage_heartbeat.reset(token)
 
     running = asyncio.create_task(asyncio.to_thread(execute))
     try:
@@ -122,7 +126,7 @@ class PipelineActivities:
                         await running
                     finally:
                         raise
-                except ApplicationError as error:
+                except TaskError as error:
                     if error.type in {
                         "model_transport_wait",
                         "retrieval_wait",
@@ -152,14 +156,17 @@ class PipelineActivities:
             operation.close()
 
     @activity.defn
+    @activity_errors
     def initialize_review(self, run_id: str) -> dict:
         return Review(self.settings, self.engine).initialize(run_id)
 
     @activity.defn
+    @activity_errors
     def review_status(self, run_id: str) -> dict:
         return Review(self.settings, self.engine).status(run_id)
 
     @activity.defn
+    @activity_errors
     async def organize_book(self, run_id: str) -> dict:
         async def organize():
             RunLifecycle(self.engine).transition(run_id, "processing", "organization")
@@ -169,10 +176,12 @@ class PipelineActivities:
         return {"run_id": run_id, "chapters": len(result["groups"])}
 
     @activity.defn
+    @activity_errors
     def publish_book(self, run_id: str) -> dict:
         return Library(self.settings, self.engine).publish(run_id)
 
     @activity.defn
+    @activity_errors
     async def index_book(self, run_id: str) -> dict:
         async def index():
             search = Search(self.settings, self.engine)
@@ -181,28 +190,32 @@ class PipelineActivities:
                 search.outputs,
                 run_id,
                 "book-index",
-                lambda: task_search(search.index, self.settings.retrieval_endpoint, run_id, run_id),
+                lambda: task_search(BookIndexer(search).index, self.settings.retrieval_endpoint, run_id, run_id),
             )
 
         return await self.observe(run_id, index())
 
     @activity.defn
+    @activity_errors
     def create_card_run(self, run_id: str) -> dict:
         if not self.settings.auto_cards_enabled:
             return {"run_id": run_id, "skipped": True, "reason": "auto_cards_disabled"}
         return Cards(self.settings, self.engine).create_run(run_id)
 
     @activity.defn
+    @activity_errors
     def finish_book(self, run_id: str) -> dict:
         RunLifecycle(self.engine).transition(run_id, "completed", "complete")
         return {"run_id": run_id, "state": "completed"}
 
     @activity.defn
+    @activity_errors
     async def generate_cards(self, request: str | dict) -> dict:
         run_id = request["run_id"] if isinstance(request, dict) else request
         return await self.observe(run_id, Cards(self.settings, self.engine).generate(run_id, incremental=isinstance(request, dict)))
 
     @activity.defn
+    @activity_errors
     async def check_card_images(self, request: str | dict) -> dict:
         from hrs_runtime.local_vision import task_scope
 
@@ -219,6 +232,7 @@ class PipelineActivities:
             task_scope.reset(token)
 
     @activity.defn
+    @activity_errors
     async def adopt_cards(self, request: str | dict) -> dict:
         run_id = request["run_id"] if isinstance(request, dict) else request
         batch_key = request.get("batch_key") if isinstance(request, dict) else None
@@ -232,10 +246,12 @@ class PipelineActivities:
         return await self.observe(run_id, finalize_and_adopt())
 
     @activity.defn
+    @activity_errors
     def schedule_card_repair(self, request: dict) -> dict:
         return Cards(self.settings, self.engine).schedule_repair(request["run_id"], request["revision"])
 
     @activity.defn
+    @activity_errors
     def record_pipeline_failure(self, run_id: str) -> dict:
         run = get_run(self.engine, run_id)
         previous = run["error"] or {}

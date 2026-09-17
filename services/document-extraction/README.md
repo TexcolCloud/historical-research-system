@@ -12,7 +12,7 @@ PDF／图片转换模块，使用 Docling 与一个配置明确的 OCR 后端生
 
 ## 安装与命令
 
-使用独立 OCR 环境，避免与平台依赖混装。在项目根目录按 [快速开始](../../README.md#快速开始) 准备配置和根目录标记，再运行：
+使用独立 OCR 环境，避免与平台依赖混装。在项目根目录按 [快速开始](../../README.md#快速开始) 准备配置，再运行：
 
 ```powershell
 $env:UV_PROJECT_ENVIRONMENT="$PWD/services/document-extraction/.venv"

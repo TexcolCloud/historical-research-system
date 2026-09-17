@@ -2,13 +2,14 @@
 
 import json
 
-from fastapi import HTTPException
 from sqlalchemy import select
 
 from hrs_platform import models as db
-from hrs_platform.services.cards import Cards, quote_pages
-from hrs_platform.services.library import Library
-from hrs_platform.services.outputs import Outputs
+from hrs_platform.domain.card_rules import quote_pages
+from hrs_platform.domain.errors import ServiceError
+from hrs_platform.services.cards import Cards
+from hrs_platform.services.documents.library import Library
+from hrs_platform.services.runs.outputs import Outputs
 
 
 class Exports:
@@ -21,7 +22,7 @@ class Exports:
     def book(self, book_id):
         chapters = self.library.chapters(book_id)
         if not chapters:
-            raise HTTPException(409, "本书尚未入库，暂不能导出完整正文。")
+            raise ServiceError(409, "本书尚未入库，暂不能导出完整正文。")
         dependencies = [chapter["content"]["sha256"] for chapter in chapters]
         run_id = chapters[0]["run_id"]
         saved = self.outputs.get(run_id, "export:book-reading-v1", dependencies)

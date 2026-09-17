@@ -24,7 +24,7 @@ def test_detail_exposes_exact_unicode_occurrence_and_cross_page_quote_without_gu
         request.getfixturevalue("platform") if storage == "database" else (Settings.load(), MagicMock())
     )
     if storage == "memory":
-        monkeypatch.setattr("hrs_platform.services.review.Review.read_json", lambda self, reference: reference)
+        monkeypatch.setattr("hrs_platform.services.documents.review.Review.read_json", lambda self, reference: reference)
     book, run, identity, chapter = [str(uuid4()) for _ in range(4)]
     cards = Cards(settings, engine)
     candidate = draft().model_dump(mode="json")
@@ -102,7 +102,7 @@ def test_detail_exposes_exact_unicode_occurrence_and_cross_page_quote_without_gu
 
 
 def test_detail_keeps_older_candidate_without_item_ids_readable(monkeypatch):
-    monkeypatch.setattr("hrs_platform.services.review.Review.read_json", lambda self, reference: reference)
+    monkeypatch.setattr("hrs_platform.services.documents.review.Review.read_json", lambda self, reference: reference)
     engine = MagicMock()
     candidate = {"items": [{"selections": [{"unit_id": "u", "quote": "原文", "occurrence": 0}]}]}
     content = {"candidate": candidate, "units": [{"unit_id": "u", "text": "原文"}]}

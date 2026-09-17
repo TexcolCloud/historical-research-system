@@ -19,7 +19,7 @@ from hrs_platform.jobs.deletion import DeletionActivities
 from hrs_platform.jobs.pipeline import PipelineActivities
 from hrs_platform.jobs.workflows import BookWorkflow, CardWorkflow, ConversionWorkflow, DeleteBookWorkflow
 from hrs_platform.services.deletion import DELETING
-from hrs_platform.services.recovery import workflow_id
+from hrs_platform.services.runs.recovery import workflow_id
 
 logger = logging.getLogger(__name__)
 
