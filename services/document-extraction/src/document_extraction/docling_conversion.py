@@ -13,7 +13,7 @@ import time
 from . import ocr
 from .models import OcrResult
 from .utils import display_text, sha256, write_json
-from .native_pdf import normalized_text, inspect_pdf
+from .native_pdf import export_matches, inspect_pdf
 from .provenance import text_hash
 
 
@@ -119,6 +119,10 @@ class DoclingConverter:
                 ):
                     from docling.datamodel.backend_options import MarkdownBackendOptions
 
+                    native = (owner.native_plan or {}).get(page.page_no, {})
+                    if native.get('route') == 'native' and native.get('layout_blocks'):
+                        from .native_layout import to_docling
+                        return to_docling(native, page.get_image(scale=scale), owner.settings.render_dpi)
                     raw = owner.page_evidence.get(page.page_no, {}).get("raw", {})
                     source_uri = raw.get("metadata", {}).get("markdown_path")
 
@@ -258,7 +262,7 @@ class DoclingConverter:
         )
         referenced = DoclingDocument.load_from_json(output / "docling-document.json")
         (output / "docling-document.md").write_text(
-            export_markdown(referenced), encoding="utf-8"
+            export_markdown(referenced, asset_root=output), encoding="utf-8"
         )
         pages, mismatches = [], []
         for number, item in sorted(document.pages.items()):
@@ -269,11 +273,11 @@ class DoclingConverter:
             image = output / "pages" / f"page-{number:03d}.png"
             image.parent.mkdir(parents=True, exist_ok=True)
             item.image.pil_image.save(image)
-            text = display_text(export_markdown(referenced, page_no=number))
+            text = display_text(export_markdown(referenced, page_no=number, asset_root=output))
             evidence = self.page_evidence.get(number)
             native = (self.native_plan or {}).get(number, {})
             if native.get('route') == 'native':
-                if normalized_text(text) != normalized_text(native['text']):
+                if not export_matches(text, native):
                     mismatches.append(number)
                 pages.append({
                     'page': number, 'image_path': image, 'text': text, 'ocr': {},
@@ -370,7 +374,7 @@ class DoclingConverter:
         self.converter = None
 
 
-def export_markdown(document, page_no=None):
+def export_markdown(document, page_no=None, asset_root=None):
     """Use Docling's HTML table serializer to preserve merged-cell ownership."""
     from docling_core.transforms.serializer.html import HTMLTableSerializer
     from docling_core.transforms.serializer.markdown import (
@@ -379,7 +383,7 @@ def export_markdown(document, page_no=None):
     )
     from docling_core.types.doc import ImageRefMode
 
-    return (
+    text = (
         MarkdownDocSerializer(
             doc=document,
             table_serializer=HTMLTableSerializer(),
@@ -392,3 +396,12 @@ def export_markdown(document, page_no=None):
         .serialize()
         .text
     )
+
+    if asset_root is not None:
+        from urllib.parse import quote
+        for picture in document.pictures:
+            if picture.image is not None and Path(str(picture.image.uri)).is_absolute():
+                uri = picture.image.uri
+                relative = Path(str(uri)).resolve().relative_to(asset_root.resolve()).as_posix()
+                text = text.replace(f']({uri!s})', f']({quote(relative, safe="/")})')
+    return text

@@ -24,7 +24,7 @@ class ScheduledConverter:
     def convert_document(self, source, output):
         from .ocr import _release_cuda
         plan = inspect_pdf(source, enabled=getattr(self.settings, 'native_pdf', False)
-                           and self.settings.ocr_backends[0].get('kind') == 'paddleocr-vl')
+                           if self.settings.ocr_backends[0].get('kind') == 'paddleocr-vl' else False)
         while True:
             needs_ocr = not plan or any(p['route'] != 'native' for p in plan.values())
             with gpu_lease() if needs_ocr else nullcontext():

@@ -45,17 +45,17 @@ $extract = 'services/document-extraction/.venv/Scripts/history-extract.exe'
 
 [default.json](config/default.json) 启用 `vision_review.review_mode=full`、自动接受和风险检查。视觉模型由 [settings.py](src/document_extraction/settings.py) 绑定本地 Qwen3-VL-8B-Instruct Q4_K_M，当前生产视觉不使用 DeepSeek。
 
-1. 默认先在 CPU 上检查 PDF 文字层。仅接受有可靠 Unicode 映射、水平不透明文字、单栏且无图形／表格／批注／复杂脚注证据的简单页；保留原文、行框、物理页、原件摘要与完整原页图。不确定、扫描、隐藏 OCR 层和页内混合内容仍交 PaddleOCR-VL。
+1. 默认先在 CPU 上检查 PDF 文字层。PDFium 检查可见 Unicode，pdfplumber 提取段落、分栏和表格；两者字符覆盖一致后保留块框、表格单元格与合并关系、物理页和原件摘要。缩进、明显段间距、多栏、不同字号与独立脚注不再单独触发 OCR。扫描、隐藏文字层、提取缺失和无法可靠定位的内容仍交 PaddleOCR-VL。
 2. 依据原页边缘、数字和上下文规则清理页码噪声，记录删除范围和摘要；不一律删除所有 footer，保留表格数字、注释与署名。
-3. 原生页通过证据绑定的确定性检查后标记 `native-pass`，无需 OCR 或视觉模型；不伪造识别置信度或视觉回执。其余页仍全量视觉核验。Docling 序列化若改变原生文字则回退到 OCR，重新取得 GPU 租约。
+3. 原生页通过证据绑定的确定性检查后标记 `native-pass`，无需 OCR 或视觉模型；不伪造识别置信度或视觉回执。有边框表格只有字符归属和行列跨度一致才能直接通过。无边框数字列、行内变字号／上标、重叠结构与图像保留原生提取和原图，进入本地视觉机审，不重复 OCR；机审未解决的问题才交人工。Docling 序列化若改变文字、段落顺序或单元格结构，则批量回退到 OCR，重新取得 GPU 租约。
 4. 唯一定位的修正经独立原图复核且无未解决内容后才能写回；歧义、不可读、未定位、请求失败或复核失败保留待审。
 5. 平台保护已有人工决定和草稿。整书未解决／未核验内容清空后才入库和分块。
 
 PDF 物理页序与印刷页码分开使用，表外页码不应作为表格正文比较。没有可信细粒度坐标时只承诺定位到原页，不把占位框当作精确证据。
 
-默认原生策略为 `native_pdf.policy=native-pdf-simple-text-v1`；删除此配置即保持旧全 OCR 路径，RapidOCR 配置仍使用全页 OCR。配置类接受旧 `risk_based` 与 `conversion_only`，用于既有产物与显式 CLI 配置；平台 `stages review` 仍要求视觉开启且为 `full`，该模式核验所有未通过原生规则的页。不能关闭审核来绕过平台放行门槛。
+默认原生策略为 `native_pdf.policy=native-pdf-layout-v2`；删除此配置即保持旧全 OCR 路径，RapidOCR 配置仍使用全页 OCR。配置类接受旧 `risk_based` 与 `conversion_only`，用于既有产物与显式 CLI 配置；平台 `stages review` 仍要求视觉开启且为 `full`，该模式核验所有未通过原生规则的页。不能关闭审核来绕过平台放行门槛。
 
-这是保守的第一版：缩进、明显段间距、无边框表格的列间隙和重复数字列也触发回退，避免把分段或脚注压成正文。它不推断复杂排版语义，也不保证发现字体本身的错误字符映射。Paddle 跨页结构处理仅在连续 OCR 页段内执行，表格组 ID 包含该段起始物理页，不跨过原生页合并。序列化不一致页会在同一轮收集后批量回退，避免逐页重跑整书。
+原生放行验证字符覆盖、可见性、几何范围和输出结构，不以字号、缩进或分栏本身判失败。图像以原页裁剪保留，输出使用可移植的相对资源路径。该规则不保证发现字体自身的错误字符映射，也没有真实书籍的免审率承诺。冻结运行中的 `native-pdf-simple-text-v1` 保持原判定，避免旧检查点被追溯放宽；所有该版本运行和可恢复检查点退出后才能移除此兼容路径。Paddle 跨页结构处理仅在连续 OCR 页段内执行，表格组 ID 包含该段起始物理页，不跨过原生页合并。序列化不一致页会在同一轮收集后批量回退，避免逐页重跑整书。
 
 ## 平台阶段与恢复
 
@@ -93,7 +93,7 @@ Docling 使用 PDFium；表格采用 HTML 保留合并单元格，原图用于�
 | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | [pipeline.py](src/document_extraction/pipeline.py)、[stages.py](src/document_extraction/stages.py)                           | 转换／核验编排、检查点       |
 | [docling_conversion.py](src/document_extraction/docling_conversion.py)、[ocr.py](src/document_extraction/ocr.py)             | 单路识别与模型适配           |
-| [native_pdf.py](src/document_extraction/native_pdf.py) | PDFium 文字层测量、保守分流及原生证据验证 |
+| [native_pdf.py](src/document_extraction/native_pdf.py)、[native_layout.py](src/document_extraction/native_layout.py) | PDFium 文字层验证、pdfplumber 布局提取、原生证据分流 |
 | [semantic_completion.py](src/document_extraction/semantic_completion.py)                                                     | 当前本地视觉校读、修正与复查 |
 | [provenance.py](src/document_extraction/provenance.py)、[content_readiness.py](src/document_extraction/content_readiness.py) | 来源与可用性                 |
 | [settings.py](src/document_extraction/settings.py)、[accelerator.py](src/document_extraction/accelerator.py)                 | 配置与设备资源               |

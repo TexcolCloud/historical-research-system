@@ -84,7 +84,7 @@ class Settings:
     acceleration: AccelerationSettings
     env_file: Path
     model_root: Path
-    native_pdf: bool = False
+    native_pdf: str | bool = False
 
     @classmethod
     def load(cls, config_path: Path, env_path: Path | None = None) -> "Settings":
@@ -115,12 +115,12 @@ class Settings:
         if len(config.get("ocr_backends", [])) != 1:
             raise ValueError("Exactly one OCR backend is required; dual OCR is retired")
         native = config.get('native_pdf', {}).get('policy')
-        if native not in {None, 'native-pdf-simple-text-v1'}:
+        if native not in {None, 'native-pdf-simple-text-v1', 'native-pdf-layout-v2'}:
             raise ValueError('Unknown native PDF policy')
         if native and config['ocr_backends'][0]['kind'] != 'paddleocr-vl':
             raise ValueError('Native PDF routing requires the Paddle page adapter')
         return cls(
-            native_pdf=config.get("native_pdf", {}).get("policy") == "native-pdf-simple-text-v1",
+            native_pdf=native or False,
             render_dpi=int(config.get("render_dpi", 300)),
             ocr_backends=config.get("ocr_backends", []),
             vision_review=ReviewSettings(

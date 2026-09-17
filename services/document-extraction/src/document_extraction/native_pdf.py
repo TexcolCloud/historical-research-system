@@ -1,20 +1,22 @@
-"""Conservative CPU text-layer inspection; uncertain pages retain the OCR path.
+"""Evidence-based CPU text-layer inspection; corrupt extraction retains OCR.
 
 PDFium is already Docling's PDF backend. This module never loads an OCR model.
-Only horizontal, opaque, single-column text with an unambiguous Unicode mapping
-qualifies. Images, paths, forms and annotations deliberately require OCR/review.
+Complex layout is reconstructed separately; uncertain structure uses visual
+review without repeating recognition of already proven native text.
 """
 import ctypes
 import math
 import re
 import unicodedata
-from contextlib import closing
+from contextlib import ExitStack, closing
 from pathlib import Path
 
+from .native_layout import POLICY, extract_layout, structure, validate_layout
 from .provenance import text_hash
 from .utils import sha256
 
-POLICY = "native-pdf-simple-text-v1"
+# Retained only for frozen v1 runs/checkpoints. New runs use structured v2.
+LEGACY_POLICY = "native-pdf-simple-text-v1"
 
 
 def compact(text):
@@ -28,9 +30,15 @@ def normalized_text(text):
 
 def issues(evidence):
     """Re-evaluate retained measurements, rather than trust a stored pass flag."""
+    if evidence.get('policy') == POLICY:
+        errors = validate_layout(evidence)
+        if any(unicodedata.category(c) in {'Co', 'Cs', 'Cn'} or c == '\ufffd'
+               or (unicodedata.category(c) == 'Cc' and c not in '\n\r\t') for c in evidence.get('raw_text', '')):
+            errors.append('invalid-unicode')
+        return errors
     reasons = list(evidence.get("inspection_errors", []))
     text, lines = evidence.get("text", ""), evidence.get("lines", [])
-    if evidence.get("policy") != POLICY:
+    if evidence.get("policy") != LEGACY_POLICY:
         reasons.append("unknown-native-policy")
     if len(compact(text)) < 30 or len(lines) < 2:
         reasons.append("sparse-text")
@@ -74,25 +82,49 @@ def inspect_pdf(source, *, enabled):
 
     source_hash = sha256(Path(source))
     decisions = {}
-    with pdfium.PdfDocument(source) as document:
+    policy = enabled if isinstance(enabled, str) else POLICY
+    probe_errors = (OSError, ValueError, TypeError, AttributeError, RuntimeError, ctypes.ArgumentError)
+    with ExitStack() as stack:
+        document = stack.enter_context(pdfium.PdfDocument(source))
+        layout_pages, layout_error = None, None
+        if policy == POLICY:
+            import pdfplumber
+            from pdfplumber.utils.exceptions import MalformedPDFException, PdfminerException
+            probe_errors += (MalformedPDFException, PdfminerException)
+            try:
+                layout_document = stack.enter_context(pdfplumber.open(source, laparams={'line_margin': 0.2, 'boxes_flow': 0.5}))
+                layout_pages = layout_document.pages
+                if len(layout_pages) != len(document):
+                    raise ValueError('layout-page-count-mismatch')
+            except probe_errors as exc:
+                layout_error = f'{type(exc).__name__}: {exc}'
         for index in range(len(document)):
-            evidence = {"policy": POLICY, "page": index + 1, "source_sha256": source_hash,
+            evidence = {"policy": policy, "page": index + 1, "source_sha256": source_hash,
                         "text": "", "lines": [], "inspection_errors": []}
             try:
                 with closing(document[index]) as page, closing(page.get_textpage()) as textpage:
-                    evidence.update(_inspect_page(page, textpage, raw))
-            except (OSError, ValueError, TypeError, AttributeError, RuntimeError, ctypes.ArgumentError) as exc:
+                    evidence.update(_inspect_page(page, textpage, raw, structured=policy == POLICY))
+                if layout_error:
+                    raise ValueError('layout-parser-unavailable: ' + layout_error)
+                if layout_pages is not None:
+                    layout_page = layout_pages[index]
+                    try:
+                        evidence.update(extract_layout(layout_page, evidence))
+                    finally:
+                        layout_page.close()
+            except probe_errors as exc:
                 evidence["inspection_errors"].append("probe-failed:" + type(exc).__name__)
+                evidence['probe_error'] = str(exc)
             evidence["reasons"] = issues(evidence)
             evidence["route"] = "ocr" if evidence["reasons"] else "native"
             decisions[index + 1] = evidence
     return decisions
 
 
-def _inspect_page(page, textpage, raw):
+def _inspect_page(page, textpage, raw, *, structured=False):
     width, height = page.get_size()
     errors = []
-    if page.get_rotation() or raw.FPDFPage_GetAnnotCount(page) != 0:
+    if page.get_rotation() or (not structured and raw.FPDFPage_GetAnnotCount(page) != 0):
         errors.append("rotation-or-annotations")
     for obj in page.get_objects(textpage=textpage):
         if obj.type != raw.FPDF_PAGEOBJ_TEXT:
@@ -103,7 +135,8 @@ def _inspect_page(page, textpage, raw):
         clip = raw.FPDFPageObj_GetClipPath(obj)
         if (raw.FPDFTextObj_GetTextRenderMode(obj) != 0
                 or not raw.FPDFPageObj_GetFillColor(obj, *colors)
-                or colors[3].value != 255 or max(c.value for c in colors[:3]) > 80
+                or colors[3].value != 255
+                or (min(c.value for c in colors[:3]) > 245 if structured else max(c.value for c in colors[:3]) > 80)
                 or abs(matrix.b) > 0.001 or abs(matrix.c) > 0.001
                 or matrix.a <= 0 or matrix.d <= 0
                 or (clip and raw.FPDFClipPath_CountPaths(clip) > 0)):
@@ -157,14 +190,14 @@ def native_eligible(page):
     """Bind CPU acceptance to the measured text, page, source and rendered image."""
     evidence = page.get("native_evidence") or {}
     try:
-        if issues(evidence) or evidence["page"] != page["page"]:
+        if issues(evidence) or evidence.get('visual_reasons') or evidence["page"] != page["page"]:
             return False
         conversion = page["conversion_evidence"]
         if (evidence["source_sha256"] != conversion["source_sha256"]
                 or conversion["image_sha256"] != sha256(Path(page["image_path"]))):
             return False
         exported = page.get("layout_cleanup", {}).get("original_text", page["text"])
-        if normalized_text(exported) != normalized_text(evidence["text"]):
+        if not export_matches(exported, evidence):
             return False
         if exported != page["text"]:
             from .artifacts import clean_page_numbers
@@ -174,3 +207,9 @@ def native_eligible(page):
         return text_hash(exported) == evidence["exported_text_sha256"]
     except (KeyError, TypeError, ValueError, OSError):
         return False
+
+
+def export_matches(text, evidence):
+    if evidence.get('policy') == POLICY:
+        return structure(text) == structure(evidence['text'])
+    return normalized_text(text) == normalized_text(evidence['text'])

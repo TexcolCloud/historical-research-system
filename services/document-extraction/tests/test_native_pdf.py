@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from document_extraction.artifacts import clean_page_numbers, write_outputs
-from document_extraction.native_pdf import POLICY, inspect_pdf, native_eligible
+from document_extraction.native_pdf import LEGACY_POLICY, POLICY, inspect_pdf, native_eligible
 from document_extraction.provenance import text_hash
 from document_extraction.semantic_completion import complete_document
 from document_extraction.utils import sha256
@@ -95,9 +95,9 @@ def test_native_acceptance_rejects_changed_evidence(tmp_path, edit):
     (f'BT /F1 12 Tf 50 700 Td ({TEXT[0]}) Tj 0 -100 Td ({TEXT[1]}) Tj ET', 'paragraph-boundary-or-detached-note'),
     (f'BT /F1 12 Tf 50 700 Td ({TEXT[0]}) Tj 24 -20 Td ({TEXT[1]}) Tj ET', 'multiple-columns-or-indentation'),
 ])
-def test_uncertain_pages_require_ocr(tmp_path, content, reason):
+def test_frozen_v1_pages_keep_the_original_policy(tmp_path, content, reason):
     source = make_pdf(tmp_path / 'source.pdf', [content])
-    evidence = inspect_pdf(source, enabled=True)[1]
+    evidence = inspect_pdf(source, enabled=LEGACY_POLICY)[1]
     assert evidence['route'] == 'ocr'
     assert reason in evidence['reasons']
 

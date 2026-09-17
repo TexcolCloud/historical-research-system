@@ -102,8 +102,8 @@ def test_native_export_mismatch_retries_through_ocr_under_lease(tmp_path, monkey
     source = make_pdf(tmp_path / 'source.pdf', [native] * page_count)
     export = docling_conversion.export_markdown
     damaged = []
-    def changed(document, page_no=None):
-        text = export(document, page_no)
+    def changed(document, page_no=None, **kwargs):
+        text = export(document, page_no, **kwargs)
         if page_no and page_no not in damaged:
             damaged.append(page_no)
             return text.replace('120', '999')

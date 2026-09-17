@@ -62,6 +62,7 @@ jobs:
           services/document-extraction/tests/test_page_number_cleanup.py
           services/document-extraction/tests/test_settings.py
           services/document-extraction/tests/test_native_pdf.py
+          services/document-extraction/tests/test_native_layout.py
           services/document-extraction/tests/test_phase_checkpoint.py
           --basetemp "${{ runner.temp }}/conversion-review" --junitxml=reports/conversion-review.xml
       - run: npm --prefix services/review-workbench test
