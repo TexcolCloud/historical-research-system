@@ -99,7 +99,11 @@ def test_business_and_core_modules_do_not_depend_on_http_or_worker_composition()
                     for n in names
                 ), f"{path}:{getattr(node, 'lineno', 0)} reverses application layering"
                 if folder == "domain":
-                    assert not any(n.startswith("hrs_platform.services") for n in names), str(path)
+                    assert not any(n.startswith(("hrs_platform.services", "torch", "transformers")) for n in names), str(path)
+                if path.parent.name == "models":
+                    assert not any(n.startswith("hrs_platform.services.cards") for n in names), str(path)
+                if path.name == "indexing.py":
+                    assert "hrs_platform.services.retrieval.search" not in names, str(path)
 
 
 @pytest.mark.parametrize("status", [404, 409, 422, 502])

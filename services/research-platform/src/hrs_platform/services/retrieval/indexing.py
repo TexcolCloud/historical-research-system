@@ -8,22 +8,30 @@ from sqlalchemy import select, update
 
 from hrs_platform import models as db
 from hrs_platform.services.books import get_run
+from hrs_platform.services.documents.library import Library
 from hrs_platform.services.documents.structure import POLICY as STRUCTURE_POLICY
 from hrs_platform.services.documents.structure import project_structure
 from hrs_platform.services.retrieval.chunks import CHUNK_RULE, retrieval_chunks
-from hrs_platform.services.retrieval.compute import EMBEDDING_IDENTITY, measured, normalizer
+from hrs_platform.services.retrieval.compute import (
+    EMBEDDING_IDENTITY,
+    RetrievalCompute,
+    measured,
+    normalizer,
+    search_client,
+)
 from hrs_platform.services.retrieval.inputs import INPUT_RULE, bounded_chunks
-from hrs_platform.services.runs.outputs import fingerprint
+from hrs_platform.services.runs.outputs import Outputs, fingerprint
 
 logger = logging.getLogger(__name__)
 EMBEDDING_BATCH = 8
 
 
 class BookIndexer:
-    def __init__(self, search):
-        self.search = search
-        self.settings, self.engine = search.settings, search.engine
-        self.client, self.library, self.outputs = search.client, search.library, search.outputs
+    def __init__(self, settings, engine):
+        self.settings, self.engine = settings, engine
+        self.client = search_client(settings.opensearch_url)
+        self.library, self.outputs = Library(settings, engine), Outputs(settings, engine)
+        self.runtime = RetrievalCompute(settings)
 
     def embed_cached(self, run_id, chunks, metrics):
         identity = {**EMBEDDING_IDENTITY, "device": self.settings.retrieval_device}
@@ -47,12 +55,12 @@ class BookIndexer:
         metrics["computed_vectors"] = 0
         missing = [key for key in wanted if key not in cached]
         if missing:
-            tokenizer = self.search.tokenizer("BAAI/bge-m3")
+            tokenizer = self.runtime.tokenizer("BAAI/bge-m3")
             missing.sort(key=lambda key: len(tokenizer.encode(wanted[key]).ids))
         for offset in range(0, len(missing), EMBEDDING_BATCH):
             keys = missing[offset : offset + EMBEDDING_BATCH]
             with measured(metrics, "embedding_ms"):
-                result = self.search.compute("embed", [wanted[key] for key in keys])
+                result = self.runtime.compute("embed", [wanted[key] for key in keys])
             vectors = dict(zip(keys, result["vectors"], strict=True))
             dependency = {"embedding": identity, "texts": keys}
             with measured(metrics, "checkpoint_ms"):
@@ -125,7 +133,7 @@ class BookIndexer:
         saved = self.outputs.get(run_id, step, dependency)
         if saved is None:
             with measured(metrics, "chunking_ms"):
-                tokenizer = self.search.tokenizer("BAAI/bge-m3")
+                tokenizer = self.runtime.tokenizer("BAAI/bge-m3")
                 chunks = []
                 for row in chapters:
                     chapter = self.library.chapter(row["id"])

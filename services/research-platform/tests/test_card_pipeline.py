@@ -178,7 +178,7 @@ def test_topic_plan_rejects_uncovered_duplicate_or_unknown_units(assigned):
 
 
 def test_oversized_requests_stop_before_model_and_preserve_atomic_sources(monkeypatch):
-    monkeypatch.setattr("hrs_platform.services.cards.reading.CARD_INPUT_TOKENS", 1)
+    monkeypatch.setattr("hrs_platform.domain.card_rules.CARD_INPUT_TOKENS", 1)
     models = SimpleNamespace(run=lambda *a, **k: pytest.fail("Oversize input reached a model"))
     with pytest.raises(TaskError, match="超过输入预算"):
         asyncio.run(

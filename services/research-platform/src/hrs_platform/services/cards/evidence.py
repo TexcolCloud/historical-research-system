@@ -6,11 +6,11 @@ from agents import function_tool
 from sqlalchemy import select
 
 from hrs_platform import models as db
-from hrs_platform.domain.card_rules import PURPOSES, EvidenceAssessment, EvidenceQuery
+from hrs_platform.domain.card_rules import PURPOSES, EvidenceAssessment, EvidenceQuery, source_payload
 from hrs_platform.domain.errors import TaskError
 from hrs_platform.domain.tokens import estimate_request
 from hrs_platform.services.books import get_run
-from hrs_platform.services.cards.reading import card_model, neighbor_context, source_payload
+from hrs_platform.services.cards.reading import card_model, neighbor_context
 from hrs_platform.services.retrieval.chunks import source_excerpt
 from hrs_platform.services.retrieval.compute import task_search
 from hrs_platform.services.retrieval.recovery import recover_retrieval

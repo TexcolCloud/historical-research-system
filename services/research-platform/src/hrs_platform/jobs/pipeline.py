@@ -16,7 +16,6 @@ from hrs_platform.services.documents.review import Review
 from hrs_platform.services.retrieval.compute import task_search
 from hrs_platform.services.retrieval.indexing import BookIndexer
 from hrs_platform.services.retrieval.recovery import recover_retrieval
-from hrs_platform.services.retrieval.search import Search
 from hrs_platform.services.runs.lifecycle import RunLifecycle
 from hrs_platform.services.runs.outputs import Outputs, execution_progress
 
@@ -184,13 +183,13 @@ class PipelineActivities:
     @activity_errors
     async def index_book(self, run_id: str) -> dict:
         async def index():
-            search = Search(self.settings, self.engine)
+            indexer = BookIndexer(self.settings, self.engine)
             return await recover_retrieval(
                 self.engine,
-                search.outputs,
+                indexer.outputs,
                 run_id,
                 "book-index",
-                lambda: task_search(BookIndexer(search).index, self.settings.retrieval_endpoint, run_id, run_id),
+                lambda: task_search(indexer.index, self.settings.retrieval_endpoint, run_id, run_id),
             )
 
         return await self.observe(run_id, index())

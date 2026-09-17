@@ -13,14 +13,13 @@ from hrs_platform.services.documents.library import Library
 from hrs_platform.services.retrieval.chunks import expand_hits
 from hrs_platform.services.retrieval.compute import (
     EMBEDDING_IDENTITY,
-    local_models,
+    RetrievalCompute,
     measured,
     normalizer,
     query_vector,
-    remote_compute,
     search_client,
 )
-from hrs_platform.services.retrieval.inputs import ranking_windows, tokenizer_for
+from hrs_platform.services.retrieval.inputs import ranking_windows
 from hrs_platform.services.retrieval.ranking import (
     candidates_for_rerank,
     fuse,
@@ -59,24 +58,9 @@ def calibrated_policy(result):
 class Search:
     def __init__(self, settings, engine):
         self.settings, self.engine = settings, engine
+        self.runtime = RetrievalCompute(settings)
         self.client = search_client(settings.opensearch_url)
         self.library, self.outputs = Library(settings, engine), Outputs(settings, engine)
-
-    def tokenizer(self, model):
-        return tokenizer_for(self.settings.project_root / "models/document-retrieval", model)
-
-    def compute(self, operation, texts, **options):
-        if self.settings.retrieval_device == "cuda":
-            return remote_compute(self.settings.retrieval_endpoint, operation, texts, **options)
-        models = local_models(str(self.settings.project_root / "models/document-retrieval"))
-        if operation == "embed":
-            return {
-                "vectors": models.embed(texts, query=options.get("query", False)),
-                "identity": models.identity(),
-            }
-        if operation == "rerank":
-            return {"scores": models.rerank(options["query"], texts)}
-        raise ValueError("Unsupported local model operation")
 
     def active_scope(self, book_id):
         with self.engine.connect() as connection:
@@ -319,9 +303,9 @@ class Search:
                     texts, owners = ranking_windows(
                         query,
                         [row.get("retrieval_text", row["text"]) for row in rows],
-                        self.tokenizer("BAAI/bge-reranker-v2-m3"),
+                        self.runtime.tokenizer("BAAI/bge-reranker-v2-m3"),
                     )
-                    window_scores = self.compute("rerank", texts, query=query)["scores"]
+                    window_scores = self.runtime.compute("rerank", texts, query=query)["scores"]
                     scores = [float("-inf")] * len(rows)
                     for owner, score in zip(owners, window_scores, strict=True):
                         scores[owner] = max(scores[owner], score)

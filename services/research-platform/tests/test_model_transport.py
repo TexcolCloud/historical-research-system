@@ -48,7 +48,7 @@ def test_tool_history_budget_stops_before_sending_oversized_followup(monkeypatch
         return "仅为合成测试来源，不可截断。" * 10000
 
     model, sends = transport_model(monkeypatch, provider)
-    monkeypatch.setattr("hrs_platform.services.cards.reading.CARD_INPUT_TOKENS", 10000)
+    monkeypatch.setattr("hrs_platform.domain.card_rules.CARD_INPUT_TOKENS", 10000)
     with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "tool-budget", "test", {}, Receipt, tools=[read_evidence]))
     assert failure.value.type == "card_input_budget"

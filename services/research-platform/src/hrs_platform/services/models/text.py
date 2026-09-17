@@ -61,15 +61,18 @@ class Models:
 
         async def close(history):
             options = {name: value for name, value in kwargs.items() if name != "tools"}
-            from hrs_platform.services.cards.reading import card_model
+            from hrs_platform.domain.card_rules import card_input
 
-            return await card_model(
-                self,
+            final_instructions = instructions + "\n工具读取阶段已结束。仅使用给定任务和已取得信息输出最终结果，不能要求继续调用工具。"
+            final_payload = card_input(
+                close_key + ":final", final_instructions,
+                {"task": payload, "completed_tool_history": history}, output_type,
+            )
+            return await self.run(
                 run_id,
                 close_key + ":final",
-                instructions
-                + "\n工具读取阶段已结束。仅使用给定任务和已取得信息输出最终结果，不能要求继续调用工具。",
-                {"task": payload, "completed_tool_history": history},
+                final_instructions,
+                final_payload,
                 output_type,
                 parent=execution_parent.get() or parent,
                 **options,
@@ -338,7 +341,7 @@ class Models:
                 body = json.loads((await request.aread()).decode("utf-8"))
                 if tools:
                     from hrs_platform.domain.tokens import estimate_request
-                    from hrs_platform.services.cards.reading import CARD_INPUT_TOKENS
+                    from hrs_platform.domain.card_rules import CARD_INPUT_TOKENS
 
                     if estimate_request(body)["input_tokens"] > CARD_INPUT_TOKENS:
                         raise TaskError(

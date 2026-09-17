@@ -189,8 +189,7 @@ def test_index_uses_owned_requests_and_durable_recovery(platform, monkeypatch):
         return remote_compute("http://fixture.invalid/retrieval", "embed", ["fixture"])
 
     search = SimpleNamespace(index=index, outputs=Outputs(settings, engine))
-    monkeypatch.setattr("hrs_platform.jobs.pipeline.Search", lambda *_: search)
-    monkeypatch.setattr("hrs_platform.jobs.pipeline.BookIndexer", lambda _: search)
+    monkeypatch.setattr("hrs_platform.jobs.pipeline.BookIndexer", lambda *_: search)
 
     async def observe(run, operation, **kwargs):
         return await operation

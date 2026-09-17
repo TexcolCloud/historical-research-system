@@ -11,7 +11,7 @@ from hrs_platform.domain.generation_contracts import ReadingRecord
 from hrs_platform.services.cards.reading import coverage
 from hrs_platform.services.cards.reading import read_batch
 from hrs_platform.services.cards.reading import scoped_check
-from hrs_platform.services.cards.reading import source_payload
+from hrs_platform.domain.card_rules import source_payload
 
 
 def test_reading_batch_checks_sources_once_and_repairs_only_missing_verdicts():

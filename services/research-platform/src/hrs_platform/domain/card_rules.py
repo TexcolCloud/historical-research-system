@@ -5,7 +5,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from hrs_platform.domain.errors import TaskError
 from hrs_platform.domain.generation_contracts import CardDraft, DigestFact
+from hrs_platform.domain.prompts import COMMON
 from hrs_platform.domain.tokens import estimate_request
 
 PURPOSES = {"support", "counter", "qualify"}
@@ -230,3 +232,65 @@ def repair_sources(previous, units, chosen):
         # A failed verdict without located findings still has an explicit checked scope.
         if check.get("conclusion") != "pass" and not check.get("findings"):
             chosen.update(set(check.get("checked_object_ids", [])) & known)
+
+
+CARD_INPUT_TOKENS = 48000
+
+
+def source_payload(payload):
+    """Send each identified original once, retaining explicit note/owner links."""
+    if "source_units" not in payload:
+        return payload
+    sources, contexts, known = [], [], {}
+
+    def add(unit, target):
+        identity = unit.get("unit_id", unit.get("id"))
+        if identity is None:
+            target.append(unit)
+            return
+        if identity in known:
+            old = known[identity]
+            if old.get("text") != unit.get("text") or old.get("sources") != unit.get("sources"):
+                raise ValueError("A source identity cannot refer to different evidence.")
+            return
+        value = {**unit, "unit_id": identity}
+        known[identity] = value
+        target.append(value)
+
+    for unit in payload["source_units"]:
+        add(unit, sources)
+    for unit in payload.get("context_units", []):
+        add(unit, contexts)
+    # Appending related originals is intentional: links can be nested and shared.
+    queue = [*sources, *contexts]
+    for unit in queue:
+        if not unit.get("context"):
+            continue
+        links = []
+        for extra in unit["context"]:
+            identity = extra.get("unit_id", extra.get("id"))
+            if identity is None or "text" not in extra:
+                links.append(extra)
+                continue
+            before = len(contexts)
+            add(extra, contexts)
+            queue.extend(contexts[before:])
+            links.append({"unit_id": identity, "role": extra.get("role")})
+        unit["context"] = links
+    return {**payload, "source_units": sources, "context_units": contexts}
+
+
+def card_input(key, instructions, payload, output_type):
+    payload = source_payload(payload)
+    request = {
+        "instructions": instructions if instructions.startswith(COMMON) else COMMON + instructions,
+        "input": payload,
+        "schema": output_type.model_json_schema(),
+    }
+    if estimate_request(request)["input_tokens"] > CARD_INPUT_TOKENS:
+        raise TaskError(
+            f"制卡步骤 {key} 超过输入预算，请缩小研究主题；已保存证据不截断、不放行。",
+            type="card_input_budget",
+            non_retryable=True,
+        )
+    return payload

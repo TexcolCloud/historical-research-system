@@ -25,12 +25,14 @@ from hrs_platform.domain.card_rules import CardTopic
 from hrs_platform.services.cards.reading import reading_units
 from hrs_platform.services.retrieval.evaluation import evaluate
 from hrs_platform.services.retrieval.search import Search
+from hrs_platform.services.retrieval.compute import RetrievalCompute
 
 
 def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_vectors(platform, monkeypatch):
     settings, engine = platform
     settings = settings.model_copy(update={"opensearch_index": "test-structure-" + uuid4().hex})
     search = Search(settings, engine)
+    indexer = BookIndexer(settings, engine)
     book, run, chapter = [str(uuid4()) for _ in range(3)]
     original = "# 合成运输\n\n" + "甲地运入120吨粮食，不包括乙地。" * 150
     body = {"parts": [{"span_id": "synthetic", "start": 0, "text": original, "source": {"pages": [3, 4]}}]}
@@ -65,25 +67,25 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         return {"scores": [1.0] * len(texts)}
 
     # The API constructs its own Search instance; isolate those calls as well.
-    monkeypatch.setattr(Search, "compute", lambda self, operation, texts, **options: compute(operation, texts, **options))
+    monkeypatch.setattr(RetrievalCompute, "compute", lambda self, operation, texts, **options: compute(operation, texts, **options))
     monkeypatch.setattr(module, "query_vector", lambda *_: [1.0] + [0.0] * 1023)
     tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
-    monkeypatch.setattr(Search, "tokenizer", lambda self, model: tokenizer)
+    monkeypatch.setattr(RetrievalCompute, "tokenizer", lambda self, model: tokenizer)
     bulk = indexing.helpers.bulk
     try:
         with engine.begin() as connection:
             connection.execute(update(db.runs).where(db.runs.c.id == run).values(result={}))
         with pytest.raises(ValueError, match="published book"):
-            BookIndexer(search).index(run)
+            indexer.index(run)
         assert embeddings == []
         with engine.begin() as connection:
             connection.execute(update(db.runs).where(db.runs.c.id == run).values(result={"published": True}))
         search.outputs.put(run, "retrieval-chunks", {"chunks": ["obsolete"]}, {"legacy": True})
-        first = BookIndexer(search).index(run)
+        first = indexer.index(run)
         assert all(text.startswith("独立运输样本\n") for text in embeddings[0])
         assert len(embeddings) == 1
-        assert BookIndexer(search).index(run) == first
+        assert indexer.index(run) == first
         assert len(embeddings) == 1
         hits = search.search("糧食", book, context_chars=6000)
         assert hits and all(h["generation"] == first["generation"] for h in hits)
@@ -180,7 +182,7 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
 
         monkeypatch.setattr(indexing.helpers, "bulk", partial)
         with pytest.raises(OSError, match="partial index"):
-            BookIndexer(search).index(run)
+            indexer.index(run)
         with engine.connect() as connection:
             metrics = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == run))[
                 "retrieval_metrics"
@@ -188,7 +190,7 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
             assert metrics["status"] == "failed" and metrics["total_ms"] > 0
         assert all(h["generation"] == first["generation"] for h in search.search("粮食", book, use_calibration=False))
         monkeypatch.setattr(indexing.helpers, "bulk", bulk)
-        second = BookIndexer(search).index(run)
+        second = indexer.index(run)
         assert second["generation"] != first["generation"]
         with pytest.raises(TaskError) as changed:
             evidence_tools.pin(get_run(engine, child), snapshot)
@@ -197,7 +199,7 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         assert all(h["generation"] == second["generation"] for h in search.search("粮食", book))
         assert search.client.count(index=settings.opensearch_index)["count"] == second["chunks"]
         search.client.indices.delete(index=settings.opensearch_index)
-        assert BookIndexer(search).index(run) == second
+        assert indexer.index(run) == second
         assert len(embeddings) == count_before_rebuild
     finally:
         search.client.indices.delete(index=settings.opensearch_index, ignore=[404])

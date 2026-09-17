@@ -84,21 +84,20 @@ def main():
         settings = Settings.load()
         engine = engine_for(settings)
         try:
-            search = Search(settings, engine)
             if args.command == "evaluate":
                 from pathlib import Path
 
                 from hrs_platform.services.retrieval.evaluation import evaluate
 
                 result = evaluate(
-                    search,
+                    Search(settings, engine),
                     run_id,
                     json.loads(Path(args.cases).read_text(encoding="utf-8-sig")),
                     semantic=args.semantic,
                     limit=args.limit,
                 )
             else:
-                result = BookIndexer(search).index(run_id)
+                result = BookIndexer(settings, engine).index(run_id)
             print(json.dumps(result, ensure_ascii=False, indent=2))
         finally:
             engine.dispose()

@@ -75,11 +75,11 @@ def test_hybrid_retrieval_widens_candidates_but_bounds_reranking(monkeypatch):
     )
     search.library = SimpleNamespace(chapter=lambda _: source)
     search.active_scope = lambda _: []
-    search.tokenizer = lambda _: None
+    search.runtime = SimpleNamespace(tokenizer=lambda _: None)
     monkeypatch.setattr(module, "query_vector", lambda *_: [0] * 1024)
     monkeypatch.setattr(module, "ranking_windows", lambda q, texts, t: (texts, list(range(len(texts)))))
     sizes = []
-    search.compute = lambda op, texts, **kw: sizes.append(len(texts)) or {"scores": list(range(len(texts)))}
+    search.runtime.compute = lambda op, texts, **kw: sizes.append(len(texts)) or {"scores": list(range(len(texts)))}
     result = search.search("运输", rerank_limit=12)
     assert sizes == [12]
     assert all(c["size"] == 50 for c in calls)

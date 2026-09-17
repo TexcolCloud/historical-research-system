@@ -52,7 +52,7 @@ docker compose -f deploy/infrastructure/compose.search.yml up -d --wait
 | `services/cards/` | 制卡用例入口与持久化，协调规划、分工阅读、主题队列、单主题综合和定稿；各步骤只保留一份实现 |
 | `services/retrieval/` | 查询、索引发布、计算访问、恢复等待、分块／排序规则与离线评测；`BookIndexer` 负责索引，`Search` 负责查询 |
 | `services/documents/` | 原件核对、局部修复、章节发布、脚注与结构投影 |
-| `services/models/` | 文本及本地视觉调用、回执、预算与断线恢复，不持有 Temporal 异常 |
+| `services/models/` | 文本、本地视觉与嵌入／重排模型调用、回执、预算与断线恢复，不持有 Temporal 异常 |
 | `services/runs/` | 运行状态、检查点、执行事件与显式恢复请求 |
 | `services/books.py`、`deletion.py`、`storage.py` 等 | 跨功能的书籍生命周期、对象归属与导出；不依赖 HTTP 响应或 worker |
 | `jobs/` | Temporal 工作流、活动适配器、worker 注册／派发及转换 CLI 调用；不定义第二份业务状态规则 |
@@ -62,7 +62,7 @@ docker compose -f deploy/infrastructure/compose.search.yml up -d --wait
 
 依赖方向是 `main → api → services → core/models/domain`，`jobs → services`；业务代码不得反向导入 `main/api/jobs`，也不直接导入 FastAPI、Starlette 或 Temporal。`ServiceError` 在 HTTP 入口还原既有状态和响应体（tus 拒绝保持 hook 格式）；`TaskError` 在活动入口转换为 Temporal 错误，保留类型、详情和重试属性。对象锁等待通过调用方注入的心跳回调报告进度。SQL 事务留在有业务含义的服务中，S3 对象归属保护由 `services/storage.py` 实现。既有异常的 HTTP 状态和响应格式保持兼容。Python 内部导入全部迁移到新位置，不保留旧模块转发层；`Cards` 是 API、CLI 和 worker 共享的用例入口，复用同一资源实例，将内部阶段委派给各自实现；Temporal 工作流和活动名称、检查点键及 CLI 命令保持兼容。
 
-`tests/test_app_composition.py` 验证依赖替换、应用资源隔离、生命周期及分层方向；其余测试继续覆盖原业务链路。离线回归使用合成内容和模拟模型响应，默认不启用真实文本／视觉模型测试。
+`tests/test_app_composition.py` 验证依赖替换、应用资源隔离、生命周期及分层方向；模型调用层不导入制卡编排，索引器不导入查询服务，GPU 模型加载不放在领域层。其余测试继续覆盖原业务链路。离线回归使用合成内容和模拟模型响应，默认不启用真实文本／视觉模型测试。
 
 ## 处理流程与数据职责
 
@@ -88,7 +88,7 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 - 表格按完整行组处理，保留表头、合并单元格及表前范围说明；脚注保留正文归属，不猜测歧义链接。
 - 书名、章节路径、表头和脚注加入检索投影；图片路径及通用占位符不进入嵌入文本。
 - BGE 输入按实际 tokenizer 限制至 6144 tokens；超长结构在投影层划窗，保留原文坐标。重排按问题与文段总 token 数划窗。
-- 默认每路召回 50、重排 30、返回 8 条；单条上下文预算 6000 字符、整次 24000 字符，实际参数见 [API 路由](src/hrs_platform/api/routes/search.py)。
+- 默认每路召回 50、重排 30、返回 8 条；单条上下文预算 6000 字符、整次 24000 字符，实际参数见 [API 路由](src/hrs_platform/api/routes/library.py)。
 - 相交证据合并，必要标题、脚注与限定信息随结果返回；共享统计量不能因分行而被误归属。
 
 索引检查点按文本、模型与规则指纹复用，只有变化或缺失输入重算。运行结果的 `retrieval_metrics` 记录计算／复用量；搜索的 `Server-Timing` 区分召回、嵌入、重排和上下文组装耗时。

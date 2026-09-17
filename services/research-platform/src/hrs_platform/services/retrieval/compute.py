@@ -13,6 +13,7 @@ from uuid import uuid4
 from opensearchpy import OpenSearch
 
 from hrs_platform.domain.settings import MODEL_REVISIONS
+from hrs_platform.services.retrieval.inputs import tokenizer_for
 
 logger = logging.getLogger(__name__)
 EMBEDDING_IDENTITY = {"revision": MODEL_REVISIONS["BAAI/bge-m3"], "adapter": "bge-cls-l2-float32-v1"}
@@ -75,8 +76,8 @@ def search_client(url):
 
 @lru_cache(maxsize=1)
 def local_models(root):
-    from hrs_platform.domain.retrieval_models import LocalModels
     from hrs_platform.domain.settings import RetrievalSettings
+    from hrs_platform.services.models.retrieval import LocalModels
 
     return LocalModels(RetrievalSettings(models_root=Path(root), device="cpu"))
 
@@ -126,3 +127,26 @@ def remote_compute(endpoint, operation, texts, **options):
         if "identity" in value:
             result["identity"] = value["identity"]
     return result
+
+
+class RetrievalCompute:
+    """The same tokenizer and CPU/GPU dispatch for queries and index builds."""
+
+    def __init__(self, settings):
+        self.settings = settings
+
+    def tokenizer(self, model):
+        return tokenizer_for(self.settings.project_root / "models/document-retrieval", model)
+
+    def compute(self, operation, texts, **options):
+        if self.settings.retrieval_device == "cuda":
+            return remote_compute(self.settings.retrieval_endpoint, operation, texts, **options)
+        models = local_models(str(self.settings.project_root / "models/document-retrieval"))
+        if operation == "embed":
+            return {
+                "vectors": models.embed(texts, query=options.get("query", False)),
+                "identity": models.identity(),
+            }
+        if operation == "rerank":
+            return {"scores": models.rerank(options["query"], texts)}
+        raise ValueError("Unsupported local model operation")

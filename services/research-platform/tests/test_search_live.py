@@ -23,6 +23,7 @@ def test_real_search_retains_source_scopes_and_exports_after_cache_loss(platform
     name = "hrs-v2-test-" + uuid4().hex
     settings = settings.model_copy(update={"opensearch_index": name, "cache_root": tmp_path})
     search = Search(settings, engine)
+    indexer = BookIndexer(settings, engine)
     objects = objects_for(settings)
     book, run, chapter, span = [str(uuid4()) for _ in range(4)]
     source = "# 仓储记录\n这是一段软件验收文本。仓库登记粮食110吨，不包括其他月份。\n"
@@ -59,7 +60,7 @@ def test_real_search_retains_source_scopes_and_exports_after_cache_loss(platform
             )
         )
     try:
-        assert BookIndexer(search).index(run)["chunks"] == 1
+        assert indexer.index(run)["chunks"] == 1
         assert search.search("倉儲", book)[0]["text"] == source
         assert search.search("粮食入库数量", book, semantic=True)[0]["pages"] == [7]
         assert search.search("粮食", str(uuid4())) == []
@@ -72,8 +73,8 @@ def test_real_search_retains_source_scopes_and_exports_after_cache_loss(platform
             assert client.get(f"/api/v2/books/{book}/export").text == source
         search.client.indices.delete(index=name)
         monkeypatch.setattr(
-            search, "compute", lambda *a, **k: pytest.fail("Index recovery must reuse S3 vectors.")
+            indexer.runtime, "compute", lambda *a, **k: pytest.fail("Index recovery must reuse S3 vectors.")
         )
-        assert BookIndexer(search).index(run)["chunks"] == 1
+        assert indexer.index(run)["chunks"] == 1
     finally:
         search.client.indices.delete(index=name, ignore=[404])

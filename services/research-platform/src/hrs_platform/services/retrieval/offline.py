@@ -38,17 +38,17 @@ def evaluate_offline(settings, engine, dataset):
     search.active_scope = lambda _: [{"term": {"book_id": book_id}}]
     search.library.chapter = chapters.__getitem__
     try:
-        BookIndexer(search).ensure_index(index)
+        BookIndexer(search.settings, engine).ensure_index(index)
         chunks = []
         for chapter in chapters.values():
             chunks.extend(
                 bounded_chunks(
-                    chapter, retrieval_chunks(chapter, dataset["title"]), search.tokenizer("BAAI/bge-m3")
+                    chapter, retrieval_chunks(chapter, dataset["title"]), search.runtime.tokenizer("BAAI/bge-m3")
                 )
             )
         for offset in range(0, len(chunks), 8):
             batch = chunks[offset : offset + 8]
-            vectors = search.compute("embed", [c["retrieval_text"] for c in batch])["vectors"]
+            vectors = search.runtime.compute("embed", [c["retrieval_text"] for c in batch])["vectors"]
             helpers.bulk(
                 search.client,
                 [
