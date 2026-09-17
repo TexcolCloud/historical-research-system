@@ -5,7 +5,7 @@ from sqlalchemy import func, insert, select
 
 from hrs_platform import models as db
 from hrs_platform.main import create_app
-from hrs_platform.services.recovery import workflow_id
+from hrs_platform.services.runs.recovery import workflow_id
 
 
 def test_repeated_retry_only_starts_one_new_attempt_and_preserves_published_book(platform):

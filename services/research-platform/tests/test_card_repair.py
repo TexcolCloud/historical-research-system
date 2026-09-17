@@ -7,27 +7,28 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, insert
-from temporalio.exceptions import ApplicationError
+from hrs_platform.domain.errors import TaskError
 from test_card_pipeline import StubEvidence, chapter, record, verdict
 
-from hrs_platform.services import cards as module
+from hrs_platform.services.cards import service, generation, synthesis, topics
+from hrs_platform.domain import card_rules as module
 from hrs_platform import models as db
 from hrs_platform.services.books import get_run
-from hrs_platform.services.cards import CardPlan
+from hrs_platform.domain.card_rules import CardPlan
 from hrs_platform.services.cards import Cards
-from hrs_platform.services.cards import ResearchPlan
+from hrs_platform.domain.card_rules import ResearchPlan
 from hrs_platform.domain.generation_contracts import CardDraft
 from hrs_platform.domain.generation_contracts import CardRepair
 from hrs_platform.domain.generation_contracts import ReadingRecord
-from hrs_platform.services.outputs import fingerprint
-from hrs_platform.services.reading import reading_units
-from hrs_platform.services.recovery import retry_run
-from hrs_platform.services.visual_review import result_key
+from hrs_platform.services.runs.outputs import fingerprint
+from hrs_platform.services.cards.reading import reading_units
+from hrs_platform.services.runs.recovery import retry_run
+from hrs_platform.services.models.vision import result_key
 
 
 @pytest.fixture
 def harness(platform, monkeypatch, request):
-    monkeypatch.setattr(module, "CardEvidence", StubEvidence)
+    monkeypatch.setattr(service, "CardEvidence", StubEvidence)
     settings, engine = platform
     book, run = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
@@ -51,7 +52,7 @@ def harness(platform, monkeypatch, request):
         chapter=lambda identity: next(row for row in originals if row["id"] == identity),
     )
     bundle = {"manifest": {"pages": [], "page_count": 1}, "files": {}}
-    monkeypatch.setattr(module, "Review", lambda *_: SimpleNamespace(read_json=lambda _: bundle))
+    monkeypatch.setattr(generation, "Review", lambda *_: SimpleNamespace(read_json=lambda _: bundle))
     read_json = cards.review.read_json
     monkeypatch.setattr(
         cards.review, "read_json", lambda ref: bundle if ref == {"synthetic": True} else read_json(ref)
@@ -91,7 +92,7 @@ def harness(platform, monkeypatch, request):
             )
         elif output_type in {CardDraft, CardRepair}:
             if scenario.get("fail_topic") == payload.get("objective"):
-                raise ApplicationError(
+                raise TaskError(
                     "synthetic exhausted output", type=scenario.get("draft_error", "model_output_invalid"), non_retryable=True
                 )
             value = CardDraft(
@@ -125,7 +126,7 @@ def harness(platform, monkeypatch, request):
                 and key.startswith("原图后定稿")
                 and payload["candidate"]["title"] == scenario.get("final_topic", "topic-1")
             ):
-                raise ApplicationError(
+                raise TaskError(
                     "synthetic final invalid", type=scenario.get("final_error", "model_output_invalid"), non_retryable=True
                 )
             ids = payload.get("required_object_ids") or [
@@ -144,9 +145,9 @@ def harness(platform, monkeypatch, request):
 
     def vision(run_row, bundle, card, group):
         if scenario.get("original_missing"):
-            raise ApplicationError("Missing source", type="original_missing", non_retryable=True)
+            raise TaskError("Missing source", type="original_missing", non_retryable=True)
         if scenario.get("visual_failure") and card["candidate"]["title"] == "topic-1":
-            raise ApplicationError(
+            raise TaskError(
                 "synthetic visual invalid", type="visual_output_invalid", non_retryable=True
             )
         return cards.outputs.put(
@@ -157,9 +158,9 @@ def harness(platform, monkeypatch, request):
             {},
         )
 
-    monkeypatch.setattr("hrs_platform.services.visual_review.VisualReview.check", lambda self, *args: vision(*args))
+    monkeypatch.setattr("hrs_platform.services.models.vision.VisualReview.check", lambda self, *args: vision(*args))
     monkeypatch.setattr(
-        "hrs_platform.services.visual_review.VisualReview.prepare",
+        "hrs_platform.services.models.vision.VisualReview.prepare",
         lambda self, run, bundle, numbers: {"pages": [], "issues": []},
     )
     monkeypatch.setattr("agents.Runner.run", lambda *a, **k: pytest.fail("Real model API called"))
@@ -222,14 +223,14 @@ def test_coverage_feedback_supplies_missing_original_before_next_revision(harnes
 
 def test_budget_preflight_and_local_vision_have_separate_allowances(harness):
     cards, run, _, _, calls = harness
-    with pytest.raises(ApplicationError, match="预算不足"):
+    with pytest.raises(TaskError, match="预算不足"):
         cards.outputs.preflight(run, 1348, 512)
     assert not calls
     cards.outputs.reserve_request(run, "视觉核对:card:http-request:0:0", {}, 1)
     cards.outputs.reserve_request(run, "read:http-request:1:1", {}, 1)
     assert cards.outputs.preflight(run, 1, 1)["remaining_calls"] == 0
     assert cards.outputs.preflight(run, 1348, 1)["remaining_calls"] == 0
-    with pytest.raises(ApplicationError):
+    with pytest.raises(TaskError):
         cards.outputs.reserve_request(run, "read:recovery:1:http-request:1:1", {}, 1)
     assert cards.outputs.request_count(run) == cards.outputs.request_count(run, vision=True) == 1
 
@@ -386,7 +387,7 @@ def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(h
     cards.settings.model_max_calls = 40  # Packed-plan estimate must not turn into legacy pairs on resume.
     async def plan(*args):
         return CardPlan(rationale="synthetic", topics=[dict(name=f"topic-{i}", objective=f"topic-{i}", unit_ids=[u["unit_id"]]) for i, u in enumerate(units)])
-    monkeypatch.setattr(cards, "_plan_topics", plan)
+    monkeypatch.setattr(generation, "plan_topics", plan)
     first = asyncio.run(cards.generate(run, incremental=True))
     assert first == {"run_id": run, "more": True, "stage": "reading"}
     reading_calls = [(key, payload) for key, payload in calls if ":reading:" in key]
@@ -406,7 +407,7 @@ def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(h
 def test_generation_refuses_insufficient_budget_before_any_model(harness):
     cards, run, _, _, calls = harness
     cards.settings.model_max_calls = 1
-    with pytest.raises(ApplicationError, match="预算不足"):
+    with pytest.raises(TaskError, match="预算不足"):
         asyncio.run(cards.generate(run))
     assert calls == []
 
@@ -417,7 +418,7 @@ def test_tool_closeout_failure_uses_durable_catalogue_reading_plan(harness):
 
     async def fail_plan(*args, **kwargs):
         if args[4] is ResearchPlan:
-            raise ApplicationError("plan invalid", type="model_output_invalid", non_retryable=True)
+            raise TaskError("plan invalid", type="model_output_invalid", non_retryable=True)
         return await original(*args, **kwargs)
 
     cards.models.run = fail_plan
@@ -437,7 +438,7 @@ def test_budget_limit_splits_only_failed_topic_and_reuses_children_on_restart(ha
     async def bounded(*args, **kwargs):
         if args[4] is CardDraft and len(args[3]["source_units"]) > 1:
             failed_sizes.append(len(args[3]["source_units"]))
-            raise ApplicationError("output too long", type="model_output_limit", non_retryable=True)
+            raise TaskError("output too long", type="model_output_limit", non_retryable=True)
         return await original(*args, **kwargs)
 
     if stage == "draft":
@@ -448,7 +449,7 @@ def test_budget_limit_splits_only_failed_topic_and_reuses_children_on_restart(ha
             size = len(args[4].unit_ids)
             if size > 1:
                 failed_sizes.append(size)
-                raise ApplicationError("evidence too large", type="card_input_budget", non_retryable=True)
+                raise TaskError("evidence too large", type="card_input_budget", non_retryable=True)
             return await research(*args, **kwargs)
         cards.evidence.research = bounded_evidence
     result = finish(cards, run)
@@ -472,7 +473,7 @@ def test_atomic_overflow_stays_pending_without_recursive_retries(harness):
 
     async def overflow(*args, **kwargs):
         if args[4] is CardDraft and args[3]["objective"] == "topic-1":
-            raise ApplicationError("atomic overflow", type="model_output_limit", non_retryable=True)
+            raise TaskError("atomic overflow", type="model_output_limit", non_retryable=True)
         return await original(*args, **kwargs)
 
     cards.models.run = overflow
@@ -485,8 +486,8 @@ def test_atomic_overflow_stays_pending_without_recursive_retries(harness):
 def test_topic_preflight_splits_before_draft_calls_and_total_is_bounded(harness, monkeypatch):
     cards, run, units, scenario, calls = harness
     scenario["combined"] = True
-    monkeypatch.setattr(module, "TOPIC_PREFLIGHT_TOKENS", 1)
-    monkeypatch.setattr(module, "MAX_CARD_TOPICS", 2)
+    monkeypatch.setattr(synthesis, "TOPIC_PREFLIGHT_TOKENS", 1)
+    monkeypatch.setattr(topics, "MAX_CARD_TOPICS", 2)
     result = finish(cards, run)
     assert result["state"] == "needs_revision" and result["cards"] == 0
     pending = get_run(cards.engine, run)["result"]["pending_topics"]
@@ -504,7 +505,7 @@ def test_split_recovery_retires_failed_parent_even_after_worker_interruption(har
 
     async def limited_final(*args, **kwargs):
         if args[1].startswith("原图后定稿"):
-            raise ApplicationError("final output too long", type="model_output_limit", non_retryable=True)
+            raise TaskError("final output too long", type="model_output_limit", non_retryable=True)
         return await original(*args, **kwargs)
 
     cards.models.run = limited_final
@@ -530,7 +531,7 @@ def test_split_recovery_retires_failed_parent_even_after_worker_interruption(har
 def test_replayed_split_tree_reserves_all_leaf_slots_before_new_splits(harness, monkeypatch):
     cards, run, units, scenario, calls = harness
     scenario["combined"] = True
-    monkeypatch.setattr(module, "MAX_CARD_TOPICS", 3)
+    monkeypatch.setattr(topics, "MAX_CARD_TOPICS", 3)
     root = module.CardTopic(name="topic-0", objective="topic-0", unit_ids=[unit["unit_id"] for unit in units])
     children = module.split_topic(root, units)
     grandchildren = module.split_topic(children[1], units)
@@ -543,7 +544,7 @@ def test_replayed_split_tree_reserves_all_leaf_slots_before_new_splits(harness, 
 
     async def limited(*args, **kwargs):
         if args[4] is CardDraft and len(args[3]["source_units"]) > 1:
-            raise ApplicationError("limit", type="model_output_limit", non_retryable=True)
+            raise TaskError("limit", type="model_output_limit", non_retryable=True)
         return await original(*args, **kwargs)
 
     cards.models.run = limited

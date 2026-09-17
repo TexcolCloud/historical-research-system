@@ -1,17 +1,17 @@
-from hrs_platform.services.lifecycle import RunLifecycle
+from hrs_platform.services.runs.lifecycle import RunLifecycle
 import pytest
-from temporalio.exceptions import ApplicationError
+from hrs_platform.domain.errors import TaskError
 from test_review import seed
 
-from hrs_platform.services.outputs import Outputs
-from hrs_platform.services.outputs import execution_parent
+from hrs_platform.services.runs.outputs import Outputs
+from hrs_platform.services.runs.outputs import execution_parent
 
 
 def test_total_request_budget_is_not_a_local_output_error(platform):
     settings, engine = platform
     run, _ = seed(engine)
     outputs = Outputs(settings, engine)
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         outputs.reserve_request(run, "step:http-request:1:1", {"synthetic": True}, 0)
     assert failure.value.type == "model_request_budget" and failure.value.non_retryable
     assert outputs.get(run, "step:http-request:1:1") is None
@@ -76,11 +76,11 @@ def test_service_recovery_is_visible_and_cleared_when_activity_resumes(platform,
     monkeypatch.setattr("hrs_platform.jobs.pipeline.activity.heartbeat", lambda *_: None)
 
     async def offline():
-        raise ApplicationError(
+        raise TaskError(
             "waiting", {"retry_at": 1060.0}, type="model_transport_wait", non_retryable=True
         )
 
-    with pytest.raises(ApplicationError):
+    with pytest.raises(TaskError):
         asyncio.run(pipeline.observe(run, offline()))
     saved = get_run(engine, run)
     assert saved["state"] == "processing" and saved["error"]["code"] == "model_transport_wait"

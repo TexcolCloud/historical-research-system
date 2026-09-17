@@ -5,10 +5,10 @@ from io import BytesIO
 import pytest
 from botocore.exceptions import EndpointConnectionError
 from PIL import Image, ImageDraw
-from temporalio.exceptions import ApplicationError
+from hrs_platform.domain.errors import TaskError
 from test_review import seed
 
-from hrs_platform.services.visual_review import VisualReview
+from hrs_platform.services.models.vision import VisualReview
 
 
 @pytest.fixture
@@ -96,6 +96,6 @@ def test_storage_transport_failure_is_retryable_and_never_relabelled_as_missing(
     monkeypatch.setattr(
         reviewer, "_restore_page", lambda *a: pytest.fail("Transport failure rendered a page")
     )
-    with pytest.raises(ApplicationError) as error:
+    with pytest.raises(TaskError) as error:
         reviewer.prepare(run, bundle, [1])
     assert error.value.type == "original_unavailable" and not error.value.non_retryable

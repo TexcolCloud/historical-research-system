@@ -7,11 +7,11 @@ from sqlalchemy.engine import Engine
 
 from hrs_platform.core.config import Settings
 from hrs_platform.services.cards import Cards
+from hrs_platform.services.documents.library import Library
+from hrs_platform.services.documents.review import Review
 from hrs_platform.services.exports import Exports
-from hrs_platform.services.library import Library
-from hrs_platform.services.outputs import Outputs
-from hrs_platform.services.review import Review
-from hrs_platform.services.search import Search
+from hrs_platform.services.retrieval.search import Search
+from hrs_platform.services.runs.outputs import Outputs
 
 
 def get_engine(request: Request) -> Engine:

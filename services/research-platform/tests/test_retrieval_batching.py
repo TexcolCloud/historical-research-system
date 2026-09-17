@@ -6,7 +6,7 @@ import pytest
 
 torch = pytest.importorskip('torch')
 pytest.importorskip('transformers')
-from hrs_platform.domain.retrieval_models import LocalModels
+from hrs_platform.services.models.retrieval import LocalModels
 
 
 def test_length_buckets_restore_original_order_even_after_oom():

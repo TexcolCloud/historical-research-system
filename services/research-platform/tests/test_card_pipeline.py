@@ -8,32 +8,33 @@ from types import MappingProxyType, SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from temporalio.exceptions import ApplicationError
+from hrs_platform.domain.errors import TaskError
 
-from hrs_platform.services import cards as module
-from hrs_platform.services.cards import CardPlan
+from hrs_platform.services.cards import assignments, generation, planning, service, topics
+from hrs_platform.domain import card_rules
+from hrs_platform.domain.card_rules import CardPlan
 from hrs_platform.services.cards import Cards
-from hrs_platform.services.cards import ResearchPlan
-from hrs_platform.services.cards import neighbor_context
-from hrs_platform.services.cards import validate_topics
+from hrs_platform.domain.card_rules import ResearchPlan
+from hrs_platform.services.cards.reading import neighbor_context
+from hrs_platform.domain.card_rules import validate_topics
 from hrs_platform.domain.generation_contracts import CardDraft
 from hrs_platform.domain.generation_contracts import CardRepair
 from hrs_platform.domain.generation_contracts import ReadingRecord
-from hrs_platform.services.outputs import StageInputMismatch
-from hrs_platform.services.outputs import fingerprint
-from hrs_platform.services.reading import card_model
-from hrs_platform.services.reading import check_candidate_coverage
-from hrs_platform.services.reading import read_batch
-from hrs_platform.services.reading import reading_units
-from hrs_platform.services.reading import scoped_check
-from hrs_platform.services.reading import synthesis_readings
+from hrs_platform.services.runs.outputs import StageInputMismatch
+from hrs_platform.services.runs.outputs import fingerprint
+from hrs_platform.services.cards.reading import card_model
+from hrs_platform.services.cards.reading import check_candidate_coverage
+from hrs_platform.services.cards.reading import read_batch
+from hrs_platform.services.cards.reading import reading_units
+from hrs_platform.services.cards.reading import scoped_check
+from hrs_platform.services.cards.reading import synthesis_readings
 
 
 @pytest.fixture(autouse=True)
 def no_original_io(monkeypatch):
-    monkeypatch.setattr(module, "CardEvidence", StubEvidence)
-    monkeypatch.setattr("hrs_platform.services.visual_review.VisualReview.__init__", lambda self, *args: None)
-    monkeypatch.setattr("hrs_platform.services.visual_review.VisualReview.prepare",
+    monkeypatch.setattr(service, "CardEvidence", StubEvidence)
+    monkeypatch.setattr("hrs_platform.services.models.vision.VisualReview.__init__", lambda self, *args: None)
+    monkeypatch.setattr("hrs_platform.services.models.vision.VisualReview.prepare",
                         lambda self, run, bundle, numbers: {"pages": [], "issues": []})
 
 
@@ -177,9 +178,9 @@ def test_topic_plan_rejects_uncovered_duplicate_or_unknown_units(assigned):
 
 
 def test_oversized_requests_stop_before_model_and_preserve_atomic_sources(monkeypatch):
-    monkeypatch.setattr("hrs_platform.services.reading.CARD_INPUT_TOKENS", 1)
+    monkeypatch.setattr("hrs_platform.domain.card_rules.CARD_INPUT_TOKENS", 1)
     models = SimpleNamespace(run=lambda *a, **k: pytest.fail("Oversize input reached a model"))
-    with pytest.raises(ApplicationError, match="超过输入预算"):
+    with pytest.raises(TaskError, match="超过输入预算"):
         asyncio.run(
             card_model(models, "run", "test", "review", {"source": "不允许截断"}, scoped_check(["u"]))
         )
@@ -233,7 +234,7 @@ def test_digest_four_round_limit_routes_to_topic_recovery(monkeypatch, shrinks_o
         # request is still below the 48k hard input ceiling.
         return {"input_tokens": 1 if shrinks_on_last_round and len(calls) == 4 else 7000}
 
-    monkeypatch.setattr("hrs_platform.services.reading.estimate_request", estimate)
+    monkeypatch.setattr("hrs_platform.services.cards.reading.estimate_request", estimate)
 
     async def run(run_id, key, instructions, payload, output_type, **kwargs):
         calls.append(key)
@@ -246,7 +247,7 @@ def test_digest_four_round_limit_routes_to_topic_recovery(monkeypatch, shrinks_o
     if shrinks_on_last_round:
         assert asyncio.run(operation)[0]["covered_record_indexes"] == [0]
     else:
-        with pytest.raises(ApplicationError) as failure:
+        with pytest.raises(TaskError) as failure:
             asyncio.run(operation)
         assert failure.value.type == "card_input_budget"
     assert len(calls) == 4
@@ -266,40 +267,40 @@ def test_topic_fallback_is_bounded_durable_and_validates_source_identity(monkeyp
 
     async def digest(*args, **kwargs):
         if stage == "digest":
-            raise ApplicationError("content failure", type=error_type, non_retryable=True)
+            raise TaskError("content failure", type=error_type, non_retryable=True)
         return readings
 
     async def fail(*args, **kwargs):
-        raise ApplicationError("content failure", type=error_type, non_retryable=True)
+        raise TaskError("content failure", type=error_type, non_retryable=True)
 
-    monkeypatch.setattr(module, "synthesis_readings", digest)
-    monkeypatch.setattr(module, "card_model", fail)
+    monkeypatch.setattr(planning, "synthesis_readings", digest)
+    monkeypatch.setattr(planning, "card_model", fail)
     # Simulate a crash after the immutable plan commit but before its UI event.
     def unavailable_event(*args, **kwargs):
         raise OSError("event unavailable")
 
     cards.outputs.node = unavailable_event
     with pytest.raises(OSError, match="event unavailable"):
-        asyncio.run(cards._plan_topics("run", readings, units, chapters, "parent"))
+        asyncio.run(planning.plan_topics(cards, "run", readings, units, chapters, "parent"))
     cards.outputs.node = lambda *a, **k: "node"
-    monkeypatch.setattr(module, "synthesis_readings", lambda *a, **k: pytest.fail("Saved plan reran digest"))
-    monkeypatch.setattr(module, "card_model", lambda *a, **k: pytest.fail("Saved plan reran model"))
-    plan = asyncio.run(cards._plan_topics("run", readings, units, chapters, "parent"))
-    assert len(plan.topics) <= 64 < module.MAX_CARD_TOPICS
+    monkeypatch.setattr(planning, "synthesis_readings", lambda *a, **k: pytest.fail("Saved plan reran digest"))
+    monkeypatch.setattr(planning, "card_model", lambda *a, **k: pytest.fail("Saved plan reran model"))
+    plan = asyncio.run(planning.plan_topics(cards, "run", readings, units, chapters, "parent"))
+    assert len(plan.topics) <= 64 < card_rules.MAX_CARD_TOPICS
     assert [uid for topic in plan.topics for uid in topic.unit_ids] == [unit["unit_id"] for unit in units]
     receipt = cards.outputs.get("run", "card-topic-plan")
     assert receipt["fallback_stage"] == stage and receipt["reason"] == error_type
     assert receipt["machine_approval"] is False
     assert readings[0]["readings"][0]["candidate_quotes"] == ["正文0①"]
     with pytest.raises(StageInputMismatch):
-        asyncio.run(cards._plan_topics("run", readings, [*units, {**units[0], "unit_id": "new"}], chapters, "parent"))
+        asyncio.run(planning.plan_topics(cards, "run", readings, [*units, {**units[0], "unit_id": "new"}], chapters, "parent"))
 
 
 @pytest.mark.parametrize("stage", ["digest", "topic"])
 @pytest.mark.parametrize("error", [
-    ApplicationError("budget", type="model_request_budget", non_retryable=True),
-    ApplicationError("unknown response", type="model_request_exhausted", non_retryable=True),
-    ApplicationError("credentials", non_retryable=True),
+    TaskError("budget", type="model_request_budget", non_retryable=True),
+    TaskError("unknown response", type="model_request_exhausted", non_retryable=True),
+    TaskError("credentials", non_retryable=True),
     OSError("S3 unavailable"), asyncio.CancelledError(),
 ])
 def test_topic_planning_does_not_hide_operational_failures(monkeypatch, stage, error):
@@ -314,10 +315,10 @@ def test_topic_planning_does_not_hide_operational_failures(monkeypatch, stage, e
     async def fail(*args, **kwargs):
         raise error
 
-    monkeypatch.setattr(module, "synthesis_readings", digest)
-    monkeypatch.setattr(module, "card_model", fail)
+    monkeypatch.setattr(planning, "synthesis_readings", digest)
+    monkeypatch.setattr(planning, "card_model", fail)
     with pytest.raises(type(error)):
-        asyncio.run(cards._plan_topics("run", [], [], [], None))
+        asyncio.run(planning.plan_topics(cards, "run", [], [], [], None))
     assert not cards.outputs.values
 
 
@@ -449,7 +450,7 @@ def test_local_model_failure_falls_back_without_more_calls(error_type, stage):
             )
             kwargs["validate"](value)
             return value
-        raise ApplicationError("model output exhausted", type=error_type, non_retryable=True)
+        raise TaskError("model output exhausted", type=error_type, non_retryable=True)
 
     models = SimpleNamespace(run=run, outputs=MemoryOutputs())
     result = asyncio.run(read_batch(models, "run", "read", [{"unit_id": "a", "text": "来源"}], "scope", None))
@@ -465,9 +466,9 @@ def test_local_model_failure_falls_back_without_more_calls(error_type, stage):
 @pytest.mark.parametrize(
     "error",
     [
-        ApplicationError("budget", type="model_request_budget", non_retryable=True),
-        ApplicationError("unknown response", type="model_request_exhausted", non_retryable=True),
-        ApplicationError("credentials", non_retryable=True),
+        TaskError("budget", type="model_request_budget", non_retryable=True),
+        TaskError("unknown response", type="model_request_exhausted", non_retryable=True),
+        TaskError("credentials", non_retryable=True),
         OSError("S3 unavailable"),
         asyncio.CancelledError(),
     ],
@@ -504,9 +505,9 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
         chapter=lambda identity: next(row for row in originals if row["id"] == identity),
     )
     run_id = str(uuid4())
-    monkeypatch.setattr(module, "get_run", lambda *_: {"book_id": "book", "conversion": {}})
+    monkeypatch.setattr(generation, "get_run", lambda *_: {"book_id": "book", "conversion": {}})
     monkeypatch.setattr(
-        module,
+        generation,
         "Review",
         lambda *_: SimpleNamespace(
             read_json=lambda _: {"manifest": {"pages": [], "page_count": 1}, "files": {}}
@@ -514,20 +515,23 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
     )
     transitions = []
     monkeypatch.setattr(
-        module, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: transitions.append(args))
+        generation, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: transitions.append(args))
+    )
+    monkeypatch.setattr(
+        topics, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: transitions.append(args))
     )
     monkeypatch.setattr("agents.Runner.run", lambda *a, **k: pytest.fail("Real model API called"))
     monkeypatch.setattr(
-        "hrs_platform.services.visual_review.VisualReview.check", lambda *a, **k: pytest.fail("Vision API called")
+        "hrs_platform.services.models.vision.VisualReview.check", lambda *a, **k: pytest.fail("Vision API called")
     )
     calls, cache, active, maximum, fail_topic = [], {}, 0, 0, True
     first_reads_ready = asyncio.Event()
     if planning_failure == "digest":
         async def digest(*args, **kwargs):
             if args[2] == "全书主题:v2":
-                raise ApplicationError("digest exhausted", type="card_input_budget", non_retryable=True)
+                raise TaskError("digest exhausted", type="card_input_budget", non_retryable=True)
             return await synthesis_readings(*args, **kwargs)
-        monkeypatch.setattr(module, "synthesis_readings", digest)
+        monkeypatch.setattr(planning, "synthesis_readings", digest)
 
     async def run(identity, key, instructions, payload, output_type, **kwargs):
         nonlocal active, maximum, fail_topic
@@ -548,7 +552,7 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
                 )
             elif output_type is CardPlan:
                 if planning_failure == "topic":
-                    raise ApplicationError("topic exhausted", type="model_output_invalid", non_retryable=True)
+                    raise TaskError("topic exhausted", type="model_output_invalid", non_retryable=True)
                 if fail_topic:
                     fail_topic = False
                     raise RuntimeError("temporary topic failure")
@@ -692,15 +696,16 @@ def test_failed_assignment_drains_transport_siblings_but_cancels_on_global_error
         chapters=lambda _: originals,
         chapter=lambda identity: next(row for row in originals if row["id"] == identity),
     )
-    monkeypatch.setattr(module, "get_run", lambda *_: {"book_id": "book", "conversion": {}})
+    monkeypatch.setattr(generation, "get_run", lambda *_: {"book_id": "book", "conversion": {}})
     monkeypatch.setattr(
-        module,
+        generation,
         "Review",
         lambda *_: SimpleNamespace(
             read_json=lambda _: {"manifest": {"pages": [], "page_count": 1}, "files": {}}
         ),
     )
-    monkeypatch.setattr(module, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: None))
+    monkeypatch.setattr(generation, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: None))
+    monkeypatch.setattr(topics, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: None))
 
     async def plan(*args, **kwargs):
         assert args[4] is ResearchPlan
@@ -725,7 +730,7 @@ def test_failed_assignment_drains_transport_siblings_but_cancels_on_global_error
                 if objective == "甲":
                     await second.wait()
                     if transport:
-                        raise ApplicationError(
+                        raise TaskError(
                             "offline", {"retry_at": 1000}, type="model_transport_wait", non_retryable=True
                         )
                     raise RuntimeError("reading failed")
@@ -738,9 +743,9 @@ def test_failed_assignment_drains_transport_siblings_but_cancels_on_global_error
                 running.remove(objective)
                 stopped.append(objective)
 
-        monkeypatch.setattr(module, "read_batch", reading)
+        monkeypatch.setattr(assignments, "read_batch", reading)
         with pytest.raises(
-            ApplicationError if transport else RuntimeError,
+            TaskError if transport else RuntimeError,
             match="offline" if transport else "reading failed",
         ):
             await cards.generate(str(uuid4()))

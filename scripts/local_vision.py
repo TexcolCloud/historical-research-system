@@ -15,7 +15,7 @@ from pathlib import Path
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'services/runtime-support/src'))
+sys.path.insert(0, str(ROOT / 'packages/runtime-support/src'))
 from hrs_runtime.local_vision import (  # noqa: E402 - script bootstrap
     MODEL,
     POLICY,
@@ -27,7 +27,7 @@ from hrs_runtime.local_vision import (  # noqa: E402 - script bootstrap
 def retrieval_worker(connection):
     """One owned CUDA process; embeddings and reranker stay resident between requests."""
     sys.path.insert(0, str(ROOT / 'services/research-platform/src'))
-    from hrs_platform.domain.retrieval_models import LocalModels
+    from hrs_platform.services.models.retrieval import LocalModels
     from hrs_platform.domain.settings import RetrievalSettings
     models = LocalModels(RetrievalSettings(models_root=ROOT / 'models/document-retrieval', device='cuda'))
     try:

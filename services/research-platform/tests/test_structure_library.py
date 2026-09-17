@@ -8,7 +8,7 @@ from test_structure_views import table
 from hrs_platform import models as db
 from hrs_platform.main import create_app
 from hrs_platform.services.exports import Exports
-from hrs_platform.services.library import Library
+from hrs_platform.services.documents.library import Library
 
 
 def seed_structure_book(settings, engine):
@@ -83,7 +83,7 @@ def test_confirm_without_replacement_and_correction_both_prepare_for_ingestion(p
     from uuid import uuid4
 
     from hrs_platform.schemas import ReviewDecision
-    from hrs_platform.services.review import digest
+    from hrs_platform.services.documents.review import digest
 
     settings, engine = platform
     run, library = seed_structure_book(settings, engine)

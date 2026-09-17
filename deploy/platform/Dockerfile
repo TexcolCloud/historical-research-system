@@ -2,7 +2,7 @@ FROM ghcr.io/astral-sh/uv:0.12.6@sha256:88bc6eb1ccd4b82efd0e1b530caffabddf50dc2b
 FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app/services/research-platform
-COPY services/runtime-support /app/services/runtime-support
+COPY packages/runtime-support /app/packages/runtime-support
 COPY services/research-platform/pyproject.toml services/research-platform/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --python /usr/local/bin/python --no-dev --extra retrieval --no-install-project
 COPY services/research-platform/src ./src

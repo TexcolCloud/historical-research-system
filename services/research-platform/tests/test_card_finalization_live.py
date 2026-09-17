@@ -43,7 +43,7 @@ def test_original_visual_observations_are_incorporated_by_actual_text_model(plat
         before = cards.outputs.get(run, "generated-cards")
         after = cards.outputs.get(run, "finalized-cards")
         for old, new in zip(before["cards"], after["cards"], strict=True):
-            from hrs_platform.services.cards import validate_final_candidate
+            from hrs_platform.domain.card_rules import validate_final_candidate
             from hrs_platform.domain.generation_contracts import CardDraft
 
             source = cards.outputs.get(run, old["source_step"])

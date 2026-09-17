@@ -5,10 +5,10 @@ import asyncio
 import httpx2 as httpx
 import pytest
 from agents import function_tool
-from temporalio.exceptions import ApplicationError
+from hrs_platform.domain.errors import TaskError
 from test_model_lifecycle import Receipt, setup
 
-from hrs_platform.services import agents as module
+from hrs_platform.services.models import text as module
 
 
 @pytest.mark.parametrize("kind", ["card_input_budget", "retrieval_wait", "card_corpus_changed"])
@@ -22,10 +22,10 @@ def test_real_sdk_preserves_tool_control_errors(monkeypatch, kind):
     @function_tool(failure_error_function=None)
     async def read_evidence() -> str:
         """Read synthetic evidence."""
-        raise ApplicationError("synthetic control", {"retry_at": 1234}, type=kind, non_retryable=True)
+        raise TaskError("synthetic control", {"retry_at": 1234}, type=kind, non_retryable=True)
 
     model, sends = transport_model(monkeypatch, provider)
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "control", "test", {}, Receipt, tools=[read_evidence]))
     assert failure.value.type == kind
     assert failure.value.details == ({"retry_at": 1234},)
@@ -48,8 +48,8 @@ def test_tool_history_budget_stops_before_sending_oversized_followup(monkeypatch
         return "仅为合成测试来源，不可截断。" * 10000
 
     model, sends = transport_model(monkeypatch, provider)
-    monkeypatch.setattr("hrs_platform.services.reading.CARD_INPUT_TOKENS", 10000)
-    with pytest.raises(ApplicationError) as failure:
+    monkeypatch.setattr("hrs_platform.domain.card_rules.CARD_INPUT_TOKENS", 10000)
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "tool-budget", "test", {}, Receipt, tools=[read_evidence]))
     assert failure.value.type == "card_input_budget"
     assert len(calls) == len(sends) == 1
@@ -64,7 +64,7 @@ def transport_model(monkeypatch, handler):
 
     def reserve(run, key, body, maximum):
         if len(reservations) >= maximum:
-            raise ApplicationError("budget", type="model_request_budget", non_retryable=True)
+            raise TaskError("budget", type="model_request_budget", non_retryable=True)
         reservations.append(key)
         model.outputs.put(run, key, body, body)
 
@@ -81,7 +81,7 @@ def test_disconnect_defers_without_sdk_retry_and_records_safe_diagnostics(monkey
         raise httpx.ConnectError("private proxy password and URL must not escape", request=request)
 
     model, sends = transport_model(monkeypatch, offline)
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "step", "test", {"source": "fixed"}, Receipt))
     assert failure.value.type == "model_transport_wait"
     assert failure.value.non_retryable
@@ -144,12 +144,12 @@ def test_continuous_outage_keeps_cooldown_and_send_limit_across_restarts(monkeyp
             model._transport_failure = ("run", {"attempt": 3})
             assert asyncio.run(model.run("run", "step", "test", {}, Receipt)).acknowledgement == "ready"
             break
-        with pytest.raises(ApplicationError) as failure:
+        with pytest.raises(TaskError) as failure:
             asyncio.run(model.run("run", "step", "test", {}, Receipt))
         assert failure.value.type == "model_transport_wait"
         assert len(sends) == len(calls) == attempt
         # A fresh worker arriving before the persisted deadline cannot send early.
-        with pytest.raises(ApplicationError):
+        with pytest.raises(TaskError):
             asyncio.run(restart(model).run("run", "step", "test", {}, Receipt))
         assert len(calls) == attempt
         if attempt < 3:
@@ -167,7 +167,7 @@ def test_long_outage_resumes_without_spending_output_validation_attempts(monkeyp
         return success()
     model, _ = transport_model(monkeypatch, provider)
     for _ in range(8):
-        with pytest.raises(ApplicationError) as error:
+        with pytest.raises(TaskError) as error:
             asyncio.run(restart(model).run("run", "long", "test", {}, Receipt))
         assert error.value.type == "model_transport_wait"
         now[0] = error.value.details[0]["retry_at"]
@@ -182,7 +182,7 @@ def test_retryable_http_status_honors_retry_after_without_sdk_retry(monkeypatch,
         monkeypatch,
         lambda _: httpx.Response(status, headers={"Retry-After": "120"}, json={"error": "offline"}),
     )
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "step", "test", {}, Receipt))
     assert failure.value.type == "model_transport_wait" and len(sends) == 1
     receipt = failure.value.details[0]
@@ -194,7 +194,7 @@ def test_retryable_http_status_honors_retry_after_without_sdk_retry(monkeypatch,
 def test_configuration_and_auth_errors_never_retry_as_outage(monkeypatch, status):
     model, sends = transport_model(monkeypatch, lambda _: httpx.Response(status, json={"error": "invalid"}))
     for _ in range(2):
-        with pytest.raises(ApplicationError) as failure:
+        with pytest.raises(TaskError) as failure:
             asyncio.run(restart(model).run("run", "step", "test", {}, Receipt))
         assert failure.value.type == "model_request_rejected" and failure.value.non_retryable
     assert len(sends) == 1
@@ -233,11 +233,11 @@ def test_shared_circuit_stops_new_steps_without_cancelling_inflight_response(mon
         model, sends = transport_model(monkeypatch, provider)
         slow = asyncio.create_task(model.run("run", "slow", "test", {"case": "slow"}, Receipt))
         try:
-            with pytest.raises(ApplicationError):
+            with pytest.raises(TaskError):
                 await model.run("run", "broken", "test", {}, Receipt)
             offline.set()
             assert (await slow).acknowledgement == "ready"
-            with pytest.raises(ApplicationError):
+            with pytest.raises(TaskError):
                 await model.run("run", "queued", "test", {}, Receipt)
             assert len(sends) == 2 and "queued:request:1" not in model.outputs.values
         finally:
@@ -255,7 +255,7 @@ def test_failure_is_compact_in_temporal_and_preserves_underlying_cause_types(mon
         raise httpx.ConnectError("private" * 50000, request=request)
 
     model, _ = transport_model(monkeypatch, offline)
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "step", "test", {}, Receipt))
     serialized = Failure()
     DefaultFailureConverter().to_failure(failure.value, DefaultPayloadConverter(), serialized)
@@ -273,7 +273,7 @@ def test_timeout_during_tool_execution_is_not_provider_disconnect(monkeypatch):
         raise TimeoutError()
 
     monkeypatch.setattr(module.Runner, "run", execute)
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "step", "test", {}, Receipt))
     assert failure.value.type == "model_execution_timeout"
 
@@ -285,7 +285,7 @@ def test_outer_request_deadline_enters_recovery_and_cancellation_stays_cancelled
         raise TimeoutError()
 
     monkeypatch.setattr(module.Runner, "run", timeout)
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "step", "test", {}, Receipt))
     assert failure.value.type == "model_transport_wait"
 
@@ -304,7 +304,7 @@ def test_response_body_disconnect_is_distinguished_from_connection_failure(monke
             raise httpx.ReadError("synthetic broken stream")
 
     model, sends = transport_model(monkeypatch, lambda _: httpx.Response(200, stream=BrokenBody()))
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "step", "test", {}, Receipt))
     assert len(sends) == 1
     assert failure.value.details[0]["phase"] == "response_read"
@@ -321,10 +321,10 @@ def test_budget_is_shared_with_outage_recovery_and_never_automatically_increased
 
     model, sends = transport_model(monkeypatch, offline)
     model.settings.model_max_calls = 1
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "step", "test", {}, Receipt))
     now[0] = failure.value.details[0]["retry_at"]
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(restart(model).run("run", "step", "test", {}, Receipt))
     assert failure.value.type == "model_request_budget" and len(sends) == 1
 
@@ -343,10 +343,10 @@ def test_circuit_opened_between_request_intent_and_send_reuses_unsent_slot(monke
         return result
 
     model.outputs.put = open_circuit
-    with pytest.raises(ApplicationError):
+    with pytest.raises(TaskError):
         asyncio.run(model.run("run", "step", "test", {}, Receipt))
     assert sends == [] and model.outputs.get("run", "step:request-deferred:1") == receipt
-    with pytest.raises(ApplicationError):
+    with pytest.raises(TaskError):
         asyncio.run(restart(model).run("run", "step", "test", {}, Receipt))
     assert sends == []
     now[0] = 1060.0
@@ -398,7 +398,7 @@ def test_tool_runs_still_have_a_fresh_deadline_for_each_model_request(monkeypatc
         return "ready"
     model, sends = transport_model(monkeypatch, provider)
     model.settings.model_timeout_seconds = 0.05
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "tool-network-timeout", "test", {}, Receipt, tools=[wait_for_gpu]))
     assert failure.value.type == "model_transport_wait"
     assert len(sends) == 2

@@ -1,5 +1,5 @@
-from hrs_platform.services.structure_views import describe_structure
-from hrs_platform.services.structure_views import reading_view
+from hrs_platform.services.documents.structure import describe_structure
+from hrs_platform.services.documents.structure import reading_view
 
 
 def source(pages):
@@ -17,7 +17,7 @@ def table(value):
 
 
 def test_headerless_continuation_with_closed_local_rowspans_keeps_column_ownership():
-    from hrs_platform.services.structure_views import merge_table_parts
+    from hrs_platform.services.documents.structure import merge_table_parts
 
     first = '<table><tr><th>地区</th><th>数量</th></tr><tr><td rowspan="2">甲县</td><td>120</td></tr><tr><td>130</td></tr></table>'
     second = '<table><tr><td>乙县</td><td>140</td></tr></table>'
@@ -35,7 +35,7 @@ def test_headerless_continuation_with_closed_local_rowspans_keeps_column_ownersh
 
 def test_a_retrieved_table_note_also_carries_its_source_checked_header():
     from uuid import uuid4
-    from hrs_platform.services.retrieval_chunks import retrieval_chunks
+    from hrs_platform.services.retrieval.chunks import retrieval_chunks
 
     first = table('甲县')
     second = '<table><tr><td>乙县①</td><td>140</td></tr></table>'
@@ -68,7 +68,7 @@ def test_source_checked_cross_page_table_is_one_reading_table_without_changing_e
 
 
 def test_table_candidates_cannot_drop_numbers_or_bypass_content_review():
-    from hrs_platform.services.structure_views import merge_table_parts
+    from hrs_platform.services.documents.structure import merge_table_parts
 
     first, second = table('甲县'), table('乙县')
     merged = first.replace('</table>', '<tr><td>乙县</td><td>120</td></tr></table>')
@@ -87,7 +87,7 @@ def test_table_candidates_cannot_drop_numbers_or_bypass_content_review():
 
 
 def test_continuation_joins_only_located_body_and_preserves_footnote_links():
-    from hrs_platform.services.structure_views import project_structure
+    from hrs_platform.services.documents.structure import project_structure
 
     first, second = '本月运入粮食共计', '一百二十吨，不含军运。'
     chapter = source([first, second + '\n\n另见注释[^a]。\n\n[^a]: 按当月统计。'])
@@ -107,7 +107,7 @@ def test_continuation_joins_only_located_body_and_preserves_footnote_links():
 def test_cross_page_context_reaches_retrieval_with_exact_source_ranges():
     from uuid import uuid4
 
-    from hrs_platform.services.retrieval_chunks import retrieval_chunks
+    from hrs_platform.services.retrieval.chunks import retrieval_chunks
 
     first, second = table('甲县'), table('乙县')
     chapter = {**source(['单位：吨\n\n' + first, second]),
@@ -134,7 +134,7 @@ def test_three_page_paragraph_is_joined_as_one_chain():
 
 
 def test_intervening_notes_and_ambiguous_or_complex_tables_keep_original_layout():
-    from hrs_platform.services.structure_views import merge_table_parts
+    from hrs_platform.services.documents.structure import merge_table_parts
 
     first, second = table('甲县'), table('乙县')
     merged = first.replace('</table>', '<tr><td>乙县</td><td>120</td></tr></table>')

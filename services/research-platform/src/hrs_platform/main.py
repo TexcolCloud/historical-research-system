@@ -8,12 +8,12 @@ from fastapi.responses import JSONResponse
 from hrs_platform.api.main import api_router
 from hrs_platform.core.config import Settings
 from hrs_platform.core.db import engine_for
-from hrs_platform.domain.errors import Problem
+from hrs_platform.domain.errors import Problem, ServiceError
 from hrs_platform.services.cards import Cards
+from hrs_platform.services.documents.library import Library
+from hrs_platform.services.documents.review import Review
 from hrs_platform.services.exports import Exports
-from hrs_platform.services.library import Library
-from hrs_platform.services.outputs import Outputs
-from hrs_platform.services.review import Review
+from hrs_platform.services.runs.outputs import Outputs
 
 
 def create_app(settings=None, engine=None):
@@ -36,6 +36,10 @@ def create_app(settings=None, engine=None):
     app.state.outputs = Outputs(settings, engine)
     app.state.cards = Cards(settings, engine)
     app.state.exports = Exports(settings, engine)
+
+    @app.exception_handler(ServiceError)
+    async def rejected_operation(request: Request, error: ServiceError):
+        return JSONResponse({"detail": error.detail}, status_code=error.status_code)
 
     @app.exception_handler(Problem)
     async def recoverable_problem(request: Request, error: Problem):

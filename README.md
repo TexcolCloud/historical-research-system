@@ -84,8 +84,6 @@ cd historical-research-system
 # 已有配置时保留，逐项补齐，不覆盖密钥。
 if (-not (Test-Path .env)) { Copy-Item .env.platform.example .env }
 
-# 当前 OCR 用此本地文件定位项目根目录；不需要填入指令，也不提交 Git。
-if (-not (Test-Path AGENTS.md)) { New-Item -ItemType File AGENTS.md | Out-Null }
 ```
 
 编辑 `.env`，将所有 `CHANGE_ME` 替换为真实配置，并确认文本模型选择。当前模板显式选择 Pro 推理模型；需要统一使用 Flash 时，将 `CARDS_REASONING_MODEL` 和 `CARDS_READING_MODEL` 均设为 `deepseek-flash`。主机与容器的配置优先级见 [平台配置](services/research-platform/README.md#运行与配置)。原件、真实配置、模型权重和业务存储数据不包含在仓库中。
@@ -166,10 +164,14 @@ services/
   research-platform/     # 现役业务 API、领域规则、工作流、迁移与测试
   review-workbench/      # React 书籍工作台
   document-extraction/   # 独立 OCR / 文档转换与本地视觉核验
-  runtime-support/       # 共用存储、来源和本地运行支持
+packages/
+  runtime-support/       # 共用 Python 包，不是独立服务
+evaluation/
+  reference/             # 冻结评测参考资源，不进入生产内容流
 deploy/
   platform/              # 应用 Compose、Dockerfile、代理与测试基础设施
   windows/               # OCR 环境与 GPU 检查脚本
+  infrastructure/        # PostgreSQL / S3 / OpenSearch，共享数据卷
 scripts/                 # 平台启动、诊断、模型安装及评测入口
 models/                  # 本地权重与缓存；大文件不入 Git
 ```
@@ -188,12 +190,12 @@ models/                  # 本地权重与缓存；大文件不入 Git
 
 文档按“入门 → 操作指南 → 参考与限制”组织：根 README 提供安装和首次使用，模块 README 解释当前职责、日常操作及验证。各级 `docs/`、历史调优与验收报告、`output/` 及个人开发指令留在本地，不随 Git 分发；保留的操作说明不依赖这些本地资料才能阅读。API 契约、配置示例、测试资源、依赖锁与第三方许可证继续随仓库保存。
 
-旧业务实现已退役，但以下路径仍管理当前共享基础设施，保留原 Compose 项目名与卷定义：
+共享基础设施统一放在 `deploy/infrastructure/`，保留原 Compose 项目名、服务名与卷定义：
 
-- [PostgreSQL 与 S3](services/document-ingestion/config/compose.acceptance.yml)，以及同目录初始化 SQL。
-- [OpenSearch 与快照卷](services/document-retrieval/config/compose.yml)。
+- [PostgreSQL 与 S3](deploy/infrastructure/compose.storage.yml)，以及同目录初始化 SQL。
+- [OpenSearch 与快照卷](deploy/infrastructure/compose.search.yml)。
 
-这些文件不启动旧业务服务。迁移其管理路径前需验证卷归属和备份恢复；历史代码可从 Git 记录追溯，现役回归与 Ragas 工具位于 `services/research-platform`。
+目录迁移不会改名或重建现有数据卷。`document-ingestion`、`document-retrieval`、`research-cards` 已没有现役服务入口，不再保留同名服务目录；历史代码从 Git 记录追溯。现役回归与 Ragas 工具位于 `services/research-platform`，未入 Git 的历史资料与生成残留不会成为运行依赖。
 
 ## 常见问题
 

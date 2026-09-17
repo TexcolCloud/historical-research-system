@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, insert
 
 from hrs_platform import models as db
-from hrs_platform.services.agents import Models
+from hrs_platform.services.models.text import Models
 
 
 class Receipt(BaseModel):

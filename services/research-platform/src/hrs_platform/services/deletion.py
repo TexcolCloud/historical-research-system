@@ -6,20 +6,20 @@ books are retained. Cleanup is retryable and never reports success before I/O.
 """
 
 
-from fastapi import HTTPException
 from sqlalchemy import insert, select, update
 
 from hrs_platform import models as db
+from hrs_platform.domain.errors import ServiceError
 
 DELETING = {"deleting", "delete_failed", "deleted"}
 
 
 def require_active(connection, book_id):
     if book_id is None:
-        raise HTTPException(409, "书籍不存在或已删除。")
+        raise ServiceError(409, "书籍不存在或已删除。")
     state = connection.scalar(select(db.books.c.state).where(db.books.c.id == str(book_id)).with_for_update())
     if state is None or state in DELETING:
-        raise HTTPException(409, "本书正在删除或已删除，不能继续处理。")
+        raise ServiceError(409, "本书正在删除或已删除，不能继续处理。")
 
 
 def require_run_active(connection, run_id):
@@ -47,7 +47,7 @@ def request_deletion(engine, book_id):
             .one_or_none()
         )
         if book is None:
-            raise HTTPException(404, "书籍不存在。")
+            raise ServiceError(404, "书籍不存在。")
         prior = (
             connection.execute(select(db.book_deletions).where(db.book_deletions.c.book_id == book_id))
             .mappings()

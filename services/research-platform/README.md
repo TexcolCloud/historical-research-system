@@ -21,11 +21,11 @@ $platformPython = '.cache/engineering-envs/research-platform/Scripts/python.exe'
 已有满足配置的存储服务时跳过。新主机可使用仓库保留的基础设施 Compose；先填写根配置模板中的 `INGEST_DEV_DB_PASSWORD`、S3 bucket 和凭据，再执行：
 
 ```powershell
-docker compose --env-file .env -f services/document-ingestion/config/compose.acceptance.yml up -d --wait
-docker compose -f services/document-retrieval/config/compose.yml up -d --wait
+docker compose --env-file .env -f deploy/infrastructure/compose.storage.yml up -d --wait
+docker compose -f deploy/infrastructure/compose.search.yml up -d --wait
 ```
 
-前者提供 PostgreSQL 和 SeaweedFS S3，后者提供 OpenSearch。数据库用户、端口、bucket 与根配置必须一致；确认 S3 bucket 可访问后再运行平台 `init`。这些路径保留原项目名和卷归属，不代表旧业务服务仍在使用。已有部署不要随意改项目名或删除卷。
+前者提供 PostgreSQL 和 SeaweedFS S3，后者提供 OpenSearch。数据库用户、端口、bucket 与根配置必须一致；确认 S3 bucket 可访问后再运行平台 `init`。配置文件已经迁至统一部署目录，仍保留原 Compose 项目名和卷归属。已有部署不要随意改项目名或删除卷。
 
 ### 配置优先级
 
@@ -49,16 +49,20 @@ docker compose -f services/document-retrieval/config/compose.yml up -d --wait
 | [main.py](src/hrs_platform/main.py) | 装配 FastAPI、异常处理与应用资源生命周期；外部注入的数据库连接池由调用方管理 |
 | [api/main.py](src/hrs_platform/api/main.py)、`api/routes/` | 按书籍、史料卡、运行、核对、检索、上传、事件和健康检查注册路由；负责请求校验、响应及 HTTP 头 |
 | [api/deps.py](src/hrs_platform/api/deps.py) | 提供应用级资源和可覆盖的请求依赖，测试可以替换业务服务而不启动模型 |
-| `services/` | 业务用例及其数据操作：上传事务、内容审阅、入库、检索、制卡、删除请求、导出；跨入口复用同一实现 |
-| [services/lifecycle.py](src/hrs_platform/services/lifecycle.py)、[services/events.py](src/hrs_platform/services/events.py) | 共享任务状态事务及已提交事件的分发次序，不依赖 HTTP 路由或 worker |
+| `services/cards/` | 制卡用例入口与持久化，协调规划、分工阅读、主题队列、单主题综合和定稿；各步骤只保留一份实现 |
+| `services/retrieval/` | 查询、索引发布、计算访问、恢复等待、分块／排序规则与离线评测；`BookIndexer` 负责索引，`Search` 负责查询 |
+| `services/documents/` | 原件核对、局部修复、章节发布、脚注与结构投影 |
+| `services/models/` | 文本、本地视觉与嵌入／重排模型调用、回执、预算与断线恢复，不持有 Temporal 异常 |
+| `services/runs/` | 运行状态、检查点、执行事件与显式恢复请求 |
+| `services/books.py`、`deletion.py`、`storage.py` 等 | 跨功能的书籍生命周期、对象归属与导出；不依赖 HTTP 响应或 worker |
 | `jobs/` | Temporal 工作流、活动适配器、worker 注册／派发及转换 CLI 调用；不定义第二份业务状态规则 |
 | `core/config.py`、`core/db.py` | 配置加载、数据库连接与迁移入口 |
 | [models.py](src/hrs_platform/models.py)、[schemas.py](src/hrs_platform/schemas.py) | SQL 表结构与公开请求／响应模型，迁移历史保留在 `migrations/` |
 | `domain/` | 已有文本、结构、token 与模型数据契约和算法；不依赖应用装配、路由或 worker |
 
-依赖方向是 `main → api → services → core/models/domain`，`jobs → services`；业务代码不得反向导入 `main/api/jobs`。SQL 事务留在有业务含义的服务中，S3 对象归属保护由 `services/storage.py` 实现。既有异常的 HTTP 状态和响应格式保持兼容。Python 内部导入全部迁移到新位置，不保留空转的旧模块转发层；Temporal 工作流和活动名称、检查点键及 CLI 命令保持兼容。
+依赖方向是 `main → api → services → core/models/domain`，`jobs → services`；业务代码不得反向导入 `main/api/jobs`，也不直接导入 FastAPI、Starlette 或 Temporal。`ServiceError` 在 HTTP 入口还原既有状态和响应体（tus 拒绝保持 hook 格式）；`TaskError` 在活动入口转换为 Temporal 错误，保留类型、详情和重试属性。对象锁等待通过调用方注入的心跳回调报告进度。SQL 事务留在有业务含义的服务中，S3 对象归属保护由 `services/storage.py` 实现。既有异常的 HTTP 状态和响应格式保持兼容。Python 内部导入全部迁移到新位置，不保留旧模块转发层；`Cards` 是 API、CLI 和 worker 共享的用例入口，复用同一资源实例，将内部阶段委派给各自实现；Temporal 工作流和活动名称、检查点键及 CLI 命令保持兼容。
 
-`tests/test_app_composition.py` 验证依赖替换、应用资源隔离、生命周期及分层方向；其余测试继续覆盖原业务链路。离线回归使用合成内容和模拟模型响应，默认不启用真实文本／视觉模型测试。
+`tests/test_app_composition.py` 验证依赖替换、应用资源隔离、生命周期及分层方向；模型调用层不导入制卡编排，索引器不导入查询服务，GPU 模型加载不放在领域层。其余测试继续覆盖原业务链路。离线回归使用合成内容和模拟模型响应，默认不启用真实文本／视觉模型测试。
 
 ## 处理流程与数据职责
 
@@ -78,13 +82,13 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 ## 检索与来源
 
-当前分块规则为 `structure-1400-160-v6-evidence-scopes`，见 [retrieval_chunks.py](src/hrs_platform/services/retrieval_chunks.py)。已发布章节是正文与字符坐标的权威来源，索引不改写它。
+当前分块规则为 `structure-1400-160-v6-evidence-scopes`，见 [retrieval_chunks.py](src/hrs_platform/services/retrieval/chunks.py)。已发布章节是正文与字符坐标的权威来源，索引不改写它。
 
 - 正文以 1400 字符为目标、最多 160 字符重叠；连续标题携带首段。
 - 表格按完整行组处理，保留表头、合并单元格及表前范围说明；脚注保留正文归属，不猜测歧义链接。
 - 书名、章节路径、表头和脚注加入检索投影；图片路径及通用占位符不进入嵌入文本。
 - BGE 输入按实际 tokenizer 限制至 6144 tokens；超长结构在投影层划窗，保留原文坐标。重排按问题与文段总 token 数划窗。
-- 默认每路召回 50、重排 30、返回 8 条；单条上下文预算 6000 字符、整次 24000 字符，实际参数见 [API 路由](src/hrs_platform/main.py)。
+- 默认每路召回 50、重排 30、返回 8 条；单条上下文预算 6000 字符、整次 24000 字符，实际参数见 [API 路由](src/hrs_platform/api/routes/library.py)。
 - 相交证据合并，必要标题、脚注与限定信息随结果返回；共享统计量不能因分行而被误归属。
 
 索引检查点按文本、模型与规则指纹复用，只有变化或缺失输入重算。运行结果的 `retrieval_metrics` 记录计算／复用量；搜索的 `Server-Timing` 区分召回、嵌入、重排和上下文组装耗时。
@@ -101,8 +105,8 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 ### 评测
 
-- `evaluate --run-id UUID --cases dataset.json [--semantic]`：评测已发布书籍，题目格式由 [retrieval_evaluation.py](src/hrs_platform/services/retrieval_evaluation.py) 定义。
-- `evaluate-offline --cases dataset.json`：创建独立 `hrs-offline-*` 临时索引比较候选策略，见 [离线评测实现](src/hrs_platform/services/retrieval_offline.py)。
+- `evaluate --run-id UUID --cases dataset.json [--semantic]`：评测已发布书籍，题目格式由 [retrieval_evaluation.py](src/hrs_platform/services/retrieval/evaluation.py) 定义。
+- `evaluate-offline --cases dataset.json`：创建独立 `hrs-offline-*` 临时索引比较候选策略，见 [离线评测实现](src/hrs_platform/services/retrieval/offline.py)。
 - [Ragas 操作说明](evaluation/tools/ragas/README.md)：冻结真实检索上下文，再运行离线回答与模型评分。
 
 评测数据与报告留在本地或 S3。单书、合成输入及同书新页段的结果不能推断跨书泛化；开发机器评审不能冒充人工金标。
@@ -115,7 +119,7 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 模型输入按来源 ID 去重，关联脚注与表头通过 ID/role 指向保留的完整原文，不以摘要替换证据。上一批阅读线索和综合输入去除重复候选引文。局部制卡修订只输出变更条目及必要元数据；程序合并后检查引用关系，仍对完整候选执行独立语义、主题全文覆盖和本地原图核验。未按条目建立可靠影响范围前，不跳过整卡最终核验。
 
-主题研究复用 [OpenSearch 检索](src/hrs_platform/services/search.py) 和 [证据工具](src/hrs_platform/services/card_evidence.py)：
+主题研究复用 [OpenSearch 检索](src/hrs_platform/services/retrieval/search.py) 和 [证据工具](src/hrs_platform/services/cards/evidence.py)：
 
 1. 新主题规划同时生成支持、反证、限定三类查询，程序先执行检索、去重与原文装配，模型可直接评估证据。旧检查点中未含查询的主题、规划回退及定向补证仍由 Agent 调用 `search_evidence`。支持材料先查主题章节，无命中时扩大到本书；反证与限定查全书。沿用混合召回、重排和校准。
 2. `read_evidence` 读取固定来源原文，并保留必需的关联脚注、归属和表头；邻文返回可选 ID，需要时显式读取。预览、线索与模型概括不能作为引用；工具不能读取其他书籍或任意文件。
@@ -146,7 +150,7 @@ SQL 保存状态、来源引用、事件及 outbox；S3 保存原件、OCR、页
 
 检索工具进度不进入模型输入指纹，最终阶段保存失败可复用已完成模型结果。GPU 排队超过 60 秒交回持久化恢复；工具等待不消耗文本模型请求超时，HTTP 请求仍独立限时。取消检索携带任务和请求标识，终止所属 GPU 工作并等待底层线程结束；取消接口断连时也要等原调用退出，不能提前释放活动名额。
 
-检查点绑定完整输入、来源和规则；输入改变不能复用旧批准。关闭网页不终止工作流；服务恢复后由 Temporal 接续。执行页展示等待原因和预计重试时间。具体预算与恢复判断见 [工作流](src/hrs_platform/jobs/workflows.py) 和 [研究调用实现](src/hrs_platform/services/agents.py)。
+检查点绑定完整输入、来源和规则；输入改变不能复用旧批准。关闭网页不终止工作流；服务恢复后由 Temporal 接续。执行页展示等待原因和预计重试时间。具体预算与恢复判断见 [工作流](src/hrs_platform/jobs/workflows.py) 和 [研究调用实现](src/hrs_platform/services/models/text.py)。
 
 制卡活动心跳包含当前步骤及距最近检查点的时间。超过 30 分钟（或两倍文本请求超时，取较大值）没有新检查点会中止该次活动并按有限活动重试恢复；取消等待底层请求退出，避免占用尚未释放就重复启动。不把持续心跳视为业务进展。合成故障测试覆盖 SDK 异常包装、长期断连、视觉服务等待、分批采用、检查点恢复和自动修订去重；真实卡片准确度仍须另行验证。
 
@@ -203,7 +207,7 @@ $backupReference = Get-Content -Raw backup-reference.json
 常规测试使用专用测试 SQL、S3 和 OpenSearch；完整配置见 [CI](../../.github/workflows/engineering.yml) 和 [测试 Compose](../../deploy/platform/compose.test.yml)。不要对业务库设置测试连接。
 
 ```powershell
-& $platformPython -m pytest services/research-platform/tests services/runtime-support/tests -q
+& $platformPython -m pytest services/research-platform/tests packages/runtime-support/tests -q
 & $platformPython -m pytest scripts --collect-only -q
 & $platformPython -m ruff check services/research-platform/src scripts/hrs_v2.py
 ```

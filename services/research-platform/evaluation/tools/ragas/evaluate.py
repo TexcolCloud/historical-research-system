@@ -16,11 +16,11 @@ from pydantic import BaseModel
 
 from hrs_platform.services.books import get_run
 from hrs_platform.core.db import engine_for
-from hrs_platform.services.library import Library
-from hrs_platform.services.outputs import Outputs
-from hrs_platform.services.outputs import fingerprint
-from hrs_platform.services.retrieval_chunks import source_excerpt
-from hrs_platform.services.retrieval_evaluation import covered
+from hrs_platform.services.documents.library import Library
+from hrs_platform.services.runs.outputs import Outputs
+from hrs_platform.services.runs.outputs import fingerprint
+from hrs_platform.services.retrieval.chunks import source_excerpt
+from hrs_platform.services.retrieval.evaluation import covered
 from hrs_platform.core.config import Settings
 
 ANSWER_PROMPT = '''你是史料研究问答助手。仅依据给定证据回答用户问题，不使用外部知识。

@@ -13,8 +13,8 @@ from sqlalchemy import insert, select
 from hrs_platform import models as db
 from hrs_platform.services.storage import objects_for
 from hrs_platform.services.cards import Cards
-from hrs_platform.services.library import Library
-from hrs_platform.services.search import Search
+from hrs_platform.services.documents.library import Library
+from hrs_platform.services.retrieval.search import Search
 
 
 @pytest.mark.skipif(os.environ.get("PLATFORM_TEST_MODELS") != "1", reason="Opt-in actual text-model workflow")

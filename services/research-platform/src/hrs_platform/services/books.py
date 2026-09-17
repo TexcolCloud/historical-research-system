@@ -5,21 +5,21 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from fastapi import HTTPException
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs_platform import models as db
+from hrs_platform.domain.errors import ServiceError
 from hrs_platform.schemas import UploadSession
 
 
 def create_upload(engine, settings, request, request_id=None, upload_token=None):
     if not request.filename.lower().endswith(".pdf") or request.byte_length > settings.upload_max_bytes:
-        raise HTTPException(422, "请选择大小在上传限制内的 PDF 文件。")
+        raise ServiceError(422, "请选择大小在上传限制内的 PDF 文件。")
     if "/" in request.filename or "\\" in request.filename or "\x00" in request.filename:
-        raise HTTPException(422, "文件名不能包含路径。")
+        raise ServiceError(422, "文件名不能包含路径。")
     if request_id and (not upload_token or not 32 <= len(upload_token) <= 128):
-        raise HTTPException(422, "幂等上传请求需要有效的上传令牌。")
+        raise ServiceError(422, "幂等上传请求需要有效的上传令牌。")
     session_id = str(request_id or uuid4())
     book_id = str(uuid5(NAMESPACE_URL, f"hrs/upload/{session_id}"))
     token = upload_token if request_id else secrets.token_urlsafe(32)
@@ -45,7 +45,7 @@ def create_upload(engine, settings, request, request_id=None, upload_token=None)
                     existing["token_hash"], hashlib.sha256(token.encode()).hexdigest()
                 )
             ):
-                raise HTTPException(409, "同一上传请求不能改用另一个文件或令牌。")
+                raise ServiceError(409, "同一上传请求不能改用另一个文件或令牌。")
             return UploadSession(
                 session_id=session_id,
                 book_id=book_id,
@@ -78,7 +78,7 @@ def handle_tus(engine, settings, hook, authorization):
     try:
         session_id = str(UUID(upload.MetaData.get("session_id", "")))
     except ValueError as error:
-        raise HTTPException(403, "上传许可缺失。") from error
+        raise ServiceError(403, "上传许可缺失。") from error
     token = authorization.removeprefix("Bearer ") if authorization else ""
     if hook.Type in {"post-create", "post-receive"}:
         from hrs_platform.services.deletion import DELETING
@@ -106,7 +106,7 @@ def handle_tus(engine, settings, hook, authorization):
         if session is None or not secrets.compare_digest(
             hashlib.sha256(token.encode()).hexdigest(), session["token_hash"]
         ):
-            raise HTTPException(403, "上传许可无效。")
+            raise ServiceError(403, "上传许可无效。")
         from hrs_platform.services.deletion import require_active
 
         require_active(connection, session["book_id"])
@@ -116,10 +116,10 @@ def handle_tus(engine, settings, hook, authorization):
             or upload.IsFinal
             or upload.IsPartial
         ):
-            raise HTTPException(422, "上传大小或模式与许可不符。")
+            raise ServiceError(422, "上传大小或模式与许可不符。")
         if hook.Type == "pre-create":
             if session["expires_at"] < datetime.now(UTC) or session["state"] == "received":
-                raise HTTPException(409, "上传许可已过期或已完成。")
+                raise ServiceError(409, "上传许可已过期或已完成。")
             # A retried POST gets its own object, never overwriting an earlier multipart upload.
             return {
                 "ChangeFileInfo": {
@@ -135,11 +135,11 @@ def handle_tus(engine, settings, hook, authorization):
                 raise ValueError("prefix")
             UUID(key.removeprefix(prefix))
         except ValueError as error:
-            raise HTTPException(422, "上传对象与许可不符。") from error
+            raise ServiceError(422, "上传对象与许可不符。") from error
         if storage.get("Type") != "s3store" or storage.get("Bucket") != settings.s3_bucket:
-            raise HTTPException(422, "上传对象必须位于配置的 S3 桶。")
+            raise ServiceError(422, "上传对象必须位于配置的 S3 桶。")
         if upload.Offset != upload.Size:
-            raise HTTPException(422, "上传尚未完成。")
+            raise ServiceError(422, "上传尚未完成。")
         if session["state"] == "received":
             return {}
         run_id = str(uuid4())
@@ -188,7 +188,7 @@ def get_book(engine, book_id):
     with engine.connect() as connection:
         row = connection.execute(book_query().where(db.books.c.id == str(book_id))).mappings().one_or_none()
     if row is None:
-        raise HTTPException(404, "书籍不存在。")
+        raise ServiceError(404, "书籍不存在。")
     return dict(row)
 
 
@@ -207,7 +207,7 @@ def get_run(engine, run_id):
             connection.execute(select(db.runs).where(db.runs.c.id == str(run_id))).mappings().one_or_none()
         )
     if result is None:
-        raise HTTPException(404, "运行不存在。")
+        raise ServiceError(404, "运行不存在。")
     return dict(result)
 
 

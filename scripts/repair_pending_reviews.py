@@ -4,9 +4,9 @@ import argparse
 import json
 
 from hrs_platform.core.db import engine_for
-from hrs_platform.services.review import Review
-from hrs_platform.services.review_repair import recheck_pending
-from hrs_platform.services.review_repair import repair_scopes
+from hrs_platform.services.documents.review import Review
+from hrs_platform.services.documents.repair import recheck_pending
+from hrs_platform.services.documents.repair import repair_scopes
 from hrs_platform.core.config import Settings
 
 

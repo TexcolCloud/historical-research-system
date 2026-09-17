@@ -12,7 +12,7 @@ from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 
 from hrs_platform.core.db import engine_for
 from hrs_platform.jobs.worker import connect
-from hrs_platform.services.search import search_client
+from hrs_platform.services.retrieval.compute import search_client
 from hrs_platform.services.storage import objects_for
 
 

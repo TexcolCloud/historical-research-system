@@ -47,7 +47,7 @@ jobs:
       - name: Check standalone tool test imports
         run: .cache/engineering-envs/research-platform/bin/python -m pytest scripts --collect-only -q --basetemp "${{ runner.temp }}/tool-collection"
       - run: npm --prefix services/review-workbench run contracts
-      - run: .cache/engineering-envs/research-platform/bin/python -m pytest services/research-platform/tests services/runtime-support/tests --basetemp "${{ runner.temp }}/platform-ci" --junitxml=reports/platform.xml
+      - run: .cache/engineering-envs/research-platform/bin/python -m pytest services/research-platform/tests packages/runtime-support/tests --basetemp "${{ runner.temp }}/platform-ci" --junitxml=reports/platform.xml
       - name: Check conversion review policy without OCR model weights
         env:
           PYTHONPATH: services/document-extraction/src
@@ -60,6 +60,7 @@ jobs:
           services/document-extraction/tests/test_review_transport.py
           services/document-extraction/tests/test_visual_source.py
           services/document-extraction/tests/test_page_number_cleanup.py
+          services/document-extraction/tests/test_settings.py
           --basetemp "${{ runner.temp }}/conversion-review" --junitxml=reports/conversion-review.xml
       - run: npm --prefix services/review-workbench test
       - run: npm --prefix services/review-workbench run check-unused

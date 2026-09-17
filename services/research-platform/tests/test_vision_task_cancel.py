@@ -51,9 +51,9 @@ def test_cancel_search_drains_thread_and_prevents_later_gpu_calls(monkeypatch, c
 
     import httpx
 
-    from hrs_platform.services.search import remote_compute
-    from hrs_platform.services.search import retrieval_owner
-    from hrs_platform.services.search import task_search
+    from hrs_platform.services.retrieval.compute import remote_compute
+    from hrs_platform.services.retrieval.compute import retrieval_owner
+    from hrs_platform.services.retrieval.compute import task_search
     entered, release, notified = threading.Event(), threading.Event(), threading.Event()
     requests = []
     def post(url, **kw):
@@ -129,8 +129,8 @@ def test_remote_compute_propagates_task_and_request_ownership(monkeypatch):
 
     import httpx
 
-    from hrs_platform.services.search import remote_compute
-    from hrs_platform.services.search import task_search
+    from hrs_platform.services.retrieval.compute import remote_compute
+    from hrs_platform.services.retrieval.compute import task_search
     bodies = []
     def post(url, **kw):
         bodies.append(kw["json"])
@@ -148,7 +148,7 @@ def test_gpu_recovery_does_not_retry_invalid_requests(monkeypatch, status, retry
     import httpx
 
     from hrs_platform.domain.errors import Problem
-    from hrs_platform.services.search import remote_compute
+    from hrs_platform.services.retrieval.compute import remote_compute
     monkeypatch.setattr(httpx, "post", lambda url, **_: httpx.Response(status, request=httpx.Request("POST", url)))
     with pytest.raises(Problem) as error:
         remote_compute("http://broker/retrieval", "embed", ["synthetic"])

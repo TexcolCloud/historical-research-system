@@ -14,21 +14,20 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs_platform import models as db
 
-external_heartbeat = ContextVar("external_heartbeat", default=False)
+storage_heartbeat = ContextVar("storage_heartbeat", default=None)
 
 
 @contextmanager
 def object_lock(engine, key):
     """Only operations on the same object wait; no book lock spans S3 I/O."""
-    from temporalio import activity
 
     with engine.begin() as connection:
         deadline = time.monotonic() + 300
         while not connection.scalar(
             text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key}
         ):
-            if activity.in_activity() and not external_heartbeat.get():
-                activity.heartbeat()
+            if heartbeat := storage_heartbeat.get():
+                heartbeat()
             if time.monotonic() >= deadline:
                 raise TimeoutError("Object storage operation is still in progress; retry this stage.")
             time.sleep(0.1)
@@ -56,59 +55,6 @@ def cached_bytes(objects, reference):
                 _reader_cache.popitem(last=False)
     return value
 
-
-def object_response(objects, reference, range_header=None, *, headers=None):
-    """Proxy a verified immutable S3 object, retaining PDF single-range support."""
-    import re
-
-    from fastapi import HTTPException
-    from fastapi.responses import Response, StreamingResponse
-    from starlette.background import BackgroundTask
-
-    size = reference["byte_length"]
-    response_headers = {
-        "ETag": '"' + reference["sha256"] + '"',
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "private, max-age=3600",
-        "X-Content-Type-Options": "nosniff",
-        **(headers or {}),
-    }
-    options = {}
-    if range_header:
-        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
-        if not match or not any(match.groups()) or size == 0:
-            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
-        a, b = match.groups()
-        start = int(a) if a else max(0, size - int(b))
-        end = min(int(b), size - 1) if a and b else size - 1
-        if start > end or start >= size:
-            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
-        options["Range"] = f"bytes={start}-{end}"
-        response_headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-    response = objects.client.get_object(Bucket=objects.bucket, Key=reference["key"], **options)
-    body = response["Body"]
-    expected_length = end - start + 1 if range_header else size
-    if (
-        response["ContentLength"] != expected_length
-        or response.get("Metadata", {}).get("sha256") != reference["sha256"]
-    ):
-        body.close()
-        raise HTTPException(502, "原件存储校验失败。")
-    response_headers["Content-Length"] = str(expected_length)
-
-    def chunks():
-        try:
-            yield from body.iter_chunks(1024 * 1024)
-        finally:
-            body.close()
-
-    return StreamingResponse(
-        chunks(),
-        status_code=206 if range_header else 200,
-        media_type=reference["media_type"],
-        headers=response_headers,
-        background=BackgroundTask(body.close),
-    )
 
 
 class OwnedObjects(S3Objects):

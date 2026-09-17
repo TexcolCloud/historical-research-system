@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header
 
 from hrs_platform.api.deps import EngineDep, SettingsDep
+from hrs_platform.domain.errors import ServiceError
 from hrs_platform.schemas import TusHook, UploadRequest, UploadSession
 from hrs_platform.services import books
 
@@ -26,7 +27,7 @@ def tus_hook(
 ):
     try:
         return books.handle_tus(engine, settings, hook, authorization)
-    except HTTPException as error:
+    except ServiceError as error:
         if hook.Type != "pre-create":
             raise
         return {

@@ -8,13 +8,13 @@ import pytest
 from agents import AgentOutputSchema
 from httpx import MockTransport
 from pydantic import BaseModel, SecretStr
-from temporalio.exceptions import ApplicationError
+from hrs_platform.domain.errors import TaskError
 from test_card_pipeline import MemoryOutputs, record, verdict
 
-from hrs_platform.services import agents as module
-from hrs_platform.services.outputs import Outputs
-from hrs_platform.services.outputs import execution_parent
-from hrs_platform.services.reading import read_batch
+from hrs_platform.services.models import text as module
+from hrs_platform.services.runs.outputs import Outputs
+from hrs_platform.services.runs.outputs import execution_parent
+from hrs_platform.services.cards.reading import read_batch
 from hrs_platform.core.config import Settings
 
 
@@ -109,7 +109,7 @@ def test_every_exit_after_start_closes_agent_and_restores_parent(monkeypatch, fa
     if failure == "exhausted":
         for n in range(1, 4):
             model.outputs.put("run", f"step:request:{n}", dependency, dependency)
-        expected = ApplicationError
+        expected = TaskError
     elif failure == "request-save":
 
         def fail(*args):
@@ -207,7 +207,7 @@ def test_sdk_request_hook_preserves_nonretryable_global_budget(monkeypatch):
     model.settings.model_max_calls = 0
 
     def exhausted(*args):
-        raise ApplicationError("Budget exhausted", type="model_request_budget", non_retryable=True)
+        raise TaskError("Budget exhausted", type="model_request_budget", non_retryable=True)
 
     model.outputs.reserve_request = exhausted
     monkeypatch.setattr(module.Runner, "run", runner)
@@ -218,7 +218,7 @@ def test_sdk_request_hook_preserves_nonretryable_global_budget(monkeypatch):
             **kwargs, transport=MockTransport(lambda _: pytest.fail("Request escaped budget guard"))
         ),
     )
-    with pytest.raises(ApplicationError) as failure:
+    with pytest.raises(TaskError) as failure:
         asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt))
     assert failure.value.type == "model_request_budget" and failure.value.non_retryable
     assert model.outputs.get("run", "step:request:2") is None
@@ -272,7 +272,7 @@ def test_truncation_at_ceiling_stops_without_another_provider_call(monkeypatch):
         },
         dependency,
     )
-    with pytest.raises(ApplicationError, match="输出.*上限") as error:
+    with pytest.raises(TaskError, match="输出.*上限") as error:
         asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt))
     assert error.value.non_retryable
 
@@ -287,13 +287,13 @@ def test_validation_feedback_survives_restart_and_exhaustion_is_terminal(monkeyp
         raise module.ModelBehaviorError("invalid quotation at unit-2 candidate_quotes[0]")
 
     monkeypatch.setattr(module.Runner, "run", respond)
-    with pytest.raises(ApplicationError, match="三次") as error:
+    with pytest.raises(TaskError, match="三次") as error:
         asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt))
     assert error.value.non_retryable
     assert len(seen) == 3
     assert "unit-2" in seen[1]["validation_feedback"][0]["problem"]
     monkeypatch.setattr(module.Runner, "run", lambda *a, **k: pytest.fail("Repeated exhausted step"))
-    with pytest.raises(ApplicationError):
+    with pytest.raises(TaskError):
         asyncio.run(model.run("run", "step", "test", dependency["input"], Receipt))
 
 

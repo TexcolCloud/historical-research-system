@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 
 from hrs_platform.domain.book_structure import validate_outline_boundaries
-from hrs_platform.services.library import reviewed_spans
+from hrs_platform.services.documents.library import reviewed_spans
 
 
 def test_corrected_span_keeps_both_original_pages_and_continuation_whitespace():
@@ -46,7 +46,7 @@ def test_published_errata_reject_unsafe_changes_before_visual_review(monkeypatch
     from copy import deepcopy
     from types import SimpleNamespace
 
-    from hrs_platform.services import library as module
+    from hrs_platform.services.documents import library as module
     source = {'id':'chapter','content':{'sha256':'current'},'text':'甲地。',
               'parts':[{'text':'甲地。','source':{'pages':[1]}}]}
     if bad == 'human':
@@ -78,7 +78,7 @@ def test_verified_published_errata_commit_once_and_invalidate_old_search(platfor
 
     from hrs_platform import models as db
     from hrs_platform.services.books import get_run
-    from hrs_platform.services.library import Library
+    from hrs_platform.services.documents.library import Library
 
     settings, engine = platform
     library=Library(settings.model_copy(update={'cache_root':tmp_path}),engine)

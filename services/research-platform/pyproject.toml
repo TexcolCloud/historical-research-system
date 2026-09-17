@@ -27,7 +27,7 @@ dev = ["pytest>=8,<10", "ruff>=0.12,<1"]
 hrs-platform = "hrs_platform.cli:main"
 
 [tool.uv.sources]
-hrs-runtime = { path = "../runtime-support", editable = true }
+hrs-runtime = { path = "../../packages/runtime-support", editable = true }
 torch = [
   { index = "pytorch-cu130", marker = "sys_platform == 'win32'" },
   { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
