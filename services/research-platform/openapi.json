@@ -1985,6 +1985,22 @@
             "type": "string",
             "title": "Machine Status"
           },
+          "extraction_method": {
+            "type": "string",
+            "title": "Extraction Method",
+            "default": "ocr"
+          },
+          "acceptance_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Basis"
+          },
           "footnotes": {
             "items": {
               "$ref": "#/components/schemas/FootnoteLink"

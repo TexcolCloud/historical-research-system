@@ -1,11 +1,13 @@
 """Own one Docling converter and run conversion, semantic review and export."""
 
 from pathlib import Path
+from contextlib import nullcontext
 import time
 
-from .accelerator import detect
+from .accelerator import detect, cpu_profile
 from .artifacts import clean_page_numbers, write_outputs
-from .docling_conversion import DoclingConverter
+from .docling_conversion import DoclingConverter, NativeExportMismatch
+from .native_pdf import inspect_pdf
 from .semantic_completion import complete_document
 from .settings import Settings
 from .utils import sha256
@@ -21,20 +23,35 @@ class ScheduledConverter:
 
     def convert_document(self, source, output):
         from .ocr import _release_cuda
-        with gpu_lease():
-            prepare_ocr()
-            backend = None
-            try:
-                backend = DoclingConverter(self.settings, self.accelerator)
-                backend.model_manifest_sha256 = self.model_manifest_sha256
-                return backend.convert_document(source, output)
-            finally:
+        plan = inspect_pdf(source, enabled=getattr(self.settings, 'native_pdf', False)
+                           and self.settings.ocr_backends[0].get('kind') == 'paddleocr-vl')
+        while True:
+            needs_ocr = not plan or any(p['route'] != 'native' for p in plan.values())
+            with gpu_lease() if needs_ocr else nullcontext():
+                if needs_ocr:
+                    prepare_ocr()
+                    if getattr(self.settings, 'native_pdf', False):
+                        self.accelerator = detect(self.settings.acceleration)
+                backend = None
                 try:
-                    if backend is not None:
-                        backend.close()
+                    backend = DoclingConverter(self.settings, self.accelerator, native_plan=plan)
+                    backend.model_manifest_sha256 = self.model_manifest_sha256
+                    return backend.convert_document(source, output)
+                except NativeExportMismatch as exc:
+                    # Collect failures for the whole book before one fallback pass.
+                    # Already recognized pages reuse their evidence-bound OCR cache.
+                    for number in exc.pages:
+                        if plan[number]['route'] != 'native':
+                            raise
+                        plan[number].update(route='ocr', reasons=['native-export-difference'])
                 finally:
-                    backend = None
-                    _release_cuda()
+                    try:
+                        if backend is not None:
+                            backend.close()
+                    finally:
+                        backend = None
+                        if needs_ocr:
+                            _release_cuda()
 
     def close(self):
         pass
@@ -49,10 +66,12 @@ class DocumentExtractor:
                 "Exactly one OCR backend is required; the dual-OCR pipeline is retired"
             )
         self.settings = settings
-        self.accelerator = detect(settings.acceleration)
+        self.accelerator = (cpu_profile(settings.acceleration) if getattr(settings, 'native_pdf', False)
+                            else detect(settings.acceleration))
         self.converter = None
         try:
-            local = getattr(getattr(settings, 'vision_review', None), 'model', None) == LOCAL_MODEL
+            local = (getattr(getattr(settings, 'vision_review', None), 'model', None) == LOCAL_MODEL
+                     or getattr(settings, 'native_pdf', False))
             self.converter = (ScheduledConverter if local else DoclingConverter)(settings, self.accelerator)
             manifest = settings.model_root / "manifest.sha256"
             self.converter.model_manifest_sha256 = (
@@ -111,7 +130,7 @@ def run_document(source, output, settings, backend, accelerator, *, reviewer=Non
         [backend.name],
         {
             "pipeline": "docling-single-recognizer",
-            "accelerator": accelerator.report(),
+            "accelerator": getattr(backend, 'accelerator', accelerator).report(),
             "timings": timings,
         },
         auto_accept=settings.risk.enabled and settings.risk.auto_accept,

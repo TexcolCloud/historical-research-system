@@ -148,6 +148,8 @@ class ConversionPage(BaseModel):
     text: str
     image: str
     machine_status: str
+    extraction_method: str = "ocr"
+    acceptance_basis: str | None = None
     footnotes: list[FootnoteLink] = Field(default_factory=list)
 
 
