@@ -16,6 +16,9 @@ Use the configured Codex model; inherit model/provider settings from the parent.
    pixels before inspecting the candidate. Spawn separate `verify` workers for
    proposed corrections. A pending verdict stays pending until an explicit retry;
    report its page and issue and retain readable clean pages.
+   Explicitly retrying a pending verify task reopens review against the retained
+   original OCR. The new reviewer proposes a fresh correction, followed by a new
+   independent verify task; previous proposals and failed verdicts remain evidence.
 4. When every page is approved, spawn an `organization` worker. It reads the full
    approved text and maps articles to physical pages. Bibliographic identity stays
    `unclaimed`; article titles may describe fragments when a source is incomplete.
@@ -35,7 +38,16 @@ candidate Markdown/hash or approved page collection. The lease lasts 15 minutes;
 expired leases can be claimed again. Never submit with another worker's lease.
 For OCR, review and verification, call `original_image(document_id, physical_page)`
 and inspect the returned pixels. If more detail is necessary, inspect the retained
-local image at full resolution. Read the original first; use the OCR only as a candidate.
+local image at full resolution. For uncertain small print, previously unreadable
+text, or conflicting glyph readings, call `original_detail(document_id, page, box)`
+before deciding. `box` is normalized `[left, top, right, bottom]`; for example a
+bottom footnote band may use `[0.05, 0.78, 0.95, 0.97]`. PDF detail is rendered from
+the retained source at 432 dpi before cropping, rather than enlarging the 216 dpi
+page preview. Inspect the pixels and include the returned metadata in the result's
+`original_details` list. A source typo may be retained and noted; filling in a more specific
+office, name or date without visible support is not harmless normalization.
+Read the original first; use the OCR only as a candidate. Persist pending when the
+original remains genuinely unclear after the detail retry.
 
 Call `submit_task(document_id, task_id, lease_token, result)`. Every result MUST
 include the claim's exact `input_sha256`. Examples below omit that repeated field:

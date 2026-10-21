@@ -11,6 +11,7 @@ from pathlib import Path
 from mcp import Client, StdioServerParameters
 from PIL import Image
 from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject
 
 
 def server_parameters(root):
@@ -89,11 +90,26 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
             await submit(client, doc_id, ocr, {"markdown": "1938年"})
             review = await claim(client, doc_id, "review", "fixture-review")
             assert review["inputs"]["markdown"] == "1938年"
+            detail_result = await client.call_tool(
+                "original_detail", {"document_id": doc_id, "page": 1, "box": [0, 0, 1, 1]}
+            )
+            detail = json.loads(next(block.text for block in detail_result.content if block.type == "text"))
+            bad_detail = {**detail, "image_sha256": "0" * 64}
+            invalid_evidence = await client.call_tool(
+                "submit_task",
+                {
+                    "document_id": doc_id, "task_id": review["task_id"],
+                    "lease_token": review["lease_token"],
+                    "result": {"input_sha256": review["input_sha256"], "verdict": "approved", "original_details": [bad_detail]},
+                },
+            )
+            assert invalid_evidence.is_error
             await submit(
                 client, doc_id, review,
                 {
                     "verdict": "corrections", "markdown": "1939年",
                     "corrections": [{"before": "1938", "after": "1939", "reason": "Synthetic correction fixture"}],
+                    "original_details": [detail],
                 },
             )
             rejected = await client.call_tool("publish_document", {"document_id": doc_id})
@@ -118,6 +134,9 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
             assert recovered["state"] == "published"
             assert recovered["pages"][0]["ocr"]["markdown"] == "1938年"
             assert recovered["pages"][0]["approved"]["markdown"] == "1939年"
+            detail_path = root / "documents" / doc_id / detail["image"]
+            detail_path.write_bytes(b"changed detail")
+            assert (await client.call_tool("search_library", {"query": "1939"})).is_error
 
     asyncio.run(scenario())
 
@@ -154,5 +173,61 @@ def test_stdio_pending_pdf_cannot_publish_and_retry_retains_decision(tmp_path):
             )
             assert previous["state"] == "superseded"
             assert previous["result"]["issues"] == ["Synthetic unresolved scan"]
+
+    asyncio.run(scenario())
+
+
+def test_stdio_original_detail_rerenders_pdf_and_uses_native_raster_frames(tmp_path):
+    pdf_source = tmp_path / "source.pdf"
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=100, height=120)
+    contents = DecodedStreamObject()
+    contents.set_data(b"1 0 0 rg 0 0 50 120 re f\n0 0 1 rg 50 0 50 120 re f")
+    page.replace_contents(contents)
+    with pdf_source.open("wb") as stream:
+        writer.write(stream)
+    raster_source = tmp_path / "source.tiff"
+    Image.new("RGB", (80, 60), "red").save(
+        raster_source, save_all=True, append_images=[Image.new("RGB", (80, 60), "blue")]
+    )
+    root = tmp_path / "library"
+
+    async def scenario():
+        async with Client(server_parameters(root), mode="legacy", read_timeout_seconds=15) as client:
+            for source, physical_page, expected_size, expected_crop in (
+                (pdf_source, 1, [600, 720], [300, 180, 600, 540]),
+                (raster_source, 2, [80, 60], [40, 15, 80, 45]),
+            ):
+                document = value(await client.call_tool("prepare_document", {"source": str(source)}))
+                arguments = {"document_id": document["id"], "page": physical_page, "box": [0.5, 0.25, 1, 0.75]}
+                result = await client.call_tool("original_detail", arguments)
+                assert not result.is_error, result.content
+                metadata = json.loads(next(block.text for block in result.content if block.type == "text"))
+                data = base64.b64decode(next(block.data for block in result.content if block.type == "image"))
+                assert metadata["source_size"] == expected_size
+                assert metadata["crop_pixels"] == expected_crop
+                assert metadata["source_sha256"] == document["source"]["sha256"]
+                assert metadata["image_sha256"] == metadata["detail_sha256"] == hashlib.sha256(data).hexdigest()
+                directory = root / "documents" / document["id"]
+                assert (directory / metadata["image"]).read_bytes() == data
+                metadata_bytes = (directory / metadata["metadata"]).read_bytes()
+                assert hashlib.sha256(metadata_bytes).hexdigest() == metadata["metadata_sha256"]
+                persisted = json.loads(metadata_bytes)
+                assert "metadata_sha256" not in persisted
+                assert persisted["image_sha256"] == metadata["image_sha256"]
+                with Image.open(io.BytesIO(data)) as image:
+                    assert list(image.size) == metadata["image_size"]
+                    assert image.getpixel((image.width // 2, image.height // 2)) == (0, 0, 255)
+                cached = await client.call_tool("original_detail", arguments)
+                assert not cached.is_error
+                assert json.loads(cached.content[0].text) == metadata
+                for box in ([0, 0, 0, 1], [-0.1, 0, 1, 1], [0, 0, 1.1, 1], [0, 1, 1, 0], [0, 0, 1]):
+                    invalid = await client.call_tool("original_detail", {**arguments, "box": box})
+                    assert invalid.is_error
+                invalid = await client.call_tool("original_detail", {**arguments, "page": 0})
+                assert invalid.is_error
+                (directory / document["source"]["path"]).write_bytes(b"changed retained source")
+                changed = await client.call_tool("original_detail", arguments)
+                assert changed.is_error
 
     asyncio.run(scenario())

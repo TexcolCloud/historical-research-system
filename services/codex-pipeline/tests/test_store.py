@@ -97,6 +97,9 @@ def test_unclear_original_pending_then_explicit_retry_preserves_verdict(tmp_path
     task = complete(store, doc_id, "review", "review", {"verdict": "pending", "issues": ["原件破损"]})
     assert store.status(doc_id)["state"] == "pending"
     assert store.search("无法辨认") == []
+    assert store.claim_task(doc_id, "review", "unscheduled-review") is None
+    with pytest.raises(ValueError, match="Whole document"):
+        store.publish(doc_id)
     retry = store.retry_task(doc_id, task["task_id"])
     assert retry["retry_of"] == task["task_id"]
     previous = store.get_task(doc_id, task["task_id"])
@@ -104,6 +107,68 @@ def test_unclear_original_pending_then_explicit_retry_preserves_verdict(tmp_path
     assert previous["result"]["issues"] == ["原件破损"]
     complete(store, doc_id, "review", "retry-review", {"verdict": "pending", "issues": ["重试后仍无法辨认"]})
     assert store.status(doc_id)["state"] == "pending"
+
+
+def test_failed_verification_can_be_repaired_without_changing_retained_evidence(tmp_path):
+    store, doc_id = document(tmp_path)
+    complete(store, doc_id, "ocr", "ocr", {"markdown": "1938年。"})
+    proposal = complete(
+        store,
+        doc_id,
+        "review",
+        "first-review",
+        {
+            "verdict": "corrections",
+            "markdown": "1939年。",
+            "corrections": [{"before": "1938", "after": "1939", "reason": "First proposal"}],
+        },
+    )
+    failure = complete(
+        store,
+        doc_id,
+        "verify",
+        "first-verify",
+        {"verdict": "pending", "issues": ["Clear original says 1940; proposed date is still wrong."]},
+    )
+    assert store.status(doc_id)["state"] == "pending"
+    assert store.claim_task(doc_id, "review", "unscheduled-review") is None
+    assert store.claim_task(doc_id, "verify", "unscheduled-verifier") is None
+    with pytest.raises(ValueError, match="Whole document"):
+        store.publish(doc_id)
+
+    reopened = store.retry_task(doc_id, failure["task_id"])
+    assert reopened["stage"] == "review"
+    assert reopened["retry_of"] == failure["task_id"]
+    assert store.claim_task(doc_id, "verify", "premature-verifier") is None
+    complete(
+        store,
+        doc_id,
+        "review",
+        "fresh-review",
+        {
+            "verdict": "corrections",
+            "markdown": "1940年。",
+            "corrections": [{"before": "1938", "after": "1940", "reason": "Clear original date"}],
+        },
+    )
+    old_verification = store.get_task(doc_id, failure["task_id"])
+    assert old_verification["state"] == "superseded"
+    assert old_verification["inputs"] == failure["inputs"]
+    assert old_verification["inputs"]["markdown"] == "1939年。"
+    assert old_verification["claim"]["input_sha256"] == failure["input_sha256"]
+    assert store.get_task(doc_id, proposal["task_id"])["result"]["markdown"] == "1939年。"
+    with pytest.raises(ValueError, match="separate subagent"):
+        store.claim_task(doc_id, "verify", "fresh-review")
+    complete(store, doc_id, "verify", "fresh-verifier", {"verdict": "approved", "issues": []})
+    complete(
+        store, doc_id, "organization", "organizer", {"articles": [{"title": "Date record", "pages": [1]}]}
+    )
+    publication = store.publish(doc_id)
+    assert store.status(doc_id)["state"] == "published"
+    assert store.status(doc_id)["pages"][0]["ocr"]["markdown"] == "1938年。"
+    assert store.status(doc_id)["pages"][0]["approved"]["markdown"] == "1940年。"
+    assert publication["human_approval"] is False
+    assert store.search("1940")[0]["page"] == 1
 
 
 def test_claim_exclusion_stale_hash_and_lease_recovery(tmp_path):

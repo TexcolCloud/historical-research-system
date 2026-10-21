@@ -6,6 +6,7 @@ from pathlib import Path
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.types import TextContent
 
+from hrs_codex.details import original_detail as render_original_detail
 from hrs_codex.render import render_document
 from hrs_codex.store import Store
 
@@ -82,6 +83,15 @@ def create_server(root: Path) -> MCPServer:
             Image(data=data, format="png").to_image_content(),
         ]
 
+    @server.tool(structured_output=False)
+    def original_detail(document_id: str, page: int, box: list[float]) -> list:
+        """Inspect a normalized source-page crop: PDFs rerender at 432 dpi; rasters use native pixels."""
+        metadata, data = render_original_detail(store, document_id, page, box)
+        return [
+            TextContent(type="text", text=json.dumps(metadata)),
+            Image(data=data, format="png").to_image_content(),
+        ]
+
     @server.tool()
     def submit_task(document_id: str, task_id: str, lease_token: str, result: dict) -> dict:
         """Commit a Codex machine decision bound to claimed input_sha256; retain originals and drafts."""
@@ -89,7 +99,7 @@ def create_server(root: Path) -> MCPServer:
 
     @server.tool()
     def retry_task(document_id: str, task_id: str) -> dict:
-        """Reopen a pending task while retaining previous machine decisions for traceability."""
+        """Reopen pending work; failed verify restarts review, retaining all historical evidence."""
         return store.retry_task(document_id, task_id)
 
     @server.tool()
