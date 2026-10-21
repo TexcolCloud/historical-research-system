@@ -29,7 +29,7 @@ def check(settings: Settings) -> int:
     backend = None
     name = settings.ocr_backends[0]["name"]
     try:
-        backend = DoclingConverter(settings, accelerator)
+        backend = DoclingConverter(settings, accelerator, native_plan={})
         backend.converter.initialize_pipeline(InputFormat.PDF)
         report["backends"][name] = "ok"
     except Exception as exc:

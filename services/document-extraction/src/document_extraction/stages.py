@@ -10,14 +10,22 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from .utils import sha256, write_json
+from .provenance import text_hash
 
 CHECKPOINT = "ocr-checkpoint.json"
+
+
+def extraction_fingerprint(config):
+    values = {key: value for key, value in config.items() if key not in {'vision_review', 'risk'}}
+    return text_hash(json.dumps(values, sort_keys=True, ensure_ascii=False))
 
 
 def save_checkpoint(source, output, pages, timings, backend, accelerator, config):
     output = Path(output).resolve()
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "config": json.loads(Path(config).read_text('utf-8')),
+        "extraction_sha256": extraction_fingerprint(json.loads(Path(config).read_text('utf-8'))),
         "source_sha256": sha256(Path(source)),
         "config_sha256": sha256(Path(config)),
         "backend": backend,
@@ -32,10 +40,19 @@ def save_checkpoint(source, output, pages, timings, backend, accelerator, config
     return payload
 
 
-def load_checkpoint(source, output, config):
+def load_checkpoint(source, output, config, *, reuse_legacy=False):
     output = Path(output).resolve()
     payload = json.loads((output / CHECKPOINT).read_text("utf-8"))
-    if payload["schema_version"] != 1 or payload["source_sha256"] != sha256(Path(source)) or payload["config_sha256"] != sha256(Path(config)):
+    values = json.loads(Path(config).read_text('utf-8'))
+    version = payload['schema_version']
+    config_matches = (payload.get('extraction_sha256') == extraction_fingerprint(values)
+                      if version == 2 else payload['config_sha256'] == sha256(Path(config)))
+    # Previously committed OCR may be reviewed under the old full-review policy.
+    # Never grant native acceptance to these legacy artifacts on configuration drift.
+    legacy_full = (reuse_legacy and version == 1 and not values.get('native_pdf')
+                   and values.get('vision_review', {}).get('review_mode') == 'full'
+                   and not any(p.get('native_evidence') for p in payload['pages']))
+    if version not in {1, 2} or payload["source_sha256"] != sha256(Path(source)) or not (config_matches or legacy_full):
         raise ValueError("OCR checkpoint belongs to different source or configuration")
     if not payload["pages"] or not payload["files"]:
         raise ValueError("OCR checkpoint has no complete evidence")
@@ -67,14 +84,14 @@ def main():
         extractor = DocumentExtractor(settings)
         try:
             pages, timings = extractor.converter.convert_document(args.source.resolve(), args.output.resolve())
-            save_checkpoint(args.source, args.output, pages, timings, extractor.converter.name, extractor.accelerator.report(), args.config)
+            save_checkpoint(args.source, args.output, pages, timings, extractor.converter.name, extractor.converter.accelerator.report(), args.config)
         finally:
             extractor.close()
         print(json.dumps({"stage": "ocr", "pages": len(pages), "reviewed": False}))
     else:
         if not settings.vision_review.enabled or settings.vision_review.review_mode != "full":
             raise ValueError("Platform document review requires the full configured visual review")
-        checkpoint = load_checkpoint(args.source, args.output, args.config)
+        checkpoint = load_checkpoint(args.source, args.output, args.config, reuse_legacy=True)
         cached = SimpleNamespace(name=checkpoint["backend"], convert_document=lambda *_: (checkpoint["pages"], checkpoint["timings"]))
         accelerator = SimpleNamespace(report=lambda: checkpoint["accelerator"])
         manifest = run_document(args.source, args.output, settings, cached, accelerator)

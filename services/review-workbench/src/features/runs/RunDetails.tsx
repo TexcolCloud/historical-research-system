@@ -10,10 +10,6 @@ const phases = [
   { title: "原件视觉核验", description: "对照原书逐页核验已识别的内容" },
   { title: "人工核对", description: "处理机器发现的错误与不确定项" },
   { title: "整理与入库", description: "组装整书章节、建立出处与检索索引" },
-  {
-    title: "制作史料卡",
-    description: "动态研究分工，文本和原件核验后自动采用",
-  },
 ];
 export default function RunDetails({ book }: { book: Book }) {
   const runs = useQuery({
@@ -28,22 +24,20 @@ export default function RunDetails({ book }: { book: Book }) {
       return data;
     },
   });
-  const run = runs.data?.find((row) => row.id === book.run_id),
-    cards = runs.data?.find((row) => row.kind === "cards");
-  const active = cards
-    ? 5
-    : ["organization", "indexing", "ingestion"].includes(book.stage ?? "")
-      ? 4
-      : book.stage === "review"
-        ? 3
-        : book.stage === "vision"
-          ? 2
-          : ["conversion", "ocr"].includes(book.stage ?? "")
-            ? 1
-            : 0;
-  const failed = run?.state === "failed" || cards?.state === "failed",
-    done = cards?.state === "completed",
-    needsRevision = cards?.state === "needs_revision";
+  const run = runs.data?.find((row) => row.id === book.run_id);
+  const done = run?.state === "completed" || (!run && book.state === "ready");
+  const failed = run?.state === "failed";
+  const active = ["organization", "indexing", "ingestion", "complete"].includes(
+    book.stage ?? "",
+  )
+    ? 4
+    : book.stage === "review"
+      ? 3
+      : book.stage === "vision"
+        ? 2
+        : ["conversion", "ocr"].includes(book.stage ?? "")
+          ? 1
+          : 0;
   return (
     <section className="platform-process">
       <div className="platform-process-heading">
@@ -52,11 +46,9 @@ export default function RunDetails({ book }: { book: Book }) {
             ? "本书处理完成"
             : failed
               ? "处理需要恢复"
-              : needsRevision
-                ? "部分卡片未通过机器核验"
-                : book.state === "awaiting_review"
-                  ? "有内容需要你核对"
-                  : "书籍正在处理中"}
+              : book.state === "awaiting_review"
+                ? "有内容需要你核对"
+                : "书籍正在处理中"}
         </h2>
         <p>已完成结果会保留，关闭页面不影响后台处理。</p>
       </div>
@@ -75,7 +67,6 @@ export default function RunDetails({ book }: { book: Book }) {
                   <Check size={20} />
                 ) : status === "current" &&
                   !failed &&
-                  !needsRevision &&
                   book.state !== "awaiting_review" ? (
                   <LoaderCircle size={20} className="platform-spin" />
                 ) : (
@@ -94,9 +85,7 @@ export default function RunDetails({ book }: { book: Book }) {
                           ? "需要恢复"
                           : book.state === "awaiting_review"
                             ? "等待核对"
-                            : needsRevision
-                              ? "机器核验未通过"
-                              : "正在处理"}
+                            : "正在处理"}
                   </small>
                 </h3>
                 <p>{phase.description}</p>
@@ -119,11 +108,6 @@ export default function RunDetails({ book }: { book: Book }) {
                     {run?.pending_count ? ` · ${run.pending_count} 项` : ""} →
                   </a>
                 )}
-                {status === "current" && cards && (
-                  <a href={`#/books/${book.id}?tab=execution`}>
-                    查看实际研究分工 →
-                  </a>
-                )}
               </div>
             </li>
           );
@@ -133,15 +117,8 @@ export default function RunDetails({ book }: { book: Book }) {
         <StructurePanel runId={book.run_id} revision={book.revision} />
       )}
       {runs.isError && <p role="alert">{runs.error.message}</p>}
-      {(failed || needsRevision) && (
-        <RetryRunButton
-          key={`${cards?.id ?? run?.id}:${cards?.revision ?? run?.revision}`}
-          runId={
-            cards && ["failed", "needs_revision"].includes(cards.state)
-              ? cards.id
-              : run!.id
-          }
-        />
+      {failed && run && (
+        <RetryRunButton key={`${run.id}:${run.revision}`} runId={run.id} />
       )}
     </section>
   );

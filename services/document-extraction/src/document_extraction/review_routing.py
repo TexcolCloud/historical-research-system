@@ -21,6 +21,13 @@ ARCHIVE_POLICY = "conversion-archive-article-review-v1"
 
 
 def route_page(page, index, count, *, threshold=0.98, mode="risk_based"):
+    from .native_pdf import native_eligible
+    if mode != 'conversion_only' and native_eligible(page):
+        return {'policy': ROUTING_POLICY, 'route': 'native-pass', 'reasons': [],
+                'confidence': None, 'threshold': threshold,
+                'page': page['page'], 'page_index': index, 'page_count': count,
+                'text_sha256': text_hash(page['text']), 'image_sha256': sha256(Path(page['image_path'])),
+                'native_evidence_sha256': text_hash(json.dumps(page['native_evidence'], sort_keys=True, ensure_ascii=False))}
     text = page['text']
     evidence = page.get('ocr_evidence') or {}
     metadata = evidence.get('metadata') or {}
@@ -86,7 +93,7 @@ def conversion_deferred(page):
 def rule_passed(page):
     """Recompute rules and verify bindings; a plain caller-supplied status cannot release text."""
     decision = page.get('routing_decision') or {}
-    if page.get('review_route') != 'rule-pass' or page.get('receipts') or page.get('concerns'):
+    if page.get('review_route') not in {'rule-pass', 'native-pass'} or page.get('receipts') or page.get('concerns'):
         return False
     try:
         threshold = decision['threshold']
@@ -95,6 +102,6 @@ def rule_passed(page):
             return False
         if type(threshold) not in (int, float) or not math.isfinite(threshold) or not 0 < threshold <= 1:
             return False
-        return decision == route_page(page, decision['page_index'], decision['page_count'], threshold=threshold) and decision['route'] == 'rule-pass'
+        return decision == route_page(page, decision['page_index'], decision['page_count'], threshold=threshold) and decision['route'] in {'rule-pass', 'native-pass'}
     except (KeyError, TypeError, ValueError, OSError, AttributeError):
         return False

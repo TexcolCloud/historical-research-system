@@ -92,7 +92,7 @@ services:
       PLATFORM_MODEL_MAX_CALLS: ${PLATFORM_MODEL_MAX_CALLS:-4096}
       PLATFORM_VISION_MAX_CALLS: ${PLATFORM_VISION_MAX_CALLS:-4096}
       PLATFORM_RETRIEVAL_DEVICE: ${PLATFORM_RETRIEVAL_DEVICE:-cuda}
-      PLATFORM_AUTO_CARDS_ENABLED: ${PLATFORM_AUTO_CARDS_ENABLED:-true}
+      PLATFORM_AUTO_CARDS_ENABLED: 'false'
       PLATFORM_RETRIEVAL_ENDPOINT: http://host.docker.internal:18160/retrieval
     ports: ['127.0.0.1:${PLATFORM_API_PORT:-18170}:18170']
     volumes: ['../../models/document-retrieval:/app/models/document-retrieval:ro', 'compute-cache:/tmp/hrs-compute']

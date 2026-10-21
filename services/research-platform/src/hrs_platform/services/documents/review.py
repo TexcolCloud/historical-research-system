@@ -59,6 +59,7 @@ class Review:
                 "text": original["text"],
                 "image": f"/api/v2/runs/{run_id}/artifacts/{original['image_path']}",
                 "machine_status": "unreviewed-source",
+                "extraction_method": original.get('extraction_method', 'ocr'),
                 "footnotes": resolve_footnotes(original['text'], [{'text':original['text'], 'source':{'pages':[page]}}]),
             }
 
@@ -80,6 +81,8 @@ class Review:
             "text": text[boundary["start"] : boundary["end"]],
             "image": f"/api/v2/runs/{run_id}/artifacts/{original['image']}",
             "machine_status": original["status"],
+            "extraction_method": original.get('extraction_method', 'ocr'),
+            "acceptance_basis": original.get('acceptance_basis'),
             "footnotes": resolve_footnotes(text[boundary['start']:boundary['end']],
                                             [{'text':text[boundary['start']:boundary['end']], 'source':{'pages':[page]}}]),
         }

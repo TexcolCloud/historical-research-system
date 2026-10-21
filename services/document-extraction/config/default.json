@@ -1,4 +1,5 @@
 {
+  "native_pdf": {"policy": "native-pdf-layout-v2"},
   "render_dpi": 300,
   "ocr_backends": [
     {

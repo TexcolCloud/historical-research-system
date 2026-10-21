@@ -17,7 +17,7 @@ from hrs_platform.core.db import engine_for
 from hrs_platform.jobs.conversion import Activities
 from hrs_platform.jobs.deletion import DeletionActivities
 from hrs_platform.jobs.pipeline import PipelineActivities
-from hrs_platform.jobs.workflows import BookWorkflow, CardWorkflow, ConversionWorkflow, DeleteBookWorkflow
+from hrs_platform.jobs.workflows import BookWorkflow, ConversionWorkflow, DeleteBookWorkflow
 from hrs_platform.services.deletion import DELETING
 from hrs_platform.services.runs.recovery import workflow_id
 
@@ -147,10 +147,14 @@ async def dispatch_event(engine, client, settings, event, *, conversion_only=Fal
             await client.get_workflow_handle(workflow_id("book", event["run_id"], attempt)).signal(
                 BookWorkflow.review_changed, event["payload"]["revision"], rpc_timeout=timedelta(seconds=30)
             )
-        elif event["kind"] in {"retry_run", "start_cards"}:
+        elif event["kind"] == "start_cards" or (
+            event["kind"] == "retry_run" and event["payload"].get("run_kind") == "cards"
+        ):
+            logger.info("Retired card event acknowledged without starting generation: %s", event["id"])
+        elif event["kind"] == "retry_run":
             kind = event["payload"]["run_kind"]
             await client.start_workflow(
-                CardWorkflow.run if kind == "cards" else BookWorkflow.run,
+                BookWorkflow.run,
                 {"run_id": event["run_id"], "gpu_queue": settings.gpu_queue},
                 id=workflow_id(kind, event["run_id"], event["payload"].get("recovery_attempt", 0)),
                 task_queue=settings.task_queue,
@@ -221,8 +225,8 @@ async def run_worker(settings, gpu=False):
         worker = Worker(
             client,
             task_queue=queue,
-            workflows=[] if gpu else [BookWorkflow, CardWorkflow, ConversionWorkflow, DeleteBookWorkflow],
-            activities=[activities.convert_document, pipeline.check_card_images]
+            workflows=[] if gpu else [BookWorkflow, ConversionWorkflow, DeleteBookWorkflow],
+            activities=[activities.convert_document]
             if gpu
             else [
                 activities.verify_upload,
@@ -232,10 +236,6 @@ async def run_worker(settings, gpu=False):
                 pipeline.organize_book,
                 pipeline.publish_book,
                 pipeline.index_book,
-                pipeline.create_card_run,
-                pipeline.generate_cards,
-                pipeline.adopt_cards,
-                pipeline.schedule_card_repair,
                 pipeline.record_pipeline_failure,
                 pipeline.finish_book,
             ],

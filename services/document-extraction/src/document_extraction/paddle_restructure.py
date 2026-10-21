@@ -56,7 +56,7 @@ def restructure_document(pages, output, restructure):
         heads = [m for m in members if m['candidate_html'].strip()]
         if len(heads) != 1:
             raise ValueError('Cross-page table has ambiguous merged content')
-        group = {'group_id':f'paddle-table-{group_id}', 'pages':page_numbers,
+        group = {'group_id':f'paddle-table-{pages[0]["page"]}-{group_id}', 'pages':page_numbers,
             'merged_html':heads[0]['candidate_html'],
             'page_text_sha256':{str(p['page']):text_hash(p['text']) for p in pages if p['page'] in page_numbers},
             'qualification':'structural-candidate-not-release-approval',

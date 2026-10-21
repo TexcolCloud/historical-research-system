@@ -1,5 +1,7 @@
 # Research Platform
 
+> 2026-10-21：本模块保留为历史数据兼容平台。项目默认处理入口已改为 [Codex 本地 MCP 工作流](../codex-pipeline/README.md)。下文 GPU/OCR/模型部署仅用于旧平台；新流程无需这些服务。制卡新建、重试和调度已退出，保留历史读取与导出。下文旧制卡说明不再是可用操作。
+
 统一业务后端：上传、转换、内容核对、章节入库、混合检索和研究制卡。部署面向 Windows NVIDIA GPU 主机与 Docker Desktop；真实整书内容验收、完整灾难恢复及公网多用户边界仍需单独验证。
 
 [首次安装](../../README.md#快速开始) · [模型准备](../../models/README.md) · [前端](../review-workbench/README.md) · [OpenAPI](openapi.json)
@@ -34,7 +36,7 @@ docker compose -f deploy/infrastructure/compose.search.yml up -d --wait
 | 根 `.env` 与进程环境变量                          | 主机 [Settings.load](src/hrs_platform/core/config.py) 先读文件，再以同名进程变量覆盖；优先读取 `PLATFORM_*` 字段，缺失时兼容部分 `INGEST_*`、`CARDS_*` 和 `DEEPSEEK_*` 字段     |
 | [应用 Compose](../../deploy/platform/compose.yml) | 显式将根配置映射到容器；例如 `CARDS_REASONING_MODEL` 映射成容器的 `PLATFORM_REASONING_MODEL`。不能假定任意主机变量都自动进入容器                                             |
 | 文本模型                                          | Settings 与 Compose 未配置时均使用 `deepseek-flash`；但当前 [配置模板](../../.env.platform.example) 显式设置 `CARDS_REASONING_MODEL=deepseek-v4-pro`，复制模板后会覆盖默认值 |
-| 自动制卡                                          | `PLATFORM_AUTO_CARDS_ENABLED=false` 使书籍在索引后结束；不取消已创建任务，也不禁用独立手动制卡                                                                               |
+| 制卡兼容字段                                      | 制卡创建、重试与调度已退出；`PLATFORM_AUTO_CARDS_ENABLED` 无法重新启用，历史结果仍可读取与导出                                                                             |
 | GPU 检索                                          | `PLATFORM_RETRIEVAL_DEVICE=cuda` 为默认，经主机 broker 执行；CPU 必须显式选择 `cpu`，不会静默回退                                                                            |
 | 输出与调用预算                                    | 阅读首轮 16000、推理首轮 32000、输出封顶 64000 tokens；文本与视觉调用预算默认分别为 4096，实际以配置和回执为准                                                               |
 
@@ -69,8 +71,8 @@ docker compose -f deploy/infrastructure/compose.search.yml up -d --wait
 | 阶段     | 完成条件与恢复方式                                                                               |
 | -------- | ------------------------------------------------------------------------------------------------ |
 | 上传     | tusd 将文件写入 S3；平台校验 PDF、大小和摘要后幂等创建运行                                       |
-| OCR      | Docling + 单路 PaddleOCR-VL；完成后先保存 S3 OCR 证据，后续恢复可复用，不因视觉失败重做 OCR      |
-| 内容核对 | 本地 Qwen 全量对照原图；唯一定位的修正经独立原图复核通过后写回。不确定、不可读或未完成部分交人工 |
+| 提取（OCR 阶段） | 简单可靠的 PDF 文字页直接提取；其余页通过 Docling + PaddleOCR-VL。配置先冻结到 S3，提取证据随后提交，重试复用 |
+| 内容核对 | 原生页通过确定性规则检查；其他页由本地 Qwen 对照原图。唯一定位的修正经独立复核后写回，不确定、不可读或未完成部分交人工 |
 | 人工处理 | 保存草稿不放行；局部确认提交版本、决定与计数，响应提供下一问题；保留人工决定和编辑内容           |
 | 章节入库 | 整书无未解决或未核验内容后组织章节；文章结构不增加人工批准步骤。保留全文覆盖和物理页映射         |
 | 检索索引 | 从已发布章节构造检索投影；完整一代索引写入后切换生效版本，中途失败保留此前有效代                 |

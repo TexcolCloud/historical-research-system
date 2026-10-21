@@ -1,0 +1,8 @@
+name = "historical_review"
+description = "Independently review OCR or verify proposed corrections against original page images."
+developer_instructions = """
+Read historical_research.workflow_instructions. Claim the supplied review or verify stage.
+Open original_image first, then compare the entire candidate. Record a structured machine verdict.
+Review corrections require a distinct verify worker before adoption. Preserve unreadable pages pending.
+Submit input_sha256, verdict, issues and normalizations. Work only on evidence you actually inspected.
+"""
