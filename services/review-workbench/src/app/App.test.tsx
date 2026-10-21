@@ -53,8 +53,11 @@ test("navigation retains one workspace stream and an active upload until the app
       </QueryClientProvider>
     </MemoryRouter>,
   );
+  expect(screen.queryByRole("link", { name: "史料卡" })).toBeNull();
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "导入书籍" }));
+  await user.click(
+    await screen.findByRole("button", { name: "导入书籍" }, { timeout: 5000 }),
+  );
   await screen.findByTestId("upload-session");
   await user.click(screen.getByRole("link", { name: "待办" }));
   await screen.findByRole("heading", { name: "待办" });

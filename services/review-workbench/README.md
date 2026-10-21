@@ -1,6 +1,8 @@
 # Review Workbench
 
-以书籍任务为中心的 React 工作台：书架、待办、史料卡，以及每本书的进展、阅读全文、内容核对、检索与任务执行图。
+> 2026-10-21：本工作台保留为旧 SQL/S3 平台的界面；史料卡页面与生成入口已移除。新的 [Codex 本地工作流](../codex-pipeline/README.md) 通过 Codex 对话和 CLI 使用，不读取此界面的旧平台数据库。
+
+以书籍任务为中心的 React 工作台：书架、待办，以及每本书的进展、阅读全文、内容核对、检索与任务执行图。
 
 [首次启动](../../README.md#快速开始) · [业务行为](../research-platform/README.md#处理流程与数据职责) · [API 契约](../research-platform/openapi.json)
 

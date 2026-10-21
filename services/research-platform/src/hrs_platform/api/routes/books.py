@@ -3,9 +3,9 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
 
-from hrs_platform.api.deps import CardsDep, EngineDep, ExportsDep, LibraryDep, ReviewDep
+from hrs_platform.api.deps import EngineDep, ExportsDep, LibraryDep, ReviewDep
 from hrs_platform.api.files import download
-from hrs_platform.schemas import BookSummary, ChapterSummary, DeletionReceipt, RecoveryRequest, RunSummary
+from hrs_platform.schemas import BookSummary, ChapterSummary, DeletionReceipt, RunSummary
 from hrs_platform.services import books
 from hrs_platform.services.deletion import request_deletion
 
@@ -32,11 +32,6 @@ def delete_book(engine: EngineDep, book_id: UUID):
 @router.get("/api/v2/books/{book_id}/runs", response_model=list[RunSummary])
 def book_runs(engine: EngineDep, book_id: UUID):
     return books.list_runs(engine, book_id)
-
-
-@router.post("/api/v2/books/{book_id}/card-runs", response_model=RunSummary, status_code=201)
-def start_cards(cards: CardsDep, book_id: UUID, request: RecoveryRequest):
-    return cards.start(book_id, request.request_id)
 
 
 @router.get("/api/v2/books/{book_id}/chapters", response_model=list[ChapterSummary])

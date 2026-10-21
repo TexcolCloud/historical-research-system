@@ -1,12 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import {
-  BookOpen,
-  LibraryBig,
-  ClipboardCheck,
-  NotebookPen,
-  CloudCheck,
-} from "lucide-react";
+import { BookOpen, LibraryBig, ClipboardCheck, CloudCheck } from "lucide-react";
 import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents.ts";
 const UploadPanel = lazy(() => import("@/features/uploads/UploadPanel.tsx"));
 
@@ -55,10 +49,6 @@ export default function AppShell() {
             <ClipboardCheck size={19} />
             待办
           </NavLink>
-          <NavLink to="/cards">
-            <NotebookPen size={19} />
-            史料卡
-          </NavLink>
         </nav>
         <p className="platform-sidebar-note">
           从原始材料出发
@@ -69,12 +59,7 @@ export default function AppShell() {
       <div className="platform-body">
         <header className="platform-topbar">
           <span>
-            研究工作台 /{" "}
-            {location.pathname === "/reviews"
-              ? "待办"
-              : location.pathname === "/cards"
-                ? "史料卡"
-                : "书籍"}
+            研究工作台 / {location.pathname === "/reviews" ? "待办" : "书籍"}
           </span>
           <span className="platform-sync">
             <CloudCheck size={16} />
