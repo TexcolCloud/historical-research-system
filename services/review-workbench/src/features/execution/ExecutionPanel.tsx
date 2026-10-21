@@ -25,14 +25,13 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
       return data;
     },
   });
-  const id =
-    selectedRun ||
-    runs.data?.find((run) => run.kind === "cards")?.id ||
-    runs.data?.[0]?.id;
+  const id = selectedRun || runs.data?.[0]?.id;
   const activeRun = runs.data?.find((run) => run.id === id);
   const waiting =
     activeRun?.state === "processing" &&
-    ["model_transport_wait", "retrieval_wait", "vision_service_wait"].includes(String(activeRun.error?.code));
+    ["model_transport_wait", "retrieval_wait", "vision_service_wait"].includes(
+      String(activeRun.error?.code),
+    );
   const recovery = activeRun?.error?.recovery;
   const retryAt =
     recovery && typeof recovery === "object" && "retry_at" in recovery
@@ -49,8 +48,10 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
         >
           {runs.data?.map((run) => (
             <option key={run.id} value={run.id}>
-              {run.kind === "cards" ? "史料卡制作" : "书籍转换与入库"} ·{" "}
-              {run.id.slice(-8)}
+              {run.kind === "cards"
+                ? "历史史料卡任务（已停用）"
+                : "书籍转换与入库"}{" "}
+              · {run.id.slice(-8)}
             </option>
           ))}
         </select>
@@ -58,7 +59,13 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
       {runs.isError && <p role="alert">{runs.error.message}</p>}
       {waiting && (
         <p role="status">
-          等待{activeRun?.error?.code === "retrieval_wait" ? "检索" : activeRun?.error?.code === "vision_service_wait" ? "本地视觉" : "文本"}服务恢复，已完成结果保留。
+          等待
+          {activeRun?.error?.code === "retrieval_wait"
+            ? "检索"
+            : activeRun?.error?.code === "vision_service_wait"
+              ? "本地视觉"
+              : "文本"}
+          服务恢复，已完成结果保留。
           {typeof retryAt === "number" &&
             Number.isFinite(retryAt) &&
             `预计 ${new Date(retryAt * 1000).toLocaleString("zh-CN")} 自动重试。`}
@@ -70,9 +77,8 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
           <p role="alert">{activeRun.error.message}</p>
         )}
       {activeRun &&
-        (activeRun.state === "failed" ||
-          (activeRun.kind === "cards" &&
-            activeRun.state === "needs_revision")) &&
+        activeRun.kind !== "cards" &&
+        activeRun.state === "failed" &&
         id && (
           <RetryRunButton key={`${id}:${activeRun.revision}`} runId={id} />
         )}{" "}

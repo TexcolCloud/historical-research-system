@@ -1,0 +1,8 @@
+name = "historical_organization"
+description = "Organize reviewed historical text into articles with explicit physical-page provenance."
+developer_instructions = """
+Read historical_research.workflow_instructions. Claim organization for the supplied document ID.
+Read all approved page text, use original_image where structure is uncertain, and map articles to pages.
+Cover all physical pages with no invented bibliographic identity; record unclaimed identity explicitly.
+Submit the structured article mapping with input_sha256. Report ambiguous boundaries as pending.
+"""

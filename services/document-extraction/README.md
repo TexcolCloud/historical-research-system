@@ -1,5 +1,7 @@
 # Document Extraction
 
+> 2026-10-21：本模块作为历史转换实现保留。项目默认 OCR 与审核改由 [Codex 原生子代理 + 本地 MCP](../codex-pipeline/README.md) 完成，下文仅适用于旧转换模块。
+
 PDF／图片转换模块，使用 Docling 与一个配置明确的 OCR 后端生成 Markdown、原页图及来源映射。默认后端为 PaddleOCR-VL-1.6；RapidOCR 是显式替代，不自动作为第二识别器。
 
 [项目安装](../../README.md#快速开始) · [模型准备](../../models/README.md) · [平台处理流程](../research-platform/README.md#处理流程与数据职责)

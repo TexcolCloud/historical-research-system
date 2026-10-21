@@ -1,4 +1,4 @@
-name: Platform V2 checks
+name: Historical research checks
 on:
   push:
   pull_request:
@@ -83,3 +83,29 @@ jobs:
           retention-days: 14
       - if: always()
         run: docker compose -f deploy/platform/compose.test.yml down
+
+  codex-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.cache/engineering-envs/codex-pipeline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.6'
+          enable-cache: true
+      - run: uv sync --project services/codex-pipeline --locked --group dev
+      - name: Lint local MCP and pipeline
+        run: uv run --project services/codex-pipeline --locked ruff check services/codex-pipeline/src services/codex-pipeline/tests
+      - name: Verify evidence workflow and local MCP protocol without model credentials
+        run: uv run --project services/codex-pipeline --locked pytest services/codex-pipeline/tests --junitxml=reports/codex-pipeline.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: codex-pipeline-checks
+          path: reports/codex-pipeline.xml
+          retention-days: 14

@@ -11,7 +11,6 @@ const ReviewPanel = lazy(() => import("@/features/review/ReviewPanel.tsx"));
 const ExecutionPanel = lazy(
   () => import("@/features/execution/ExecutionPanel.tsx"),
 );
-const CardsPanel = lazy(() => import("@/features/cards/CardsPanel.tsx"));
 const SearchPanel = lazy(() => import("@/features/search/SearchPanel.tsx"));
 export default function BookPage() {
   const { bookId = "" } = useParams();
@@ -83,7 +82,6 @@ export default function BookPage() {
           <TabsTrigger value="progress">处理进展</TabsTrigger>
           <TabsTrigger value="reader">阅读全文</TabsTrigger>
           <TabsTrigger value="review">内容核对</TabsTrigger>
-          <TabsTrigger value="cards">史料卡</TabsTrigger>
           <TabsTrigger value="search">检索本书</TabsTrigger>
           <TabsTrigger value="execution">任务运行</TabsTrigger>
         </TabsList>
@@ -97,8 +95,6 @@ export default function BookPage() {
             stage={book.stage ?? undefined}
             state={book.state}
           />
-        ) : tab === "cards" ? (
-          <CardsPanel bookId={bookId} published={book.state === "ready"} />
         ) : tab === "search" ? (
           <SearchPanel bookId={bookId} />
         ) : tab === "execution" ? (

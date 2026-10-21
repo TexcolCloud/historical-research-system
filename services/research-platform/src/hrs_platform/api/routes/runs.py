@@ -4,6 +4,7 @@ from fastapi import APIRouter, Header
 from fastapi.responses import Response
 
 from hrs_platform.api.deps import EngineDep, LibraryDep, OutputsDep, ReviewDep
+from hrs_platform.domain.errors import ServiceError
 from hrs_platform.schemas import ExecutionNode, RecoveryRequest, RunSummary, StructureReport
 from hrs_platform.services import books
 from hrs_platform.services.runs.recovery import retry_run
@@ -18,6 +19,8 @@ def get_run(engine: EngineDep, run_id: UUID):
 
 @router.post("/api/v2/runs/{run_id}/retry", response_model=RunSummary)
 def retry(engine: EngineDep, run_id: UUID, request: RecoveryRequest):
+    if books.get_run(engine, run_id)["kind"] == "cards":
+        raise ServiceError(410, "史料卡制作已停用，历史结果与证据仍保留。")
     return retry_run(engine, run_id, request.request_id)
 
 

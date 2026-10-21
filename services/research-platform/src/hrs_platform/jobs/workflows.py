@@ -73,16 +73,7 @@ class BookWorkflow:
             await step("organize_book", long=True)
             await step("publish_book")
             await step("index_book", long=True)
-            card_request = await step("create_card_run")
-            if card_request.get("skipped"):
-                return {**await step("finish_book"), "auto_cards": "disabled"}
-            result = await workflow.execute_child_workflow(
-                CardWorkflow.run,
-                {**card_request, "gpu_queue": request["gpu_queue"]},
-                id=card_request.get("workflow_id", f"cards/{card_request['run_id']}"),
-            )
-            await step("finish_book")
-            return result
+            return await step("finish_book")
         except asyncio.CancelledError:
             raise
         except Exception:

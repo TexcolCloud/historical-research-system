@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-21",
+  "verdict": "approved",
+  "approval_type": "machine",
+  "human_approval": false,
+  "sealed_gold_approval": false,
+  "original_first": true,
+  "review_model": "active Codex GPT vision",
+  "scope": "one retained real scanned page; original pixels inspected before candidate text and organization",
+  "document_id": "a85c20ae8d54fe8bc73c3fc2",
+  "source_sha256": "a85c20ae8d54fe8bc73c3fc214f3a571378dfeab55e217eb0a284a0ae584a893",
+  "image_sha256": "e7a22db2bef4a7ae66833ae7dcec49e4c0a3d36d54ed99dfd32ddee87ec42f52",
+  "approved_markdown_sha256": "fe78d88093d95a875971b4c5d9fdf65bb1ba53d44ccc02491012c8a918e07fa7",
+  "published_markdown_sha256": "558fc2812c4541f28db161e4363ee82d46451714ea3df678010c8fab2925655b",
+  "organization_sha256": "18dc64871e46208087a9835e17f6ed605f3a32c972ae77547fa3b9d60eb0e971",
+  "checks": {
+    "names_places_dates_quantities_negation_and_claims": "preserved",
+    "body_and_footnote_ownership": "preserved",
+    "physical_page_1_printed_page_10": "mapped",
+    "opening_and_ending_continuations": "explicit fragments, no invented missing text",
+    "bibliographic_identity": "unclaimed",
+    "publication_and_search": "passed",
+    "native_codex_subagents_spawned": 3
+  },
+  "normalizations": [
+    "Physical page 1 (printed page 10): printed line wrapping and spaces around Arabic numerals are normalized into continuous Markdown paragraphs without changing meaning.",
+    "Physical page 1 footnote ①: the printed separator between ‘宁夏省政府主席’ and ‘第十五路军中央总指挥’ is rendered as ‘、’; the offices and their attribution to 马鸿逵 remain unchanged.",
+    "Physical page 1: the footnote rule is represented by a Markdown horizontal rule, and note marker ① is retained."
+  ],
+  "issues": [],
+  "runtime_tasks": [
+    {
+      "stage": "ocr",
+      "worker_id": "ocr-a85c20-page1",
+      "input_sha256": "5308188e16b3167a69b3498fc8eba9a6fbbc11a16303d57d37bfd0309997ecb8",
+      "result_sha256": "1baf08b5a8e382b60b5d961cedbefaa318f70c2a8b485f821ab3c7235ba0ad11"
+    },
+    {
+      "stage": "review",
+      "worker_id": "review-a85c20-page1",
+      "input_sha256": "f053bfd9882606dc2005d3e6eec9b29bec406cf9094148ba389fa86bbc9763c4",
+      "result_sha256": "87809f355d30809222f71384bb35373389fc3b89278896e642145878ec4a7035"
+    },
+    {
+      "stage": "organization",
+      "worker_id": "organization-a85c20",
+      "input_sha256": "f705cf81e2bca0be34b206ff55b7c7d1a8aa9850a3269a383870ac6c735e3aa6",
+      "result_sha256": "e50e192c96a1d7e6fc7f52031e924dd07842682ae6e22d7c8ef58f850be07d9a"
+    }
+  ],
+  "artifacts": {
+    "document": "state\\codex\\documents\\a85c20ae8d54fe8bc73c3fc2\\document.json",
+    "published_markdown": "state\\codex\\documents\\a85c20ae8d54fe8bc73c3fc2\\document.md",
+    "native_run": "state\\codex\\runs\\a85c20ae8d54fe8bc73c3fc2\\20261021T151652052558Z"
+  },
+  "local_tests": {
+    "codex_pipeline_passed": 30,
+    "legacy_platform_and_runtime_passed": 386,
+    "legacy_skipped": 14,
+    "frontend_passed": 34,
+    "frontend_build": "passed",
+    "api_contracts": "passed",
+    "unused_frontend_code": "passed",
+    "ruff": "passed"
+  },
+  "evidence_sha256": {
+    "state\\codex\\documents\\a85c20ae8d54fe8bc73c3fc2\\document.json": "2789f7d47ddb37936a21b2a1b596343f4a06f3d5daf0715f98987be4bd5a62c3",
+    "state\\codex\\runs\\a85c20ae8d54fe8bc73c3fc2\\20261021T151652052558Z\\events.jsonl": "43e8e983e68ca1e948741673ada3cbadf5c26f3941d74dc4ed8894900713c756",
+    "reports\\codex-pipeline.xml": "da5635db9d5e87c04ece93c076325b3d666e903125def3f6df55b125f0a251e7",
+    "reports\\platform-codex-migration.xml": "65ee7f95512a5f776482e06a4056481ce66ebbd99e546473cc69c6021bc488eb",
+    "state\\codex\\runs\\a85c20ae8d54fe8bc73c3fc2\\20261021T151652052558Z\\receipt.json": "5f91b0385380da066c1c261a82fa7eddae78d57c17cd79137be9ab485adb58e4"
+  },
+  "native_cli_returncode": 0
+}

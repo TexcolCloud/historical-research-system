@@ -42,19 +42,6 @@ export async function readBooks(signal?: AbortSignal): Promise<Book[]> {
   }
 }
 
-export async function readCards(bookId?: string, signal?: AbortSignal) {
-  const cards = new Map<string, components["schemas"]["CardSummary"]>();
-  for (let offset = 0; ; offset += 100) {
-    const { data } = await client.GET("/api/v2/cards", {
-      signal,
-      params: { query: { book_id: bookId, offset, limit: 100 } },
-    });
-    if (!data) throw new Error("暂时无法读取史料卡，请重试。");
-    data.forEach((card) => cards.set(card.id, card));
-    if (data.length < 100) return [...cards.values()];
-  }
-}
-
 export async function readReviewIssues(runId: string, signal?: AbortSignal) {
   const issues = new Map<string, components["schemas"]["ReviewIssueSummary"]>();
   for (let offset = 0; ; offset += 100) {

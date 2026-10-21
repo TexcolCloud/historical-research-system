@@ -1,0 +1,7 @@
+[mcp_servers.historical_research]
+command = "uv"
+args = ["run", "--project", "services/codex-pipeline", "--locked", "hrs-codex", "mcp"]
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+default_tools_approval_mode = "approve"
+env_vars = ["HRS_CODEX_ROOT"]
