@@ -52,7 +52,7 @@ uv run --project services/codex-pipeline --locked python -m pytest services/code
 uv run --project services/codex-pipeline --locked python -m ruff check services/codex-pipeline
 ```
 
-新流程的验证不依赖旧平台容器。[模块说明](services/codex-pipeline/README.md) 给出工具和文件契约；[本次本地验证](services/codex-pipeline/VALIDATION.md) 记录实际结果。
+新流程的验证不依赖旧平台容器。[模块说明](services/codex-pipeline/README.md) 给出工具和文件契约；[真实史料验收](services/codex-pipeline/ACCEPTANCE.md) 记录当前结果，三组中两组全文通过，另一组因原件一字不清保持待审。[首次单页验证](services/codex-pipeline/VALIDATION.md) 保留历史工程记录及后续复评说明。
 
 ## 原有平台与历史资料
 

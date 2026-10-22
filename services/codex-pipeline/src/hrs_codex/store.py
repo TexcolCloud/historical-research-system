@@ -173,11 +173,34 @@ class Store:
                 raise ValueError("Retained task input hash mismatch")
             if task.get("result") is not None and digest(task["result"]) != task["receipt"]["result_sha256"]:
                 raise ValueError("Retained task result hash mismatch")
+            if task.get("result") is not None:
+                self._verify_details(doc, task, task["result"])
         organization = doc.get("organization")
         if organization:
             task = next(t for t in doc["tasks"] if t["task_id"] == organization["task_id"])
             if organization["articles"] != task["result"]["articles"]:
                 raise ValueError("Organization differs from its retained machine result")
+
+    def _verify_details(self, doc: dict, task: dict, result: dict) -> None:
+        evidence = result.get("original_details", [])
+        if not isinstance(evidence, list):
+            raise ValueError("Detail evidence must be a list")
+        for detail in evidence:
+            if (
+                not isinstance(detail, dict)
+                or detail.get("document_id") != doc["id"]
+                or detail.get("source_sha256") != doc["source"]["sha256"]
+                or detail.get("page") not in [p["page"] for p in doc["pages"]]
+                or (task["page"] is not None and detail.get("page") != task["page"])
+            ):
+                raise ValueError("Detail evidence source/page mismatch")
+            for field in ("image", "metadata"):
+                path = detail.get(field)
+                if not isinstance(path, str) or file_digest(self._path(doc, path)) != detail.get(field + "_sha256"):
+                    raise ValueError("Detail evidence file hash mismatch")
+            retained = json.loads(self._path(doc, detail["metadata"]).read_text(encoding="utf-8"))
+            if {k: v for k, v in detail.items() if k not in {"metadata", "metadata_sha256"}} != retained:
+                raise ValueError("Detail evidence metadata mismatch")
 
     def status(self, document_id: str) -> dict:
         with self.lock:
@@ -233,7 +256,8 @@ class Store:
         with self.lock:
             doc = self._load(document_id)
             task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
-            return {**task, "inputs": self._inputs(doc, task)}
+            inputs = task["inputs"] if "inputs" in task else self._inputs(doc, task)
+            return {**task, "inputs": inputs}
 
     def claim_task(
         self, document_id: str, stage: str, worker_id: str, lease_seconds: int = 900
@@ -294,6 +318,7 @@ class Store:
                 or digest(self._inputs(doc, task)) != claim["input_sha256"]
             ):
                 raise ValueError("Task input hash mismatch")
+            self._verify_details(doc, task, result)
             stage = task["stage"]
             page = doc["pages"][task["page"] - 1] if task["page"] is not None else None
             receipt = {
@@ -424,11 +449,14 @@ class Store:
             if task["state"] != "pending":
                 raise ValueError("Only pending tasks can be retried; active leases expire automatically")
             task["state"] = "superseded"
-            replacement = self._new_task(task["stage"], task["page"])
+            # A rejected correction needs a new proposal against retained OCR,
+            # followed by another independent verification of that proposal.
+            stage = "review" if task["stage"] == "verify" else task["stage"]
+            replacement = self._new_task(stage, task["page"])
             replacement["retry_of"] = task_id
             doc["tasks"].append(replacement)
             if task["page"] is not None:
-                doc["pages"][task["page"] - 1]["state"] = "awaiting_" + task["stage"]
+                doc["pages"][task["page"] - 1]["state"] = "awaiting_" + stage
             doc["state"] = "processing"
             self._save(doc)
             return replacement

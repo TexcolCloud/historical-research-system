@@ -1,0 +1,501 @@
+{
+  "schema_version": 1,
+  "evaluated_at_utc": "2026-10-21T16:00:31.946000+00:00",
+  "approval_type": "machine",
+  "human_approval": false,
+  "sealed_gold_approval": false,
+  "engineering_verdict": "passed",
+  "full_batch_content_verdict": "pending",
+  "accepted_documents": 2,
+  "documents": 3,
+  "accepted_document_pages": 4,
+  "total_natural_pages": 6,
+  "individually_approved_pages": 5,
+  "unresolved_pages": 1,
+  "policy": "All pages and organization must pass before document acceptance; source ambiguity remains pending after original detail retry. No majority-vote adjudication.",
+  "samples": [
+    {
+      "sample_id": "A",
+      "document_id": "cbec19f647466977e1fc52ac",
+      "title": "真实史料验收A：郭村战斗简况及部队动向（连续两页）",
+      "source_sha256": "cbec19f647466977e1fc52ac4fd7ce9308a0f058449be2b4a3287663a730b911",
+      "parent_physical_pages": [
+        119,
+        120
+      ],
+      "printed_pages": [
+        106,
+        107
+      ],
+      "state": "published",
+      "content_verdict": "approved",
+      "structure_verdict": "approved",
+      "issues": [],
+      "checks": {
+        "title_and_1940_07_09_date": "preserved",
+        "ten_body_points_order_and_point6_cross_page_continuation": "preserved",
+        "all_visible_names_places_quantities_negation_and_causality": "preserved",
+        "note1_leaf_owner_ye_guan_unit": "preserved",
+        "note2_li_mingyang_li_changjiang_offices": "preserved including original chief/deputy distinction",
+        "note3_han_deqin": "preserved",
+        "note4_hu_bingyun_tian_wenyang": "preserved",
+        "note5_zhong_hui_wei_guoqing": "preserved",
+        "note6_zhang_aiping_and_hongze_lake_west_bank": "preserved",
+        "starred_note_chen_yi_telegram_to_central_committee": "preserved, distinct from numbered notes",
+        "article_mapping": "one complete article mapped to physical pages1-2; running header excluded as new article",
+        "bibliographic_identity": "unclaimed"
+      },
+      "pages": [
+        {
+          "page": 1,
+          "image_sha256": "2c94010414e32db649362d3404385c713c432f2b43cdfade638c8ab7b1cc2bca",
+          "approved_markdown_sha256": "ed07c751352b24401732dc8c32872b9d307f0fdef1f4748369290cc72481b38f"
+        },
+        {
+          "page": 2,
+          "image_sha256": "18c12ebe90ae126a471f70345cc6591e64452c55d6b29e4a3db2f5fad989eb34",
+          "approved_markdown_sha256": "bbdb6b827bb24ec7e0c830713f0a68c46b70b68ec4d49f131b709349c74dfa0f"
+        }
+      ],
+      "machine_verdict": {
+        "path": "output/codex-acceptance-20261021/A-independent-verdict.json",
+        "sha256": "54fd6be6a50605ffdfcef6d3de9f98c55936fa26a209dabd07faf30d149fdfd6",
+        "availability": "local ignored artifact"
+      },
+      "document_manifest": {
+        "path": "state/codex-acceptance-20261021/documents/cbec19f647466977e1fc52ac/document.json",
+        "sha256": "0728f6ac4ef8694b93af7ee7f8e44fa31e5da2c10425691879bfcd9bd0b57694",
+        "availability": "local ignored artifact"
+      },
+      "native_runs": [
+        {
+          "receipt": {
+            "path": "state/codex-acceptance-20261021/runs/cbec19f647466977e1fc52ac/20261021T153337810254Z/receipt.json",
+            "sha256": "1dfdaf2742e36c0d52cf3b8f799c8d720742196afdc4a93fe3276b2773b7f8e1",
+            "availability": "local ignored artifact"
+          },
+          "events": {
+            "path": "state/codex-acceptance-20261021/runs/cbec19f647466977e1fc52ac/20261021T153337810254Z/events.jsonl",
+            "sha256": "ee36ff3715d5517a8b34d1b6860ab9f6b34d54834150f6cdc8005ffbb8d11687",
+            "availability": "local ignored artifact"
+          },
+          "native_coordinator_returncode": 0,
+          "document_state": "published",
+          "successful_native_subagent_spawns": 5
+        }
+      ],
+      "task_counts": {
+        "ready": 0,
+        "leased": 0,
+        "completed": 5,
+        "pending": 0,
+        "superseded": 0
+      },
+      "publication": {
+        "markdown_sha256": "4941d8605a0735f7ebb6bcba8b56580b4c7c2f354a4c14bcad5dd6e5ac01ee16",
+        "organization_sha256": "25869e729935b8b5202339d8fa63b311c3e0e480fc3d49de22053743a55f92ac",
+        "approval_type": "machine",
+        "human_approval": false
+      }
+    },
+    {
+      "sample_id": "B",
+      "document_id": "6e892682cea361e55dc4fb10",
+      "title": "真实史料验收B：宁夏近代史连续页与人物脚注",
+      "source_sha256": "6e892682cea361e55dc4fb1018852e12930259c075f9b7ef0121d705e24533a4",
+      "parent_physical_pages": [
+        41,
+        42
+      ],
+      "printed_pages": [
+        10,
+        11
+      ],
+      "state": "pending",
+      "content_verdict": "pending_one_source_glyph",
+      "structure_verdict": "not_ready_pending_page_approval",
+      "issues": [
+        {
+          "kind": "source_glyph_uncertain_after_native_pixel_retry",
+          "physical_page": 1,
+          "printed_page": 10,
+          "location": "note1, 1933 appointment, character between army designation and commander title",
+          "alternatives": [
+            "U+51B3",
+            "U+592E"
+          ],
+          "impact": "cannot establish a unique source-supported reading of the office-name span; no forced transcription or invented central-office repair",
+          "evidence": "B-source-glyph-reinspection.json"
+        }
+      ],
+      "checks": {
+        "all_other_visible_text": "no content regression found",
+        "people_places_dates_quantities_negation_and_causal_relations": "preserved outside disputed source glyph",
+        "1919_1917_20wan_2200_2400_50_10wan": "preserved",
+        "page2_1923_30wan_1915_1liang_10liang_1922_10mu_3mu_70liang_210liang": "preserved",
+        "biography_note1_owner": "Ma Hongkui; all other visible appointments and death/departure dates preserved",
+        "cross_page_body_continuation": "page1 子女出生即 followed by page2 有粮饷; clean text remains readable",
+        "running_headers": "carrier context retained",
+        "fragment_boundaries": "opening starts mid-name, ending continues beyond selected pages; no invented missing text"
+      },
+      "pages": [
+        {
+          "page": 1,
+          "image_sha256": "dd5c034ce6c8effd39c16e661bc2e9da613cf704ab5943a8d9acd3fff340d230",
+          "approved_markdown_sha256": null,
+          "candidate_markdown_sha256": "c7dfcd9fc74eedbc454e1c7b53e12ef233d1c7a6f349fb9a1f75527b3ed34100"
+        },
+        {
+          "page": 2,
+          "image_sha256": "3fa664626a500012a0e10f83bdfa1e1b65b5760d8770ea7515bc7727ac05c1b0",
+          "approved_markdown_sha256": "55ec79435f6c0b1f4c9ba039f5ca192998858dedf42e5cc193424bc515b0aaec",
+          "candidate_markdown_sha256": null
+        }
+      ],
+      "machine_verdict": {
+        "path": "output/codex-acceptance-20261021/B-independent-verdict.json",
+        "sha256": "7eab4139b8e0c2ec255d28cee8bb982215b96bfb5ebad2fdeffdcc825b85af0b",
+        "availability": "local ignored artifact"
+      },
+      "document_manifest": {
+        "path": "state/codex-acceptance-20261021/documents/6e892682cea361e55dc4fb10/document.json",
+        "sha256": "2751079ec8f67720f7b645ca1bd73d986f5254888c785d44c678362f62d4c5a8",
+        "availability": "local ignored artifact"
+      },
+      "native_runs": [
+        {
+          "receipt": {
+            "path": "state/codex-acceptance-20261021/runs/6e892682cea361e55dc4fb10/20261021T153411814666Z/receipt.json",
+            "sha256": "755241b2275d22733c252a75680e45908e3eb73d06f6797a35f9cfcd29ec2be1",
+            "availability": "local ignored artifact"
+          },
+          "events": {
+            "path": "state/codex-acceptance-20261021/runs/6e892682cea361e55dc4fb10/20261021T153411814666Z/events.jsonl",
+            "sha256": "a0c489abfad78214510343d787e10bcb59281f91936005aa06d885a9c819cb58",
+            "availability": "local ignored artifact"
+          },
+          "native_coordinator_returncode": 0,
+          "document_state": "pending",
+          "successful_native_subagent_spawns": 6
+        }
+      ],
+      "task_counts": {
+        "ready": 0,
+        "leased": 0,
+        "completed": 4,
+        "pending": 1,
+        "superseded": 0
+      },
+      "publication": null,
+      "publication_rejected": "Whole document must have approved pages and completed organization",
+      "organization_not_started": true
+    },
+    {
+      "sample_id": "C",
+      "document_id": "863e653e63e069ccb80b0d56",
+      "title": "真实史料验收C：组织沿革图与章节边界",
+      "source_sha256": "863e653e63e069ccb80b0d56edd576f127f6f3d2a31f6588e014c9fa7cf6ad6b",
+      "parent_physical_pages": [
+        510,
+        511
+      ],
+      "printed_pages": [
+        434,
+        435
+      ],
+      "state": "published",
+      "content_verdict": "approved",
+      "structure_verdict": "approved",
+      "issues": [],
+      "checks": {
+        "personnel_names_offices_and_dates": "preserved, including Li Jingyu and original alias Xiao Ti written with wood radical",
+        "unknown_date_ends": "preserved blank, no invented terminal dates",
+        "diagram_original_pixels": "retained with page hashes",
+        "diagram_parent_and_six_branches": "faithful text-tree representation",
+        "diagram_two_branch_convergence": "preserved",
+        "diagram_tangshan_and_beiping_succession": "preserved with date ranges",
+        "preceding_chapter_and_new_chapter18": "separate article fragments, diagram retained in preceding fragment",
+        "chapter18_shijiazhuang_liaoxian_and_six_special_committees": "preserved",
+        "final_organization_department_label": "heading-only continuation, no invented personnel",
+        "bibliographic_identity": "unclaimed"
+      },
+      "pages": [
+        {
+          "page": 1,
+          "image_sha256": "52379d8c784ea2bc048d9a78ddd584308a6577d158aa40ae889830764ac3130b",
+          "approved_markdown_sha256": "80d0abb4de0b5c53e9c4fb49a612f8c2a4e45130ab1b9e80425331de5b29e656"
+        },
+        {
+          "page": 2,
+          "image_sha256": "af7e542c7746a3da39ba6557a69f56849ab298be9f2e4b09fbacd39da000e842",
+          "approved_markdown_sha256": "bfc017ac07a828a8d0b3e2aa97fd203efa0a84fcff771c2e6780dd8445566c60"
+        }
+      ],
+      "machine_verdict": {
+        "path": "output/codex-acceptance-20261021/C-independent-verdict.json",
+        "sha256": "311e981d7dbd368dd1a578f3b3a8303b5666ba5cb5a4ce20f7e86f2b2367fbcd",
+        "availability": "local ignored artifact"
+      },
+      "document_manifest": {
+        "path": "state/codex-acceptance-20261021/documents/863e653e63e069ccb80b0d56/document.json",
+        "sha256": "07c960e9f1e90343da89c2dab338112d72c9641aadb8e557a19063887c2e2d9f",
+        "availability": "local ignored artifact"
+      },
+      "native_runs": [
+        {
+          "receipt": {
+            "path": "state/codex-acceptance-20261021/runs/863e653e63e069ccb80b0d56/20261021T153422028091Z/receipt.json",
+            "sha256": "9ccc36785b440b2c657f8be0ef712d5611deeda9d54782a3b1eda45786985411",
+            "availability": "local ignored artifact"
+          },
+          "events": {
+            "path": "state/codex-acceptance-20261021/runs/863e653e63e069ccb80b0d56/20261021T153422028091Z/events.jsonl",
+            "sha256": "4493f0aed88fe429e1242795860c872fd3fb72820ff931cba038c3e2a1d0f8f4",
+            "availability": "local ignored artifact"
+          },
+          "native_coordinator_returncode": 0,
+          "document_state": "published",
+          "successful_native_subagent_spawns": 5
+        }
+      ],
+      "task_counts": {
+        "ready": 0,
+        "leased": 0,
+        "completed": 5,
+        "pending": 0,
+        "superseded": 0
+      },
+      "publication": {
+        "markdown_sha256": "287cbed599af9afc894417a9680c1cee768e8315c81b691cf5c890e5c27c8942",
+        "organization_sha256": "fb7b5cb0397d4082b5513de282f558e6065ee92479629048c538e9535559ff20",
+        "approval_type": "machine",
+        "human_approval": false
+      }
+    }
+  ],
+  "real_publication_and_search_checks": {
+    "passed": true,
+    "queries": {
+      "郭村": [
+        {
+          "document_id": "cbec19f647466977e1fc52ac",
+          "page": 1,
+          "markdown_sha256": "ed07c751352b24401732dc8c32872b9d307f0fdef1f4748369290cc72481b38f"
+        },
+        {
+          "document_id": "cbec19f647466977e1fc52ac",
+          "page": 2,
+          "markdown_sha256": "bbdb6b827bb24ec7e0c830713f0a68c46b70b68ec4d49f131b709349c74dfa0f"
+        }
+      ],
+      "石家庄": [
+        {
+          "document_id": "863e653e63e069ccb80b0d56",
+          "page": 2,
+          "markdown_sha256": "bfc017ac07a828a8d0b3e2aa97fd203efa0a84fcff771c2e6780dd8445566c60"
+        }
+      ],
+      "马鸿逵": []
+    },
+    "pending_document_excluded": true
+  },
+  "original_first_evidence": [
+    {
+      "path": "output/codex-acceptance-20261021/selection.json",
+      "sha256": "fbb8d0039cca1b6859ee809e3a319fc40a0605a2e0bc3e1f83997ba8bcf653d4",
+      "availability": "local ignored artifact"
+    },
+    {
+      "path": "output/codex-acceptance-20261021/source-first-checklist.json",
+      "sha256": "1a3ebed966d1291013ea09f18322af4f3852f32cb4609cd8d33bade7181c3078",
+      "availability": "local ignored artifact"
+    },
+    {
+      "path": "output/codex-acceptance-20261021/source-checklist-amendments.json",
+      "sha256": "c0487416dff3ee102f418433a9dff643d473df78cb7d11973eb84b66ab16842a",
+      "availability": "local ignored artifact"
+    },
+    {
+      "path": "output/codex-acceptance-20261021/source-checklist-amendments-C.json",
+      "sha256": "ac6d453b4ca12f0bddc08d0477550cdc7781909399dba732cf769b1c766b86c0",
+      "availability": "local ignored artifact"
+    },
+    {
+      "path": "output/codex-acceptance-20261021/B-source-glyph-reinspection.json",
+      "sha256": "99cc101c7ac1b3e260c9423842e536d46476f9bd1ffae60c1a9fee0e0a585453",
+      "availability": "local ignored artifact"
+    },
+    {
+      "path": "output/codex-acceptance-20261021/B-final-detail-reinspection.json",
+      "sha256": "e6d8673bb8792a5133d059618a507f5b3b2cac13653ab269ca5d8e7fa5c82a36",
+      "availability": "local ignored artifact"
+    },
+    {
+      "path": "output/codex-acceptance-20261021/blind-glyph-check/verdict.json",
+      "sha256": "81160b5a1b26d01a0052eb79d89e147cc77b315189f7f616b839cbab5f928fdb",
+      "availability": "local ignored artifact"
+    }
+  ],
+  "b_source_detail": {
+    "actual_pdf_raster_size": [
+      1568,
+      2336
+    ],
+    "higher_dpi_adds_no_new_source_information": true,
+    "image": {
+      "path": "state/codex-acceptance-20261021/documents/6e892682cea361e55dc4fb10/evidence/details/eb4099c80c3f6408596b2eba.png",
+      "sha256": "f28d21f2fb683a377600a8f8ab9e6954317b4e37bc52e06bac5a138312e88a87",
+      "availability": "local ignored artifact"
+    },
+    "metadata": {
+      "path": "state/codex-acceptance-20261021/documents/6e892682cea361e55dc4fb10/evidence/details/eb4099c80c3f6408596b2eba.json",
+      "sha256": "3660ff025cccd3e748e7f07b527d8443b8481d02a6f45cab5b74f0a5020efa38",
+      "availability": "local ignored artifact"
+    },
+    "verdict": "pending_after_detail_retry"
+  },
+  "controlled_challenge": {
+    "kind": "explicit fault injection on a real original; excluded from natural OCR accuracy",
+    "initial_manifest": {
+      "path": "output/codex-acceptance-20261021/controlled-challenge.json",
+      "sha256": "216ff5d2a012cf81f13516444b90525eace7a9b593d89bda7c862044fccd3fe8",
+      "availability": "local ignored artifact"
+    },
+    "source_sha256": "a85c20ae8d54fe8bc73c3fc214f3a571378dfeab55e217eb0a284a0ae584a893",
+    "document_id": "a85c20ae8d54fe8bc73c3fc2",
+    "mutation": {
+      "original_quantity": 20,
+      "injected_ocr_quantity": 21,
+      "injected_wrong_correction_quantity": 22,
+      "verified_recovered_quantity": 20,
+      "unit": "万两"
+    },
+    "numeric_recovery_verdict": "passed",
+    "full_content_acceptance": "pending_same_ambiguous_footnote_as_B",
+    "historical_runtime_state": "published",
+    "historical_publication_preserved": true,
+    "not_accepted_for_content_use": true,
+    "prior_text_is_machine_output_not_gold": true,
+    "historical_trusted_prior_text_sha256_key_is_not_gold": true,
+    "unsupported_added_character_in_prior_machine_text": "U+4E2D removed in later correction",
+    "task_history": [
+      {
+        "stage": "ocr",
+        "state": "completed",
+        "task_id": "7fd7237029cd4109aeee7d052f76cc5d",
+        "retry_of": null,
+        "verdict": null,
+        "result_sha256": "358fa0404c87c47e9f21dda59c13a7c80bba6def6c183e3115410d65c7edb30e",
+        "input_sha256": "e3f20294f9ec8301975cda0b36ad740b5b1ae34c6f82a3138d7b51bb25e38fd9"
+      },
+      {
+        "stage": "review",
+        "state": "completed",
+        "task_id": "98c44836b9f944359daa3128da314cee",
+        "retry_of": null,
+        "verdict": "corrections",
+        "result_sha256": "0c0832eb1d11f47b60b56d32a43467b906fd25ba6b32de08e7e8aee547567ed3",
+        "input_sha256": "c556650d87c9f4f562cfd279f8eb691370a17affcc4b8aa59bc33405243ea2f2"
+      },
+      {
+        "stage": "verify",
+        "state": "superseded",
+        "task_id": "afb4c1959ba542d0bcb7606c996ff40f",
+        "retry_of": null,
+        "verdict": "pending",
+        "result_sha256": "100b09cbb867f32d32cd45c48cededaa00024291a3a2036b2829c786962e0c5c",
+        "input_sha256": "11ec0a689421e9a85b78efee6cbe38ad94936e012ac30ba188549b24b6c6f290"
+      },
+      {
+        "stage": "review",
+        "state": "completed",
+        "task_id": "a9c7eaf7f33e42b28cd410cf1e993dfe",
+        "retry_of": "afb4c1959ba542d0bcb7606c996ff40f",
+        "verdict": "corrections",
+        "result_sha256": "e152ad1cb008b54cb3814654b350abbad1d2447752c8746190b4b2b62362985c",
+        "input_sha256": "c556650d87c9f4f562cfd279f8eb691370a17affcc4b8aa59bc33405243ea2f2"
+      },
+      {
+        "stage": "verify",
+        "state": "completed",
+        "task_id": "857ba972ce0142678d47dc962f4e854b",
+        "retry_of": null,
+        "verdict": "approved",
+        "result_sha256": "f9f819962fae9eb06826287cd473b8e66841e784fe7e3c2172a7ab04bfd7a14d",
+        "input_sha256": "265c91c370e0d0e25338f9ab20d405da2fff2aae39467fb4870ce784487a7e6b"
+      },
+      {
+        "stage": "organization",
+        "state": "completed",
+        "task_id": "9d72a62167bf4770895eb8fbb9a916d3",
+        "retry_of": null,
+        "verdict": null,
+        "result_sha256": "fe57558a23bef40638c732ca2a5727bcb2f842020da3812030e2bee96713971c",
+        "input_sha256": "81f56b24af1134fefe562d3c45337eb725c9cd7ede0a7252fc4219c8ba87c42a"
+      }
+    ],
+    "document_manifest": {
+      "path": "state/codex-acceptance-challenge-20261021/documents/a85c20ae8d54fe8bc73c3fc2/document.json",
+      "sha256": "02ad771f4c622562fa3709b170a9e39fe6ac63b2f30405dc03f404ba0876a7c0",
+      "availability": "local ignored artifact"
+    },
+    "native_runs": [
+      {
+        "receipt": {
+          "path": "state/codex-acceptance-challenge-20261021/runs/a85c20ae8d54fe8bc73c3fc2/20261021T153351139746Z/receipt.json",
+          "sha256": "17fe8913ccb5633890d340dc463619b44c0517be02436d9f1895476d487e2b57",
+          "availability": "local ignored artifact"
+        },
+        "events": {
+          "path": "state/codex-acceptance-challenge-20261021/runs/a85c20ae8d54fe8bc73c3fc2/20261021T153351139746Z/events.jsonl",
+          "sha256": "a7fcafa16bcd476295cc98dc99abd6adfd8e3b862ba41a167592149912d5825a",
+          "availability": "local ignored artifact"
+        },
+        "native_coordinator_returncode": 0,
+        "document_state": "pending",
+        "successful_native_subagent_spawns": 4
+      },
+      {
+        "receipt": {
+          "path": "state/codex-acceptance-challenge-20261021/runs/a85c20ae8d54fe8bc73c3fc2/20261021T153853635911Z/receipt.json",
+          "sha256": "2a90c61ac0b8f460af12438c5c02c1335752734b98072b94b36056263de1ab2b",
+          "availability": "local ignored artifact"
+        },
+        "events": {
+          "path": "state/codex-acceptance-challenge-20261021/runs/a85c20ae8d54fe8bc73c3fc2/20261021T153853635911Z/events.jsonl",
+          "sha256": "d79175358c57d1c91adc39e8729805a6113cc34ff429aa6f37f7ec1f831a2b29",
+          "availability": "local ignored artifact"
+        },
+        "native_coordinator_returncode": 0,
+        "document_state": "published",
+        "successful_native_subagent_spawns": 4
+      }
+    ]
+  },
+  "prior_baseline_reassessment": {
+    "historical_evidence": "services/codex-pipeline/validation-20261021.json",
+    "full_content_pass_withdrawn": true,
+    "reason": "Unsupported added U+4E2D in office title; remaining source glyph U+592E/U+51B3 unresolved after native source/detail inspection. Initial machine approval is not gold.",
+    "historical_records_preserved": true
+  },
+  "improvements": [
+    "Explicit retry after failed verification reopens review of retained OCR; later verification remains independent.",
+    "Historical task details use original saved input snapshots.",
+    "original_detail returns hash-bound original-source crops; submissions use original_details references with file/source/page validation; prior evidence objects remain compatible.",
+    "Unclear-source retry policy requires pending rather than forced transcription."
+  ],
+  "engineering_checks": {
+    "pytest": {
+      "passed": 32,
+      "failed": 0,
+      "junit": {
+        "path": "reports/codex-real-acceptance.xml",
+        "sha256": "8d570d76759e07222b03b4626c29712f0db19049edd2a62cb75bc4cd8b78134a",
+        "availability": "local ignored artifact"
+      }
+    },
+    "ruff": "passed",
+    "git_diff_check": "passed",
+    "previous_unchanged_module_regressions": "See VALIDATION.md; not rerun in this follow-up."
+  }
+}
