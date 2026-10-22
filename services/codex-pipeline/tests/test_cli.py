@@ -132,6 +132,16 @@ def test_run_pending_is_exit_two_not_success(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["status"]["state"] == "pending"
 
 
+def test_review_cli_opens_selected_workspace_without_starting_codex(tmp_path, monkeypatch):
+    from hrs_codex import human_review
+
+    calls = []
+    monkeypatch.setattr(human_review, "serve", lambda store, port: calls.append((store.root, port)))
+    monkeypatch.setattr(sys, "argv", ["hrs-codex", "--root", str(tmp_path), "review", "--port", "0"])
+    cli.main()
+    assert calls == [(tmp_path.resolve(), 0)]
+
+
 @pytest.mark.parametrize("available", [True, False])
 def test_doctor_reports_missing_auth_or_cli(tmp_path, monkeypatch, capsys, available):
     monkeypatch.setattr(sys, "argv", ["hrs-codex", "--root", str(tmp_path), "doctor"])

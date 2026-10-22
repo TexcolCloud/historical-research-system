@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "evaluated_at_utc": "2026-10-22T02:48:38.119909+00:00",
+  "approval_type": "machine",
+  "human_approval": false,
+  "sealed_gold_approval": false,
+  "engineering_verdict": "passed",
+  "ui_verdict": "approved_with_wording_suggestion_addressed",
+  "tests": {
+    "passed": 37,
+    "failed": 0,
+    "evidence": {
+      "path": "reports/codex-human-review.xml",
+      "sha256": "4e139d23dc433dc411f3d7289150174f7b1a691727e5838b816a4775f5a0e180",
+      "availability": "local ignored artifact"
+    },
+    "scope": [
+      "real local HTTP forms using explicitly synthetic human names and decisions",
+      "MCP read-only human queue",
+      "draft persistence and history",
+      "stale submissions and changed original rejection",
+      "machine retry cannot replace human draft",
+      "one approved page cannot release other pending pages",
+      "mixed publication and continued search",
+      "exact failed task input used rather than an older candidate"
+    ]
+  },
+  "ruff": "passed",
+  "git_diff_check": "passed",
+  "independent_visual_qa": {
+    "path": "output/codex-human-review-20261022/ui-verdict.json",
+    "sha256": "b23e9b8bdf4818130b581c99b8710c692df55c8ef76d3c2d6d16eb8570d2a580",
+    "availability": "local ignored artifact"
+  },
+  "suggestion_resolution": {
+    "before": "查看高分辨率原件",
+    "after": "放大查看原图",
+    "reason": "Rerendering does not add missing native scan information",
+    "verified_in_final_browser": true,
+    "final_screenshot": {
+      "path": "output/codex-human-review-20261022/human-overview-final.png",
+      "sha256": "442d750f61c462b9690cc782b93e8be66fa95d76e8ab29d4eeb4b1e448a62ef4",
+      "availability": "local ignored artifact"
+    }
+  },
+  "human_form_screenshot": {
+    "path": "output/codex-human-review-20261022/human-form.png",
+    "sha256": "8d2139f89361c58e9ed84ed53a5d7b8601a133fe8018a37e4b8b9ee9394436de",
+    "availability": "local ignored artifact"
+  },
+  "real_material_handoff": {
+    "document_id": "6e892682cea361e55dc4fb10",
+    "source_sha256": "6e892682cea361e55dc4fb1018852e12930259c075f9b7ef0121d705e24533a4",
+    "pending_pages": [
+      1
+    ],
+    "state": "pending",
+    "publication": null,
+    "human_decisions_written": 0,
+    "source_manifest_unchanged": true,
+    "manifest": {
+      "path": "state/codex-acceptance-20261021/documents/6e892682cea361e55dc4fb10/document.json",
+      "sha256": "2751079ec8f67720f7b645ca1bd73d986f5254888c785d44c678362f62d4c5a8",
+      "availability": "local ignored artifact"
+    },
+    "content_acceptance": "pending; human verdict still required"
+  },
+  "workflow": [
+    "Unresolved page reviews automatically enter human queue; after original-detail retry hand off instead of repeated guessing.",
+    "Only a deliberate loopback human form submission records a named human decision; no MCP human approval write tool.",
+    "Human can edit and approve whole-page text or preserve a pending draft.",
+    "All pages approved makes organization ready; resume Codex run to organize and publish.",
+    "Page human approvals stay distinct from machine results; combined publication is mixed and lists human_reviewed_pages."
+  ],
+  "limits": [
+    "Reviewer name is locally supplied attribution, not authenticated identity.",
+    "Whole-document human_approval remains false when organization was machine-reviewed.",
+    "No real-source human content acceptance was simulated."
+  ]
+}
