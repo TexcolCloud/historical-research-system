@@ -19,6 +19,11 @@ Use the configured Codex model; inherit model/provider settings from the parent.
    Explicitly retrying a pending verify task reopens review against the retained
    original OCR. The new reviewer proposes a fresh correction, followed by a new
    independent verify task; previous proposals and failed verdicts remain evidence.
+   Unresolved page reviews automatically appear in `human_review_queue`, including
+   repeated failures. After original-detail retry remains inconclusive, hand off
+   to the human workspace instead of repeatedly guessing. Report the page, exact
+   issue and `hrs-codex --root <workspace> review` command. The human may correct
+   and approve the entire page or save a draft and keep it pending.
 4. When every page is approved, spawn an `organization` worker. It reads the full
    approved text and maps articles to physical pages. Bibliographic identity stays
    `unclaimed`; article titles may describe fragments when a source is incomplete.
@@ -79,7 +84,23 @@ include the claim's exact `input_sha256`. Examples below omit that repeated fiel
   verdict with issues instead of an article mapping.
 
 The server retains OCR drafts, correction proposals, completed task results,
-machine verdicts, input/output hashes and source image hashes. These records are
+machine verdicts, input/output hashes and source image hashes. Codex verdicts are
 machine decisions, never human review or sealed gold approval. Published text is
 searchable locally with physical-page and image provenance. Existing legacy data
 is preserved separately; this workflow does not generate historical research cards.
+
+## Human handoff
+
+Human decisions are entered explicitly in the local review form; there is no MCP
+tool for granting human approval. Never fill or submit that form for real source
+documents, impersonate a reviewer, or interpret a request to implement human
+review as an actual content decision. Development form tests use labeled synthetic
+fixtures only. Do not overwrite an existing human draft with a machine retry.
+
+The form records the reviewer's supplied name, reason, source/page hashes, input
+snapshot and edited full-page text. A human-approved page is marked `human`, while
+machine decisions retain `machine`; neither is sealed gold. Once all pages pass,
+the organization task becomes ready. Resume `run` to delegate organization and
+publish. A publication containing human page decisions and machine organization
+is marked `mixed`, with `human_reviewed_pages`; document-level `human_approval`
+remains false because the entire workflow has not received human review.
