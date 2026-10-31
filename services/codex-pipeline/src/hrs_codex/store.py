@@ -56,7 +56,9 @@ class Store:
         return self.root / "documents" / document_id
 
     def _load(self, document_id: str) -> dict:
-        return json.loads((self._directory(document_id) / "document.json").read_text(encoding="utf-8"))
+        return json.loads(
+            (self._directory(document_id) / "document.json").read_text(encoding="utf-8")
+        )
 
     def _save(self, doc: dict) -> None:
         atomic_json(self._directory(doc["id"]) / "document.json", doc)
@@ -162,7 +164,9 @@ class Store:
                 if text:
                     task = tasks[text["task_id"]]
                     retained = (
-                        task["inputs"]["markdown"] if field == "approved" else task["result"]["markdown"]
+                        task["inputs"]["markdown"]
+                        if field == "approved" and task["stage"] != "human_review"
+                        else task["result"]["markdown"]
                     )
                     if text["markdown"] != retained:
                         raise ValueError(
@@ -171,7 +175,10 @@ class Store:
         for task in doc["tasks"]:
             if task.get("inputs") and digest(task["inputs"]) != task["claim"]["input_sha256"]:
                 raise ValueError("Retained task input hash mismatch")
-            if task.get("result") is not None and digest(task["result"]) != task["receipt"]["result_sha256"]:
+            if (
+                task.get("result") is not None
+                and digest(task["result"]) != task["receipt"]["result_sha256"]
+            ):
                 raise ValueError("Retained task result hash mismatch")
             if task.get("result") is not None:
                 self._verify_details(doc, task, task["result"])
@@ -196,10 +203,14 @@ class Store:
                 raise ValueError("Detail evidence source/page mismatch")
             for field in ("image", "metadata"):
                 path = detail.get(field)
-                if not isinstance(path, str) or file_digest(self._path(doc, path)) != detail.get(field + "_sha256"):
+                if not isinstance(path, str) or file_digest(self._path(doc, path)) != detail.get(
+                    field + "_sha256"
+                ):
                     raise ValueError("Detail evidence file hash mismatch")
             retained = json.loads(self._path(doc, detail["metadata"]).read_text(encoding="utf-8"))
-            if {k: v for k, v in detail.items() if k not in {"metadata", "metadata_sha256"}} != retained:
+            if {
+                k: v for k, v in detail.items() if k not in {"metadata", "metadata_sha256"}
+            } != retained:
                 raise ValueError("Detail evidence metadata mismatch")
 
     def status(self, document_id: str) -> dict:
@@ -221,7 +232,11 @@ class Store:
             return documents
 
     def _inputs(self, doc: dict, task: dict) -> dict:
-        inputs = {"document_id": doc["id"], "source_sha256": doc["source"]["sha256"], "stage": task["stage"]}
+        inputs = {
+            "document_id": doc["id"],
+            "source_sha256": doc["source"]["sha256"],
+            "stage": task["stage"],
+        }
         if task["page"] is not None:
             page = doc["pages"][task["page"] - 1]
             inputs.update(
@@ -276,7 +291,9 @@ class Store:
                     continue
                 inputs = self._inputs(doc, task)
                 if inputs.get("prior_worker_id") == worker_id:
-                    raise ValueError("Review and correction verification require a separate subagent")
+                    raise ValueError(
+                        "Review and correction verification require a separate subagent"
+                    )
                 claim = {
                     "worker_id": worker_id,
                     "lease_token": uuid4().hex,
@@ -332,7 +349,9 @@ class Store:
             if stage == "ocr":
                 markdown = result.get("markdown")
                 if not isinstance(markdown, str):
-                    raise ValueError("OCR result requires markdown (empty is valid for a blank page)")
+                    raise ValueError(
+                        "OCR result requires markdown (empty is valid for a blank page)"
+                    )
                 page["ocr"] = {**receipt, "markdown": markdown, "sha256": digest(markdown)}
                 page["state"] = "awaiting_review"
                 doc["tasks"].append(self._new_task("review", page["page"]))
@@ -343,7 +362,9 @@ class Store:
                 text = page["candidate" if stage == "verify" else "ocr"]
                 if verdict == "approved":
                     if result.get("markdown", text["markdown"]) != text["markdown"]:
-                        raise ValueError("Changed text requires corrections and separate verification")
+                        raise ValueError(
+                            "Changed text requires corrections and separate verification"
+                        )
                     page["approved"] = {**text, **receipt}
                     page["state"] = "approved"
                 elif verdict == "pending":
@@ -368,7 +389,9 @@ class Store:
                         start = text["markdown"].find(correction["before"])
                         if start < 0 or text["markdown"].find(correction["before"], start + 1) >= 0:
                             raise ValueError("Correction is not uniquely located in original OCR")
-                        spans.append((start, start + len(correction["before"]), correction["after"]))
+                        spans.append(
+                            (start, start + len(correction["before"]), correction["after"])
+                        )
                     spans.sort()
                     if any(left[1] > right[0] for left, right in zip(spans, spans[1:])):
                         raise ValueError("Correction spans overlap in original OCR")
@@ -376,7 +399,9 @@ class Store:
                     for start, end, replacement in reversed(spans):
                         patched = patched[:start] + replacement + patched[end:]
                     if patched != markdown:
-                        raise ValueError("Change records must explain the entire corrected markdown")
+                        raise ValueError(
+                            "Change records must explain the entire corrected markdown"
+                        )
                     page["candidate"] = {
                         **receipt,
                         "markdown": markdown,
@@ -403,17 +428,26 @@ class Store:
                         raise ValueError("Organization requires nonempty articles")
                     covered = set()
                     for article in articles:
-                        if not isinstance(article.get("title"), str) or not article["title"].strip():
+                        if (
+                            not isinstance(article.get("title"), str)
+                            or not article["title"].strip()
+                        ):
                             raise ValueError("Article title is required")
                         numbers = article.get("pages")
                         if (
                             not isinstance(numbers, list)
                             or not numbers
-                            or any(type(p) is not int or not 1 <= p <= len(doc["pages"]) for p in numbers)
+                            or any(
+                                type(p) is not int or not 1 <= p <= len(doc["pages"])
+                                for p in numbers
+                            )
                         ):
                             raise ValueError("Article page mapping is invalid")
                         covered.update(numbers)
-                        article["bibliography"] = {**article.get("bibliography", {}), "status": "unclaimed"}
+                        article["bibliography"] = {
+                            **article.get("bibliography", {}),
+                            "status": "unclaimed",
+                        }
                     if covered != set(range(1, len(doc["pages"]) + 1)):
                         raise ValueError("Organization must account for every physical page")
                     doc["organization"] = {**receipt, "articles": articles}
@@ -432,7 +466,9 @@ class Store:
                 )
             else:
                 doc["state"] = (
-                    "pending" if any(p["state"] == "pending" for p in doc["pages"]) else "processing"
+                    "pending"
+                    if any(p["state"] == "pending" for p in doc["pages"])
+                    else "processing"
                 )
             self._save(doc)
             return {
@@ -447,7 +483,11 @@ class Store:
             doc = self._load(document_id)
             task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
             if task["state"] != "pending":
-                raise ValueError("Only pending tasks can be retried; active leases expire automatically")
+                raise ValueError(
+                    "Only pending tasks can be retried; active leases expire automatically"
+                )
+            if task["stage"] == "human_review":
+                raise ValueError("A human draft must be resolved in the human review workspace")
             task["state"] = "superseded"
             # A rejected correction needs a new proposal against retained OCR,
             # followed by another independent verification of that proposal.
@@ -461,12 +501,154 @@ class Store:
             self._save(doc)
             return replacement
 
+    def human_queue(self) -> list[dict]:
+        """All unresolved page reviews are available to people, including repeated failures."""
+        with self.lock:
+            rows = []
+            for path in sorted((self.root / "documents").glob("*/document.json")):
+                doc = json.loads(path.read_text(encoding="utf-8"))
+                for page in doc["pages"]:
+                    if page["state"] != "pending":
+                        continue
+                    attempts = [
+                        t
+                        for t in doc["tasks"]
+                        if t["page"] == page["page"]
+                        and t.get("result", {}).get("verdict") == "pending"
+                    ]
+                    rows.append(
+                        {
+                            "document_id": doc["id"],
+                            "title": doc["title"],
+                            "page": page["page"],
+                            "unresolved_attempts": len(attempts),
+                            "issues": attempts[-1]["result"]["issues"],
+                        }
+                    )
+            return rows
+
+    def _human_packet(self, doc: dict, number: int) -> dict:
+        if type(number) is not int or not 1 <= number <= len(doc["pages"]):
+            raise ValueError("Unknown physical page")
+        page = doc["pages"][number - 1]
+        if page["state"] != "pending" or doc["publication"]:
+            raise ValueError("Only unpublished pending pages can receive human review")
+        history = [t for t in doc["tasks"] if t["page"] == number]
+        pending = next(t for t in reversed(history) if t["state"] == "pending")
+        text = (
+            pending["result"]["markdown"]
+            if pending["stage"] == "human_review"
+            else pending["inputs"]["markdown"]
+        )
+        return {
+            "document_id": doc["id"],
+            "title": doc["title"],
+            "page": number,
+            "source_sha256": doc["source"]["sha256"],
+            "image_sha256": page["image_sha256"],
+            "pending_task_id": pending["task_id"],
+            "markdown": text,
+            "ocr_markdown": page["ocr"]["markdown"],
+            "history": [
+                {
+                    "task_id": t["task_id"],
+                    "stage": t["stage"],
+                    "state": t["state"],
+                    "result": t.get("result"),
+                    "receipt": t.get("receipt"),
+                }
+                for t in history
+            ],
+        }
+
+    def human_packet(self, document_id: str, page: int) -> dict:
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            packet = self._human_packet(doc, page)
+            return {**packet, "input_sha256": digest(packet)}
+
+    def record_human_review(
+        self,
+        document_id: str,
+        page: int,
+        *,
+        input_sha256: str,
+        reviewer: str,
+        markdown: str,
+        note: str,
+        verdict: str,
+    ) -> dict:
+        """Record an explicit local form submission. Deliberately not exposed through MCP."""
+        if verdict not in {"approved", "pending"} or not reviewer.strip() or not note.strip():
+            raise ValueError(
+                "Human review requires a reviewer, reason and approved/pending decision"
+            )
+        if not isinstance(markdown, str):
+            raise ValueError("Human review requires full page Markdown")
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            packet = self._human_packet(doc, page)
+            if digest(packet) != input_sha256:
+                raise ValueError("Review input changed; reload before deciding")
+            task = self._new_task("human_review", page)
+            receipt = {
+                "task_id": task["task_id"],
+                "worker_id": "human:" + reviewer.strip(),
+                "reviewer": reviewer.strip(),
+                "input_sha256": input_sha256,
+                "approval_type": "human",
+                "human_approval": verdict == "approved",
+                "sealed_gold_approval": False,
+                "origin": "local_human_review_form",
+                "created_at": time.time(),
+            }
+            result = {
+                "input_sha256": input_sha256,
+                "markdown": markdown,
+                "verdict": verdict,
+                "note": note.strip(),
+                "issues": [note.strip()] if verdict == "pending" else [],
+            }
+            task.update(
+                state="completed" if verdict == "approved" else "pending",
+                inputs=packet,
+                claim={"input_sha256": input_sha256},
+                result=result,
+                receipt={**receipt, "result_sha256": digest(result)},
+            )
+            previous = next(t for t in doc["tasks"] if t["task_id"] == packet["pending_task_id"])
+            previous["state"] = "superseded"
+            task["review_of"] = previous["task_id"]
+            doc["tasks"].append(task)
+            target = doc["pages"][page - 1]
+            target["review"] = {**receipt, "verdict": verdict, "issues": result["issues"]}
+            target["state"] = "approved" if verdict == "approved" else "pending"
+            if verdict == "approved":
+                target["approved"] = {**receipt, "markdown": markdown, "sha256": digest(markdown)}
+            if all(p["state"] == "approved" for p in doc["pages"]):
+                doc["tasks"].append(self._new_task("organization"))
+                doc["state"] = "processing"
+            else:
+                doc["state"] = "pending"
+            self._save(doc)
+            return {
+                "document_id": document_id,
+                "page": page,
+                "state": doc["state"],
+                "page_state": target["state"],
+                "receipt": task["receipt"],
+            }
+
     def publish(self, document_id: str) -> dict:
         with self.lock:
             doc = self._load(document_id)
             self._verify_evidence(doc)
             if not all(p["state"] == "approved" for p in doc["pages"]) or not doc["organization"]:
-                raise ValueError("Whole document must have approved pages and completed organization")
+                raise ValueError(
+                    "Whole document must have approved pages and completed organization"
+                )
             if doc["state"] == "published":
                 publication = doc["publication"]
                 directory = self._directory(document_id)
@@ -494,8 +676,13 @@ class Store:
                 "markdown_sha256": digest(content),
                 "source_sha256": doc["source"]["sha256"],
                 "organization_sha256": digest(doc["organization"]),
-                "approval_type": "machine",
+                "approval_type": "mixed"
+                if any(p["approved"]["approval_type"] == "human" for p in doc["pages"])
+                else "machine",
                 "human_approval": False,
+                "human_reviewed_pages": [
+                    p["page"] for p in doc["pages"] if p["approved"]["approval_type"] == "human"
+                ],
                 "published_at": time.time(),
             }
             atomic_json(directory / "publication.json", publication)

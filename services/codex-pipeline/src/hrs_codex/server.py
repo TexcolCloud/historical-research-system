@@ -98,6 +98,11 @@ def create_server(root: Path) -> MCPServer:
         return store.submit_task(document_id, task_id, lease_token, result)
 
     @server.tool()
+    def human_review_queue() -> list[dict]:
+        """Read unresolved pages awaiting explicit human review; cannot record human decisions."""
+        return store.human_queue()
+
+    @server.tool()
     def retry_task(document_id: str, task_id: str) -> dict:
         """Reopen pending work; failed verify restarts review, retaining all historical evidence."""
         return store.retry_task(document_id, task_id)

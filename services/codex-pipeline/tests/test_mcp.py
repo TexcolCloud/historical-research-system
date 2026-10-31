@@ -160,6 +160,10 @@ def test_stdio_pending_pdf_cannot_publish_and_retry_retains_decision(tmp_path):
             await submit(client, doc_id, ocr, {"markdown": "[无法辨认]"})
             review = await claim(client, doc_id, "review", "fixture-review")
             await submit(client, doc_id, review, {"verdict": "pending", "issues": ["Synthetic unresolved scan"]})
+            human_queue = value(await client.call_tool("human_review_queue"))
+            assert human_queue[0]["document_id"] == doc_id
+            assert human_queue[0]["page"] == 1
+            assert human_queue[0]["unresolved_attempts"] == 1
             rejected = await client.call_tool("publish_document", {"document_id": doc_id})
             assert rejected.is_error
             assert value(await client.call_tool("search_library", {"query": "无法辨认"})) == []
@@ -173,6 +177,7 @@ def test_stdio_pending_pdf_cannot_publish_and_retry_retains_decision(tmp_path):
             )
             assert previous["state"] == "superseded"
             assert previous["result"]["issues"] == ["Synthetic unresolved scan"]
+            assert value(await client.call_tool("human_review_queue")) == []
 
     asyncio.run(scenario())
 
