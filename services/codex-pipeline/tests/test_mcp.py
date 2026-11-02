@@ -48,9 +48,56 @@ async def submit(client, doc_id, task, result):
 
 
 async def claim(client, doc_id, stage, worker):
-    return value(
+    task = value(
         await client.call_tool(
             "claim_task", {"document_id": doc_id, "stage": stage, "worker_id": worker}
+        )
+    )
+    if task is None or stage not in {"review", "verify"}:
+        return task
+    assert task["source_first_required"] is True
+    assert "markdown" not in task["inputs"]
+    assert "corrections" not in task["inputs"]
+    retained = value(
+        await client.call_tool("task_details", {"document_id": doc_id, "task_id": task["task_id"]})
+    )
+    assert "markdown" not in retained["inputs"]
+    premature = await client.call_tool(
+        "submit_task",
+        {
+            "document_id": doc_id,
+            "task_id": task["task_id"],
+            "lease_token": task["lease_token"],
+            "result": {"input_sha256": task["input_sha256"], "verdict": "approved", "issues": []},
+        },
+    )
+    assert premature.is_error
+    image = await client.call_tool(
+        "original_image",
+        {
+            "document_id": doc_id,
+            "page": task["page"],
+            "task_id": task["task_id"],
+            "lease_token": task["lease_token"],
+        },
+    )
+    metadata = json.loads(next(b.text for b in image.content if b.type == "text"))
+    return value(
+        await client.call_tool(
+            "review_candidate",
+            {
+                "document_id": doc_id,
+                "task_id": task["task_id"],
+                "lease_token": task["lease_token"],
+                "original_reading": {
+                    "image_sha256": metadata["image_sha256"],
+                    "image_receipt": metadata["image_receipt"],
+                    "observations": [
+                        "Synthetic protocol fixture: original pixels received before candidate exposure."
+                    ],
+                    "unresolved": [],
+                },
+            },
         )
     )
 

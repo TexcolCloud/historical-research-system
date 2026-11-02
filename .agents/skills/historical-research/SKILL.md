@@ -28,6 +28,11 @@ source for PDF routing, original-first review, fallback limits and publication.
    retained Markdown and original-page evidence. A revision keeps the previous
    published version searchable until its replacement passes.
 
+If independent original-image audits still disagree after detail inspection,
+use `request_human_review` with current evidence hashes and the exact unresolved
+issue. It records machine uncertainty and protects the human handoff from another
+automatic retry. Preserve opposing observations; a prior publication is not gold.
+
 Human decisions are made explicitly in the local form. Preserve human drafts and
 receipts; development permission does not authorize approving real source content
 on a person's behalf. Model and human decisions retain distinct provenance.

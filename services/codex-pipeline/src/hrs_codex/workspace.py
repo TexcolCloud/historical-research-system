@@ -1,5 +1,6 @@
 """Shared workspace selection and the lifecycle of its local workbench."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -44,6 +45,16 @@ def identity(store: Store) -> dict:
     }
 
 
+def change_token(store: Store) -> str:
+    """Cheap UI change detection; content approval still uses evidence hashes."""
+    with store.lock:
+        rows = []
+        for path in sorted((store.root / "documents").glob("*/document.json")):
+            stat = path.stat()
+            rows.append((path.parent.name, stat.st_mtime_ns, stat.st_size))
+    return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
+
+
 def running_workbench(store: Store) -> dict | None:
     path = store.root / ".workbench.json"
     if not path.exists():
@@ -53,11 +64,27 @@ def running_workbench(store: Store) -> dict | None:
         parsed = urlparse(record["url"])
         if parsed.scheme != "http" or parsed.hostname != "127.0.0.1":
             return None
+        expected = identity(store)["workspace_id"]
+        if record.get("workbench_protocol", 1) < 2:
+            # Reuse an older live executor until it is idle and can be upgraded;
+            # starting a second dashboard must not fork its active work.
+            with urlopen(record["url"], timeout=2) as response:
+                body = response.read().decode("utf-8")
+            return record if record["workspace_id"] == expected and expected in body else None
         # The session token stays in this workspace; never forward it remotely.
-        with urlopen(record["url"], timeout=2) as response:
+        health_url = parsed._replace(path="/health").geturl()
+        with urlopen(health_url, timeout=2) as response:
             if response.status != 200:
                 return None
-        return record if record["workspace_id"] == identity(store)["workspace_id"] else None
+            health = json.load(response)
+        return (
+            record
+            if (
+                record["workspace_id"] == health["workspace_id"] == expected
+                and health["executor_running"]
+            )
+            else None
+        )
     except (OSError, ValueError, KeyError):
         return None
 

@@ -107,7 +107,18 @@ def create_server(root: Path) -> MCPServer:
                 page["extraction_plan"].pop("probe_evidence", None)
                 page["extraction_plan"].pop("native_markdown", None)
         doc["tasks"] = [
-            {k: v for k, v in task.items() if k not in {"inputs", "result"}}
+            {
+                k: v
+                for k, v in task.items()
+                if k
+                not in {
+                    "inputs",
+                    "result",
+                    "source_reading",
+                    "source_reading_history",
+                    "image_access",
+                }
+            }
             for task in doc["tasks"]
         ]
         doc.pop("published_versions", None)
@@ -134,24 +145,48 @@ def create_server(root: Path) -> MCPServer:
     @server.tool()
     def claim_task(document_id: str, stage: str, worker_id: str) -> dict | None:
         """Lease one ocr/review/verify/organization task to a Codex subagent. Null means none ready."""
-        task = store.claim_task(document_id, stage, worker_id)
+        task = store.claim_task(document_id, stage, worker_id, source_first=True)
         if task and stage == "organization":
             for page in task["inputs"]["pages"]:
                 page.pop("markdown", None)
             task["content_access"] = (
                 "Use approved_page_text for each page; hashes bind the entire collection."
             )
+        return source_packet(task)
+
+    def source_packet(task):
+        if task and task.get("source_first_required") and not task.get("source_reading"):
+            for key in ("markdown", "original_markdown", "corrections"):
+                task["inputs"].pop(key, None)
+            if "extraction_plan" in task["inputs"]:
+                task["inputs"]["extraction_plan"].pop("native_markdown", None)
+            task["content_access"] = (
+                "Open original_image with task_id and lease_token, inspect original pixels, then "
+                "call review_candidate with image_receipt, image_sha256, observations and unresolved. "
+                "The candidate is withheld until those source observations are frozen."
+            )
         return task
+
+    @server.tool()
+    def review_candidate(
+        document_id: str, task_id: str, lease_token: str, original_reading: dict
+    ) -> dict:
+        """Freeze original-image observations and then reveal the review/verification candidate."""
+        return store.review_candidate(document_id, task_id, lease_token, original_reading)
 
     @server.tool()
     def task_details(document_id: str, task_id: str) -> dict:
         """Read retained task inputs and its evidence hashes."""
-        return store.get_task(document_id, task_id)
+        return source_packet(store.get_task(document_id, task_id))
 
     @server.tool(structured_output=False)
-    def original_image(document_id: str, page: int) -> list:
+    def original_image(
+        document_id: str, page: int, task_id: str | None = None, lease_token: str | None = None
+    ) -> list:
         """Open the retained original page as image pixels, with its SHA-256 evidence."""
-        metadata, data = store.original_page(document_id, page)
+        metadata, data = store.original_page(
+            document_id, page, task_id=task_id, lease_token=lease_token
+        )
         return [
             TextContent(type="text", text=json.dumps(metadata)),
             Image(data=data, format="png").to_image_content(),
@@ -175,6 +210,14 @@ def create_server(root: Path) -> MCPServer:
     def human_review_queue() -> list[dict]:
         """Read unresolved pages awaiting explicit human review; cannot record human decisions."""
         return store.human_queue()
+
+    @server.tool()
+    def request_human_review(
+        document_id: str, page: int, issue: str, evidence: dict, worker_id: str
+    ) -> dict:
+        """Route an explicit original-image audit dispute to humans, retaining versions and machine provenance."""
+        result = store.request_human_review(document_id, page, issue, evidence, worker_id)
+        return {"handoff": result, "workbench": open_workbench()}
 
     @server.tool()
     def retry_task(document_id: str, task_id: str) -> dict:

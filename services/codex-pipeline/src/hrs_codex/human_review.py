@@ -42,8 +42,11 @@ details{margin-top:18px}summary{cursor:pointer;font-weight:600}pre{white-space:p
 table{border-collapse:collapse;width:100%;text-align:left;font-size:14px}th{font-weight:600;color:#425a6a;background:#f0f4f7}
 td,th{padding:16px 14px;border-bottom:1px solid #dce4eb;vertical-align:top}td:first-child{min-width:180px}
 td small{font-size:12px}td progress{width:130px;accent-color:#176b8e}.inline{display:inline-block}
+td>a{display:inline-block;margin:4px 12px 4px 0}
 .inline button{padding:7px 10px;font-size:13px}.search-hit{padding:18px 0;border-bottom:1px solid #dce4eb}
 li{margin:12px 0}code{overflow-wrap:anywhere}p{line-height:1.65}button:hover{filter:brightness(.94)}
+.sync{padding:8px 30px;color:#425a6a;background:#f5f8fa;font-size:13px}button:disabled{opacity:.55;cursor:wait}
+progress,td small{font-variant-numeric:tabular-nums}h1,h2{text-wrap:balance}.form-error{font-weight:400}
 @media(max-width:1050px){.layout{grid-template-columns:1fr}nav{border-right:0;border-bottom:1px solid #cbd6df}.compare{grid-template-columns:1fr}main{padding:16px}}
 @media(max-width:600px){header{padding:20px}.primary{padding:10px}.primary a{padding:10px 12px}.workspace{padding:10px 16px}.workspace-body main{padding:18px}.section-heading{align-items:flex-start}td,th{padding:12px 10px}}
 """
@@ -67,7 +70,7 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+                "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'",
             )
             self.end_headers()
             self.wfile.write(data)
@@ -89,12 +92,13 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
             self.end_headers()
 
         def shell(self, view, content, sidebar=""):
+            pending_count = len(store.human_queue())
             links = "".join(
                 f'<a href="{escape(self.link(view=key))}"'
                 f"{' aria-current=page' if view == key else ''}>{label}</a>"
                 for key, label in (
                     ("tasks", "处理任务"),
-                    ("review", "人工待审"),
+                    ("review", f"人工待审 · {pending_count}"),
                     ("library", "已入库"),
                 )
             )
@@ -104,15 +108,18 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
             location = f"{workspace['root']} · {workspace['workspace_id']}"
             return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1"><title>史料研究工作台</title>
-            <style>{STYLE}</style></head><body><header><h1>史料研究工作台</h1>
+            <style>{STYLE}</style><script defer src="{escape(self.link("/assets/workbench.js"))}"></script></head><body data-workspace-id="{workspace["workspace_id"]}"><header><h1>史料研究工作台</h1>
             <p>从原件到可检索正文，每一步都有记录。</p></header>
-            <nav class="primary" aria-label="工作台导航">{links}</nav>
+            <nav class="primary" aria-label="工作台导航" data-live-section="navigation">{links}</nav>
             <div class="workspace">当前工作区 <code>{escape(location)}</code></div>
+            <div class="sync" data-sync-status role="status" aria-live="polite">正在连接进度更新…</div>
             <div class="{"layout" if sidebar else "workspace-body"}">{sidebar}<main>{content}</main></div></body></html>'''
 
         def run_form(self, doc):
             if doc["state"] == "published":
                 return ""
+            if (doc.get("run_request") or {}).get("state") == "waiting_human":
+                return f'<a href="{escape(self.link(view="review", document=doc["id"]))}">打开人工待审</a>'
             return f'''<form method="post" action="{escape(self.link("/run"))}" class="inline">
             <input type="hidden" name="document_id" value="{escape(doc["id"])}">
             <button class="secondary">继续 / 重试运行</button></form>'''
@@ -134,6 +141,9 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                 "approved": "已通过",
                 "superseded": "已保留历史",
                 "failed": "运行失败",
+                "awaiting_ocr": "等待识别",
+                "awaiting_review": "等待原图审核",
+                "awaiting_verification": "等待独立复核",
             }.get(state, state or "尚未排队")
 
         def document_link(self, doc):
@@ -171,7 +181,7 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
             <label for="source">本地 PDF / 图片完整路径</label><input id="source" name="source" required placeholder="D:\\史料\\原件.pdf">
             <label for="title">文档名称（可选）</label><input id="title" name="title">
             <button>导入并开始处理</button><small>支持 PDF、PNG、JPEG、TIFF。原件保留在当前工作区。</small></form></section>
-            <section class="panel"><h2>任务列表 · {len(documents)}</h2>
+            <section class="panel" data-live-section="task-list"><h2>任务列表 · {len(documents)}</h2>
             {f'<div class="table-scroll"><table><thead><tr><th>文档</th><th>页面进度</th><th>内容状态</th><th>运行状态</th><th>操作</th></tr></thead><tbody>{rows}</tbody></table></div>' if rows else '<p class="empty">还没有文档。在上方输入原件路径即可开始。</p>'}</section>'''
             return self.shell("tasks", notice + content)
 
@@ -226,28 +236,36 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
             )
             revision_note = ""
             if doc.get("active_publication") and doc["state"] != "published":
-                revision_note = f'<div class="notice">当前为第 {doc.get("revision", 1)} 版草稿；已入库检索继续使用通过审核的第 {doc["active_publication"]["revision"]} 版，直到新版本全部通过。</div>'
+                reason = doc["revision_history"][-1]["reason"]
+                revision_note = f'<div class="notice">当前为第 {doc.get("revision", 1)} 版草稿；检索暂用历史发布的第 {doc["active_publication"]["revision"]} 版。复核原因：{escape(reason.split("。", 1)[0])}<details><summary>查看复核依据</summary><pre>{escape(reason)}</pre></details></div>'
             revision_form = ""
             if doc["state"] == "published" and any(
                 p["approved"].get("approval_type") != "human" for p in doc["pages"]
             ):
                 revision_form = f'<details><summary>重新核对已发布内容</summary><form method="post" action="{escape(self.link("/revision"))}"><input type="hidden" name="document_id" value="{doc["id"]}"><label for="reason">重新核对原因</label><input id="reason" name="reason" required><button class="secondary">创建复核版本并开始</button><small>保留当前发布版本和人工决定；新版本全部通过后才替换检索版本。</small></form></details>'
-            return f'''<a href="{escape(self.link(view="tasks"))}">← 全部任务</a><div class="section-heading"><div>
+            return f'''<div data-live-section="document"><a href="{escape(self.link(view="tasks"))}">← 全部任务</a><div class="section-heading"><div>
             <h2>{escape(doc["title"])}</h2><p>{escape(self.state_label(doc["state"]))} · {len(doc["pages"])} 页</p></div>
             <a href="{self.document_link(doc)}">刷新状态</a></div>
             {revision_note}{failure}<section class="panel"><h2>运行状态</h2><p>{escape(self.run_label(run))} <code>{escape(run.get("state", ""))}</code></p>
             <p>排队请求由本地运行器接续；未启动运行器时会保持排队。</p>{self.run_form(doc)}</section>
             <section class="panel"><h2>逐页进度</h2><div class="table-scroll"><table><thead><tr><th>物理页</th><th>处理方式</th><th>页面状态</th><th>正文与核对</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></section>
             <section class="panel"><h2>文章目录</h2>{f"<ul>{article_list}</ul>" if articles else "<p>全文通过后自动整理文章目录。</p>"}</section>
-            {revision_form}<details><summary>处理任务与历史</summary><table><thead><tr><th>步骤</th><th>范围</th><th>状态</th></tr></thead><tbody>{task_rows}</tbody></table>
-            <pre>{escape(json.dumps(run, ensure_ascii=False, indent=2))}</pre></details>'''
+            <details><summary>处理任务与历史</summary><table><thead><tr><th>步骤</th><th>范围</th><th>状态</th></tr></thead><tbody>{task_rows}</tbody></table>
+            <pre>{escape(json.dumps(run, ensure_ascii=False, indent=2))}</pre></details></div>
+            <div data-live-section="revision-controls">{revision_form}</div>'''
 
         def render_library(self, query):
             term = query.get("q", "").strip()
             results = store.search(term) if term else []
             hits = "".join(
                 f'<article class="search-hit"><a href="{escape(self.link(view="document", document=row.get("document_id", row.get("id"))))}">{escape(row.get("title", row.get("document_id", "文档")))}</a>'
-                f"<small>物理第 {escape(row.get('page', ''))} 页</small><pre>{escape(row.get('excerpt', row.get('snippet', row.get('text', ''))))}</pre></article>"
+                f"<small>物理第 {escape(row.get('page', ''))} 页</small>"
+                + (
+                    f'<p class="notice">新版本复核中，以下为历史发布文本。{escape((row.get("revision_reason") or "").split("。", 1)[0])}</p>'
+                    if row.get("revision_pending")
+                    else ""
+                )
+                + f"<pre>{escape(row.get('excerpt', row.get('snippet', row.get('text', ''))))}</pre></article>"
                 for row in results
             )
             documents = [store.status(doc["id"]) for doc in store.list_documents()]
@@ -257,19 +275,40 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                 if doc["state"] == "published" or doc.get("active_publication")
             ]
             entries = "".join(
-                f'<li><a href="{self.document_link(doc)}">{escape(doc["title"])}</a></li>'
+                f'<li><a href="{self.document_link(doc)}">{escape(doc["title"])}</a>{" · 新版本复核中" if doc["state"] != "published" else ""}</li>'
                 for doc in documents
             )
             return f'''<h2>已入库</h2><p>仅检索全部通过并已发布的正文。</p><section class="panel">
             <form method="get" action="/"><input type="hidden" name="token" value="{escape(token)}"><input type="hidden" name="view" value="library">
             <label for="q">检索已入库正文</label><input id="q" name="q" value="{escape(term)}" required><button>检索</button></form></section>
-            {f'<section class="panel"><h2>检索结果 · {len(results)}</h2>{hits or "<p>没有匹配的已入库内容。</p>"}</section>' if term else ""}
-            <section class="panel"><h2>已入库文档 · {len(documents)}</h2>{f"<ul>{entries}</ul>" if entries else "<p>还没有已入库文档。处理任务全部通过后会出现在这里。</p>"}</section>'''
+            <div data-live-section="library-results">{f'<section class="panel"><h2>检索结果 · {len(results)}</h2>{hits or "<p>没有匹配的已入库内容。</p>"}</section>' if term else ""}
+            <section class="panel"><h2>已入库文档 · {len(documents)}</h2>{f"<ul>{entries}</ul>" if entries else "<p>还没有已入库文档。处理任务全部通过后会出现在这里。</p>"}</section></div>'''
 
         def do_GET(self):
             try:
                 query = self.query()
                 path = urlparse(self.path).path
+                if path in {"/health", "/changes"}:
+                    from hrs_codex.workspace import change_token, identity
+
+                    state = {"workspace_id": identity(store)["workspace_id"]}
+                    if path == "/changes":
+                        state["revision"] = change_token(store)
+                    else:
+                        executor = getattr(self.server, "executor", None)
+                        state["executor_running"] = bool(
+                            executor
+                            and executor.thread
+                            and executor.thread.is_alive()
+                            and not executor.stop_event.is_set()
+                        )
+                    self.respond(200, json.dumps(state), "application/json; charset=utf-8")
+                    return
+                if path == "/assets/workbench.js":
+                    from hrs_codex.workbench_assets import SCRIPT
+
+                    self.respond(200, SCRIPT, "text/javascript; charset=utf-8")
+                    return
                 if path == "/page-image":
                     document_id, number = query["document"], int(query["page"])
                     if query.get("detail") == "1":
@@ -338,10 +377,12 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                 <button name="verdict" value="approved">确认整页通过</button><button class="secondary" name="verdict" value="pending">保存草稿，继续待审</button>
                 </form><details><summary>查看原始 OCR</summary><pre>{escape(packet["ocr_markdown"])}</pre></details>
                 <details><summary>查看机器尝试和人工历史</summary><pre>{history}</pre></details></section></div>'''
-            sidebar = (
-                f'<nav aria-label="待审页面"><h2>待审队列 · {len(queue)}</h2>{"".join(links)}</nav>'
+            sidebar = f'<nav aria-label="待审页面" data-live-section="review-queue"><h2>待审队列 · {len(queue)}</h2>{"".join(links)}</nav>'
+            return self.shell(
+                "review",
+                f'<div data-live-section="review-content">{notice}{content}</div>',
+                sidebar,
             )
-            return self.shell("review", notice + content, sidebar)
 
         def do_POST(self):
             try:
@@ -352,7 +393,13 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                 embedded_navigation = (
                     self.headers.get("Origin") == "null"
                     and self.headers.get("Sec-Fetch-Site") == "same-origin"
-                    and self.headers.get("Sec-Fetch-Mode") == "navigate"
+                    and (
+                        self.headers.get("Sec-Fetch-Mode") == "navigate"
+                        or (
+                            self.headers.get("Sec-Fetch-Mode") == "same-origin"
+                            and self.headers.get("X-HRS-Form") == "1"
+                        )
+                    )
                 )
                 if urlparse(self.path).path not in {
                     "/decision",
@@ -396,9 +443,7 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                     )
                     return
                 if form.get("verdict") == "approved" and form.get("confirmed") != "yes":
-                    raise ValueError(
-                        "Confirm that the entire page has been checked before approving"
-                    )
+                    raise ValueError("确认通过前，请勾选已对照原图核对整页。")
                 result = store.record_human_review(
                     form["document_id"],
                     int(form["page"]),
@@ -413,9 +458,19 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                     message = "人工决定已保存。其他页面仍待审。"
                     if result["state"] == "processing":
                         message = "全文页面已通过，后续文章整理已自动排队。"
-                self.redirect(view="review", message=message)
+                context = (
+                    {"document": form["document_id"], "page": form["page"]}
+                    if result["page_state"] == "pending"
+                    else {}
+                )
+                self.redirect(view="review", message=message, **context)
             except (ValueError, KeyError, OSError, StopIteration) as error:
-                self.respond(409, escape(error))
+                message = (
+                    "找不到原件，请核对完整文件路径后重试。"
+                    if isinstance(error, FileNotFoundError)
+                    else str(error)
+                )
+                self.respond(409, escape(message))
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.authority = f"127.0.0.1:{server.server_port}"
@@ -430,12 +485,14 @@ def serve(store: Store, port: int) -> None:
     from hrs_codex.store import atomic_json
     from hrs_codex.workspace import identity
 
-    with create_review_server(store, port) as server, Runner(store):
+    with create_review_server(store, port) as server, Runner(store) as executor:
+        server.executor = executor
         record = {
             **identity(store),
             "url": server.review_url,
             "pid": os.getpid(),
             "runner": "native-codex",
+            "workbench_protocol": 2,
         }
         atomic_json(store.root / ".workbench.json", record)
         print(f"史料工作台：{server.review_url}", flush=True)

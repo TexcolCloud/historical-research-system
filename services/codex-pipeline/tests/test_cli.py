@@ -55,6 +55,7 @@ def test_runner_native_command_paths_model_inheritance_and_receipt(tmp_path, mon
     assert process.arguments[process.arguments.index("--add-dir") + 1] == str(store.root)
     assert process.options["cwd"] == cli.PROJECT
     assert process.options["stdin"] == subprocess.PIPE
+    assert "features.shell_tool=false" in process.arguments
     assert "native Codex subagents" in process.prompt
     assert document_id in process.prompt
     assert any(
@@ -70,6 +71,27 @@ def test_runner_native_command_paths_model_inheritance_and_receipt(tmp_path, mon
     assert json.loads((logs / "request.json").read_text(encoding="utf-8"))["model"] == model
     assert json.loads((logs / "receipt.json").read_text(encoding="utf-8"))["returncode"] == 0
     assert (logs / "events.jsonl").read_text(encoding="utf-8").startswith('{"type":')
+
+
+def test_runtime_loads_project_skill_without_requiring_a_worker_shell(tmp_path, monkeypatch):
+    store, document_id = prepared_store(tmp_path)
+    project = tmp_path / "project"
+    skill = project / ".agents/skills/historical-research/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("Synthetic skill content for runtime bootstrap", encoding="utf-8")
+    monkeypatch.setattr(cli, "PROJECT", project)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
+    launched = []
+
+    def launch(args, **options):
+        process = ProcessStub(args, **options)
+        launched.append(process)
+        return process
+
+    monkeypatch.setattr(cli.subprocess, "Popen", launch)
+    cli.run_codex(store, document_id)
+    assert skill.read_text("utf-8") in launched[0].prompt
+    assert "do not import or enqueue yourself again" in launched[0].prompt
 
 
 def test_runner_nonzero_exit_keeps_request_events_and_failure_receipt(tmp_path, monkeypatch):

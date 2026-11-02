@@ -213,6 +213,25 @@ class Store:
                             f"Page {page['page']} {field} differs from its retained machine result"
                         )
         for task in doc["tasks"]:
+            readings = task.get("source_reading_history", []) + (
+                [task["source_reading"]] if task.get("source_reading") else []
+            )
+            for reading in readings:
+                if digest({k: v for k, v in reading.items() if k != "sha256"}) != reading["sha256"]:
+                    raise ValueError("Original reading evidence hash mismatch")
+                if (
+                    reading["reading"]["image_sha256"]
+                    != doc["pages"][task["page"] - 1]["image_sha256"]
+                ):
+                    raise ValueError("Original reading page hash mismatch")
+                self._verify_details(doc, task, reading["reading"])
+            if task.get("source_first_required") and task.get("result") is not None:
+                if (
+                    not task.get("source_reading")
+                    or task["receipt"].get("source_reading_sha256")
+                    != task["source_reading"]["sha256"]
+                ):
+                    raise ValueError("Machine decision lacks its original-first reading")
             if task.get("inputs") and digest(task["inputs"]) != task["claim"]["input_sha256"]:
                 raise ValueError("Retained task input hash mismatch")
             if (
@@ -271,7 +290,14 @@ class Store:
                 documents.append({key: doc[key] for key in ("id", "title", "state", "created_at")})
             return documents
 
-    def original_page(self, document_id: str, page: int) -> tuple[dict, bytes]:
+    def original_page(
+        self,
+        document_id: str,
+        page: int,
+        *,
+        task_id: str | None = None,
+        lease_token: str | None = None,
+    ) -> tuple[dict, bytes]:
         """Read original pixels for pending, approved or published content alike."""
         with self.lock:
             doc = self._load(document_id)
@@ -283,12 +309,93 @@ class Store:
             data = self._path(doc, row["image"]).read_bytes()
             if digest(data) != row["image_sha256"]:
                 raise ValueError("Original page image hash mismatch")
-            return {
+            metadata = {
                 "document_id": document_id,
                 "page": page,
                 "image_sha256": row["image_sha256"],
                 "source_sha256": doc["source"]["sha256"],
-            }, data
+            }
+            if task_id is not None or lease_token is not None:
+                task = self._active_review(doc, task_id, lease_token)
+                if task["page"] != page:
+                    raise ValueError("Original image does not belong to the leased page")
+                access = task.get("image_access")
+                if not access:
+                    access = {
+                        **metadata,
+                        "task_id": task_id,
+                        "worker_id": task["claim"]["worker_id"],
+                        "receipt": uuid4().hex,
+                        "opened_at": time.time(),
+                    }
+                    task["image_access"] = access
+                    self._save(doc)
+                metadata["image_receipt"] = access["receipt"]
+            return metadata, data
+
+    @staticmethod
+    def _active_review(doc: dict, task_id: str, lease_token: str) -> dict:
+        task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
+        if (
+            task["stage"] not in {"review", "verify"}
+            or task["state"] != "leased"
+            or task["claim"]["lease_token"] != lease_token
+        ):
+            raise ValueError("Original reading requires this active review lease")
+        if task["claim"]["expires_at"] <= time.time():
+            raise ValueError("Task lease expired; reclaim before reading")
+        return task
+
+    def review_candidate(
+        self, document_id: str, task_id: str, lease_token: str, original_reading: dict
+    ) -> dict:
+        """Freeze source observations before exposing the candidate to a reviewer."""
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            task = self._active_review(doc, task_id, lease_token)
+            access = task.get("image_access")
+            if (
+                not access
+                or not isinstance(original_reading, dict)
+                or original_reading.get("image_receipt") != access["receipt"]
+                or original_reading.get("image_sha256") != access["image_sha256"]
+            ):
+                raise ValueError(
+                    "Open original_image with this task and lease before recording observations"
+                )
+            observations = original_reading.get("observations")
+            unresolved = original_reading.get("unresolved", [])
+            if (
+                not isinstance(observations, list)
+                or not observations
+                or any(not isinstance(s, str) or not s.strip() for s in observations)
+            ):
+                raise ValueError("Original reading requires nonempty source observations")
+            if not isinstance(unresolved, list) or any(
+                not isinstance(s, str) or not s.strip() for s in unresolved
+            ):
+                raise ValueError("Unresolved original observations must be a list of issues")
+            self._verify_details(doc, task, original_reading)
+            if task.get("source_reading"):
+                if task["source_reading"]["reading"] != original_reading:
+                    raise ValueError(
+                        "Original reading cannot change after candidate exposure; retain uncertainty and retry independently"
+                    )
+            else:
+                reading = {
+                    "reading": original_reading,
+                    "image_access": access,
+                    "worker_id": task["claim"]["worker_id"],
+                    "input_sha256": task["claim"]["input_sha256"],
+                    "approval_type": "source_observation",
+                    "human_approval": False,
+                    "created_at": time.time(),
+                }
+                reading["sha256"] = digest(reading)
+                task["source_reading"] = reading
+                self._save(doc)
+            return {**task, **task["claim"]}
 
     def _inputs(self, doc: dict, task: dict) -> dict:
         inputs = {
@@ -296,6 +403,9 @@ class Store:
             "source_sha256": doc["source"]["sha256"],
             "stage": task["stage"],
         }
+        if doc.get("revision") and ("inputs" not in task or "revision" in task["inputs"]):
+            inputs["revision"] = doc["revision"]
+            inputs["revision_reason"] = doc["revision_history"][-1]["reason"]
         if task["page"] is not None:
             page = doc["pages"][task["page"] - 1]
             if "extraction_plan" in page:
@@ -343,7 +453,13 @@ class Store:
             return {**task, "inputs": inputs}
 
     def claim_task(
-        self, document_id: str, stage: str, worker_id: str, lease_seconds: int = 900
+        self,
+        document_id: str,
+        stage: str,
+        worker_id: str,
+        lease_seconds: int = 900,
+        *,
+        source_first: bool = False,
     ) -> dict | None:
         if stage not in STAGES or not isinstance(worker_id, str) or not worker_id.strip():
             raise ValueError("A valid stage and nonempty worker ID are required")
@@ -368,6 +484,11 @@ class Store:
                     "expires_at": time.time() + lease_seconds,
                     "input_sha256": digest(inputs),
                 }
+                if task.get("source_reading"):
+                    task.setdefault("source_reading_history", []).append(task.pop("source_reading"))
+                task.pop("image_access", None)
+                if source_first and stage in {"review", "verify"}:
+                    task["source_first_required"] = True
                 task.update(state="leased", claim=claim, inputs=inputs)
                 self._save(doc)
                 return {**task, **claim}
@@ -405,6 +526,10 @@ class Store:
                 raise ValueError("Task input hash mismatch")
             self._verify_details(doc, task, result)
             stage = task["stage"]
+            if task.get("source_first_required") and not task.get("source_reading"):
+                raise ValueError(
+                    "Record original-first observations through review_candidate before judging the candidate"
+                )
             page = doc["pages"][task["page"] - 1] if task["page"] is not None else None
             receipt = {
                 "task_id": task_id,
@@ -414,6 +539,8 @@ class Store:
                 "human_approval": False,
                 "created_at": time.time(),
             }
+            if task.get("source_reading"):
+                receipt["source_reading_sha256"] = task["source_reading"]["sha256"]
             if stage == "ocr":
                 markdown = result.get("markdown")
                 if not isinstance(markdown, str):
@@ -425,6 +552,10 @@ class Store:
                 doc["tasks"].append(self._new_task("review", page["page"]))
             elif stage in {"review", "verify"}:
                 verdict = self._review_result(result)
+                if verdict == "approved" and task.get("source_reading", {}).get("reading", {}).get(
+                    "unresolved"
+                ):
+                    raise ValueError("Unresolved original observations cannot be approved")
                 if stage == "verify" and verdict == "corrections":
                     raise ValueError("Failed correction verification must remain pending")
                 text = page["candidate" if stage == "verify" else "ocr"]
@@ -559,6 +690,10 @@ class Store:
                 )
             if task["stage"] == "human_review":
                 raise ValueError("A human draft must be resolved in the human review workspace")
+            if task["stage"] == "machine_handoff":
+                raise ValueError(
+                    "An explicit source dispute awaits human review; machine retry cannot reopen it"
+                )
             task["state"] = "superseded"
             # A rejected correction needs a new proposal against retained OCR,
             # followed by another independent verification of that proposal.
@@ -587,7 +722,9 @@ class Store:
                 raise ValueError("Unknown physical page")
             target = doc["pages"][page - 1]
             history = [t for t in doc["tasks"] if t["page"] == page]
-            if target["state"] == "approved" or any(t["stage"] == "human_review" for t in history):
+            if target["state"] == "approved" or any(
+                t["stage"] in {"human_review", "machine_handoff"} for t in history
+            ):
                 raise ValueError(
                     "Approved content and human decisions or drafts cannot be replaced"
                 )
@@ -860,6 +997,144 @@ class Store:
                     )
             return rows
 
+    def request_human_review(
+        self, document_id: str, page: int, issue: str, evidence: dict, worker_id: str
+    ) -> dict:
+        """Retain an explicit Codex audit dispute without impersonating a human."""
+        if (
+            not isinstance(issue, str)
+            or not issue.strip()
+            or not isinstance(worker_id, str)
+            or not worker_id.strip()
+            or worker_id.strip().startswith("human:")
+        ):
+            raise ValueError(
+                "A machine auditor identity and an unresolved source issue are required"
+            )
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            if type(page) is not int or not 1 <= page <= len(doc["pages"]):
+                raise ValueError("Unknown physical page")
+            target = doc["pages"][page - 1]
+            history = [t for t in doc["tasks"] if t["page"] == page]
+            if any(t["stage"] == "human_review" for t in history):
+                raise ValueError("Human approvals and drafts cannot be replaced by a machine audit")
+            text = target.get("approved") or target.get("candidate") or target.get("ocr")
+            if (
+                not text
+                or not isinstance(evidence, dict)
+                or evidence.get("source_sha256") != doc["source"]["sha256"]
+                or evidence.get("image_sha256") != target["image_sha256"]
+                or evidence.get("markdown_sha256") != text["sha256"]
+            ):
+                raise ValueError("Audit evidence does not match the current source, page and text")
+            observations = evidence.get("observations")
+            if (
+                not evidence.get("original_details")
+                or not isinstance(observations, list)
+                or not observations
+                or any(not isinstance(s, str) or not s.strip() for s in observations)
+            ):
+                raise ValueError(
+                    "Human handoff requires retained original-detail evidence and observations"
+                )
+            self._verify_details(doc, {"page": page}, evidence)
+            prior = next(
+                (
+                    t
+                    for t in reversed(history)
+                    if t["stage"] == "machine_handoff" and t["state"] == "pending"
+                ),
+                None,
+            )
+            if (
+                prior
+                and prior["inputs"]["audit_evidence"] == evidence
+                and prior["result"]["issues"] == [issue.strip()]
+                and prior["receipt"]["worker_id"] == worker_id.strip()
+            ):
+                return {
+                    "document_id": document_id,
+                    "page": page,
+                    "state": "pending",
+                    "receipt": prior["receipt"],
+                }
+            if doc.get("run_request", {}).get("state") == "running" or any(
+                t["state"] == "leased" and t["claim"]["expires_at"] > time.time()
+                for t in doc["tasks"]
+            ):
+                raise ValueError(
+                    "Wait for the active coordinator and workers before an audit handoff"
+                )
+            if doc["state"] == "published":
+                self.begin_revision(document_id, issue, pages=[page])
+                doc = self._load(document_id)
+                target = doc["pages"][page - 1]
+            for task in doc["tasks"]:
+                if task["stage"] == "organization" or (
+                    task["page"] == page and task["state"] in {"ready", "leased", "pending"}
+                ):
+                    task["state"] = "superseded"
+            task = self._new_task("machine_handoff", page)
+            inputs = {
+                "document_id": document_id,
+                "source_sha256": doc["source"]["sha256"],
+                "page": page,
+                "image_sha256": target["image_sha256"],
+                "markdown": text["markdown"],
+                "markdown_sha256": text["sha256"],
+                "audit_evidence": evidence,
+            }
+            result = {
+                "verdict": "pending",
+                "issues": [issue.strip()],
+                "observations": evidence["observations"],
+                "original_details": evidence["original_details"],
+            }
+            receipt = {
+                "task_id": task["task_id"],
+                "worker_id": worker_id.strip(),
+                "input_sha256": digest(inputs),
+                "result_sha256": digest(result),
+                "approval_type": "machine",
+                "human_approval": False,
+                "sealed_gold_approval": False,
+                "origin": "codex_original_audit_handoff",
+                "created_at": time.time(),
+            }
+            task.update(
+                state="pending",
+                inputs=inputs,
+                claim={"input_sha256": digest(inputs)},
+                result=result,
+                receipt=receipt,
+            )
+            doc["tasks"].append(task)
+            target.pop("approved", None)
+            target.update(
+                state="pending",
+                review={**receipt, "verdict": "pending", "issues": result["issues"]},
+            )
+            doc.update(state="pending", organization=None, publication=None)
+            request = self._request_run(doc)
+            request.update(state="waiting_human", error=None, not_before=0, ready_after=0)
+            request["history"].append(
+                {
+                    "event": "audit_handoff",
+                    "at": time.time(),
+                    "page": page,
+                    "evidence_sha256": digest(evidence),
+                }
+            )
+            self._save(doc)
+            return {
+                "document_id": document_id,
+                "page": page,
+                "state": "pending",
+                "receipt": receipt,
+            }
+
     def _human_packet(self, doc: dict, number: int) -> dict:
         if type(number) is not int or not 1 <= number <= len(doc["pages"]):
             raise ValueError("Unknown physical page")
@@ -889,6 +1164,7 @@ class Store:
                     "state": t["state"],
                     "result": t.get("result"),
                     "receipt": t.get("receipt"),
+                    **({"source_reading": t["source_reading"]} if t.get("source_reading") else {}),
                 }
                 for t in history
             ],
@@ -1182,6 +1458,14 @@ class Store:
         with self.lock:
             for path in sorted((self.root / "documents").glob("*/document.json")):
                 doc = json.loads(path.read_text(encoding="utf-8"))
+                revision_pending = bool(
+                    doc.get("active_publication") and doc["state"] != "published"
+                )
+                revision_reason = (
+                    doc.get("revision_history", [{}])[-1].get("reason")
+                    if revision_pending
+                    else None
+                )
                 if doc.get("active_publication"):
                     doc = self._published_snapshot(doc, doc["active_publication"])
                 elif doc["state"] != "published":
@@ -1201,6 +1485,8 @@ class Store:
                             "image": str(self._path(doc, page["image"])),
                             "image_sha256": page["image_sha256"],
                             "markdown_sha256": page["approved"]["sha256"],
+                            "revision_pending": revision_pending,
+                            "revision_reason": revision_reason,
                         }
                     )
                     if len(results) >= limit:

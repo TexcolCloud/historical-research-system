@@ -103,6 +103,35 @@ office, name or date without visible support is not harmless normalization.
 Read the original first; use the OCR only as a candidate. Persist pending when the
 original remains genuinely unclear after the detail retry.
 
+### Enforced original-first review
+
+New MCP review and verify claims withhold candidate text, proposed patches and
+native text. Call `original_image(document_id, page, task_id, lease_token)` using
+your own claim. It returns pixels plus a lease-bound `image_receipt`. Inspect the
+entire original, including distinctive terms, names, dates, quantities, negation,
+causal statements, notes and page structure. Record those observations before
+reading a candidate:
+
+`review_candidate(document_id, task_id, lease_token, original_reading={
+  "image_sha256":"original image hash", "image_receipt":"returned receipt",
+  "observations":["literal source observations and structure"],
+  "unresolved":[], "original_details":[]
+})`
+
+Use `original_detail` before freezing uncertain small print and attach its actual
+metadata. Original observations are fallible machine evidence, not gold; preserve
+uncertainties explicitly. This call freezes observations and returns the complete
+candidate for comparison. Observations cannot be rewritten after candidate
+exposure. If the source observations have unresolved issues, approval is blocked;
+retain pending, and request an independent fresh attempt with new source evidence
+when justified. Corrections still require another worker's full original-first
+verify. Submissions without this reading receipt are rejected. Existing completed
+decisions and already-active legacy contracts remain historical evidence.
+
+Runtime coordinators use MCP tools only; the local bridge supplies the project
+skill verbatim and disables shell tools for that run and its workers. Coding-chat
+tools are unaffected. Rendering, evidence files and state writes belong to MCP.
+
 Call `submit_task(document_id, task_id, lease_token, result)`. Every result MUST
 include the claim's exact `input_sha256`. Examples below omit that repeated field:
 
@@ -153,3 +182,18 @@ the organization task becomes ready and its continuation is queued automatically
 The background executor delegates organization and publication. A publication containing human page decisions and machine organization
 is marked `mixed`, with `human_reviewed_pages`; document-level `human_approval`
 remains false because the entire workflow has not received human review.
+
+Independent final audits can discover a source-reading dispute after machine
+publication. Once the coordinator is idle, call `request_human_review` with the
+physical page, precise unresolved issue, your machine worker ID and evidence:
+`source_sha256`, `image_sha256`, current `markdown_sha256`, actual
+`original_details` metadata and a nonempty `observations` list. This records a
+machine pending decision, opens a revision when needed and preserves historical
+publications with a visible recheck warning. It grants no human approval and
+cannot overwrite human drafts or decisions. Explicit audit handoffs cannot be
+reopened by machine retry/fallback. The real human form resolves the page; its
+last approval automatically queues organization and publication as usual.
+
+Treat original-first observations as fallible. A disagreement is not settled by
+model majority or the existence of a prior publication. Inspect isolated original
+pixels and retain opposing observations; unresolved readings belong to humans.

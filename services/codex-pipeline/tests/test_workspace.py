@@ -5,6 +5,7 @@ import threading
 
 from hrs_codex import workspace
 from hrs_codex.human_review import create_review_server
+from hrs_codex.runner import Runner
 from hrs_codex.store import Store, atomic_json
 
 
@@ -30,10 +31,19 @@ def test_default_root_is_project_relative_and_identity_survives_restart(tmp_path
 
 def test_existing_loopback_workbench_is_reused_without_spawning_an_executor(tmp_path, monkeypatch):
     store = Store(tmp_path)
-    with create_review_server(store, 0) as server:
+    with (
+        create_review_server(store, 0) as server,
+        Runner(store, execute=lambda *a, **k: None) as executor,
+    ):
+        server.executor = executor
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        record = {**workspace.identity(store), "url": server.review_url, "pid": 123}
+        record = {
+            **workspace.identity(store),
+            "url": server.review_url,
+            "pid": 123,
+            "workbench_protocol": 2,
+        }
         atomic_json(store.root / ".workbench.json", record)
         monkeypatch.setattr(
             workspace.subprocess,
@@ -42,6 +52,15 @@ def test_existing_loopback_workbench_is_reused_without_spawning_an_executor(tmp_
         )
         try:
             assert workspace.ensure_workbench(store) == record
+            legacy = {k: v for k, v in record.items() if k != "workbench_protocol"}
+            atomic_json(store.root / ".workbench.json", legacy)
+            assert workspace.ensure_workbench(store) == legacy
+            # A registry cannot make an unrelated workspace or dead executor healthy.
+            atomic_json(store.root / ".workbench.json", {**record, "workspace_id": "wrong"})
+            assert workspace.running_workbench(store) is None
+            atomic_json(store.root / ".workbench.json", record)
+            executor.stop()
+            assert workspace.running_workbench(store) is None
             atomic_json(
                 store.root / ".workbench.json",
                 {**record, "url": "https://example.com/?token=never-send"},

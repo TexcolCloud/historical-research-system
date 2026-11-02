@@ -1,10 +1,11 @@
 """Local workbench operations against synthetic evidence, without launching models."""
 
+import json
 from http.client import HTTPConnection
 from urllib.parse import urlencode, urlparse
 
 from PIL import Image
-from test_human_review import complete, pending_document, request, running_server
+from test_human_review import complete, form_from_page, pending_document, request, running_server
 
 from hrs_codex.store import Store
 
@@ -98,6 +99,76 @@ def test_embedded_browser_opaque_origin_requires_same_origin_fetch_metadata_and_
         assert len(store.list_documents()) == 1
 
 
+def test_progress_feed_is_private_and_changes_with_durable_state(tmp_path):
+    store, doc_id = pending_document(tmp_path)
+    with running_server(store) as server:
+        path = action(server, "changes")
+        status, headers, body = request(server, path=path)
+        first = json.loads(body)
+        assert status == 200 and headers["Content-Type"].startswith("application/json")
+        assert json.loads(request(server, path=path)[2]) == first
+        store.request_run(doc_id)
+        second = json.loads(request(server, path=path)[2])
+        assert first["workspace_id"] == second["workspace_id"]
+        assert first["revision"] != second["revision"]
+        assert "markdown" not in second
+        assert request(server, path="/changes?token=wrong")[0] == 409
+        status, headers, script = request(server, path=action(server, "assets/workbench.js"))
+        assert status == 200 and headers["Content-Type"].startswith("text/javascript")
+        assert b"data-live-section" in script
+        _, headers, page = request(server, path=view(server, view="review"))
+        assert b'data-live-section="review-content"' in page
+        assert b"data-workspace-id=" in page
+        assert "script-src 'self'" in headers["Content-Security-Policy"]
+        assert "connect-src 'self'" in headers["Content-Security-Policy"]
+
+
+def test_saving_draft_stays_on_the_same_physical_page(tmp_path):
+    store, doc_id = pending_document(tmp_path, pages=2)
+    with running_server(store) as server:
+        _, _, body = request(server, path=view(server, view="review", document=doc_id, page=2))
+        action_url, form = form_from_page(body)
+        status, headers, _ = request(server, "POST", action_url, {**form, "verdict": "pending"})
+        assert status == 303
+        from urllib.parse import parse_qs
+
+        query = parse_qs(urlparse(headers["Location"]).query)
+        assert query["document"] == [doc_id] and query["page"] == ["2"]
+        assert store.human_packet(doc_id, 2)["markdown"] == form["markdown"]
+
+
+def test_embedded_progressive_form_requires_trusted_metadata_and_keeps_bad_submissions_pending(
+    tmp_path,
+):
+    store, doc_id = pending_document(tmp_path)
+    with running_server(store) as server:
+        body = urlencode({"document_id": doc_id}).encode()
+        for site, marker, expected in [
+            ("cross-site", "1", 409),
+            ("same-origin", "", 409),
+            ("same-origin", "1", 303),
+        ]:
+            connection = HTTPConnection("127.0.0.1", server.server_port)
+            connection.request(
+                "POST",
+                action(server, "run"),
+                body,
+                {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Origin": "null",
+                    "Sec-Fetch-Site": site,
+                    "Sec-Fetch-Mode": "same-origin",
+                    "X-HRS-Form": marker,
+                },
+            )
+            response = connection.getresponse()
+            assert response.status == expected
+            response.read()
+            connection.close()
+        assert store.status(doc_id)["pages"][0]["state"] == "pending"
+        assert store.status(doc_id)["publication"] is None
+
+
 def test_library_search_only_includes_published_reviewed_text_and_keeps_page_provenance(tmp_path):
     store, doc_id = pending_document(tmp_path)
     with running_server(store) as server:
@@ -170,5 +241,14 @@ def test_revision_workspace_keeps_active_library_and_original_images_available(t
         assert status == 200 and "版草稿".encode() in body
         assert "已入库文档 · 1".encode() in request(server, path=view(server, view="library"))[2]
         assert store.search("1938")[0]["document_id"] == doc_id
+        assert store.search("1938")[0]["revision_pending"] is True
+        assert (
+            b"Synthetic explicit recheck"
+            in request(server, path=view(server, view="library", q="1938"))[2]
+        )
+        assert (
+            "以下为历史发布文本".encode()
+            in request(server, path=view(server, view="library", q="1938"))[2]
+        )
         assert store.status(doc_id)["active_publication"]["publication"] == publication
         assert request(server, path=image_url)[0] == 200
