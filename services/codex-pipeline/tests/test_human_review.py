@@ -70,7 +70,10 @@ def request(server, method="GET", path=None, form=None, origin=True):
         headers["Origin"] = "http://" + server.authority
     connection.request(
         method,
-        path or urlparse(server.review_url).path + "?" + urlparse(server.review_url).query,
+        path
+        or urlparse(server.review_url).path
+        + "?"
+        + urlparse(server.review_url).query.replace("view=tasks", "view=review"),
         urlencode(form).encode("utf-8") if form else None,
         headers,
     )
@@ -125,7 +128,7 @@ def test_local_form_preserves_drafts_rejects_stale_actions_and_resumes_publicati
             request(
                 server,
                 "POST",
-                action.replace(urlparse(server.review_url).query, "token=wrong"),
+                re.sub(r"token=[^&]+", "token=wrong", action),
                 form,
             )[0]
             == 409

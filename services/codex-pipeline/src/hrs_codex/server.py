@@ -38,6 +38,51 @@ def create_server(root: Path) -> MCPServer:
         return Path(__file__).with_name("workflow.md").read_text(encoding="utf-8")
 
     @server.tool()
+    def workspace_status() -> dict:
+        """Identify the exact workspace shared by these tools, the executor and the workbench."""
+        from hrs_codex.workspace import identity
+
+        return identity(store)
+
+    @server.tool()
+    def open_workbench() -> dict:
+        """Start or reuse this workspace's loopback dashboard and native Codex executor."""
+        from hrs_codex.workspace import ensure_workbench
+
+        return ensure_workbench(store)
+
+    @server.tool()
+    def process_document(source: str, title: str = "") -> dict:
+        """Import and enqueue a document; the durable executor delegates to native Codex subagents."""
+        document = prepare(store, source, title)
+        request = store.request_run(document["id"])
+        return {
+            "document_id": document["id"],
+            "run_request": request,
+            "workbench": open_workbench(),
+        }
+
+    @server.tool()
+    def resume_document(document_id: str) -> dict:
+        """Explicitly retry technical run failures; human drafts and content issues remain protected."""
+        request = store.request_run(document_id, resume=True)
+        return {"document_id": document_id, "run_request": request, "workbench": open_workbench()}
+
+    @server.tool()
+    def fallback_page(
+        document_id: str, page: int, reason: str, new_evidence: str | None = None
+    ) -> dict:
+        """Bounded content fallback to full-page OCR; keep previous candidates and reasons."""
+        return store.fallback_page(document_id, page, reason, new_evidence=new_evidence)
+
+    @server.tool()
+    def begin_revision(document_id: str, reason: str, pages: list[int] | None = None) -> dict:
+        """Explicitly reopen published machine pages, preserving the active published version and human decisions."""
+        result = store.begin_revision(document_id, reason, pages=pages)
+        store.request_run(document_id)
+        return {"revision": result, "workbench": open_workbench()}
+
+    @server.tool()
     def prepare_document(source: str, title: str = "") -> dict:
         """Retain a local PDF/image, render physical pages, and create recoverable OCR tasks."""
         return prepare(store, source, title)
@@ -48,14 +93,55 @@ def create_server(root: Path) -> MCPServer:
         return store.list_documents()
 
     @server.tool()
-    def document_status(document_id: str) -> dict:
-        """Read pages, task states and evidence; clean pages remain readable before publication."""
-        return store.status(document_id)
+    def document_status(document_id: str, include_content: bool = False) -> dict:
+        """Read compact progress by default; explicitly request full retained content when needed."""
+        doc = store.status(document_id)
+        if include_content:
+            return doc
+        for page in doc["pages"]:
+            for field in ("ocr", "candidate", "approved"):
+                if field in page:
+                    page[field].pop("markdown", None)
+            page.pop("fallback_history", None)
+            if "extraction_plan" in page:
+                page["extraction_plan"].pop("probe_evidence", None)
+                page["extraction_plan"].pop("native_markdown", None)
+        doc["tasks"] = [
+            {k: v for k, v in task.items() if k not in {"inputs", "result"}}
+            for task in doc["tasks"]
+        ]
+        doc.pop("published_versions", None)
+        return doc
+
+    @server.tool()
+    def approved_page_text(document_id: str, page: int) -> dict:
+        """Read one approved page with its hash; organization workers can inspect large documents page by page."""
+        doc = store.status(document_id)
+        if type(page) is not int or not 1 <= page <= len(doc["pages"]):
+            raise ValueError("Unknown physical page")
+        row = doc["pages"][page - 1]
+        if row["state"] != "approved":
+            raise ValueError("Page has unresolved content")
+        store._verify_evidence(doc)
+        return {
+            "document_id": document_id,
+            "page": page,
+            "image_sha256": row["image_sha256"],
+            "markdown": row["approved"]["markdown"],
+            "markdown_sha256": row["approved"]["sha256"],
+        }
 
     @server.tool()
     def claim_task(document_id: str, stage: str, worker_id: str) -> dict | None:
         """Lease one ocr/review/verify/organization task to a Codex subagent. Null means none ready."""
-        return store.claim_task(document_id, stage, worker_id)
+        task = store.claim_task(document_id, stage, worker_id)
+        if task and stage == "organization":
+            for page in task["inputs"]["pages"]:
+                page.pop("markdown", None)
+            task["content_access"] = (
+                "Use approved_page_text for each page; hashes bind the entire collection."
+            )
+        return task
 
     @server.tool()
     def task_details(document_id: str, task_id: str) -> dict:
@@ -65,21 +151,9 @@ def create_server(root: Path) -> MCPServer:
     @server.tool(structured_output=False)
     def original_image(document_id: str, page: int) -> list:
         """Open the retained original page as image pixels, with its SHA-256 evidence."""
-        document = store.status(document_id)
-        row = next((row for row in document["pages"] if row["page"] == page), None)
-        if row is None:
-            raise ValueError("Unknown physical page")
-        path = (Path(document["directory"]) / row["image"]).resolve()
-        if not path.is_relative_to(Path(document["directory"]).resolve()):
-            raise ValueError("Original image path escapes document directory")
-        from hashlib import sha256
-
-        data = path.read_bytes()
-        actual = sha256(data).hexdigest()
-        if actual != row["image_sha256"]:
-            raise ValueError("Original image evidence hash mismatch")
+        metadata, data = store.original_page(document_id, page)
         return [
-            TextContent(type="text", text=json.dumps({"page": page, "image_sha256": actual})),
+            TextContent(type="text", text=json.dumps(metadata)),
             Image(data=data, format="png").to_image_content(),
         ]
 

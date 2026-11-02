@@ -11,6 +11,8 @@ import pypdfium2 as pdfium
 from PIL import Image, ImageOps, ImageSequence
 from pypdf import PdfReader
 
+from hrs_codex.routing import image_plan, probe_page
+
 MEDIA_TYPES = {
     ".pdf": "application/pdf",
     ".png": "image/png",
@@ -119,10 +121,14 @@ def render_document(source: Path, destination: Path) -> dict:
             for number in range(len(document)):
                 page = document[number]
                 try:
+                    plan = probe_page(page)
                     bitmap = page.render(scale=3)
                     try:
                         image = bitmap.to_pil()
-                        pages.append(_save_page(image, pages_directory / f"{number + 1:06d}.png", number + 1))
+                        pages.append(
+                            _save_page(image, pages_directory / f"{number + 1:06d}.png", number + 1)
+                        )
+                        pages[-1]["extraction_plan"] = plan
                     finally:
                         bitmap.close()
                 finally:
@@ -132,6 +138,7 @@ def render_document(source: Path, destination: Path) -> dict:
             for number, frame in enumerate(ImageSequence.Iterator(document), start=1):
                 image = ImageOps.exif_transpose(frame)
                 pages.append(_save_page(image, pages_directory / f"{number:06d}.png", number))
+                pages[-1]["extraction_plan"] = image_plan()
     if not pages:
         raise ValueError("Source document did not contain any pages.")
     manifest = {

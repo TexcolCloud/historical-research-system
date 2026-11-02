@@ -129,6 +129,16 @@ class Store:
                         "state": "awaiting_ocr",
                     }
                 )
+                plan = page.get("extraction_plan")
+                if plan is not None:
+                    if plan.get("route") not in {"native", "mixed", "ocr", "blank_candidate"}:
+                        raise ValueError("Unknown PDF extraction route")
+                    native = plan.get("native_markdown", "")
+                    if not isinstance(native, str) or plan.get(
+                        "native_sha256", digest(native)
+                    ) != digest(native):
+                        raise ValueError("Native extraction text hash mismatch")
+                    retained_pages[-1].update(extraction_plan=plan, route=plan["route"])
             doc = {
                 "schema_version": 1,
                 "id": document_id,
@@ -147,6 +157,36 @@ class Store:
                 "organization": None,
                 "publication": None,
             }
+            for page in doc["pages"]:
+                plan = page.get("extraction_plan", {})
+                if plan.get("route") != "native" or not plan.get("native_markdown", "").strip():
+                    continue
+                task = next(t for t in doc["tasks"] if t["page"] == page["page"])
+                task["stage"] = "extraction"
+                inputs = self._inputs(doc, task)
+                result = {"markdown": plan["native_markdown"], "input_sha256": digest(inputs)}
+                receipt = {
+                    "task_id": task["task_id"],
+                    "worker_id": "local:pdfium",
+                    "input_sha256": digest(inputs),
+                    "approval_type": "extraction",
+                    "human_approval": False,
+                    "created_at": time.time(),
+                }
+                task.update(
+                    state="completed",
+                    inputs=inputs,
+                    claim={"input_sha256": digest(inputs)},
+                    result=result,
+                    receipt={**receipt, "result_sha256": digest(result)},
+                )
+                page["ocr"] = {
+                    **receipt,
+                    "markdown": result["markdown"],
+                    "sha256": digest(result["markdown"]),
+                }
+                page["state"] = "awaiting_review"
+                doc["tasks"].append(self._new_task("review", page["page"]))
             self._save(doc)
             return doc
 
@@ -231,6 +271,25 @@ class Store:
                 documents.append({key: doc[key] for key in ("id", "title", "state", "created_at")})
             return documents
 
+    def original_page(self, document_id: str, page: int) -> tuple[dict, bytes]:
+        """Read original pixels for pending, approved or published content alike."""
+        with self.lock:
+            doc = self._load(document_id)
+            if type(page) is not int or not 1 <= page <= len(doc["pages"]):
+                raise ValueError("Unknown physical page")
+            if file_digest(self._path(doc, doc["source"]["path"])) != doc["source"]["sha256"]:
+                raise ValueError("Retained original source hash mismatch")
+            row = doc["pages"][page - 1]
+            data = self._path(doc, row["image"]).read_bytes()
+            if digest(data) != row["image_sha256"]:
+                raise ValueError("Original page image hash mismatch")
+            return {
+                "document_id": document_id,
+                "page": page,
+                "image_sha256": row["image_sha256"],
+                "source_sha256": doc["source"]["sha256"],
+            }, data
+
     def _inputs(self, doc: dict, task: dict) -> dict:
         inputs = {
             "document_id": doc["id"],
@@ -239,6 +298,15 @@ class Store:
         }
         if task["page"] is not None:
             page = doc["pages"][task["page"] - 1]
+            if "extraction_plan" in page:
+                plan = page["extraction_plan"]
+                # Keep already-claimed input contracts stable across an upgrade.
+                compact = "inputs" not in task or "extraction_plan_sha256" in task["inputs"]
+                inputs["extraction_plan"] = (
+                    {k: v for k, v in plan.items() if k != "probe_evidence"} if compact else plan
+                )
+                if compact:
+                    inputs["extraction_plan_sha256"] = digest(plan)
             inputs.update(
                 page=page["page"],
                 image=str(self._path(doc, page["image"])),
@@ -457,7 +525,10 @@ class Store:
                 receipt={**receipt, "result_sha256": digest(result)},
             )
             if all(p["state"] == "approved" for p in doc["pages"]):
-                if not any(t["stage"] == "organization" for t in doc["tasks"]):
+                if not any(
+                    t["stage"] == "organization" and t["state"] != "superseded"
+                    for t in doc["tasks"]
+                ):
                     doc["tasks"].append(self._new_task("organization"))
                 doc["state"] = (
                     "ready"
@@ -500,6 +571,268 @@ class Store:
             doc["state"] = "processing"
             self._save(doc)
             return replacement
+
+    def fallback_page(
+        self, document_id: str, page: int, reason: str, *, new_evidence: str | None = None
+    ) -> dict:
+        """Recover content through bounded full-page OCR; never reinterpret runtime failures."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Fallback requires a content reason")
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            if doc.get("publication") or doc["state"] == "published":
+                raise ValueError("Published evidence requires a separate revision workspace")
+            if type(page) is not int or not 1 <= page <= len(doc["pages"]):
+                raise ValueError("Unknown physical page")
+            target = doc["pages"][page - 1]
+            history = [t for t in doc["tasks"] if t["page"] == page]
+            if target["state"] == "approved" or any(t["stage"] == "human_review" for t in history):
+                raise ValueError(
+                    "Approved content and human decisions or drafts cannot be replaced"
+                )
+            if any(
+                t["state"] == "leased" and t["claim"]["expires_at"] > time.time()
+                for t in doc["tasks"]
+            ):
+                raise ValueError("Wait for active task leases before changing extraction route")
+            route = target.get("route", target.get("extraction_plan", {}).get("route", "ocr"))
+            if target["state"] != "pending" and not (
+                route in {"native", "mixed"} and target.get("ocr")
+            ):
+                raise ValueError(
+                    "Fallback requires a pending content review; retry technical errors as runs"
+                )
+            budget = target.get("fallback_budget", {"fullpage_switches": 0, "fullpage_retries": 0})
+            if route in {"native", "mixed"}:
+                if budget["fullpage_switches"] >= 1:
+                    raise ValueError("Full-page fallback budget exhausted; human review required")
+                budget["fullpage_switches"] += 1
+            else:
+                if budget["fullpage_retries"] >= 1:
+                    raise ValueError("Full-page retry budget exhausted; human review required")
+                if not isinstance(new_evidence, str) or not new_evidence.strip():
+                    raise ValueError("Full-page OCR retry requires explicit new evidence")
+                budget["fullpage_retries"] += 1
+            record = {
+                "created_at": time.time(),
+                "from_route": route,
+                "to_route": "ocr",
+                "reason": reason.strip(),
+                "new_evidence": new_evidence,
+                "previous_extraction_plan": target.get("extraction_plan"),
+                "previous_candidates": {
+                    k: target[k] for k in ("ocr", "candidate", "approved", "review") if k in target
+                },
+                "superseded_tasks": [t["task_id"] for t in history],
+            }
+            for task in history:
+                task["state"] = "superseded"
+            for key in ("ocr", "candidate", "approved", "review"):
+                target.pop(key, None)
+            target.update(
+                state="awaiting_ocr",
+                route="ocr",
+                fallback_budget=budget,
+                extraction_plan={
+                    "policy": "codex-pdf-routing-v1",
+                    "route": "ocr",
+                    "native_markdown": "",
+                    "native_sha256": digest(""),
+                    "regions": [],
+                    "reason_codes": ["fullpage_fallback"],
+                },
+            )
+            target.setdefault("fallback_history", []).append(record)
+            doc["tasks"].append(self._new_task("ocr", page))
+            doc["state"] = (
+                "pending" if any(p["state"] == "pending" for p in doc["pages"]) else "processing"
+            )
+            self._save(doc)
+            return {
+                "document_id": document_id,
+                "page": page,
+                "route": "ocr",
+                "fallback_budget": budget,
+                "state": doc["state"],
+                "fallback": record,
+            }
+
+    @staticmethod
+    def _request_run(doc: dict, *, resume: bool = False, followup: bool = False) -> dict:
+        request = doc.get("run_request")
+        if request is None:
+            request = {
+                "document_id": doc["id"],
+                "state": "pending",
+                "attempts": 0,
+                "technical_failures": 0,
+                "not_before": 0,
+                "ready_after": 0,
+                "history": [],
+            }
+            doc["run_request"] = request
+        if doc["state"] == "published":
+            request["state"] = "succeeded"
+            return request
+        if request["state"] == "running":
+            if resume and request["lease_expires_at"] <= time.time():
+                request["history"].append(
+                    {"event": "lease_expired", "at": time.time(), "owner": request["owner"]}
+                )
+                request["state"] = "retryable_error"
+            else:
+                if followup:
+                    request["continuation_requested"] = True
+                return request
+        if request.get("technical_failures", 0) >= 3 and not resume:
+            return request
+        if resume:
+            request["history"].append({"event": "explicit_resume", "at": time.time()})
+            request["technical_failures"] = 0
+        if request["state"] not in {"pending", "retryable_error"} or resume:
+            request.update(state="pending", not_before=0)
+        request["ready_after"] = request["not_before"]
+        return request
+
+    def request_run(self, document_id: str, *, resume: bool = False) -> dict:
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            request = self._request_run(doc, resume=resume)
+            self._save(doc)
+            return request
+
+    def claim_run(
+        self, owner: str, lease_seconds: int = 900, *, document_id: str | None = None
+    ) -> dict | None:
+        if not isinstance(owner, str) or not owner.strip() or not 1 <= lease_seconds <= 86400:
+            raise ValueError("Run owner and lease between 1 and 86400 seconds required")
+        with self.lock:
+            now = time.time()
+            paths = (
+                [self._directory(document_id) / "document.json"]
+                if document_id is not None
+                else sorted((self.root / "documents").glob("*/document.json"))
+            )
+            for path in paths:
+                if not path.exists():
+                    continue
+                doc = json.loads(path.read_text(encoding="utf-8"))
+                request = doc.get("run_request")
+                if not request or request["state"] not in {"pending", "retryable_error", "running"}:
+                    continue
+                if request.get("technical_failures", 0) >= 3 or request.get("not_before", 0) > now:
+                    continue
+                if request["state"] == "running" and request["lease_expires_at"] > now:
+                    continue
+                # Model task leases outlive a crashed coordinator. Do not race its workers.
+                if any(
+                    t["state"] == "leased" and t["claim"]["expires_at"] > now for t in doc["tasks"]
+                ):
+                    continue
+                if request["state"] == "running":
+                    request["history"].append(
+                        {"event": "lease_expired", "at": now, "owner": request["owner"]}
+                    )
+                    request["technical_failures"] = request.get("technical_failures", 0) + 1
+                    request.update(
+                        state="retryable_error",
+                        error="Run lease expired",
+                        not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
+                    )
+                    request["ready_after"] = request["not_before"]
+                    self._save(doc)
+                    continue
+                request.update(
+                    state="running",
+                    owner=owner,
+                    token=uuid4().hex,
+                    lease_expires_at=now + lease_seconds,
+                    attempts=request["attempts"] + 1,
+                )
+                request["ready_after"] = request["not_before"]
+                request["history"].append(
+                    {"event": "claimed", "at": now, "owner": owner, "attempt": request["attempts"]}
+                )
+                self._save(doc)
+                return request
+            return None
+
+    def renew_run(self, document_id: str, token: str, lease_seconds: int = 900) -> dict:
+        if not 1 <= lease_seconds <= 86400:
+            raise ValueError("Run lease must be between 1 and 86400 seconds")
+        with self.lock:
+            doc = self._load(document_id)
+            request = doc.get("run_request", {})
+            if (
+                request.get("state") != "running"
+                or request.get("token") != token
+                or request["lease_expires_at"] <= time.time()
+            ):
+                raise ValueError("Run does not have this active lease")
+            request["lease_expires_at"] = time.time() + lease_seconds
+            self._save(doc)
+            return request
+
+    def finish_run(self, document_id: str, token: str, error: str | dict | None = None) -> dict:
+        with self.lock:
+            doc = self._load(document_id)
+            request = doc.get("run_request", {})
+            if request.get("state") != "running" or request.get("token") != token:
+                raise ValueError("Run does not have this active lease")
+            now = time.time()
+            if request["lease_expires_at"] <= now:
+                raise ValueError("Run lease expired; reclaim before finishing")
+            active = [
+                t["claim"]["expires_at"]
+                for t in doc["tasks"]
+                if t["state"] == "leased" and t["claim"]["expires_at"] > now
+            ]
+            continuation = request.pop("continuation_requested", False)
+            if active:
+                request.update(
+                    state="retryable_error",
+                    not_before=max(active),
+                    error=error or "Waiting for active task leases",
+                )
+                if error is not None:
+                    request["technical_failures"] = request.get("technical_failures", 0) + 1
+                    request["not_before"] = max(
+                        request["not_before"], now + 30 * (2 ** (request["technical_failures"] - 1))
+                    )
+            elif error is not None:
+                request["technical_failures"] = request.get("technical_failures", 0) + 1
+                request.update(
+                    state="retryable_error",
+                    error=error,
+                    not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
+                )
+            elif doc["state"] == "published":
+                self._verify_evidence(doc)
+                request.update(state="succeeded", error=None, not_before=0)
+            elif continuation and all(p["state"] == "approved" for p in doc["pages"]):
+                request.update(state="pending", error=None, not_before=0)
+            elif any(t["state"] == "pending" for t in doc["tasks"]):
+                request.update(state="waiting_human", error=None, not_before=0)
+            else:
+                request["technical_failures"] = request.get("technical_failures", 0) + 1
+                request.update(
+                    state="retryable_error",
+                    error="Coordinator exited before publication or content review decision",
+                    not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
+                )
+            request["ready_after"] = request["not_before"]
+            request["history"].append(
+                {
+                    "event": "finished",
+                    "at": now,
+                    "state": request["state"],
+                    "error": request.get("error"),
+                }
+            )
+            self._save(doc)
+            return request
 
     def human_queue(self) -> list[dict]:
         """All unresolved page reviews are available to people, including repeated failures."""
@@ -630,6 +963,7 @@ class Store:
             if all(p["state"] == "approved" for p in doc["pages"]):
                 doc["tasks"].append(self._new_task("organization"))
                 doc["state"] = "processing"
+                self._request_run(doc, followup=True)
             else:
                 doc["state"] = "pending"
             self._save(doc)
@@ -641,6 +975,151 @@ class Store:
                 "receipt": task["receipt"],
             }
 
+    def _snapshot_publication(self, doc: dict) -> dict:
+        publication = doc["publication"]
+        version = doc.get("revision", 1)
+        directory = self._directory(doc["id"])
+        if file_digest(directory / "document.md") != publication["markdown_sha256"]:
+            raise ValueError("Published markdown hash mismatch")
+        if json.loads((directory / "publication.json").read_text(encoding="utf-8")) != publication:
+            raise ValueError("Published metadata mismatch")
+        archive = directory / "revisions" / f"{version:04d}-{digest(publication)[:12]}"
+        archive.mkdir(parents=True, exist_ok=True)
+        files = {}
+        for name in ("document.md", "publication.json"):
+            source, target = directory / name, archive / name
+            if target.exists():
+                if file_digest(target) != file_digest(source):
+                    raise ValueError("Archived publication cannot be overwritten")
+            else:
+                shutil.copyfile(source, target)
+            files[name] = {
+                "path": target.relative_to(directory).as_posix(),
+                "sha256": file_digest(target),
+            }
+        snapshot = archive / "document.json"
+        if not snapshot.exists():
+            atomic_json(snapshot, doc)
+        files["document.json"] = {
+            "path": snapshot.relative_to(directory).as_posix(),
+            "sha256": file_digest(snapshot),
+        }
+        return {"revision": version, "publication": publication, "files": files}
+
+    def _published_snapshot(self, doc: dict, record: dict) -> dict:
+        for reference in record["files"].values():
+            if file_digest(self._path(doc, reference["path"])) != reference["sha256"]:
+                raise ValueError("Archived publication evidence hash mismatch")
+        snapshot = json.loads(
+            self._path(doc, record["files"]["document.json"]["path"]).read_text(encoding="utf-8")
+        )
+        if snapshot["publication"] != record["publication"]:
+            raise ValueError("Archived publication metadata mismatch")
+        if record["files"]["document.md"]["sha256"] != record["publication"]["markdown_sha256"]:
+            raise ValueError("Archived markdown hash mismatch")
+        if (
+            json.loads(
+                self._path(doc, record["files"]["publication.json"]["path"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            != record["publication"]
+        ):
+            raise ValueError("Archived publication receipt mismatch")
+        self._verify_evidence(snapshot)
+        if digest(snapshot["organization"]) != record["publication"]["organization_sha256"]:
+            raise ValueError("Archived organization hash mismatch")
+        return snapshot
+
+    def begin_revision(self, document_id: str, reason: str, pages: list[int] | None = None) -> dict:
+        """Reopen machine-reviewed pages while the last published version remains readable."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Revision requires a reason")
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            if doc["state"] != "published" or not doc.get("publication"):
+                raise ValueError("Only a published document can begin a new revision")
+            if doc.get("run_request", {}).get("state") == "running":
+                raise ValueError("Wait for the active coordinator before starting a revision")
+            selected = (
+                pages
+                if pages is not None
+                else [
+                    p["page"] for p in doc["pages"] if p["approved"].get("approval_type") != "human"
+                ]
+            )
+            if (
+                not selected
+                or len(set(selected)) != len(selected)
+                or any(type(n) is not int or not 1 <= n <= len(doc["pages"]) for n in selected)
+            ):
+                raise ValueError("Revision requires valid distinct physical pages")
+            for number in selected:
+                if any(t["page"] == number and t["stage"] == "human_review" for t in doc["tasks"]):
+                    raise ValueError("Human approvals and drafts are preserved across revisions")
+            active = doc.get("active_publication") or self._snapshot_publication(doc)
+            self._published_snapshot(doc, active)
+            doc["active_publication"] = active
+            doc.setdefault("published_versions", [])
+            if not any(r["revision"] == active["revision"] for r in doc["published_versions"]):
+                doc["published_versions"].append(active)
+            doc["revision"] = doc.get("revision", 1) + 1
+            doc.setdefault("revision_history", []).append(
+                {
+                    "revision": doc["revision"],
+                    "reason": reason.strip(),
+                    "pages": selected,
+                    "created_at": time.time(),
+                }
+            )
+            for task in doc["tasks"]:
+                if task["stage"] == "organization" or (
+                    task["page"] in selected and task["stage"] in {"review", "verify"}
+                ):
+                    task["state"] = "superseded"
+            for number in selected:
+                page = doc["pages"][number - 1]
+                approved = page.pop("approved")
+                task = self._new_task("extraction", number)
+                inputs = {
+                    "document_id": document_id,
+                    "revision": doc["revision"],
+                    "previous_approval": approved,
+                }
+                result = {"markdown": approved["markdown"]}
+                receipt = {
+                    "task_id": task["task_id"],
+                    "worker_id": "local:revision",
+                    "approval_type": "extraction",
+                    "human_approval": False,
+                    "input_sha256": digest(inputs),
+                    "created_at": time.time(),
+                }
+                task.update(
+                    state="completed",
+                    inputs=inputs,
+                    claim={"input_sha256": digest(inputs)},
+                    result=result,
+                    receipt={**receipt, "result_sha256": digest(result)},
+                )
+                page.update(
+                    ocr={**receipt, "markdown": approved["markdown"], "sha256": approved["sha256"]},
+                    state="awaiting_review",
+                )
+                page.pop("candidate", None)
+                page.pop("review", None)
+                doc["tasks"].extend([task, self._new_task("review", number)])
+            doc.update(state="processing", publication=None, organization=None)
+            self._save(doc)
+            return {
+                "document_id": document_id,
+                "revision": doc["revision"],
+                "pages": selected,
+                "state": doc["state"],
+                "active_publication": active,
+            }
+
     def publish(self, document_id: str) -> dict:
         with self.lock:
             doc = self._load(document_id)
@@ -650,6 +1129,8 @@ class Store:
                     "Whole document must have approved pages and completed organization"
                 )
             if doc["state"] == "published":
+                if doc.get("active_publication"):
+                    self._published_snapshot(doc, doc["active_publication"])
                 publication = doc["publication"]
                 directory = self._directory(document_id)
                 if file_digest(directory / "document.md") != publication["markdown_sha256"]:
@@ -687,6 +1168,10 @@ class Store:
             }
             atomic_json(directory / "publication.json", publication)
             doc.update(state="published", publication=publication)
+            if "revision" in doc:
+                active = self._snapshot_publication(doc)
+                doc["active_publication"] = active
+                doc.setdefault("published_versions", []).append(active)
             self._save(doc)
             return publication
 
@@ -697,7 +1182,9 @@ class Store:
         with self.lock:
             for path in sorted((self.root / "documents").glob("*/document.json")):
                 doc = json.loads(path.read_text(encoding="utf-8"))
-                if doc["state"] != "published":
+                if doc.get("active_publication"):
+                    doc = self._published_snapshot(doc, doc["active_publication"])
+                elif doc["state"] != "published":
                     continue
                 self._verify_evidence(doc)
                 for page in doc["pages"]:

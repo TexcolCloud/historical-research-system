@@ -54,7 +54,11 @@ def test_import_retries_incomplete_output_but_cannot_replace_original(tmp_path):
 
 
 def test_empty_invalid_and_unsupported_sources_do_not_produce_manifest(tmp_path):
-    for name, content in [("empty.pdf", b""), ("invalid.png", b"not an image"), ("unknown.txt", b"text")]:
+    for name, content in [
+        ("empty.pdf", b""),
+        ("invalid.png", b"not an image"),
+        ("unknown.txt", b"text"),
+    ]:
         source = tmp_path / name
         source.write_bytes(content)
         target = tmp_path / name.replace(".", "-")

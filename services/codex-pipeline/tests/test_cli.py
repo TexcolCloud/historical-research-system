@@ -58,7 +58,8 @@ def test_runner_native_command_paths_model_inheritance_and_receipt(tmp_path, mon
     assert "native Codex subagents" in process.prompt
     assert document_id in process.prompt
     assert any(
-        "historical_research.command=" in argument and sys.executable.replace("\\", "\\\\") in argument
+        "historical_research.command=" in argument
+        and sys.executable.replace("\\", "\\\\") in argument
         for argument in process.arguments
     )
     if model is None:
@@ -124,8 +125,27 @@ def test_runner_interrupt_cleans_owned_process_and_keeps_receipt(tmp_path, monke
 
 
 def test_run_pending_is_exit_two_not_success(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["hrs-codex", "--root", str(tmp_path), "run", "document-id"])
-    monkeypatch.setattr(cli, "run_codex", lambda *args, **kwargs: {"status": {"state": "pending"}})
+    store, doc_id = prepared_store(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["hrs-codex", "--root", str(store.root), "run", doc_id])
+
+    def pending(s, document_id, **kwargs):
+        for stage, worker, result in [
+            ("ocr", "synthetic-ocr", {"markdown": "Synthetic unclear page"}),
+            (
+                "review",
+                "synthetic-review",
+                {"verdict": "pending", "issues": ["Synthetic source uncertainty"]},
+            ),
+        ]:
+            task = s.claim_task(document_id, stage, worker)
+            s.submit_task(
+                document_id,
+                task["task_id"],
+                task["lease_token"],
+                {"input_sha256": task["input_sha256"], **result},
+            )
+
+    monkeypatch.setattr(cli, "run_codex", pending)
     with pytest.raises(SystemExit) as error:
         cli.main()
     assert error.value.code == 2
@@ -137,7 +157,9 @@ def test_review_cli_opens_selected_workspace_without_starting_codex(tmp_path, mo
 
     calls = []
     monkeypatch.setattr(human_review, "serve", lambda store, port: calls.append((store.root, port)))
-    monkeypatch.setattr(sys, "argv", ["hrs-codex", "--root", str(tmp_path), "review", "--port", "0"])
+    monkeypatch.setattr(
+        sys, "argv", ["hrs-codex", "--root", str(tmp_path), "review", "--port", "0"]
+    )
     cli.main()
     assert calls == [(tmp_path.resolve(), 0)]
 
@@ -146,7 +168,9 @@ def test_review_cli_opens_selected_workspace_without_starting_codex(tmp_path, mo
 def test_doctor_reports_missing_auth_or_cli(tmp_path, monkeypatch, capsys, available):
     monkeypatch.setattr(sys, "argv", ["hrs-codex", "--root", str(tmp_path), "doctor"])
     monkeypatch.setattr(cli.shutil, "which", lambda name: "codex" if available else None)
-    monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1))
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1)
+    )
     with pytest.raises(SystemExit) as error:
         cli.main()
     assert error.value.code == 1
@@ -155,7 +179,9 @@ def test_doctor_reports_missing_auth_or_cli(tmp_path, monkeypatch, capsys, avail
 
 def test_cli_reports_bad_source_without_traceback(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
-        sys, "argv", ["hrs-codex", "--root", str(tmp_path), "prepare", str(tmp_path / "missing.pdf")]
+        sys,
+        "argv",
+        ["hrs-codex", "--root", str(tmp_path), "prepare", str(tmp_path / "missing.pdf")],
     )
     with pytest.raises(SystemExit) as error:
         cli.main()
@@ -174,9 +200,13 @@ def test_interruption_cleanup_is_bounded_and_targets_only_owned_tree(monkeypatch
             raise subprocess.TimeoutExpired("owned-codex", timeout)
         return 0
 
-    process = SimpleNamespace(pid=12345, poll=lambda: None, wait=wait, kill=lambda: calls.append("kill"))
+    process = SimpleNamespace(
+        pid=12345, poll=lambda: None, wait=wait, kill=lambda: calls.append("kill")
+    )
     monkeypatch.setattr(cli.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs)))
-    monkeypatch.setattr(cli.os, "killpg", lambda pid, signum: calls.append((pid, signum)), raising=False)
+    monkeypatch.setattr(
+        cli.os, "killpg", lambda pid, signum: calls.append((pid, signum)), raising=False
+    )
     cli.stop_owned_process(process)
     assert all(0 < timeout <= 10 for timeout in waits)
     if cli.os.name == "nt":
