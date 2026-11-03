@@ -45,7 +45,7 @@ def available(port, wait=0):
                     raise RuntimeError(
                         f"Port {port} already has an owner; stop that launcher before the V2 cutover."
                     ) from None
-        time.sleep(.25)
+        time.sleep(0.25)
 
 
 def stop_child(process, timeout=60):
@@ -159,11 +159,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "up", "status", "doctor", "stop"])
     parser.add_argument("--build", action="store_true")
+    parser.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Explicitly run the retained Temporal/local-OCR deployment",
+    )
     args = parser.parse_args()
+    if not args.legacy:
+        from hrs_codex_platform import command
+
+        return command(args.command, build=args.build)
+    os.environ["PLATFORM_PROCESSING_BACKEND"] = "legacy"
     if args.command == "init":
         from hrs_platform.bootstrap import bootstrap
 
-        bootstrap()
+        bootstrap(legacy=True)
     elif args.command == "up":
         from filelock import FileLock
 

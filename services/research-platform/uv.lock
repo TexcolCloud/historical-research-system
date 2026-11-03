@@ -347,6 +347,33 @@ wheels = [
 ]
 
 [[package]]
+name = "hrs-codex"
+version = "0.1.0"
+source = { editable = "../codex-pipeline" }
+dependencies = [
+    { name = "filelock" },
+    { name = "mcp" },
+    { name = "pillow" },
+    { name = "pypdf" },
+    { name = "pypdfium2" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "filelock", specifier = ">=3.16,<4" },
+    { name = "mcp", specifier = "==2.2.0" },
+    { name = "pillow", specifier = ">=11,<13" },
+    { name = "pypdf", specifier = ">=6,<7" },
+    { name = "pypdfium2", specifier = ">=5,<6" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8,<10" },
+    { name = "ruff", specifier = ">=0.12,<1" },
+]
+
+[[package]]
 name = "hrs-platform"
 version = "0.1.0"
 source = { editable = "." }
@@ -354,6 +381,7 @@ dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
     { name = "filelock" },
+    { name = "hrs-codex" },
     { name = "hrs-runtime" },
     { name = "httpx" },
     { name = "langchain-text-splitters" },
@@ -395,6 +423,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.19.2,<2" },
     { name = "fastapi", specifier = ">=0.141.1,<0.142" },
     { name = "filelock", specifier = ">=3.32,<4" },
+    { name = "hrs-codex", editable = "../codex-pipeline" },
     { name = "hrs-runtime", editable = "../../packages/runtime-support" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "langchain-text-splitters", specifier = ">=0.3,<2" },

@@ -1,4 +1,6 @@
 name = "historical_ocr"
+model = "gpt-6.1-terra"
+model_reasoning_effort = "medium"
 description = "Transcribe historical source page images through the local historical_research MCP."
 developer_instructions = """
 Read historical_research.workflow_instructions. Claim ocr tasks for the supplied document ID.

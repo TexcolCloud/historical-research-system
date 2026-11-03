@@ -6,6 +6,28 @@ spawn native Codex subagents for these stages and wait for their results. Use
 distinct subagents for OCR and review, and for correction proposals and verification.
 Use the configured Codex model; inherit model/provider settings from the parent.
 
+New imports freeze `processing_policy`: OCR uses `historical_ocr` with
+`gpt-6.1-terra`; review uses `historical_review` with `gpt-6.1-sol`; organization
+uses `historical_organization` with `gpt-6.1-sol`. Spawn those exact agent types.
+When review_failure is human, any non-approval goes directly to the human queue,
+with located issues and optional suggested_markdown. Do not automatically repair,
+retry or fallback after that review. Existing legacy verify tasks may still finish.
+Reviewer output may include source-bound structure observations: headings and
+`structure={continues_previous,continuation_before,continuation_after}` with exact
+paragraph anchors. Preserve Markdown footnotes (`[^id]` / `[^id]:`), editor ownership,
+tables (HTML for merged cells), captions and diagram labels; never replace source
+content with a description. Article mappings spanning a shared page MUST include
+`boundaries=[{page,start_text}]` with a unique literal opening of each article, in
+source order. All source characters, apparatus and carrier material remain retained.
+Organization may also return `reading_structure={tables:[{pages,members:[{page,
+original_html}],merged_html}],titles:[{page,title,level}]}`. Table continuations
+must preserve every cell, row/column owner and number; the reading projection
+validates this against canonical text before adopting a merged display. If that
+cannot be verified, retain separate originals and explain the structural issue.
+For figures/maps retain the original carrier as Markdown image `![source figure](pages/000001.png)`
+using the actual physical page number (six digits); retain captions and readable
+labels too. Never invent an image filename or use an inaccessible external path.
+
 ## User entry and workspace
 
 The project `historical-research` skill calls `workspace_status`, then
@@ -170,18 +192,25 @@ is preserved separately; this workflow does not generate historical research car
 ## Human handoff
 
 Human decisions are entered explicitly in the local review form; there is no MCP
-tool for granting human approval. Never fill or submit that form for real source
-documents, impersonate a reviewer, or interpret a request to implement human
-review as an actual content decision. Development form tests use labeled synthetic
-fixtures only. Do not overwrite an existing human draft with a machine retry.
+tool for granting human approval. This is a single-user application: confirm the
+page or save edited Markdown; reviewer names, review essays and a second checkbox
+are not required. The receipt supplies a local-user identity and retains the
+source/page hashes, input snapshot and edited full-page text. Preserve drafts.
 
-The form records the reviewer's supplied name, reason, source/page hashes, input
-snapshot and edited full-page text. A human-approved page is marked `human`, while
-machine decisions retain `machine`; neither is sealed gold. Once all pages pass,
-the organization task becomes ready and its continuation is queued automatically.
-The background executor delegates organization and publication. A publication containing human page decisions and machine organization
-is marked `mixed`, with `human_reviewed_pages`; document-level `human_approval`
-remains false because the entire workflow has not received human review.
+Do not infer content approval from development authorization. An explicit user
+request to release a named workflow test may authorize real-source form tests in
+an isolated workspace with `.workflow-test-authorization.json` enabled. Record
+these as `workflow_test`, `content_verified=false`, never `human`, gold or accuracy
+acceptance. Preserve all unresolved machine issues and label the UI and exports'
+evidence scope. Normal workspaces retain actual human content decisions.
+
+A human-approved page is marked `human`, machine decisions retain `machine`.
+Once all pages pass, organization and publication are automatically queued.
+Publications containing human page decisions and machine organization are `mixed`;
+`human_approval` remains false at document level. Workflow-test publications keep
+their separate scope. Located user errata create a new candidate revision and
+independent original-image review; the old publication and its decisions remain
+archived and readable until the replacement passes.
 
 Independent final audits can discover a source-reading dispute after machine
 publication. Once the coordinator is idle, call `request_human_review` with the

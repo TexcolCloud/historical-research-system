@@ -8,8 +8,9 @@ from hrs_platform import models as db
 from hrs_platform.domain.card_rules import quote_pages
 from hrs_platform.domain.errors import ServiceError
 from hrs_platform.services.cards import Cards
+from hrs_platform.services.documents.footnotes import export_footnotes
 from hrs_platform.services.documents.library import Library
-from hrs_platform.services.runs.outputs import Outputs
+from hrs_platform.services.runs.outputs import Outputs, fingerprint
 
 
 class Exports:
@@ -25,11 +26,27 @@ class Exports:
             raise ServiceError(409, "本书尚未入库，暂不能导出完整正文。")
         dependencies = [chapter["content"]["sha256"] for chapter in chapters]
         run_id = chapters[0]["run_id"]
-        saved = self.outputs.get(run_id, "export:book-reading-v1", dependencies)
+        with self.engine.connect() as connection:
+            result = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == str(run_id))) or {}
+        workflow_test = result.get("content_acceptance") == "workflow_test"
+        dependencies = {"chapters": dependencies, "workflow_test": workflow_test}
+        key = "export:book-reading-v4-parenthesized-notes:" + fingerprint(dependencies)
+        saved = self.outputs.get(run_id, key, dependencies)
         if saved is None:
-            content = "".join(self.library.chapter(row["id"])["reading_text"] for row in chapters)
-            saved = self.outputs.objects.put_bytes(content.encode("utf-8"), "text/markdown; charset=utf-8", run_id=run_id)
-            self.outputs.put(run_id, "export:book-reading-v1", saved, dependencies)
+            content = (
+                "<!-- validation_scope: workflow_only; content_verified: false; 流程顺序与格式测试，未认证内容准确率。 -->\n\n"
+                if workflow_test
+                else ""
+            )
+            for index, row in enumerate(chapters, 1):
+                chapter = self.library.chapter(row["id"])
+                content += export_footnotes(
+                    chapter["reading_text"], chapter["reading_footnotes"], f"c{index}"
+                )
+            saved = self.outputs.objects.put_bytes(
+                content.encode("utf-8"), "text/markdown; charset=utf-8", run_id=run_id
+            )
+            self.outputs.put(run_id, key, saved, dependencies)
         with self.engine.connect() as connection:
             title = connection.scalar(select(db.books.c.title).where(db.books.c.id == str(book_id)))
         return title, saved
@@ -105,7 +122,8 @@ class Exports:
                 ]
             )
             saved = self.outputs.objects.put_bytes(
-                "\n".join(parts).encode("utf-8"), "text/markdown; charset=utf-8",
+                "\n".join(parts).encode("utf-8"),
+                "text/markdown; charset=utf-8",
                 run_id=card["run_id"],
             )
             self.outputs.put(card["run_id"], key, saved, dependencies)

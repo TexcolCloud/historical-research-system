@@ -35,6 +35,7 @@ const eventSchema = z.object({
   payload: z.object({
     state: z.string().optional(),
     book_state: z.string().nullable().optional(),
+    revision_pending: z.boolean().optional(),
     stage: z.string().optional(),
     run_kind: z.string().optional(),
     revision: z.number().optional(),
@@ -108,10 +109,13 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
         queryKey: ["platform", "issues", event.run_id],
       });
   }
-  if (event.kind === "book.published")
+  if (event.kind === "book.published" || event.kind === "library.revised") {
     void query.invalidateQueries({
       queryKey: ["platform", "chapters", event.book_id],
     });
+    void query.invalidateQueries({ queryKey: ["platform", "chapter"] });
+    void query.invalidateQueries({ queryKey: ["platform", "search"] });
+  }
   if (
     event.payload.run_kind === "cards" ||
     event.kind === "execution.changed" ||
@@ -123,6 +127,7 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
       current
         ? {
             ...current,
+            ...(event.payload.revision_pending !== undefined ? {revision_pending: Boolean(event.payload.revision_pending)} : {}),
             ...(event.payload.state
               ? { state: event.payload.book_state ?? event.payload.state }
               : {}),

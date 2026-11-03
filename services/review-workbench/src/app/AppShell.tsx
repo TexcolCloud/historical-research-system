@@ -2,9 +2,12 @@ import { lazy, Suspense, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { BookOpen, LibraryBig, ClipboardCheck, CloudCheck } from "lucide-react";
 import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents.ts";
+import { useQuery } from "@tanstack/react-query";
+import { client } from "@/client/api.ts";
 const UploadPanel = lazy(() => import("@/features/uploads/UploadPanel.tsx"));
 
 export type WorkspaceContext = {
+  workflowTest?: boolean;
   upload: () => void;
   filter: string;
   setFilter: (value: string) => void;
@@ -15,6 +18,8 @@ export type WorkspaceContext = {
 export default function AppShell() {
   const location = useLocation();
   const connected = useWorkspaceEvents();
+  const runtime = useQuery({queryKey: ["platform", "runtime"], retry: false,
+    queryFn: async () => (await client.GET("/api/v2/runtime")).data ?? null});
   const [open, setOpen] = useState(false);
   const [started, setStarted] = useState(false);
   const [filter, setFilter] = useState("all");
@@ -67,9 +72,13 @@ export default function AppShell() {
           </span>
         </header>
         <main>
+          {runtime.data?.validation_scope === "workflow_only" && (
+            <p role="note" className="platform-inline-status">流程验收工作区：本轮授权放行仅验证顺序和格式，不代表内容准确率通过。</p>
+          )}
           <Outlet
             context={
               {
+                workflowTest: runtime.data?.validation_scope === "workflow_only",
                 upload,
                 filter,
                 setFilter,

@@ -5,3 +5,15 @@ startup_timeout_sec = 60
 tool_timeout_sec = 120
 default_tools_approval_mode = "approve"
 env_vars = ["HRS_CODEX_ROOT"]
+
+[agents.historical_ocr]
+description = "Transcribe original historical page images."
+config_file = "agents/historical-ocr.toml"
+
+[agents.historical_review]
+description = "Independently compare original page images and extracted Markdown."
+config_file = "agents/historical-review.toml"
+
+[agents.historical_organization]
+description = "Organize approved Markdown with original page provenance."
+config_file = "agents/historical-organization.toml"

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useOutletContext } from "react-router-dom";
+import type { WorkspaceContext } from "@/app/AppShell.tsx";
 import {
   useMutation,
   useIsMutating,
@@ -37,6 +39,7 @@ export default function ReviewPanel({
   state?: string;
 }) {
   const query = useQueryClient();
+  const workflowTest = useOutletContext<WorkspaceContext>()?.workflowTest ?? false;
   const busy =
     useIsMutating({ mutationKey: ["platform", "review-write", runId] }) > 0;
   const [selected, setSelected] = useState<string | null>(null),
@@ -139,6 +142,7 @@ export default function ReviewPanel({
             <IssueEditor
               key={`${current.data.id}:${current.data.revision}`}
               issue={current.data}
+              workflowTest={workflowTest}
               onSaved={saved}
             />
           ) : (
@@ -153,9 +157,11 @@ export default function ReviewPanel({
 function IssueEditor({
   issue,
   onSaved,
+  workflowTest,
 }: {
   issue: components["schemas"]["ReviewIssue"];
   onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void;
+  workflowTest: boolean;
 }) {
   const query = useQueryClient(),
     draftKey = ["platform", "review-edit", issue.id, issue.revision];
@@ -237,6 +243,8 @@ function IssueEditor({
           >
             {mutation.isPending
               ? "正在保存…"
+              : workflowTest
+                ? changed ? "保存修改并放行流程" : "按授权放行流程"
               : changed
                 ? "保存修改并确认"
                 : "确认无误并放行"}
@@ -248,6 +256,12 @@ function IssueEditor({
           >
             {editing ? "返回阅读" : "编辑正文"}
           </Button>
+          {issue.proposed_text && !changed && (
+            <Button variant="outline" disabled={mutation.isPending || draft.isPending}
+              onClick={() => { setText(issue.proposed_text!); setEditing(true); query.setQueryData(draftKey, issue.proposed_text); }}>
+              采用模型建议并编辑
+            </Button>
+          )}
           {editing && (
             <Button
               variant="outline"
@@ -288,6 +302,7 @@ function IssueEditor({
             />
           ) : (
             <RenderedMarkdown
+              footnotes={text === issue.text ? issue.footnotes : []}
               assetBaseUrl={`/api/v2/runs/${issue.run_id}/artifacts`}
               markdown={issue.kind === "figure" ? figurePreview(text) : text}
             />

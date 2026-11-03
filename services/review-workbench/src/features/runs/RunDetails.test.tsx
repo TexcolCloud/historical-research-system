@@ -95,6 +95,7 @@ test.each(["book"])(
             stage: "vision",
             created_at: "2026-09-13T00:00:00Z",
             revision: 1,
+            revision_pending: false,
           }}
         />
       </QueryClientProvider>,

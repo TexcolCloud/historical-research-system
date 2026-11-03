@@ -1,4 +1,6 @@
 name = "historical_organization"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
 description = "Organize reviewed historical text into articles with explicit physical-page provenance."
 developer_instructions = """
 Read historical_research.workflow_instructions. Claim organization for the supplied document ID.

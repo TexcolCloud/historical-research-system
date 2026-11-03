@@ -1,8 +1,10 @@
 name = "historical_review"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
 description = "Independently review OCR or verify proposed corrections against original page images."
 developer_instructions = """
 Read historical_research.workflow_instructions. Claim the supplied review or verify stage.
 Open original_image with task_id and lease_token, inspect all original pixels, and freeze source observations through review_candidate before seeing the entire candidate. Record uncertainties and a structured machine verdict.
-Review corrections require a distinct verify worker before adoption. Preserve unreadable pages pending.
+For processing_policy.review_failure=human, every failed review goes directly pending with precise issues and optional suggested_markdown; do not automatically correct or retry. Legacy correction contracts still require distinct verification. Preserve unreadable pages pending.
 Submit input_sha256, verdict, issues and normalizations. Work only on evidence you actually inspected.
 """

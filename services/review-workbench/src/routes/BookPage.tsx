@@ -74,6 +74,7 @@ export default function BookPage() {
         <div>
           <h1>{book.title}</h1>
           <p>以章节阅读，以原件核对，以证据研究。</p>
+          {book.revision_pending && <p role="note">新版本正在复核，阅读和检索继续使用此前发布的版本。</p>}
         </div>
         <DeleteBookButton book={book} />
       </div>

@@ -371,9 +371,6 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                 <section class="panel"><h2>人工核对</h2><p>先查看原图。能明确判读再确认整页；仍不清楚可保存草稿，继续待审。</p>
                 <form method="post" action="{escape(self.link("/decision"))}">{hidden}
                 <label for="markdown">整页正文（可修订）</label><textarea id="markdown" name="markdown">{escape(packet["markdown"])}</textarea>
-                <label for="reviewer">审核人</label><input id="reviewer" name="reviewer" required autocomplete="name">
-                <label for="note">裁决依据 / 仍待解决的问题</label><textarea id="note" name="note" required></textarea>
-                <label class="check"><input type="checkbox" name="confirmed" value="yes">确认通过时：我已对照原图核对整页，所有内容问题均已解决。</label>
                 <button name="verdict" value="approved">确认整页通过</button><button class="secondary" name="verdict" value="pending">保存草稿，继续待审</button>
                 </form><details><summary>查看原始 OCR</summary><pre>{escape(packet["ocr_markdown"])}</pre></details>
                 <details><summary>查看机器尝试和人工历史</summary><pre>{history}</pre></details></section></div>'''
@@ -442,15 +439,13 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                         message="已提交继续处理请求，请查看运行状态。",
                     )
                     return
-                if form.get("verdict") == "approved" and form.get("confirmed") != "yes":
-                    raise ValueError("确认通过前，请勾选已对照原图核对整页。")
                 result = store.record_human_review(
                     form["document_id"],
                     int(form["page"]),
                     input_sha256=form["input_sha256"],
-                    reviewer=form["reviewer"],
+                    reviewer=form.get("reviewer") or "本地使用者",
                     markdown=form["markdown"],
-                    note=form["note"],
+                    note=form.get("note") or ("确认通过" if form["verdict"] == "approved" else "保存待定"),
                     verdict=form["verdict"],
                 )
                 message = "草稿已保存，页面继续待审。"

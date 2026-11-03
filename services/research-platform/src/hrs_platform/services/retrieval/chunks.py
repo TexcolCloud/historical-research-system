@@ -16,7 +16,7 @@ from markdown_it import MarkdownIt
 
 from hrs_platform.services.documents.footnotes import resolve_footnotes
 
-CHUNK_RULE = "structure-1400-160-v6-evidence-scopes"
+CHUNK_RULE = "structure-1400-160-v7-parenthesized-notes"
 NOTE = re.compile(r"(?m)^ {0,3}\[\^([^\]\n]+)\]:")
 IMAGE = re.compile(r'!\[([^\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\n]|\([^()\n]*\))*)\)')
 

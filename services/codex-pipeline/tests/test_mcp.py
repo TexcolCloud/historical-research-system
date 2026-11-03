@@ -132,6 +132,13 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
                 )
             )
             doc_id = document["id"]
+            # Exercise recovery of an explicit legacy correction/verification contract.
+            from hrs_codex.store import Store
+            retained = Store(root)
+            with retained.lock:
+                saved = retained._load(doc_id)
+                saved["processing_policy"]["review_failure"] = "verify"
+                retained._save(saved)
             assert document["source"]["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
             assert value(await client.call_tool("list_documents"))[0]["id"] == doc_id
             image_result = await client.call_tool(

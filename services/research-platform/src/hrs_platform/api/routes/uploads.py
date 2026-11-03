@@ -1,6 +1,7 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Request
+from fastapi.responses import Response
 
 from hrs_platform.api.deps import EngineDep, SettingsDep
 from hrs_platform.domain.errors import ServiceError
@@ -8,6 +9,37 @@ from hrs_platform.schemas import TusHook, UploadRequest, UploadSession
 from hrs_platform.services import books
 
 router = APIRouter(tags=["uploads"])
+
+
+@router.api_route(
+    "/uploads/{upload_path:path}",
+    methods=["POST", "PATCH", "HEAD", "DELETE", "OPTIONS"],
+    include_in_schema=False,
+)
+async def local_tus_proxy(upload_path: str, request: Request, settings: SettingsDep):
+    """Keep resumable browser uploads same-origin when the host API serves React."""
+    import httpx
+
+    headers = {
+        k: v for k, v in request.headers.items() if k.lower() not in {"host", "connection", "content-length"}
+    }
+    async with httpx.AsyncClient(timeout=300) as client:
+        response = await client.request(
+            request.method,
+            settings.tus_control_url.rstrip("/") + "/" + upload_path,
+            headers=headers,
+            content=request.stream(),
+        )
+    returned = {
+        k: v
+        for k, v in response.headers.items()
+        if k.lower() not in {"connection", "transfer-encoding", "content-encoding", "content-length"}
+    }
+    if "location" in returned:
+        from urllib.parse import urlparse
+
+        returned["location"] = urlparse(returned["location"]).path
+    return Response(response.content, status_code=response.status_code, headers=returned)
 
 
 @router.post("/api/v2/uploads", response_model=UploadSession, status_code=201)

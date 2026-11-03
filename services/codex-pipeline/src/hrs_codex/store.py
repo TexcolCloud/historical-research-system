@@ -63,6 +63,11 @@ class Store:
     def _save(self, doc: dict) -> None:
         atomic_json(self._directory(doc["id"]) / "document.json", doc)
 
+    @staticmethod
+    def _require_active(doc: dict) -> None:
+        if doc.get("run_request", {}).get("cancel_requested"):
+            raise ValueError("Document cancellation requested; no further processing is allowed")
+
     def _path(self, doc: dict, relative: str) -> Path:
         directory = self._directory(doc["id"]).resolve()
         path = (directory / relative).resolve()
@@ -467,6 +472,7 @@ class Store:
             raise ValueError("Lease must be between 1 and 86400 seconds")
         with self.lock:
             doc = self._load(document_id)
+            self._require_active(doc)
             self._verify_evidence(doc)
             for task in doc["tasks"]:
                 if task["stage"] != stage or task["state"] not in {"ready", "leased"}:
@@ -512,6 +518,7 @@ class Store:
     def submit_task(self, document_id: str, task_id: str, lease_token: str, result: dict) -> dict:
         with self.lock:
             doc = self._load(document_id)
+            self._require_active(doc)
             self._verify_evidence(doc)
             task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
             claim = task.get("claim", {})
@@ -526,6 +533,17 @@ class Store:
                 raise ValueError("Task input hash mismatch")
             self._verify_details(doc, task, result)
             stage = task["stage"]
+            if (
+                stage == "review"
+                and doc.get("processing_policy", {}).get("review_failure") == "human"
+                and result.get("verdict") == "corrections"
+            ):
+                result = {
+                    **result,
+                    "verdict": "pending",
+                    "issues": result.get("issues") or ["审核建议修改，请人工核对后确认。"],
+                    "suggested_markdown": result.get("markdown"),
+                }
             if task.get("source_first_required") and not task.get("source_reading"):
                 raise ValueError(
                     "Record original-first observations through review_candidate before judging the candidate"
@@ -539,6 +557,15 @@ class Store:
                 "human_approval": False,
                 "created_at": time.time(),
             }
+            policy = doc.get("processing_policy", {})
+            if policy:
+                receipt["configured_model"] = policy.get(
+                    "ocr_model"
+                    if stage == "ocr"
+                    else "organization_model"
+                    if stage == "organization"
+                    else "review_model"
+                )
             if task.get("source_reading"):
                 receipt["source_reading_sha256"] = task["source_reading"]["sha256"]
             if stage == "ocr":
@@ -649,7 +676,19 @@ class Store:
                         }
                     if covered != set(range(1, len(doc["pages"]) + 1)):
                         raise ValueError("Organization must account for every physical page")
-                    doc["organization"] = {**receipt, "articles": articles}
+                    if doc.get("processing_policy"):
+                        from hrs_codex.organization import article_parts
+
+                        article_parts(doc["pages"], articles)
+                    doc["organization"] = {
+                        **receipt,
+                        "articles": articles,
+                        **(
+                            {"reading_structure": result["reading_structure"]}
+                            if "reading_structure" in result
+                            else {}
+                        ),
+                    }
             task.update(
                 state="pending" if result.get("verdict") == "pending" else "completed",
                 result=result,
@@ -835,6 +874,8 @@ class Store:
     def request_run(self, document_id: str, *, resume: bool = False) -> dict:
         with self.lock:
             doc = self._load(document_id)
+            if doc.get("run_request", {}).get("cancel_requested"):
+                raise ValueError("This document is stopping for explicit deletion")
             self._verify_evidence(doc)
             request = self._request_run(doc, resume=resume)
             self._save(doc)
@@ -919,6 +960,11 @@ class Store:
             if request.get("state") != "running" or request.get("token") != token:
                 raise ValueError("Run does not have this active lease")
             now = time.time()
+            if request.get("cancel_requested"):
+                request.update(state="cancelled", error=None, not_before=0)
+                doc["state"] = "cancelled"
+                self._save(doc)
+                return request
             if request["lease_expires_at"] <= now:
                 raise ValueError("Run lease expired; reclaim before finishing")
             active = [
@@ -996,6 +1042,33 @@ class Store:
                         }
                     )
             return rows
+
+    def cancel_document(self, document_id: str) -> dict:
+        """Stop this document's owned coordinator before an explicit local deletion."""
+        with self.lock:
+            doc = self._load(document_id)
+            (self._directory(document_id) / ".cancel-requested").touch()
+            request = doc.get("run_request") or self._request_run(doc)
+            request["cancel_requested"] = True
+            if request["state"] != "running":
+                request["state"] = "cancelled"
+            self._save(doc)
+            return {"document_id": document_id, "state": request["state"]}
+
+    def forget_document(self, document_id: str) -> None:
+        """Erase only this stopped document's verified workspace directories."""
+        with self.lock:
+            doc = self._load(document_id)
+            if doc.get("run_request", {}).get("state") == "running":
+                raise ValueError("Wait for the owned coordinator to stop before deletion")
+            targets = [self._directory(document_id), self.root / "runs" / document_id]
+            for target in targets:
+                resolved = target.resolve()
+                if resolved != target.absolute() or not resolved.is_relative_to(self.root):
+                    raise ValueError("Document deletion escapes its workspace")
+            for target in targets:
+                if target.exists():
+                    shutil.rmtree(target)
 
     def request_human_review(
         self, document_id: str, page: int, issue: str, evidence: dict, worker_id: str
@@ -1156,6 +1229,17 @@ class Store:
             "image_sha256": page["image_sha256"],
             "pending_task_id": pending["task_id"],
             "markdown": text,
+            **(
+                {
+                    "suggested_markdown": pending["result"].get("suggested_markdown")
+                    or pending["result"].get("markdown")
+                }
+                if pending["stage"] != "human_review"
+                and (
+                    pending["result"].get("suggested_markdown") or pending["result"].get("markdown")
+                )
+                else {}
+            ),
             "ocr_markdown": page["ocr"]["markdown"],
             "history": [
                 {
@@ -1183,10 +1267,11 @@ class Store:
         page: int,
         *,
         input_sha256: str,
-        reviewer: str,
+        reviewer: str = "本地使用者",
         markdown: str,
-        note: str,
+        note: str = "本地确认",
         verdict: str,
+        decision_scope: str = "content",
     ) -> dict:
         """Record an explicit local form submission. Deliberately not exposed through MCP."""
         if verdict not in {"approved", "pending"} or not reviewer.strip() or not note.strip():
@@ -1195,8 +1280,17 @@ class Store:
             )
         if not isinstance(markdown, str):
             raise ValueError("Human review requires full page Markdown")
+        if decision_scope not in {"content", "workflow_test"}:
+            raise ValueError("Unknown decision scope")
+        if decision_scope == "workflow_test":
+            authorization = self.root / ".workflow-test-authorization.json"
+            if not authorization.exists() or not json.loads(authorization.read_text("utf-8")).get(
+                "enabled"
+            ):
+                raise ValueError("Workflow-test release requires explicit workspace authorization")
         with self.lock:
             doc = self._load(document_id)
+            self._require_active(doc)
             self._verify_evidence(doc)
             packet = self._human_packet(doc, page)
             if digest(packet) != input_sha256:
@@ -1213,6 +1307,13 @@ class Store:
                 "origin": "local_human_review_form",
                 "created_at": time.time(),
             }
+            if decision_scope == "workflow_test":
+                receipt.update(
+                    approval_type="workflow_test",
+                    human_approval=False,
+                    origin="user_authorized_workflow_test",
+                    content_verified=False,
+                )
             result = {
                 "input_sha256": input_sha256,
                 "markdown": markdown,
@@ -1307,7 +1408,14 @@ class Store:
             raise ValueError("Archived organization hash mismatch")
         return snapshot
 
-    def begin_revision(self, document_id: str, reason: str, pages: list[int] | None = None) -> dict:
+    def begin_revision(
+        self,
+        document_id: str,
+        reason: str,
+        pages: list[int] | None = None,
+        *,
+        user_errata: bool = False,
+    ) -> dict:
         """Reopen machine-reviewed pages while the last published version remains readable."""
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("Revision requires a reason")
@@ -1332,7 +1440,12 @@ class Store:
             ):
                 raise ValueError("Revision requires valid distinct physical pages")
             for number in selected:
-                if any(t["page"] == number and t["stage"] == "human_review" for t in doc["tasks"]):
+                if not user_errata and any(
+                    t["page"] == number
+                    and t["stage"] == "human_review"
+                    and t.get("receipt", {}).get("approval_type") != "workflow_test"
+                    for t in doc["tasks"]
+                ):
                     raise ValueError("Human approvals and drafts are preserved across revisions")
             active = doc.get("active_publication") or self._snapshot_publication(doc)
             self._published_snapshot(doc, active)
@@ -1396,9 +1509,101 @@ class Store:
                 "active_publication": active,
             }
 
+    def propose_revision(self, document_id: str, changes: list[dict]) -> dict:
+        """Retain explicitly located errata as candidates for independent Sol review."""
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            if doc["state"] != "published" or not changes:
+                raise ValueError("Errata require a published source and explicit changes")
+            by_page = {}
+            for change in changes:
+                number, start, before, after = (
+                    change.get(k) for k in ("page", "start", "before", "after")
+                )
+                if (
+                    type(number) is not int
+                    or not 1 <= number <= len(doc["pages"])
+                    or type(start) is not int
+                ):
+                    raise ValueError("Errata require an exact physical page and character offset")
+                text = doc["pages"][number - 1]["approved"]["markdown"]
+                if (
+                    not isinstance(before, str)
+                    or not before
+                    or not isinstance(after, str)
+                    or start < 0
+                    or text[start : start + len(before)] != before
+                ):
+                    raise ValueError("Erratum does not match current approved source")
+                by_page.setdefault(number, []).append(change)
+            replacements = {}
+            for number, edits in by_page.items():
+                edits.sort(key=lambda e: e["start"])
+                if any(
+                    a["start"] + len(a["before"]) > b["start"] for a, b in zip(edits, edits[1:])
+                ):
+                    raise ValueError("Errata overlap")
+                value = doc["pages"][number - 1]["approved"]["markdown"]
+                for edit in reversed(edits):
+                    value = (
+                        value[: edit["start"]]
+                        + edit["after"]
+                        + value[edit["start"] + len(edit["before"]) :]
+                    )
+                replacements[number] = value
+            self.begin_revision(
+                document_id,
+                "用户提交定位勘误，需重新对照原图审核",
+                pages=sorted(by_page),
+                user_errata=True,
+            )
+            doc = self._load(document_id)
+            for number, value in replacements.items():
+                page = doc["pages"][number - 1]
+                task = self._new_task("extraction", number)
+                inputs = {
+                    "document_id": document_id,
+                    "revision": doc["revision"],
+                    "source_sha256": doc["source"]["sha256"],
+                    "image_sha256": page["image_sha256"],
+                    "previous_candidate": page["ocr"],
+                    "changes": by_page[number],
+                }
+                result = {"markdown": value}
+                receipt = {
+                    "task_id": task["task_id"],
+                    "worker_id": "local:errata-proposal",
+                    "input_sha256": digest(inputs),
+                    "result_sha256": digest(result),
+                    "approval_type": "extraction",
+                    "human_approval": False,
+                    "origin": "explicit_local_errata_proposal",
+                    "created_at": time.time(),
+                }
+                task.update(
+                    state="completed",
+                    inputs=inputs,
+                    claim={"input_sha256": digest(inputs)},
+                    result=result,
+                    receipt=receipt,
+                )
+                doc["tasks"].append(task)
+                page["ocr"] = {**receipt, "markdown": value, "sha256": digest(value)}
+            self._save(doc)
+            self.request_run(document_id, resume=True)
+            return {
+                "document_id": document_id,
+                "revision": doc["revision"],
+                "pages": sorted(by_page),
+                "state": "queued_for_independent_review",
+                "content_approved": False,
+            }
+
     def publish(self, document_id: str) -> dict:
         with self.lock:
             doc = self._load(document_id)
+            self._require_active(doc)
             self._verify_evidence(doc)
             if not all(p["state"] == "approved" for p in doc["pages"]) or not doc["organization"]:
                 raise ValueError(
@@ -1442,6 +1647,17 @@ class Store:
                 ],
                 "published_at": time.time(),
             }
+            test_pages = [
+                p["page"] for p in doc["pages"] if p["approved"]["approval_type"] == "workflow_test"
+            ]
+            if test_pages:
+                publication.update(
+                    approval_type="workflow_test",
+                    content_verified=False,
+                    workflow_test_pages=test_pages,
+                )
+            if (self.root / ".workflow-test-authorization.json").exists():
+                publication.update(validation_scope="workflow_only", content_verified=False)
             atomic_json(directory / "publication.json", publication)
             doc.update(state="published", publication=publication)
             if "revision" in doc:

@@ -39,6 +39,8 @@ class Settings(BaseModel):
     retrieval_device: Literal["cpu", "cuda"] = "cuda"
     retrieval_endpoint: str = "http://127.0.0.1:18160/retrieval"
     auto_cards_enabled: bool = False
+    processing_backend: Literal["codex", "legacy"] = "codex"
+    codex_root: Path | None = None
 
     @model_validator(mode="after")
     def output_budgets(self):

@@ -396,6 +396,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/runtime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runtime */
+        get: operations["runtime_api_v2_runtime_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -459,6 +476,11 @@ export interface components {
              * @default 0
              */
             revision: number;
+            /**
+             * Revision Pending
+             * @default false
+             */
+            revision_pending: boolean;
         };
         /** CardDetail */
         CardDetail: {
@@ -946,6 +968,8 @@ export interface components {
             text_sha256: string;
             /** Text */
             text: string;
+            /** Proposed Text */
+            proposed_text?: string | null;
             /** Draft Text */
             draft_text?: string | null;
             /** Reasons */
@@ -956,6 +980,8 @@ export interface components {
             pages: number[];
             /** Images */
             images: string[];
+            /** Footnotes */
+            footnotes?: components["schemas"]["FootnoteLink"][];
         };
         /** ReviewIssueSummary */
         ReviewIssueSummary: {
@@ -1053,7 +1079,28 @@ export interface components {
              * @default book
              */
             kind: string;
+            /** Codex Document Id */
+            codex_document_id?: string | null;
+            /** Content Acceptance */
+            content_acceptance?: string | null;
             progress?: components["schemas"]["RunProgress"] | null;
+        };
+        /** RuntimeStatus */
+        RuntimeStatus: {
+            /** Backend */
+            backend: string;
+            /** Workspace Id */
+            workspace_id: string;
+            /** Root */
+            root: string;
+            /** Ocr Model */
+            ocr_model: string;
+            /** Review Model */
+            review_model: string;
+            /** Review Failure */
+            review_failure: string;
+            /** Validation Scope */
+            validation_scope: string;
         };
         /** SearchContext */
         SearchContext: {
@@ -1994,6 +2041,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    runtime_api_v2_runtime_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeStatus"];
                 };
             };
         };

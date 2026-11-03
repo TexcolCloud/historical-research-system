@@ -1,5 +1,10 @@
 # Research Platform
 
+当前默认：原 React 上传/核对/阅读/检索界面通过 `services/codex_bridge.py` 接入原生 Codex 队列。运行 `uv run --project services/research-platform python scripts/hrs_v2.py up --build`；识别 Terra、独立审核及组织 Sol，失败直接进入单用户人工队列。默认不启动 Temporal。本文下面的旧 OCR、文本模型、工作流运维说明仅适用于显式 `--legacy`；既有 SQL/S3 数据与只读卡片保留。
+
+[本轮功能映射与20页流程验收](../codex-pipeline/INTEGRATION-20261104.md)给出脚注、表格、插图、检索、导出、删除、勘误及异常恢复的对应路径。完整网页入口使用共享存储与 BGE 检索模型；独立 MCP 工作台仍可单独运行。
+
+
 > 2026-10-21：本模块保留为历史数据兼容平台。项目默认处理入口已改为 [Codex 本地 MCP 工作流](../codex-pipeline/README.md)。下文 GPU/OCR/模型部署仅用于旧平台；新流程无需这些服务。制卡新建、重试和调度已退出，保留历史读取与导出。下文旧制卡说明不再是可用操作。
 
 统一业务后端：上传、转换、内容核对、章节入库、混合检索和研究制卡。部署面向 Windows NVIDIA GPU 主机与 Docker Desktop；真实整书内容验收、完整灾难恢复及公网多用户边界仍需单独验证。
@@ -16,7 +21,7 @@ $platformPython = '.cache/engineering-envs/research-platform/Scripts/python.exe'
 & $platformPython scripts/hrs_v2.py doctor
 ```
 
-[启动器](../../scripts/hrs_v2.py) 的 `init` 创建专用数据库、配置 Temporal 并应用迁移；`up --build` 构建应用并保持主机 GPU 进程受管；`stop` 等待主机进程退出后停止应用容器。共享 PostgreSQL、S3 和 OpenSearch 由独立 Compose 管理，不随应用停止。修改配置后需重新启动相应进程。
+[启动器](../../scripts/hrs_v2.py) 的 默认 `init` 创建专用数据库并应用迁移；`--legacy init` 另外配置 Temporal；`up --build` 构建应用并保持主机 GPU 进程受管；`stop` 等待主机进程退出后停止应用容器。共享 PostgreSQL、S3 和 OpenSearch 由独立 Compose 管理，不随应用停止。修改配置后需重新启动相应进程。
 
 ### 准备共享存储
 

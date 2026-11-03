@@ -18,7 +18,18 @@ def prepare(store: Store, source: str, title: str = "") -> dict:
     with path.open("rb") as stream:
         document_id = file_digest(stream, "sha256").hexdigest()[:24]
     manifest = render_document(path, store.root / "documents" / document_id)
-    return store.register_manifest(manifest, title=title)
+    document = store.register_manifest(manifest, title=title)
+    with store.lock:
+        saved = store._load(document["id"])
+        if not saved.get("processing_policy") and saved["state"] != "published":
+            saved["processing_policy"] = {
+                "ocr_model": "gpt-6.1-terra",
+                "review_model": "gpt-6.1-sol",
+                "organization_model": "gpt-6.1-sol",
+                "review_failure": "human",
+            }
+            store._save(saved)
+    return store.status(document["id"])
 
 
 def create_server(root: Path) -> MCPServer:

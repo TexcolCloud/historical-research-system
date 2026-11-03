@@ -12,7 +12,8 @@ source for PDF routing, original-first review, fallback limits and publication.
 1. Call `workspace_status`. Keep its workspace ID for this request. The tools,
    dashboard and executor must use that same workspace; report a mismatch instead
    of silently changing directories or importing a second copy.
-2. For a new source, call `process_document(source, title)`. This retains the source,
+2. For an upload already in the React workbench, inspect its linked native document ID;
+   do not import a duplicate. For a new local source, call `process_document(source, title)`. This retains the source,
    chooses page routes and queues the native Codex coordinator. For an existing
    task, read `document_status` before deciding the next action. Use
    `resume_document` for an explicitly requested continuation or technical recovery;
@@ -33,9 +34,17 @@ use `request_human_review` with current evidence hashes and the exact unresolved
 issue. It records machine uncertainty and protects the human handoff from another
 automatic retry. Preserve opposing observations; a prior publication is not gold.
 
-Human decisions are made explicitly in the local form. Preserve human drafts and
+Use `historical_ocr` (GPT-6.1 Terra), `historical_review` and
+`historical_organization` (GPT-6.1 Sol). A failed new-policy review goes directly to
+the human queue. Preserve Markdown footnotes, note ownership, tables, retained
+figure images and exact article boundaries.
+
+Human decisions are made explicitly in the single-user local form. Preserve human drafts and
 receipts; development permission does not authorize approving real source content
-on a person's behalf. Model and human decisions retain distinct provenance.
+on a person's behalf. Explicit user-authorized workflow tests may release real
+source pages only in an isolated authorized workspace, with `workflow_test`
+receipts and `content_verified=false`. They do not certify accuracy. Model and
+human decisions retain distinct provenance.
 
 If the connected MCP lacks these tools, report that the project connection needs
 reloading; do not build an ad hoc second pipeline or alter unrelated Codex settings.

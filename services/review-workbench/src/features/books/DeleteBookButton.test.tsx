@@ -22,6 +22,7 @@ test.each(["queued", "uploading"])(
       run_id: "run",
       stage: "verify_upload",
       revision: 0,
+      revision_pending: false,
       created_at: "2026-09-13",
     };
     const query = new QueryClient();

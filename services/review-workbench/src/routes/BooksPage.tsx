@@ -13,6 +13,7 @@ const states: Record<string, string> = {
   uploading: "正在上传",
   queued: "等待处理",
   processing: "正在处理",
+  running: "正在处理",
   awaiting_review: "需要核对",
   ready_for_ingestion: "核验完成 · 等待入库",
   ready: "已入库",
@@ -37,7 +38,7 @@ export default function BooksPage() {
           (filter === "all" ||
             (filter === "review"
               ? book.state === "awaiting_review"
-              : ["uploading", "queued", "processing"].includes(book.state))),
+              : ["uploading", "queued", "processing", "running"].includes(book.state))),
       ),
     [books.data, filter, search],
   );

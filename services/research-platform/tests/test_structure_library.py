@@ -73,7 +73,11 @@ def test_structure_read_api_cache_and_published_reader_share_checked_sources(pla
     assert chapter['structure'][0]['pages'] == [1, 2]
     title, exported = Exports(settings, engine).book(published['book_id'])
     assert title
-    assert library.review.objects.read_bytes(exported).decode() == chapter['reading_text']
+    exported_text = library.review.objects.read_bytes(exported).decode()
+    assert exported_text.count('<table>') == 1
+    assert exported_text.count('[^c1-1]') == 2
+    assert '[^a]' not in exported_text
+    assert '只计本月' in exported_text
     with engine.connect() as connection:
         saved_steps = connection.scalars(select(db.stage_outputs.c.step).where(db.stage_outputs.c.run_id == run)).all()
     assert sum(step.startswith('reading-structure:') for step in saved_steps) == 2

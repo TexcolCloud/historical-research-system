@@ -1,8 +1,20 @@
 # Historical Research System
 
-本地史料工作流，默认由 **Codex 原生子代理 + 本地 MCP** 完成识别、原图审核、修订复核和文章组织。本地程序负责原件留存、页面渲染、任务状态、证据校验、Markdown 入库和全文检索。史料卡生成已退出使用。
+本地史料工作流，默认由 **Codex 原生子代理 + 本地 MCP** 完成识别、独立原图审核和文章组织。本地程序负责原件留存、页面渲染、任务状态、证据校验、Markdown 入库和全文检索。史料卡生成已退出使用。
 
 ## 快速开始
+
+完整网页入口复用原项目的上传、核对、阅读、脚注、检索与导出；上传完成后自动写入同一 Codex 持久队列，无需在聊天中再次发出处理指令。准备 Docker Desktop、Python 3.11、uv、Node.js 和已登录的 Codex CLI，然后执行：
+
+```powershell
+uv sync --project services/research-platform --locked --group dev
+npm --prefix services/review-workbench ci
+uv run --no-sync --project services/research-platform python scripts/hrs_v2.py up --build
+```
+
+打开 http://127.0.0.1:18170 。SQL、S3 和 OpenSearch 使用根 `.env` 中的配置；完整检索沿用已安装的 BGE 嵌入/重排运行时，见[平台说明](services/research-platform/README.md)。本地 Codex 协调器通过 `codex exec` 分派原生子代理，不使用交互 TUI，也不调用旧 OCR 服务。识别固定为 GPT-6.1 Terra，独立原图审核与文章组织固定为 GPT-6.1 Sol。新任务审核不通过即交人工。
+
+也可仅使用不依赖 SQL/S3 的本地 MCP 工作台。其安装命令与完整网页入口分开：
 
 准备 Python 3.11、[uv](https://docs.astral.sh/uv/) 和已登录的 Codex CLI；在项目根目录执行：
 
@@ -23,7 +35,7 @@ uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.
 uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli search '中东铁路'
 ```
 
-后台执行器启动 Codex 主代理，由主代理分派原生子代理完成各阶段，继承已配置的模型和登录。PDF 按物理页选择原生文字候选、混合区域识别或整页 OCR，所有路径都经过独立原图审核。统一根目录由 [.codex/historical-workspace.json](.codex/historical-workspace.json) 设置；CLI、MCP、工作台读取相同配置。显式 `--root` 或 `HRS_CODEX_ROOT` 用于单独工作区，界面展示实际工作区 ID，验收数据与正式库分开。新流程无需启动旧平台容器或加载旧 OCR 权重。
+后台执行器启动 Codex 主代理，由主代理分派原生子代理完成各阶段，使用已登录的 Codex 账号和项目固定角色模型。PDF 按物理页选择原生文字候选、混合区域识别或整页 OCR，所有路径都经过独立原图审核。统一根目录由 [.codex/historical-workspace.json](.codex/historical-workspace.json) 设置；CLI、MCP、工作台读取相同配置。显式 `--root` 或 `HRS_CODEX_ROOT` 用于单独工作区，界面展示实际工作区 ID，验收数据与正式库分开。新流程无需启动旧平台容器或加载旧 OCR 权重。
 
 ## 在 Codex 对话中使用
 
@@ -35,9 +47,9 @@ uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.
 
 ## 验收和恢复
 
-每页保存原图与 SHA-256、OCR 初稿、审核结论、修订补丁、输入/结果哈希和子代理身份。Codex 审核记为机器裁决；人工确认另行记录署名和依据，两者均不视为 sealed gold 审核。模型修订必须由另一个子代理再次对照原图通过后采用。全文通过且文章组织完成后才发布 document.md；清晰页面在待核对期间仍可读取。
+每页保存原图与 SHA-256、OCR 初稿、审核结论、修订补丁、输入/结果哈希和子代理身份。Codex 审核记为机器裁决；人工确认记录本地使用者与原图依据，无需填写姓名和审核意见，两者均不视为 sealed gold 审核。新任务的模型修改建议不自动采用，直接进入人工队列；旧任务的修订验证协议继续兼容。全文通过且文章组织完成后才发布 document.md；清晰页面在待核对期间仍可读取。
 
-多轮识别仍不确定时，工作台的人工队列保留原图、候选和失败原因。人工确认最后一页后自动排队续跑文章组织和发布；保存待审草稿则继续阻断。技术故障记录退避重试，连续三次后等待显式恢复，不会被写成原件不清。已发布内容的复核使用新版本；新版本失败时旧发布版本仍可检索，人工决定受到保护。
+独立审核未通过时，工作台的人工队列保留原图、候选和失败原因。人工确认最后一页后自动排队续跑文章组织和发布；保存待审草稿则继续阻断。技术故障记录退避重试，连续三次后等待显式恢复，不会被写成原件不清。已发布内容的复核使用新版本；新版本失败时旧发布版本仍可检索，人工决定受到保护。
 
 工作台自动同步进度与待审数量，提交错误和临时断线保留正在编辑的内容。审核与修订验证先通过 MCP 获取带任务回执的原图、保存原图观察，再读取候选正文；观察和最终裁决绑定哈希。独立终验发现的内容错误使用显式复核版本关闭，历史发布文本会提示复核状态。
 
@@ -62,4 +74,6 @@ uv run --no-sync --project services/codex-pipeline --locked python -m ruff check
 
 ## 原有平台与历史资料
 
-旧的 [Research Platform](services/research-platform/README.md)、[Review Workbench](services/review-workbench/README.md)、[Docling/Paddle 转换模块](services/document-extraction/README.md) 和相关 GPU 运维脚本保留作为历史数据兼容路径，不属于当前 Codex 默认处理链。旧平台中的制卡新建、重试、自动调度及前端入口已撤下，历史卡片只读/导出和数据库迁移保留。新工作区与旧 SQL/S3 库相互独立，尚未自动迁移历史数据；现有记录与存储卷不会被清理。
+[Research Platform](services/research-platform/README.md)、[Review Workbench](services/review-workbench/README.md)、[Docling/Paddle 转换模块](services/document-extraction/README.md) 和相关 GPU 运维脚本保留。原 React UI 的上传、人工核对、阅读、脚注、表格/插图、检索、Markdown 导出、删除与勘误已接入 Codex 队列和结果。原 SQL/S3 历史数据继续可读；不会自动重跑或迁移历史任务。默认运行不依赖 Temporal 或 Qwen/Paddle/DeepSeek 识别服务；`scripts/hrs_v2.py --legacy` 才使用旧处理路径。制卡新建、重试和调度保持退出，历史卡片只读与导出继续保留。
+
+本轮完整功能映射与20页真实史料流程验收见[融合验收记录](services/codex-pipeline/INTEGRATION-20261104.md)。流程验收授权只验证顺序与格式，不能证明内容准确率。

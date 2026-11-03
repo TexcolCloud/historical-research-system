@@ -3,12 +3,8 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-const python = resolve(
-  root,
-  process.platform === "win32"
-    ? ".cache/engineering-envs/research-platform/Scripts/python.exe"
-    : ".cache/engineering-envs/research-platform/bin/python",
-);
+const environment = resolve(root, process.env.UV_PROJECT_ENVIRONMENT || "services/research-platform/.venv");
+const python = resolve(environment, process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 execFileSync(python, ["-m", "hrs_platform.export_openapi"], {
   cwd: root,
   stdio: "inherit",

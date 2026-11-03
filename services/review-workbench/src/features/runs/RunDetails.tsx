@@ -51,6 +51,8 @@ export default function RunDetails({ book }: { book: Book }) {
                 : "书籍正在处理中"}
         </h2>
         <p>已完成结果会保留，关闭页面不影响后台处理。</p>
+        {run?.codex_document_id && <p>Codex 自动处理 · Terra 识别 → Sol 原图审核 → 文章组织与入库</p>}
+        {run?.content_acceptance === "workflow_test" && <p role="note">本材料用于流程测试；授权放行不代表内容准确率验收。</p>}
       </div>
       <ol className="platform-process-steps">
         {phases.map((phase, index) => {

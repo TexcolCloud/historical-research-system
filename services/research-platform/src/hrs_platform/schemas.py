@@ -7,6 +7,16 @@ from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, Field
 from hrs_platform.domain.generation_contracts import CardDraft
 
 
+class RuntimeStatus(BaseModel):
+    backend: str
+    workspace_id: str
+    root: str
+    ocr_model: str
+    review_model: str
+    review_failure: str
+    validation_scope: str
+
+
 class UploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     filename: str = Field(min_length=1, max_length=255)
@@ -29,6 +39,10 @@ class BookSummary(BaseModel):
     run_id: UUID | None = None
     stage: str | None = None
     revision: int = 0
+    revision_pending: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("revision_pending", AliasPath("result", "codex_revision_pending")),
+    )
 
 
 class RunProgress(BaseModel):
@@ -53,6 +67,14 @@ class RunSummary(BaseModel):
     error: dict | None = None
     pending_count: int = 0
     kind: str = "book"
+    codex_document_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("codex_document_id", AliasPath("result", "codex_document_id")),
+    )
+    content_acceptance: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("content_acceptance", AliasPath("result", "content_acceptance")),
+    )
     progress: RunProgress | None = Field(
         default=None, validation_alias=AliasChoices("progress", AliasPath("result", "progress"))
     )
@@ -119,11 +141,13 @@ class ReviewIssueSummary(BaseModel):
 
 class ReviewIssue(ReviewIssueSummary):
     text: str
+    proposed_text: str | None = None
     draft_text: str | None = None
     reasons: list[str]
     kind: str
     pages: list[int]
     images: list[str]
+    footnotes: list["FootnoteLink"] = Field(default_factory=list)
 
 
 class FootnoteSpan(BaseModel):
@@ -172,8 +196,8 @@ class StructureItem(BaseModel):
     status: str
     reason: str
     level: int | None = None
-    before: str = ''
-    after: str = ''
+    before: str = ""
+    after: str = ""
 
 
 class StructureReport(BaseModel):

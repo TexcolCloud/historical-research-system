@@ -1,0 +1,1068 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-11-03T22:37:55.119461+00:00",
+  "validation_scope": "workflow_only",
+  "content_verified": false,
+  "source_manifest_sha256": "33e912672c1ae32c686a63861bac4f580c9a61a89eefe755029b341de6b99d0e",
+  "source_original_first_audit_sha256": "7296ea54c27cce56b96e9b0fb8d143d192a7bbd2102c6326f6d4c7ef4be6411e",
+  "workspace_id": "adc9d0d710a94b80ad0b21e67b6381b4",
+  "documents": [
+    {
+      "sample": "FRUS",
+      "source_sha256": "29b87c58cc05613f3357bc97f9d1d6d2de3acce978886b768225afa2ffcf36bf",
+      "parent_sha256": "38b2d52f6a01c2f84fe84fd6cb5fcbb34fc364d1d6fee934cfd45fb693883682",
+      "document_id": "29b87c58cc05613f3357bc97",
+      "book_id": "bc628885-9586-5991-aa0a-1ec1b4af34f4",
+      "run_id": "9cc6fc91-26a8-4cc2-82b7-5738eecb5dda",
+      "pages": [
+        {
+          "local_physical_page": 1,
+          "parent_physical_page": 1,
+          "route": "mixed",
+          "image_sha256": "b154fdf570186cf5354477269806eb4552075fb14b6a9f312249cc3452ba339c",
+          "candidate_sha256": "91b3915e1584ac5f85f07cb3a4be8d678038d6c5856b49f38881d0301306c652",
+          "approved_sha256": "91b3915e1584ac5f85f07cb3a4be8d678038d6c5856b49f38881d0301306c652",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793741317.597863,
+          "review_original_opened_at": 1793741340.197859,
+          "source_observation_sha256": "79a541e1b13d258acf1c82792c9bf041b03ad25c4529c4081365b191cf3f143f",
+          "review_created_at": 1793741379.8901298,
+          "review_result_sha256": "f60610875b99e40197b06593ba935059401f86a3504b7281210a0b8e87378ba4",
+          "final_decision_at": 1793741379.8901298,
+          "review_verdict": "approved",
+          "retained_issues": []
+        },
+        {
+          "local_physical_page": 2,
+          "parent_physical_page": 100,
+          "route": "native",
+          "image_sha256": "e3020dcddc995c627cc87c2cd8eedad0192858465c882bcd3a0d74517863e4d5",
+          "candidate_sha256": "1932d5c7d2563104e749feb3df4d5651a616921dc44f968c3f9c3eb79a50357d",
+          "approved_sha256": "dfb1422fbf33c509671b7e3ff7862e145760fddb745af7a28b7a2f740bca8811",
+          "approval_type": "workflow_test",
+          "ocr_stage": "extraction",
+          "ocr_created_at": 1793741004.468461,
+          "review_original_opened_at": 1793741120.6749773,
+          "source_observation_sha256": "4451dcf85fa06284a5e7266648ec1b980200b2ceb64412bd1b960d05b349a6f5",
+          "review_created_at": 1793741181.4837291,
+          "review_result_sha256": "49345e3ccd68e9cd4a35c527ef38d13279e2a68a8795d8fde21a84f972df36f2",
+          "final_decision_at": 1793742070.1017787,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "Physical page 2 (printed 45), paragraph 8, 'without informing us.5': original superscript 5 belongs to an editorial footnote; candidate uses literal 'us.5' and a plain '5 Referring...' paragraph without a Markdown footnote reference/definition. Both paragraphs through '(Telegram 138446 to Taipei, August 16; ibid.)' must remain owned by footnote 5, not unmarked body paragraphs. Unchanged candidate does not preserve apparatus structure.",
+            "Physical page 2 running header 'China, 1969 45' appears in candidate immediately after unfinished body anchor 'His assurance that GRC will in the future' and before footnote 5. In the original it is top-of-page carrier material; its insertion into the body/continuation boundary obscures source reading order. Preserve the running header separately from the unfinished paragraph and note."
+          ]
+        },
+        {
+          "local_physical_page": 3,
+          "parent_physical_page": 101,
+          "route": "native",
+          "image_sha256": "5f894a57fd3ce151fd1746e79e009708c9428ae596b0f3247ac5502fb9a82169",
+          "candidate_sha256": "137da296364cf84c435cf90e23e8b49de5fa7639ddac131dad1c2eb7af3955a1",
+          "approved_sha256": "f70813d80d76e380645ac53cf86232cd7563105453ac92804d891da0371d350d",
+          "approval_type": "workflow_test",
+          "ocr_stage": "extraction",
+          "ocr_created_at": 1793741004.4886918,
+          "review_original_opened_at": 1793741133.7443376,
+          "source_observation_sha256": "cc95635a941f676d3d1bcb8fe28a5b07dfe348f23d0e3cb546dcba1c37938fae",
+          "review_created_at": 1793741183.9242218,
+          "review_result_sha256": "862b95b39af35850a082f1e2da878dd868ce36d44adbf116d38318c5981c4019",
+          "final_decision_at": 1793742093.166882,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "Physical page 3 (printed 46), document 17 title: superscript editorial note 1 flattened to 'President Nixon1'; body note 2 flattened to 'China.2' and note 3 to 'Tab A3\\n)'. Candidate has no Markdown footnote links/definitions, obscuring note ownership and reference structure.",
+            "Physical page 3 bottom apparatus: editorial note 2 is merged into note 1 as 'unsigned copy. 2 See Document 14.' rather than a separate footnote; retain three individually identified editorial notes attached to document 17, not preceding McConaughy text.",
+            "Physical page 3 running header '46 Foreign Relations, 1969–1976, Volume XVII' relocated between point 1 ending 'straight extension.' and editorial notes, instead of retained separately as top-of-page carrier material; heading and document-boundary separation are not represented as structured Markdown."
+          ]
+        },
+        {
+          "local_physical_page": 4,
+          "parent_physical_page": 102,
+          "route": "native",
+          "image_sha256": "3daab625a9ff1870c53543b996c407a1961f2e417137300dc639a9345cb2c3fa",
+          "candidate_sha256": "94d793f1e87bc915f4c6b36c1685641876ca44c851363fcfaef4f7545205d180",
+          "approved_sha256": "2105fbbd7cf1ccfb444f930d6dafa5217c243b542ed1b69dfbb16a4e59dddc42",
+          "approval_type": "workflow_test",
+          "ocr_stage": "extraction",
+          "ocr_created_at": 1793741004.4995766,
+          "review_original_opened_at": 1793741199.6562753,
+          "source_observation_sha256": "1cf9a05797f2f4b3bae8604e0cb127acdee3d91e4f15b3e0deded5b34a7910c2",
+          "review_created_at": 1793741254.5078766,
+          "review_result_sha256": "d89d8685b25a61100817f07d71f7a6b8569424f2057e041b1a31c5c7082b4f26",
+          "final_decision_at": 1793742099.3251452,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "Physical page 4 (printed 47): footnote references at 'Bucharest,4', 'instructions,5' and 'Recommendation6' are flattened into baseline digits, not linked Markdown footnotes. Original has three distinct editorial footnotes. Candidate joins note 5 directly after note 4 ('world trip. 5 The policy') and note 6 after note 5 ('12165) 6 There is no indication'), losing note boundaries and apparatus ownership. Preserve separate definitions for 4, 5 and 6 and their respective references; especially keep the editorial no-approval/no-disapproval statement in note 6, not authorial recommendation text.",
+            "Physical page 4: source's separate Recommendation heading is candidate plain 'Recommendation6'; source section identity and superscript note ownership are not encoded.",
+            "Physical page 4: top running header 'China, 1969 47' is relocated after final body recommendation 'by Bryce Harlow.' in candidate. Retain carrier header separately, not as intervening body content before editorial notes."
+          ]
+        },
+        {
+          "local_physical_page": 5,
+          "parent_physical_page": 103,
+          "route": "native",
+          "image_sha256": "20396925fda192ba6559f761ba96a9bb6f632231b93f3261d7952c055e28ea0f",
+          "candidate_sha256": "e843281c93a05479f0b9ae9825b0712ad353aaa0f87f47a21ddca6f7aa86754b",
+          "approved_sha256": "50fc04b364e4c406a677e8dbef5d3c70533f073fbf0cd5a404ea0848a543ab46",
+          "approval_type": "workflow_test",
+          "ocr_stage": "extraction",
+          "ocr_created_at": 1793741004.5125895,
+          "review_original_opened_at": 1793741199.9342253,
+          "source_observation_sha256": "5822b7bf3709a4a19cd2830d7632042948af53f6b51b020f15a72785a3ad3c1a",
+          "review_created_at": 1793741253.7319558,
+          "review_result_sha256": "e4ec88d768375f07ac87104909ebac9e9a9de16713879509bd305b5926792148",
+          "final_decision_at": 1793742104.1338944,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "Physical page 5 printed 48, title: original 'National Security Study Memorandum 69' followed by superscript editorial note 1 is flattened to 'National Security Study Memorandum 691'. This conflates memorandum number with note marker and is not acceptable unchanged; preserve 69 and a distinct footnote reference.",
+            "Physical page 5 main-text ending 'In the light of the results obtained under': running header '48 Foreign Relations, 1969–1976, Volume XVII' is inserted immediately after this unfinished sentence, disrupting continuation and mixing carrier text with body.",
+            "Physical page 5 editorial note 1 beginning 'Source: National Archives, RG 59': plain '1 Source:' lacks linked Markdown footnote definition and title reference, losing explicit separation/ownership of editorial apparatus. Original title and italic numbered area leads lack heading/emphasis structure."
+          ]
+        },
+        {
+          "local_physical_page": 6,
+          "parent_physical_page": 104,
+          "route": "native",
+          "image_sha256": "c18777dae1852bb0920fcae32dac66dca939c8f5d2186d71adec651854c051fe",
+          "candidate_sha256": "3b69e7ec90eea5825d6d735d36a6685a19995a65c33cd3f40c5c7045f06451d0",
+          "approved_sha256": "083363cd9d6500c9e2997a704647c4d8e78c2028c8f09356f5d5b1375995a74f",
+          "approval_type": "workflow_test",
+          "ocr_stage": "extraction",
+          "ocr_created_at": 1793741004.5243542,
+          "review_original_opened_at": 1793741269.968918,
+          "source_observation_sha256": "37d5e1c415cec010461a40dbc7bbef1ce03b78bcf7e7865a0da6b89c184b3668",
+          "review_created_at": 1793741321.8362944,
+          "review_result_sha256": "188810a3f57bd463596cd10bf65bc23df9577dd8d47344c7beee0bb7db4a01e8",
+          "final_decision_at": 1793742109.7436292,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "Physical page 6 printed 49, document 19 heading and first sentence: superscript editorial references flattened into '(Kissinger)1' and 'phone,2'; no Markdown footnote reference/definition structure preserves their ownership.",
+            "Physical page 6 bottom editorial apparatus: separate footnote 2 'Not found.' merged into note 1 as 'See also footnote 5, Document 17. 2 Not found.' This must remain a separate editor’s note referring to the phone conversation, not be part of note 1.",
+            "Physical page 6 main body ending 'of a more modest': carrier header 'China, 1969 49' is inserted after unfinished sentence before notes, instead of separate top-of-page header. Preserve document boundary after 'Henry A. Kissinger' and document 19 heading as distinct structured blocks."
+          ]
+        }
+      ],
+      "native_state": "published",
+      "executor_state": "succeeded",
+      "platform_state": "completed",
+      "stage": "complete",
+      "organization_sha256": "082f942089aa4dbf414eb5d46747084038faad36b21e0d793c1e15caec783aa4",
+      "organization_created_at": 1793742707.835851,
+      "published_at": 1793742740.6777146,
+      "publication_sha256": "217fef55996cdaeed003d24d8637c954bbfe024d0944bf879be71da9b30e1358",
+      "workflow_test_pages": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "chapter_count": 5,
+      "footnote_count": 10,
+      "export_sha256": "d7c5b69477f0a9927a6cdf13314351e7ed0de9d61bffeb3be168ed9a17e3ae36",
+      "export_note_ids": [
+        "c2-1",
+        "c3-1",
+        "c3-2",
+        "c3-3",
+        "c3-4",
+        "c3-5",
+        "c3-6",
+        "c4-1",
+        "c5-1",
+        "c5-2"
+      ],
+      "indexed_publication_sha256": "217fef55996cdaeed003d24d8637c954bbfe024d0944bf879be71da9b30e1358",
+      "projection_policy": "codex-platform-v5-parenthesized-notes"
+    },
+    {
+      "sample": "CHENYI",
+      "source_sha256": "4a25da63c89fd31ae22b3d45cbd405eabf8eb014dd50a081f1aa78eea181591e",
+      "parent_sha256": "4f3b8532fee1c5dc831db191dc5633dd962974712230636c4a95f16a3c5d3087",
+      "document_id": "4a25da63c89fd31ae22b3d45",
+      "book_id": "cde35dd8-7e3e-5272-afa1-12822196fc13",
+      "run_id": "cb001fb1-dbee-44a4-ab0a-e6cd022b3d20",
+      "pages": [
+        {
+          "local_physical_page": 1,
+          "parent_physical_page": 119,
+          "route": "ocr",
+          "image_sha256": "2c94010414e32db649362d3404385c713c432f2b43cdfade638c8ab7b1cc2bca",
+          "candidate_sha256": "def430e082832355c03fcca0ee603e089e1d663b642499ce15681d5930462044",
+          "approved_sha256": "def430e082832355c03fcca0ee603e089e1d663b642499ce15681d5930462044",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793742996.426369,
+          "review_original_opened_at": 1793743089.6356668,
+          "source_observation_sha256": "673a2444fa601925e79e83c20f9da28bfeae1fc375853bd5db508d86946d1036",
+          "review_created_at": 1793743477.3338013,
+          "review_result_sha256": "aab83eb2e6506b59d0487be16efff6dac913cefc08b3ca69a2b1661db786fa94",
+          "final_decision_at": 1793743477.3338013,
+          "review_verdict": "approved",
+          "retained_issues": []
+        },
+        {
+          "local_physical_page": 2,
+          "parent_physical_page": 120,
+          "route": "ocr",
+          "image_sha256": "18c12ebe90ae126a471f70345cc6591e64452c55d6b29e4a3db2f5fad989eb34",
+          "candidate_sha256": "f51b086f11623dc6099cd97ffcd2e166aa17a973eb1e2ff0cb3c7806acef70b6",
+          "approved_sha256": "f51b086f11623dc6099cd97ffcd2e166aa17a973eb1e2ff0cb3c7806acef70b6",
+          "approval_type": "workflow_test",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793743009.9523063,
+          "review_original_opened_at": 1793743104.573193,
+          "source_observation_sha256": "c30872391dcd23b6aa9d057d697f36584b1de97dc7d811141d8f56f09369cbab",
+          "review_created_at": 1793743513.7525852,
+          "review_result_sha256": "c695896af29b8f4ea20120811741556775ee08e78495cb0dda90719eb68f1fd8",
+          "final_decision_at": 1793743943.170167,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "物理第2页（印刷页107）顶部页眉：原图为“郭村战斗简况及部队动向”，候选首行为“郭村战斗情况及部队动向　107”，将“简况”误为“情况”。这是清晰原图中的来源标题/载体文字差异，非标点或简繁规范化；按 review_failure=human 交人工确认，不自动修改。"
+          ]
+        },
+        {
+          "local_physical_page": 3,
+          "parent_physical_page": 121,
+          "route": "ocr",
+          "image_sha256": "b3a496fd527c3ca9c33c48268b0248a68e0b734a509b75e34f20399c98823503",
+          "candidate_sha256": "44c86606450406024783f25ed23e4909322aada921e61d15c0434bedecfeacb2",
+          "approved_sha256": "44c86606450406024783f25ed23e4909322aada921e61d15c0434bedecfeacb2",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793743032.5002806,
+          "review_original_opened_at": 1793743171.9759977,
+          "source_observation_sha256": "25d8f274155d119e3fbfc76f5abf70e7b47eb3772966619d669d7e3bd6dff49f",
+          "review_created_at": 1793743556.972194,
+          "review_result_sha256": "566f85656aa4adc36bf27533bc5d5f13f364b2715490b4f7e315a3819a034273",
+          "final_decision_at": 1793743556.972194,
+          "review_verdict": "approved",
+          "retained_issues": []
+        },
+        {
+          "local_physical_page": 4,
+          "parent_physical_page": 122,
+          "route": "ocr",
+          "image_sha256": "1b7975ce9f102791f7df0988a60fe4210d1dd5337e16dbefb6156e4b1d4f15d5",
+          "candidate_sha256": "45a07b2b10a179d72c56c2c8576e61d0180b4501edc53966e6f7de32de639b2e",
+          "approved_sha256": "45a07b2b10a179d72c56c2c8576e61d0180b4501edc53966e6f7de32de639b2e",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793743021.9538908,
+          "review_original_opened_at": 1793743143.1671798,
+          "source_observation_sha256": "992e699f5537375f97dd9a3158c71fa63dbb85b1a68e8519a089a1d7350cc74d",
+          "review_created_at": 1793743509.5017338,
+          "review_result_sha256": "c2c9ce9e4ca6eb56a86f254765a4b6c6da79efd5a8fc2ca04e8d43baa010504b",
+          "final_decision_at": 1793743509.5017338,
+          "review_verdict": "approved",
+          "retained_issues": []
+        },
+        {
+          "local_physical_page": 5,
+          "parent_physical_page": 123,
+          "route": "ocr",
+          "image_sha256": "ddcf54600b8eab8cbfe3dd95fede6f348e660f2af8454d33da4ab657d77517dc",
+          "candidate_sha256": "c18f9007ce2503f7d554f2fd972e06bb1f06685661672d351d45b88aac813a82",
+          "approved_sha256": "c18f9007ce2503f7d554f2fd972e06bb1f06685661672d351d45b88aac813a82",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793743028.7087872,
+          "review_original_opened_at": 1793743146.5445464,
+          "source_observation_sha256": "6e9a41fc9c0e62919fa132a400991336add0c78446a36135f56a8e5989ff77ba",
+          "review_created_at": 1793743515.153781,
+          "review_result_sha256": "0b0c604c6e9a5f20ae18bde9ccfbeab2376390f630cda9f4e683b2c888793b9e",
+          "final_decision_at": 1793743515.153781,
+          "review_verdict": "approved",
+          "retained_issues": []
+        },
+        {
+          "local_physical_page": 6,
+          "parent_physical_page": 124,
+          "route": "ocr",
+          "image_sha256": "6749b60e28beb3be3856478ffb4b0cd8303d3b8e406b979bbf38936265dcf4e8",
+          "candidate_sha256": "f6c37e6b6fb23b4e295bb47d896894b2f05be7bd725cf2d70fb2f02af01d7b66",
+          "approved_sha256": "f6c37e6b6fb23b4e295bb47d896894b2f05be7bd725cf2d70fb2f02af01d7b66",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793743032.5681553,
+          "review_original_opened_at": 1793743186.8652558,
+          "source_observation_sha256": "2f198e43277fe8ade92614350ff1ba7dd5acbfa25b101b65c5006bf86c4f90fc",
+          "review_created_at": 1793743554.5233834,
+          "review_result_sha256": "367f5f514912578c884d4e8da1fbbbdd044e0b48764f3c1dc94352fcb8b0010b",
+          "final_decision_at": 1793743554.5233834,
+          "review_verdict": "approved",
+          "retained_issues": []
+        }
+      ],
+      "native_state": "published",
+      "executor_state": "succeeded",
+      "platform_state": "completed",
+      "stage": "complete",
+      "organization_sha256": "951d2168c390c850622a1ed56f8407ab0223af22bb8b1601bb4b7333c3c28846",
+      "organization_created_at": 1793744840.1100388,
+      "published_at": 1793744858.6865804,
+      "publication_sha256": "aae0c14f17486437bc0f228a8ec245a94a1c54ee7f19ffcfd255336ef66e307a",
+      "workflow_test_pages": [
+        2
+      ],
+      "chapter_count": 3,
+      "footnote_count": 11,
+      "export_sha256": "cc2a9efe3dc57de204d8305d31f89b338c0ddd7c4240b9a6889bc2e1d929d4d1",
+      "export_note_ids": [
+        "c1-1",
+        "c1-2",
+        "c1-3",
+        "c1-4",
+        "c1-5",
+        "c1-6",
+        "c1-7",
+        "c2-1",
+        "c2-2",
+        "c2-3",
+        "c3-1"
+      ],
+      "indexed_publication_sha256": "aae0c14f17486437bc0f228a8ec245a94a1c54ee7f19ffcfd255336ef66e307a",
+      "projection_policy": "codex-platform-v5-parenthesized-notes"
+    },
+    {
+      "sample": "ORGANIZATION",
+      "source_sha256": "36f1b3dcb32735768401375d580aab5adbb7ab986eaf03090674c05a6c6965f3",
+      "parent_sha256": "bdfc854adb91823283b1eb51ddb55a59187d509ea56b13d2801def2c3e94dd9b",
+      "document_id": "36f1b3dcb32735768401375d",
+      "book_id": "c8c1908c-1798-5d04-90fc-39c998d2f41b",
+      "run_id": "bae5804e-d423-4633-9528-ce26fca93f23",
+      "pages": [
+        {
+          "local_physical_page": 1,
+          "parent_physical_page": 510,
+          "route": "ocr",
+          "image_sha256": "52379d8c784ea2bc048d9a78ddd584308a6577d158aa40ae889830764ac3130b",
+          "candidate_sha256": "10d5ee83eab3660ab1b500cc59b839186c8dcaa2c100441648d5ec4b62e00b14",
+          "approved_sha256": "10d5ee83eab3660ab1b500cc59b839186c8dcaa2c100441648d5ec4b62e00b14",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793742242.4311059,
+          "review_original_opened_at": 1793742376.3074472,
+          "source_observation_sha256": "11f788dc88e5857ffeca0cd96a0599eea96c252884d9e72e029c9cf248587d77",
+          "review_created_at": 1793742453.577116,
+          "review_result_sha256": "297b8786e3f87a0bd18f4ce46ff2a1906e94bfac7dc5e84358ca0f66238cf08f",
+          "final_decision_at": 1793742453.577116,
+          "review_verdict": "approved",
+          "retained_issues": []
+        },
+        {
+          "local_physical_page": 2,
+          "parent_physical_page": 511,
+          "route": "ocr",
+          "image_sha256": "af7e542c7746a3da39ba6557a69f56849ab298be9f2e4b09fbacd39da000e842",
+          "candidate_sha256": "d633f3b89e4e117ba17a8a0246310358eae36302e794ae00c519b9150e1b0200",
+          "approved_sha256": "d633f3b89e4e117ba17a8a0246310358eae36302e794ae00c519b9150e1b0200",
+          "approval_type": "workflow_test",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793742229.8666155,
+          "review_original_opened_at": 1793742362.4469879,
+          "source_observation_sha256": "324ec31e7fdd67a3c7ba4c8a4a82c9655f0841f47775bef1d6a50d034851ef70",
+          "review_created_at": 1793742463.6666355,
+          "review_result_sha256": "37b367b08741ae8a120f15210ebbdc408c7aade74c217380ad74f75bf147d4a4",
+          "final_decision_at": 1793743847.6993635,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "Physical page 2 (printed 435), committee member list, unique candidate span 薛振彦（肖佛，1937.7—10）: the alias second character 佛 does not match the inspected original glyph. The frozen source-first reading recorded 肖棣; reconsideration of the already-inspected enlarged pixels also raises 肖悌 as a competing reading. The frozen observation is fallible and is not rewritten: exact alias must be adjudicated by a human against original_detail e112f8c31c9099c75bb9dad2.png, box [0.295,0.675,0.565,0.826], particularly the 薛振彦 row. This is an identity-bearing content issue, not harmless normalization. No replacement is adopted or automatically proposed as certain."
+          ]
+        },
+        {
+          "local_physical_page": 3,
+          "parent_physical_page": 512,
+          "route": "ocr",
+          "image_sha256": "987c6eee4d60a8906b3e0e0d58d2d59a57467d5e0d5b10bcc0160f65a8937d71",
+          "candidate_sha256": "b665c3d412ea3e31df51b37de17f8508a423d2f0a35b1b18ef97549abb0eda21",
+          "approved_sha256": "b665c3d412ea3e31df51b37de17f8508a423d2f0a35b1b18ef97549abb0eda21",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793742221.654703,
+          "review_original_opened_at": 1793742348.5148778,
+          "source_observation_sha256": "e82f1684f75b2850202af02fe272ed557abe60cfb2a0df796fb8630daaa4e712",
+          "review_created_at": 1793742454.8523958,
+          "review_result_sha256": "8edb19de650b907c9ef09e22ccbd2b409090a05a540262332b15282afc3d1d3e",
+          "final_decision_at": 1793742454.8523958,
+          "review_verdict": "approved",
+          "retained_issues": []
+        },
+        {
+          "local_physical_page": 4,
+          "parent_physical_page": 513,
+          "route": "ocr",
+          "image_sha256": "f0d507cb23bf8cb85285b150d8d4f55be37084080e0b6d14de3943e13f25a56a",
+          "candidate_sha256": "42b6fe5d512627bd430c1badcb65841cb82065fc21621f835541062047ce2a53",
+          "approved_sha256": "42b6fe5d512627bd430c1badcb65841cb82065fc21621f835541062047ce2a53",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793742214.4615667,
+          "review_original_opened_at": 1793742333.888124,
+          "source_observation_sha256": "f967017b75ee36ca48cef45d6fffc80689e3b8f8f643c3b7f61bcdd72aa5a175",
+          "review_created_at": 1793742409.5233974,
+          "review_result_sha256": "c5563b5338f3fada9106039131055b75951526d4f992a67f4fbeb2958b7425cb",
+          "final_decision_at": 1793742409.5233974,
+          "review_verdict": "approved",
+          "retained_issues": []
+        }
+      ],
+      "native_state": "published",
+      "executor_state": "succeeded",
+      "platform_state": "completed",
+      "stage": "complete",
+      "organization_sha256": "36c3073e239cdf1c06effa615566692b5edc4afbd0aba66eb865e8234b69dadb",
+      "organization_created_at": 1793744618.2935479,
+      "published_at": 1793744640.978847,
+      "publication_sha256": "7eab114982133c2220fa456d5b56a9ecc96f0a8cebb512d18f105ecc2639ff1e",
+      "workflow_test_pages": [
+        2
+      ],
+      "chapter_count": 2,
+      "footnote_count": 0,
+      "export_sha256": "c53f9822e40caa0150adb08a9c4d5c490d34bc6ba70fe624a67b6c2f764f59da",
+      "export_note_ids": [],
+      "indexed_publication_sha256": "7eab114982133c2220fa456d5b56a9ecc96f0a8cebb512d18f105ecc2639ff1e",
+      "projection_policy": "codex-platform-v5-parenthesized-notes"
+    },
+    {
+      "sample": "NINGXIA",
+      "source_sha256": "6e892682cea361e55dc4fb1018852e12930259c075f9b7ef0121d705e24533a4",
+      "parent_sha256": "70d344ee5e4731cc887f61efbeb8fb37b0f8071e5c58fb57bb263d481d6b91f3",
+      "document_id": "6e892682cea361e55dc4fb10",
+      "book_id": "5f4c7279-2972-5344-91e7-95b70e3ecf5c",
+      "run_id": "254b1ec1-0b86-4a85-9021-d6d38027ba65",
+      "pages": [
+        {
+          "local_physical_page": 1,
+          "parent_physical_page": 41,
+          "route": "ocr",
+          "image_sha256": "dd5c034ce6c8effd39c16e661bc2e9da613cf704ab5943a8d9acd3fff340d230",
+          "candidate_sha256": "980e7448ef461b42cdbd0e28174602e71183c106e019a8b6fbacfcadc9fe94e0",
+          "approved_sha256": "980e7448ef461b42cdbd0e28174602e71183c106e019a8b6fbacfcadc9fe94e0",
+          "approval_type": "workflow_test",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793743864.4888496,
+          "review_original_opened_at": 1793743932.9171455,
+          "source_observation_sha256": "06658ae03595791426f172702db70eefe3f251232c1fc42510180630ae6bf183",
+          "review_created_at": 1793744021.363479,
+          "review_result_sha256": "aaabd8859d329dd0198fd6eb3e226a8e0f23ca48d489904e8520db7ca4664721",
+          "final_decision_at": 1793744318.7304206,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "物理页1（印刷页10），正文第一段首字、脚注[^1]引用前：候选为“达[^1]已于1919年即任中央第五混成旅旅长”，原图清楚印作“逵①已于1919年即任中央第五混成旅旅长”。“逵”是前页续文的人名末字，且与本页脚注“马鸿逵”对应；误作“达”改变人名及跨页续接锚点，不属于无害字形或标点规范化。按review_failure=human交人工待审；不自动修改候选。"
+          ]
+        },
+        {
+          "local_physical_page": 2,
+          "parent_physical_page": 42,
+          "route": "ocr",
+          "image_sha256": "3fa664626a500012a0e10f83bdfa1e1b65b5760d8770ea7515bc7727ac05c1b0",
+          "candidate_sha256": "ed3c25f6ce06ccbbb81cbd6f47fcd733619eea7f9dca1489a849f42740aece22",
+          "approved_sha256": "ed3c25f6ce06ccbbb81cbd6f47fcd733619eea7f9dca1489a849f42740aece22",
+          "approval_type": "machine",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793743868.0515602,
+          "review_original_opened_at": 1793743977.0040557,
+          "source_observation_sha256": "250dacdc7253f1675f2bf83147e4948bc6286f87f4670212ab64ff0bbdd09192",
+          "review_created_at": 1793744065.1918418,
+          "review_result_sha256": "eb4e749e3823ce810166ae5b912b8d459d02400783e5095a6ed3569d922b249a",
+          "final_decision_at": 1793744065.1918418,
+          "review_verdict": "approved",
+          "retained_issues": []
+        }
+      ],
+      "native_state": "published",
+      "executor_state": "succeeded",
+      "platform_state": "completed",
+      "stage": "complete",
+      "organization_sha256": "38371acd56589cd9a46dafb571c853c8477f928d3a266320b479846d93ddeaa2",
+      "organization_created_at": 1793745092.8986974,
+      "published_at": 1793745120.5388305,
+      "publication_sha256": "ef1296e3d12f5a68c9966e56b6e1f405e612dab689b708cbb3dc0dc9e5c267f8",
+      "workflow_test_pages": [
+        1
+      ],
+      "chapter_count": 1,
+      "footnote_count": 1,
+      "export_sha256": "d4f42633b68fc84404a24844c716523cef7cb1fe0676ca2325c352603be65df2",
+      "export_note_ids": [
+        "c1-1"
+      ],
+      "indexed_publication_sha256": "ef1296e3d12f5a68c9966e56b6e1f405e612dab689b708cbb3dc0dc9e5c267f8",
+      "projection_policy": "codex-platform-v5-parenthesized-notes"
+    },
+    {
+      "sample": "TABLES",
+      "source_sha256": "12759dedf1c429a0f03445e8d02b721d8aa21b64ca8c89024715a7f9b723b0ce",
+      "parent_sha256": "1cbd40019ae690b4c9dceeab5897e0034e0bc7bf8e33743254525de2eaa2f5eb",
+      "document_id": "12759dedf1c429a0f03445e8",
+      "book_id": "38195260-187c-5046-8ea4-a5fa7ae2478a",
+      "run_id": "9962dc05-97e3-4c62-a540-2a3ff91c53be",
+      "pages": [
+        {
+          "local_physical_page": 1,
+          "parent_physical_page": 74,
+          "route": "ocr",
+          "image_sha256": "4db86ca9ce0901799e9e3b4fb5a38919d9e3cda5cd32e5c8da057dc64680185d",
+          "candidate_sha256": "f85977185602c14760a55e001240371e5fc77ee014ebb9df780bd16541e5f2c5",
+          "approved_sha256": "f85977185602c14760a55e001240371e5fc77ee014ebb9df780bd16541e5f2c5",
+          "approval_type": "workflow_test",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793741730.7439506,
+          "review_original_opened_at": 1793741842.0833094,
+          "source_observation_sha256": "fccd32e6145442e620f20746d28978bb2622fc6a0a7b52f077935e6ef104d9c9",
+          "review_created_at": 1793741933.082288,
+          "review_result_sha256": "a527a67a0f9755edb3fcfa0484e7513c6a1ea1d6069edf7107688f4795316969",
+          "final_decision_at": 1793743826.3545594,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "物理页1（印刷页63），首段“后在1938年初，编组了担任蒙古地方防卫的驻蒙兵团”中的“蒙古”不符原图：原文为“蒙疆地方防卫”。原始整页及细节框[0.16,0.09,0.94,0.38]清楚显示“蒙疆”。这改变了驻蒙兵团防卫地域的名称与范围，不属于无害字形或措辞规范化。须人工核定；候选保持原样，未自动修改。其余正文、日期、否定语义、标题、页码63和表格全部四行五列及合并单元格归属均已逐项比较，未发现其他实质性差异。"
+          ]
+        },
+        {
+          "local_physical_page": 2,
+          "parent_physical_page": 75,
+          "route": "ocr",
+          "image_sha256": "0442a9027adb5ed4e4a9e0374624a1dded61b662dc20cf44b91ed6781728ca9e",
+          "candidate_sha256": "1cf0c25da5025ca7a9d55f9b6c8e727ba665084141ae1dfae8de46a17e205caa",
+          "approved_sha256": "1cf0c25da5025ca7a9d55f9b6c8e727ba665084141ae1dfae8de46a17e205caa",
+          "approval_type": "workflow_test",
+          "ocr_stage": "ocr",
+          "ocr_created_at": 1793741611.1451206,
+          "review_original_opened_at": 1793741722.0217454,
+          "source_observation_sha256": "f968c7f6fef7a016fd240a59035fd44b2ced4b47e02e7e25d9eb6ac434bca0af",
+          "review_created_at": 1793741901.914077,
+          "review_result_sha256": "5e1f2d93437b5e0dda31c93af292a26781587308bc872f0ce80fdce8084d2dfb",
+          "final_decision_at": 1793743832.6811159,
+          "review_verdict": "pending",
+          "retained_issues": [
+            "Physical page 2 (printed 64), continuation table, 第七战区 / 刘湘 row, fourth column: candidate reads 浙赣沿线, whereas my frozen independent source reading was 浙皖沿线. Subsequent isolated original crop [0.605,0.14,0.735,0.167] does not give me sufficient confidence to resolve the second character. This is an unresolved machine source-reading discrepancy, NOT a proven candidate error; human inspection must establish the place/route name without changing it on my uncertain reading.",
+            "Physical page 2, 在华北方面 paragraph, unique candidate span 济宁——邹县——蒙阴一线: my frozen source observation instead read 郓县. Isolated crop [0.51,0.6,0.618,0.629] appears more consistent with candidate 邹县, showing that my initial reading may be wrong, but I cannot confidently close the source-reading dispute. Preserve both observations and unchanged candidate for human review; do not automatically substitute 郓县."
+          ]
+        }
+      ],
+      "native_state": "published",
+      "executor_state": "succeeded",
+      "platform_state": "completed",
+      "stage": "complete",
+      "organization_sha256": "b553a422f4aafce793b8d8fc953b408410e3b35717bcc8304c4ed7963543f483",
+      "organization_created_at": 1793744376.5372102,
+      "published_at": 1793744407.312395,
+      "publication_sha256": "b7ffb93db005663fd88ca3e5f1bf3f2dae833f94c8114b83ad25f323198560ae",
+      "workflow_test_pages": [
+        1,
+        2
+      ],
+      "chapter_count": 2,
+      "footnote_count": 1,
+      "export_sha256": "892ab72a485019626bad7229c49c5f010c7a3e8df96b0f003ad67647c8acf9e9",
+      "export_note_ids": [
+        "c2-1"
+      ],
+      "indexed_publication_sha256": "b7ffb93db005663fd88ca3e5f1bf3f2dae833f94c8114b83ad25f323198560ae",
+      "projection_policy": "codex-platform-v5-parenthesized-notes"
+    }
+  ],
+  "totals": {
+    "pages": 20,
+    "route_mixed": 1,
+    "ocr": 15,
+    "review": 20,
+    "approval_machine": 10,
+    "route_native": 5,
+    "extraction": 5,
+    "approval_workflow_test": 10,
+    "footnotes": 23,
+    "chapters": 13,
+    "route_ocr": 14,
+    "retained_figure_references": 2
+  },
+  "native_workers": [
+    {
+      "thread_id": "01a1a34c-8a69-76e0-b587-15d1cc2e1340",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "7fd57dd228a79fb3ba1b497e3e5cd5b60d9af9a1d60155732d84f222ec37d80a"
+    },
+    {
+      "thread_id": "01a1a34c-bed6-7781-b4cb-ef131e6598f5",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "13e714a7a372b25f70faf9eaecf64feb4083db94ffc562e7c241d763873240e3"
+    },
+    {
+      "thread_id": "01a1a34c-eea8-78f0-b8b3-6319f9a6c855",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "9846b5b180885afa233f13d005b86f05743b47a26be0da279a2cae6abf6b3331"
+    },
+    {
+      "thread_id": "01a1a353-1b0c-7d90-b67b-b798e9c53b6e",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "1817556c9c5b74fc5b6985af49477004ff33bff6ed4c6da12987106258876348"
+    },
+    {
+      "thread_id": "01a1a353-47de-7d72-8d0a-937623e791d6",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "e3c87239c9be75d49920674edeb345ce02157e5456e3f034a38720c2062153c1"
+    },
+    {
+      "thread_id": "01a1a355-ec1b-7e91-a670-0f4e8f3b46e4",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "fa4547374b3332ded6d6d624689c7a2fbccb79a3876c61a7ef3c766e3305dd63"
+    },
+    {
+      "thread_id": "01a1a357-78da-74b1-9c17-294810734b63",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "d308cd0def5ee95af30d4d35a5de83cd0fa7a9d2ff44bcce1910a81b5025d17f"
+    },
+    {
+      "thread_id": "01a1a35c-1b01-75f0-b894-4fa975c9f4ec",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "1acf74aef3dba8bdec72f0a360cabf01d87314b170a8ffb13ac02efb73bb1685"
+    },
+    {
+      "thread_id": "01a1a35c-449b-7903-87bc-c89856387655",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "feb7222b0fa1690005db33cf712f771af36bc79d132db655e0f3d5ffbcb3850b"
+    },
+    {
+      "thread_id": "01a1a35c-6f90-7200-9489-496069691893",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "b5e6fc19a760224fb1d0c779a0898067eb4ef740f116359385ba359d7a68be91"
+    },
+    {
+      "thread_id": "01a1a35c-9991-7a12-8b5b-d2e036db6cc2",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "d240841d9c3633e9572b70b3f3bfd812b76ef238b8f380cefbf7897542d8a1c0"
+    },
+    {
+      "thread_id": "01a1a35f-55d1-7560-83be-f21a63856ccc",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "05c491ada7f0b12db17719467a6face3d4c5f64980dce38db85e968ce751702e"
+    },
+    {
+      "thread_id": "01a1a35f-87a4-79c1-ace5-ebff708eaec4",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "a2a25291830457d81c5dbaa27251027841ffb213fb4b25cd4f46cdaf90dce8d8"
+    },
+    {
+      "thread_id": "01a1a35f-bc19-78c3-ade5-72150e376a8d",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "ac17fee17720630274db19cddbd19e4eafe5ef8a9d2461e7b3bd8e54df7de390"
+    },
+    {
+      "thread_id": "01a1a35f-f005-7ac1-b6c1-dd851520b38d",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "de9c4dd8c41a93485d3fb43516d2db24366d8246d534aa392fe1bd9878a5b18f"
+    },
+    {
+      "thread_id": "01a1a364-1f3f-7af0-8d13-75b7d6d74366",
+      "role": "historical_organization",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "7ec626f57c02a74390dc3e4bffc8dd12c4ac4a4713614d034f2c73e16be9e161"
+    },
+    {
+      "thread_id": "01a1a367-6db8-7390-8429-3c79404531bd",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "749ae0da3adb42ae34e6705a6dbc49b6711669dcf0d002678c4e631f0feab278"
+    },
+    {
+      "thread_id": "01a1a367-950a-73d0-842d-cb2f4e40a306",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "6d63dda1a26b7dd6388a75b1cf261f1cfe7efab3587af36b18ebfbf2aee378cd"
+    },
+    {
+      "thread_id": "01a1a367-c085-7e92-87b5-6712ff709983",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "2ab8de2b18f2683e6ae8e4914268bde67aa482147d9c98eb8a31b8c4cafd8ddb"
+    },
+    {
+      "thread_id": "01a1a36a-ed42-7da0-8dec-18b77fff123d",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "b35d7379fe1a5c07ae5f8cd309ca27bdf1c3c5b8af06287d12bbf4534a729f6e"
+    },
+    {
+      "thread_id": "01a1a36b-1e07-7122-9f6e-be1dcc7f0cf3",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "38d46c058c83737588007a672d25883fa5a22336da9a6ad135f21f2c2d10da4e"
+    },
+    {
+      "thread_id": "01a1a36b-c977-7882-bf8e-e8a7ac30662f",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "ef02a95347cf57079002b6bf90caa2bbfaa3f7fc21b429ebb808be61199956e3"
+    },
+    {
+      "thread_id": "01a1a374-ef16-76b1-af51-1e4ae4368980",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "5dd4ec882f1c88b0cdc343b3900ea0927e43b231293f590c76d1c73d916cb48a"
+    },
+    {
+      "thread_id": "01a1a375-1b1f-7d71-8f8a-a4c1e601d1ae",
+      "role": "historical_ocr",
+      "actual_models": [
+        "gpt-6.1-terra"
+      ],
+      "session_sha256": "e8cdd898c0474bcf549f626bca034a653b7beca3a29cddf29df83ff185ece6c0"
+    },
+    {
+      "thread_id": "01a1a377-9d45-7012-9918-4684b8967df2",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "258b45e8d0a06c8a2856db7b3ea3746a7d5fd982e9a553843b19964f1a4bac1f"
+    },
+    {
+      "thread_id": "01a1a378-35c1-7c70-abec-a117b25cf193",
+      "role": "historical_review",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "6e8e7575f660f7776af528a982cb5f17b41d4520659081135b7633f1ff2a53c0"
+    },
+    {
+      "thread_id": "01a1a37c-82fe-7c81-94b2-d564d3298d44",
+      "role": "historical_organization",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "34a4e5cfc1089b9ca9d3b9fb6d5a7722bfce788aff6be46f9188c565abfdb8b9"
+    },
+    {
+      "thread_id": "01a1a380-f44b-7a11-a7dd-68126dad4be5",
+      "role": "historical_organization",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "603d8faa0845ef64ece8ac6d9c75a3fbfa4e0322642f090fd352e2faf5ae689c"
+    },
+    {
+      "thread_id": "01a1a384-84d8-7fb3-a0c2-1c7c72cb0743",
+      "role": "historical_organization",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "b61d977a83260c02dd55c9f78e1fefb56087f4f1756398a88f19d1b8262da3a3"
+    },
+    {
+      "thread_id": "01a1a387-bc94-7743-b6ca-8c638dcef7e3",
+      "role": "historical_organization",
+      "actual_models": [
+        "gpt-6.1-sol"
+      ],
+      "session_sha256": "cf59dc5cbfa8515f1fd7ae8476528fc56ef840a90ca8f11439ba5b2358d3fad3"
+    }
+  ],
+  "native_event_files": [
+    {
+      "path": "runs/12759dedf1c429a0f03445e8/20261103T213042417335Z/events.jsonl",
+      "sha256": "4e4ba7e17dd50fe7cd97963a55b18557ffdd9e87a3755375ee54bc444511407b"
+    },
+    {
+      "path": "runs/12759dedf1c429a0f03445e8/20261103T221557996032Z/events.jsonl",
+      "sha256": "eb01802c02cf22c08ebfc1dd7602ca54d41e73f8ba4a6e5f54f2f02f7c691542"
+    },
+    {
+      "path": "runs/29b87c58cc05613f3357bc97/20261103T212326901180Z/events.jsonl",
+      "sha256": "c08e75c3c8fac184fbf2e48087c3b86cdd66bac8c17abf49dedfccb40aec0e07"
+    },
+    {
+      "path": "runs/29b87c58cc05613f3357bc97/20261103T214921587334Z/events.jsonl",
+      "sha256": "90ea8a31d13b6c030e91670ad712f994c2057bdf75db28b09571aba5067f76c9"
+    },
+    {
+      "path": "runs/36f1b3dcb32735768401375d/20261103T214032080082Z/events.jsonl",
+      "sha256": "84e1760875f1b29200d527797a83b16af57eb73abf564bc0ff254ca689d244b7"
+    },
+    {
+      "path": "runs/36f1b3dcb32735768401375d/20261103T222039671435Z/events.jsonl",
+      "sha256": "b42d220f0459376fefc2073da44ad43c3a59b1e5277368df57b159d8c7a85048"
+    },
+    {
+      "path": "runs/4a25da63c89fd31ae22b3d45/20261103T215249227893Z/events.jsonl",
+      "sha256": "aaad1b0e79f803377e9deccb79fad2a01c70384e19511a4f844fc46f5e2565c4"
+    },
+    {
+      "path": "runs/4a25da63c89fd31ae22b3d45/20261103T222430869058Z/events.jsonl",
+      "sha256": "d00763c5c82c979d091807b171766027733e64f891e4d6717ff4094962df12e6"
+    },
+    {
+      "path": "runs/6e892682cea361e55dc4fb10/20261103T220733177193Z/events.jsonl",
+      "sha256": "f29032db6739899a23410014437718295bc68bf62805c3824a621f223041653b"
+    },
+    {
+      "path": "runs/6e892682cea361e55dc4fb10/20261103T222810022879Z/events.jsonl",
+      "sha256": "c2f3ecba09c013f42ae0b06592c28483e1207f2b2e879cba125eae20b839eed2"
+    }
+  ],
+  "retrieval_checks": [
+    {
+      "sample": "CHENYI",
+      "query": "胡田大队",
+      "semantic": false,
+      "hits": 4,
+      "context_roles": [
+        "footnote",
+        "neighbor",
+        "note_owner"
+      ],
+      "all_source_offsets_match": true,
+      "response_sha256": "e50c0a0412ec132a508b44e769cce8a6ff98b04a8fe7463a365bee9b9bb1f485"
+    },
+    {
+      "sample": "TABLES",
+      "query": "余汉谋",
+      "semantic": false,
+      "hits": 2,
+      "context_roles": [
+        "footnote",
+        "neighbor",
+        "note_owner"
+      ],
+      "all_source_offsets_match": true,
+      "response_sha256": "afbb1a6108593128008929138ac22505e02b33091ea3582eaf30067996b6ad09"
+    },
+    {
+      "sample": "NINGXIA",
+      "query": "马鸿逵",
+      "semantic": false,
+      "hits": 3,
+      "context_roles": [
+        "footnote",
+        "neighbor",
+        "note_owner"
+      ],
+      "all_source_offsets_match": true,
+      "response_sha256": "7ac0613bbaee7a94b89dd0333f454ca51eb710abd47ea56f235135d2b17f777e"
+    },
+    {
+      "sample": "FRUS",
+      "query": "GRC",
+      "semantic": false,
+      "hits": 3,
+      "context_roles": [
+        "footnote",
+        "neighbor",
+        "note_owner"
+      ],
+      "all_source_offsets_match": true,
+      "response_sha256": "e35e1de202579e84d4b0fa72e69d2115e2853e2466c74915821b9b0d535b6e12"
+    },
+    {
+      "sample": "ORGANIZATION",
+      "query": "平汉线省委",
+      "semantic": false,
+      "hits": 8,
+      "context_roles": [],
+      "all_source_offsets_match": true,
+      "response_sha256": "4c2422923fd44ad739eb18564bcee4ffc0e61cea198413e95e6afb1fdc4b292d"
+    },
+    {
+      "sample": "FRUS",
+      "query": "Kissinger Nixon China policy",
+      "semantic": true,
+      "hits": 8,
+      "context_roles": [
+        "footnote",
+        "neighbor",
+        "note_owner"
+      ],
+      "all_source_offsets_match": true,
+      "response_sha256": "7341f67212faf258761a470f411a3a1da376c2adcd1489905989c02a34cf6247"
+    }
+  ],
+  "source_complete": true,
+  "all_stage_orders_valid": true,
+  "all_passed": true,
+  "engineering": {
+    "python_passed": 489,
+    "python_skipped": 15,
+    "python_junit_sha256": "f0a836efdcdd0dae6240b435261961f9662a77a85bb459d069e689cb29d3855f",
+    "frontend_tests_passed": 34,
+    "typecheck": "passed",
+    "frontend_build": "passed",
+    "unused_check": "passed",
+    "ruff": "passed",
+    "docker_api_build": "passed",
+    "docker_web_build": "passed",
+    "legacy_conversion_policy_checks": {
+      "passed": 87,
+      "skipped": 14,
+      "subtests_passed": 8,
+      "junit_sha256": "536cde3e05d21490f35797e01486dcef01e2945521d6b704ff51181b9a1ec0d5"
+    },
+    "standalone_script_tests_collected": 7
+  },
+  "browser_acceptance": {
+    "approval_type": "machine_development_format_review",
+    "human_approval": false,
+    "sealed_gold": false,
+    "validation_scope": "workflow_only",
+    "content_verified": false,
+    "verdict": "passed",
+    "checks": {
+      "original_react_upload_files": 5,
+      "workflow_test_ui_page_decisions": 10,
+      "footnote_jumps_and_backlinks_keep_book_route": true,
+      "cross_page_parenthesized_notes": true,
+      "translator_table_note_jump": true,
+      "table_rows": [
+        5,
+        3
+      ],
+      "table_rowspans": [
+        [
+          4
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "original_figure_loaded_dimensions": [
+        1785,
+        2526
+      ],
+      "pdf_original_panel": true,
+      "semantic_search_and_note_context_expansion": true,
+      "api_restart_preserves_checkpoints": true,
+      "docker_to_loopback_hook_probe": true
+    },
+    "screenshots": [
+      {
+        "path": "output/codex-integration-20261104/final-books.png",
+        "sha256": "e3602f964a8c3847cd1ea712cd5bd8d7b57b792adcc8f21e5d5cbd48b73f2e1f"
+      },
+      {
+        "path": "output/codex-integration-20261104/footnote-reader.png",
+        "sha256": "a2b204abbd58df254b9d5d4033542a3fa467c23bf998c2f63860332ea054ff85"
+      },
+      {
+        "path": "output/codex-integration-20261104/cross-page-footnotes.png",
+        "sha256": "cb40ba5d7533d60b29afa67001fc5337b6ed7b51950379e602b6ebab47691ba0"
+      },
+      {
+        "path": "output/codex-integration-20261104/table-footnote-reader.png",
+        "sha256": "015df7b436e6c57445de028910f38d927c0fa424d74be04378765e2e6569576b"
+      },
+      {
+        "path": "output/codex-integration-20261104/search-footnote-context.png",
+        "sha256": "8dfd31b56b4dac1c099ae1cc51ba0b9a9fd51f0008a799c09d0b8ee02b4660d4"
+      },
+      {
+        "path": "output/codex-integration-20261104/organization-original-reader.png",
+        "sha256": "cb16a4bdcf5b25d76156361e65f637c223c66f9a41b7a2dd4638b129df2be6fe"
+      },
+      {
+        "path": "output/codex-integration-20261104/review-footnotes.png",
+        "sha256": "70032ef5cbef391653b0fe9dd39bc77fed28b28c146ea0217ac1327a7ac664bb"
+      }
+    ],
+    "downloads": [
+      {
+        "sample": "FRUS",
+        "sha256": "d7c5b69477f0a9927a6cdf13314351e7ed0de9d61bffeb3be168ed9a17e3ae36",
+        "matches_export_object": true
+      },
+      {
+        "sample": "CHENYI",
+        "sha256": "cc2a9efe3dc57de204d8305d31f89b338c0ddd7c4240b9a6889bc2e1d929d4d1",
+        "matches_export_object": true
+      }
+    ],
+    "limitations": [
+      "Source reading issues remain in machine evidence; no accuracy certification.",
+      "Cross-page table merging adopts only a validated source-bound candidate; otherwise original page tables remain separate."
+    ],
+    "visible_books_after_restart": [
+      {
+        "title": "TABLES",
+        "state": "ready"
+      },
+      {
+        "title": "NINGXIA",
+        "state": "ready"
+      },
+      {
+        "title": "ORGANIZATION",
+        "state": "ready"
+      },
+      {
+        "title": "CHENYI",
+        "state": "ready"
+      },
+      {
+        "title": "FRUS",
+        "state": "ready"
+      }
+    ]
+  }
+}

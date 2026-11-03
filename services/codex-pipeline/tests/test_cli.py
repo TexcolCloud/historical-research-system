@@ -64,7 +64,7 @@ def test_runner_native_command_paths_model_inheritance_and_receipt(tmp_path, mon
         for argument in process.arguments
     )
     if model is None:
-        assert "--model" not in process.arguments
+        assert process.arguments[process.arguments.index("--model") + 1] == "gpt-6.1-sol"
     else:
         assert process.arguments[process.arguments.index("--model") + 1] == model
     logs = Path(receipt["logs"])

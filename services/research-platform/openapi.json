@@ -1350,6 +1350,27 @@
         }
       }
     },
+    "/api/v2/runtime": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Runtime",
+        "operationId": "runtime_api_v2_runtime_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -1438,6 +1459,11 @@
             "type": "integer",
             "title": "Revision",
             "default": 0
+          },
+          "revision_pending": {
+            "type": "boolean",
+            "title": "Revision Pending",
+            "default": false
           }
         },
         "type": "object",
@@ -2584,6 +2610,17 @@
             "type": "string",
             "title": "Text"
           },
+          "proposed_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Text"
+          },
           "draft_text": {
             "anyOf": [
               {
@@ -2619,6 +2656,13 @@
             },
             "type": "array",
             "title": "Images"
+          },
+          "footnotes": {
+            "items": {
+              "$ref": "#/components/schemas/FootnoteLink"
+            },
+            "type": "array",
+            "title": "Footnotes"
           }
         },
         "type": "object",
@@ -2808,6 +2852,28 @@
             "title": "Kind",
             "default": "book"
           },
+          "codex_document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Document Id"
+          },
+          "content_acceptance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Acceptance"
+          },
           "progress": {
             "anyOf": [
               {
@@ -2829,6 +2895,49 @@
           "updated_at"
         ],
         "title": "RunSummary"
+      },
+      "RuntimeStatus": {
+        "properties": {
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "root": {
+            "type": "string",
+            "title": "Root"
+          },
+          "ocr_model": {
+            "type": "string",
+            "title": "Ocr Model"
+          },
+          "review_model": {
+            "type": "string",
+            "title": "Review Model"
+          },
+          "review_failure": {
+            "type": "string",
+            "title": "Review Failure"
+          },
+          "validation_scope": {
+            "type": "string",
+            "title": "Validation Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "backend",
+          "workspace_id",
+          "root",
+          "ocr_model",
+          "review_model",
+          "review_failure",
+          "validation_scope"
+        ],
+        "title": "RuntimeStatus"
       },
       "SearchContext": {
         "properties": {
