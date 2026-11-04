@@ -26,6 +26,7 @@ class Review:
 
     def read_cached(self, reference):
         from hrs_platform.services.storage import cached_bytes
+
         return cached_bytes(self.objects, reference)
 
     def ocr_draft(self, run):
@@ -59,8 +60,10 @@ class Review:
                 "text": original["text"],
                 "image": f"/api/v2/runs/{run_id}/artifacts/{original['image_path']}",
                 "machine_status": "unreviewed-source",
-                "extraction_method": original.get('extraction_method', 'ocr'),
-                "footnotes": resolve_footnotes(original['text'], [{'text':original['text'], 'source':{'pages':[page]}}]),
+                "extraction_method": original.get("extraction_method", "ocr"),
+                "footnotes": resolve_footnotes(
+                    original["text"], [{"text": original["text"], "source": {"pages": [page]}}]
+                ),
             }
 
         read = self.read_cached
@@ -81,10 +84,12 @@ class Review:
             "text": text[boundary["start"] : boundary["end"]],
             "image": f"/api/v2/runs/{run_id}/artifacts/{original['image']}",
             "machine_status": original["status"],
-            "extraction_method": original.get('extraction_method', 'ocr'),
-            "acceptance_basis": original.get('acceptance_basis'),
-            "footnotes": resolve_footnotes(text[boundary['start']:boundary['end']],
-                                            [{'text':text[boundary['start']:boundary['end']], 'source':{'pages':[page]}}]),
+            "extraction_method": original.get("extraction_method", "ocr"),
+            "acceptance_basis": original.get("acceptance_basis"),
+            "footnotes": resolve_footnotes(
+                text[boundary["start"] : boundary["end"]],
+                [{"text": text[boundary["start"] : boundary["end"]], "source": {"pages": [page]}}],
+            ),
         }
 
     def initialize(self, run_id):
@@ -153,11 +158,14 @@ class Review:
                     "scope_key": scope,
                     "page": min(value["pages"]),
                     "text_sha256": digest(value["text"]),
-                    "content": self.objects.put_bytes(json.dumps(value, ensure_ascii=False).encode("utf-8"), run_id=run_id),
+                    "content": self.objects.put_bytes(
+                        json.dumps(value, ensure_ascii=False).encode("utf-8"), run_id=run_id
+                    ),
                 }
             )
         with self.engine.begin() as connection:
             from hrs_platform.services.deletion import require_active
+
             require_active(connection, run["book_id"])
             current = (
                 connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
@@ -239,21 +247,29 @@ class Review:
         return {
             **row,
             **body,
+            "footnotes": resolve_footnotes(
+                body["text"], [{"text": body["text"], "source": {"pages": body["pages"]}}]
+            ),
             "draft_text": self.objects.read_bytes(row["draft"]).decode("utf-8") if row["draft"] else None,
             "images": [f"/api/v2/runs/{row['run_id']}/artifacts/{name}" for name in body["images"]],
         }
 
     def issue_run(self, issue_id):
         with self.engine.connect() as connection:
-            run_id = connection.scalar(select(db.review_issues.c.run_id).where(db.review_issues.c.id == str(issue_id)))
+            run_id = connection.scalar(
+                select(db.review_issues.c.run_id).where(db.review_issues.c.id == str(issue_id))
+            )
         if run_id is None:
             raise ServiceError(404, "核对问题不存在。")
         return run_id
 
     def save_draft(self, issue_id, request):
-        reference = self.objects.put_bytes(request.text.encode("utf-8"), "text/markdown; charset=utf-8", run_id=self.issue_run(issue_id))
+        reference = self.objects.put_bytes(
+            request.text.encode("utf-8"), "text/markdown; charset=utf-8", run_id=self.issue_run(issue_id)
+        )
         with self.engine.begin() as connection:
             from hrs_platform.services.deletion import require_run_active
+
             require_run_active(connection, self.issue_run(issue_id))
             row = (
                 connection.execute(
@@ -287,7 +303,9 @@ class Review:
         if (request.action == "correct") != (request.text is not None):
             raise ServiceError(422, "修改并确认需要提交正文；直接放行不能附带未确认的修改。")
         replacement = (
-            self.objects.put_bytes(request.text.encode("utf-8"), "text/markdown; charset=utf-8", run_id=self.issue_run(issue_id))
+            self.objects.put_bytes(
+                request.text.encode("utf-8"), "text/markdown; charset=utf-8", run_id=self.issue_run(issue_id)
+            )
             if request.text is not None
             else None
         )
@@ -310,6 +328,7 @@ class Review:
             if run_id is None:
                 raise ServiceError(404, "核对问题不存在。")
             from hrs_platform.services.deletion import require_run_active
+
             require_run_active(connection, run_id)
             run = (
                 connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
@@ -378,8 +397,28 @@ class Review:
                     id=str(request.decision_id),
                     issue_id=issue_id,
                     request_sha256=request_hash,
-                    receipt={**receipt, "reviewer": "local-qwen-machine" if machine_evidence else "human-ui", "action": request.action,
-                             **({"machine_review": True, "human_review": False, "evidence": machine_evidence} if machine_evidence else {})},
+                    receipt={
+                        **receipt,
+                        "reviewer": "local-qwen-machine" if machine_evidence else "human-ui",
+                        "action": request.action,
+                        **(
+                            {
+                                "reviewer": "user-authorized-workflow-test",
+                                "human_review": False,
+                                "workflow_test": True,
+                                "content_verified": False,
+                            }
+                            if (run["result"] or {}).get("codex_document_id")
+                            and self.settings.codex_root
+                            and (self.settings.codex_root / ".workflow-test-authorization.json").exists()
+                            else {}
+                        ),
+                        **(
+                            {"machine_review": True, "human_review": False, "evidence": machine_evidence}
+                            if machine_evidence
+                            else {}
+                        ),
+                    },
                 )
             )
             connection.execute(
@@ -406,9 +445,9 @@ class Review:
             )
         return receipt
 
-
     def artifact(self, run_id, name):
         from hrs_platform.services.books import get_run
+
         run = get_run(self.engine, run_id)
         if name == "original.pdf":
             reference = run["source"] if run["source"].get("sha256") else None

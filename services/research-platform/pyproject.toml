@@ -14,7 +14,7 @@ dependencies = [
   "pypdfium2>=5,<6", "pypdf>=6,<7", "filelock>=3.32,<4", "psutil>=7.2,<8",
   "openai-agents>=0.22.1,<0.23", "Pillow>=11,<13", "tokenizers>=0.22,<0.23",
   "opensearch-py>=3,<4", "langchain-text-splitters>=0.3,<2",
-  "markdown-it-py>=3,<5", "OpenCC>=1.1,<2",
+  "markdown-it-py>=3,<5", "OpenCC>=1.1,<2", "hrs-codex==0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +28,7 @@ hrs-platform = "hrs_platform.cli:main"
 
 [tool.uv.sources]
 hrs-runtime = { path = "../../packages/runtime-support", editable = true }
+hrs-codex = { path = "../codex-pipeline", editable = true }
 torch = [
   { index = "pytorch-cu130", marker = "sys_platform == 'win32'" },
   { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },

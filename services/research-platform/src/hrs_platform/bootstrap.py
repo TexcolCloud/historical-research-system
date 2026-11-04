@@ -15,7 +15,7 @@ from hrs_platform.core.db import engine_for, migrate
 from hrs_platform.jobs.worker import connect, register_namespace
 
 
-def bootstrap():
+def bootstrap(*, legacy=False):
     root = Path(__file__).resolve().parents[4]
     env = {**dotenv_values(root / ".env"), **os.environ}
     ingest = make_url(env["INGEST_DATABASE_URL"])
@@ -23,9 +23,9 @@ def bootstrap():
     names = [
         "historical_research_v2",
         "historical_research_v2_test",
-        "hrs_temporal_v2",
-        "hrs_temporal_visibility_v2",
     ]
+    if legacy:
+        names += ["hrs_temporal_v2", "hrs_temporal_visibility_v2"]
     with psycopg.connect(admin, autocommit=True) as connection:
         for name in names:
             if not connection.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone():
@@ -43,15 +43,20 @@ def bootstrap():
     logdir.mkdir(parents=True, exist_ok=True)
     compose = ["docker", "compose", "--env-file", ".env", "-f", "deploy/platform/compose.yml"]
     with (logdir / "bootstrap.log").open("ab") as log:
+        if legacy:
+            subprocess.run(
+                [*compose, "--profile", "setup", "run", "--rm", "temporal-schema"],
+                cwd=root,
+                stdout=log,
+                stderr=log,
+                check=True,
+            )
         subprocess.run(
-            [*compose, "--profile", "setup", "run", "--rm", "temporal-schema"],
+            [*compose, "up", "-d", "--wait", *(["temporal"] if legacy else []), "tusd"],
             cwd=root,
             stdout=log,
             stderr=log,
             check=True,
-        )
-        subprocess.run(
-            [*compose, "up", "-d", "--wait", "temporal", "tusd"], cwd=root, stdout=log, stderr=log, check=True
         )
     settings = Settings.load(root)
     engine = engine_for(settings)
@@ -71,8 +76,9 @@ def bootstrap():
                 await asyncio.sleep(1)
         await register_namespace(settings)
 
-    asyncio.run(namespace())
-    print("V2 databases, migrations, Temporal namespace and tusd are ready. No legacy data was migrated.")
+    if legacy:
+        asyncio.run(namespace())
+    print("Databases, migrations and tusd ready; backend=" + ("legacy" if legacy else "codex"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,447 @@
+{
+  "schema_version": 1,
+  "validated_at_utc": "2026-11-02T23:38:49.030924+00:00",
+  "overall": "fusion_workflow_local_acceptance_passed",
+  "workspace_id": "2203ca55400c4e2a85932fab190298c3",
+  "state_root": "state/codex",
+  "approval_type": "machine",
+  "human_approval": false,
+  "sealed_gold_approval": false,
+  "criteria": {
+    "same_chat_mcp_workbench_executor_workspace": "passed",
+    "real_native_background_publication": "passed",
+    "real_mixed_background_publication": "passed",
+    "original_first_receipts_and_immutable_observations": "passed",
+    "real_scan_dispute_preserved_and_handed_to_human": "passed",
+    "synthetic_human_confirmation_auto_continuation": "passed",
+    "live_ui_error_reconnect_and_edit_preservation": "passed",
+    "all_real_content_passed": false
+  },
+  "published_real_documents": [
+    {
+      "document_id": "b37de17daf2998d9cefaf033",
+      "title": "融合验收：FRUS原生正文两页（默认MCP全后台）",
+      "state": "published",
+      "run_state": "succeeded",
+      "source_sha256": "b37de17daf2998d9cefaf0333e48085fcd05ca0ccbea88ca1d875d2388c13092",
+      "pages": [
+        {
+          "physical_page": 1,
+          "route": "native",
+          "state": "approved",
+          "image_sha256": "e3020dcddc995c627cc87c2cd8eedad0192858465c882bcd3a0d74517863e4d5",
+          "markdown_sha256": "b27a5075a8c7dd04e052a8e1c153e1e179a9ae7a14cc6d6d1b3f77272ff41ace"
+        },
+        {
+          "physical_page": 2,
+          "route": "native",
+          "state": "approved",
+          "image_sha256": "5f894a57fd3ce151fd1746e79e009708c9428ae596b0f3247ac5502fb9a82169",
+          "markdown_sha256": "7597996dd10df7d2d9fdfc6cf9e5489611d0ca9646e379c8b12f764a4f166bb0"
+        }
+      ],
+      "tasks": [
+        {
+          "stage": "extraction",
+          "physical_page": 1,
+          "state": "completed",
+          "verdict": null,
+          "worker_id": "local:pdfium",
+          "input_sha256": "8573a330ae181b57a75afd186295f3953c0a8691239e5ceff3fe5a4b3210b45f",
+          "result_sha256": "39dc2e63ff789bae769206ef4514be1313d722992da9a0bcbfee4d154846a027",
+          "source_reading_sha256": null
+        },
+        {
+          "stage": "extraction",
+          "physical_page": 2,
+          "state": "completed",
+          "verdict": null,
+          "worker_id": "local:pdfium",
+          "input_sha256": "9c6fd7b4989f790daeb54be38c2f650211db3365626e694d5197440b30928e86",
+          "result_sha256": "f4a0fc2f4cb92ebe225b3cd6e1d469657d1c3e7970ff4dd769c72112e4b73892",
+          "source_reading_sha256": null
+        },
+        {
+          "stage": "review",
+          "physical_page": 1,
+          "state": "completed",
+          "verdict": "corrections",
+          "worker_id": "review-b37de17d-20261103-6f28aeb9",
+          "input_sha256": "9a1492bdc662d2a2fa429e491e8bc3e0b47d1197e57869a540edbbd3cf8e7def",
+          "result_sha256": "929ad5c770c170f1a58a226a7263611d991026ca64ba740fee98b946d81f94a3",
+          "source_reading_sha256": "817d46dae4263a81f63d82612c6d3494607d20993c0d8ed6685ae08f88c3722a"
+        },
+        {
+          "stage": "review",
+          "physical_page": 2,
+          "state": "completed",
+          "verdict": "corrections",
+          "worker_id": "review-b37de17d-20261103-a93f67c2",
+          "input_sha256": "ddd93845043ef9e52dc09492e3bc4030fcea967e0aec2754f68cc0f2ebe2e64a",
+          "result_sha256": "bbcf7c11f99df6f64ab62ede622c23254246362310a66bddd0448fabd69eaad4",
+          "source_reading_sha256": "6cf4168e054560ba78d004866f864c813594d70ec739e5cf038b0b34740a31d1"
+        },
+        {
+          "stage": "verify",
+          "physical_page": 2,
+          "state": "completed",
+          "verdict": "approved",
+          "worker_id": "verify-independent-20261103-97a6c1e4",
+          "input_sha256": "361839e18fd023e3dc462d421c63b8320a34bf72db160f5546b912afb429dda3",
+          "result_sha256": "3b6a5c5df722e1450527d3f3aef6db376a4ebfb6b5358d1819bc4fa3e8240a26",
+          "source_reading_sha256": "f2578e7b3dddb5eeb0025922c6d49b62d4d64625ceb3215266e7e789bc26e2f0"
+        },
+        {
+          "stage": "verify",
+          "physical_page": 1,
+          "state": "completed",
+          "verdict": "approved",
+          "worker_id": "verify-independent-20261103-7b621e93",
+          "input_sha256": "69e7f564409a501464d8de9d0600a87b5acad01fb38eefc223db31458dbf08b4",
+          "result_sha256": "53d1cd877de1f40d9ace5fc0c5a144dc7217fd7eed2ba284f6a00b30aeaf08a3",
+          "source_reading_sha256": "313de9db25278da2d815b2f42eec2bb119a6268703043f69c1ffab490d49dfb0"
+        },
+        {
+          "stage": "organization",
+          "physical_page": null,
+          "state": "completed",
+          "verdict": null,
+          "worker_id": "org-b37de17d-20261103-9c47f1a2",
+          "input_sha256": "63492a28956b5d5995851082461f895edfa7b411f01cb5789fb9db1b7e4cd677",
+          "result_sha256": "4a03d097e6fac27e76f17de55872940179b3ce8f194968899ce2665bc348b789",
+          "source_reading_sha256": null
+        }
+      ],
+      "articles": [
+        {
+          "title": "Untitled concluding fragment ending with “McConaughy”",
+          "pages": [
+            1,
+            2
+          ],
+          "bibliography": {
+            "status": "unclaimed"
+          },
+          "fragment_status": "opening_missing; conclusion_present",
+          "boundaries": [
+            {
+              "page": 1,
+              "start_text": "be either greater or less than on earlier occasions.",
+              "end_text": "His assurance that GRC will in the future",
+              "notes": "Begins mid-sentence. Includes paragraphs 6–8 and the complete page-1 footnote 5, including its second paragraph. Footnote 5 belongs to this fragment, not the following memorandum."
+            },
+            {
+              "page": 2,
+              "start_text": "consult in advance is of considerable importance.",
+              "end_text": "McConaughy",
+              "notes": "Continues paragraph 8 from physical page 1 and ends at the signature above the horizontal divider."
+            }
+          ],
+          "notes": "No source title or document number is visible for this fragment; none assigned. Running headers and printed page labels are carrier metadata, not article titles."
+        },
+        {
+          "title": "17. Memorandum From the President’s Assistant for National Security Affairs (Kissinger) to President Nixon [opening fragment]",
+          "pages": [
+            2
+          ],
+          "bibliography": {
+            "status": "unclaimed"
+          },
+          "fragment_status": "opening_present; continuation_missing",
+          "boundaries": [
+            {
+              "page": 2,
+              "start_text": "17. Memorandum From the President’s Assistant for National Security Affairs (Kissinger) to President Nixon",
+              "end_text": "This would be helpful in obtaining its straight extension.",
+              "notes": "Begins below the horizontal divider. Includes the visible date, SUBJECT line, subject “Relaxation of Economic Controls Against China,” introductory paragraphs, numbered point 1, and footnotes 1–3. The text announces three points but only point 1 is present; no missing continuation is reconstructed."
+            }
+          ],
+          "notes": "The visible source heading is retained with an explicit editorial fragment label. Footnotes are attached apparatus, not separate articles. Visible archival references and running headers do not establish a claimed bibliographic identity."
+        }
+      ],
+      "manifest": {
+        "path": "state/codex/documents/b37de17daf2998d9cefaf033/document.json",
+        "sha256": "281e52feaf4850faa35641ef92b40925d45a3e2f1e1093dcbb6edde146e466c6"
+      },
+      "publication": {
+        "path": "state/codex/documents/b37de17daf2998d9cefaf033/publication.json",
+        "sha256": "a721532359150e6f2cfcf1b8440a5ef0240195d15e32cd055dae1f249dbadb12"
+      },
+      "published_markdown": {
+        "path": "state/codex/documents/b37de17daf2998d9cefaf033/document.md",
+        "sha256": "6e637549e5bd3739859432714117b09fd09ff88ace879bc8fbedb15dc02b3a45"
+      },
+      "search": {
+        "query": "Relaxation of Economic Controls Against China",
+        "physical_pages": [
+          2
+        ],
+        "passed": true
+      },
+      "runs": [
+        {
+          "receipt": {
+            "path": "state/codex/runs/b37de17daf2998d9cefaf033/20261102T231135081837Z/receipt.json",
+            "sha256": "9eca56e56b515945f54f95ab0aaa5a2f7c54d390bfcfb878ea5fd6d5b76126c3"
+          },
+          "events": {
+            "path": "state/codex/runs/b37de17daf2998d9cefaf033/20261102T231135081837Z/events.jsonl",
+            "sha256": "0adb78cb339abc9baa3abded38afc128cbf6824791cd9f5a13b6eee837bc5d56"
+          },
+          "native_subagents": [
+            "01a19e8a-d031-7b91-9d8f-7211b1e29e62",
+            "01a19e8b-0f55-72c1-97e8-ced235995ae4",
+            "01a19e8f-879a-7180-a816-825aa5513c01",
+            "01a19e90-0fd5-7a01-b532-7a92809eab47",
+            "01a19e97-55c8-7521-aead-0e32fec09790"
+          ],
+          "returncode": 0,
+          "manual_stage_claim_or_submission": false
+        }
+      ]
+    },
+    {
+      "document_id": "ecdee561c79014d46c0077b8",
+      "title": "融合验收：FRUS混合前置页（默认MCP全后台）",
+      "state": "published",
+      "run_state": "succeeded",
+      "source_sha256": "ecdee561c79014d46c0077b84d64a309184b0b129a28c69ce1d866d27bfe7a3d",
+      "pages": [
+        {
+          "physical_page": 1,
+          "route": "mixed",
+          "state": "approved",
+          "image_sha256": "b154fdf570186cf5354477269806eb4552075fb14b6a9f312249cc3452ba339c",
+          "markdown_sha256": "f81de752aca4a35af731e235f5570dbae57b92240cc944d926a22049ee5fa52a"
+        }
+      ],
+      "tasks": [
+        {
+          "stage": "ocr",
+          "physical_page": 1,
+          "state": "completed",
+          "verdict": null,
+          "worker_id": "ocr-ecdee561-20261103-c8e49b6f",
+          "input_sha256": "e8be8ce4adaa1aec4adcaec7190a9b28be89b3a08695c21da36ed1bad3c99645",
+          "result_sha256": "68d4359eba6f6fb2c74082c75f36377ad7490b406c415b66ad38c23ca954cfe0",
+          "source_reading_sha256": null
+        },
+        {
+          "stage": "review",
+          "physical_page": 1,
+          "state": "completed",
+          "verdict": "approved",
+          "worker_id": "review-ecdee561-20261103-7b2c91e8",
+          "input_sha256": "0c33a7e4f35c5005c8500f15e390acc6e36f493a5efd5d803eb0a281e34cfa5b",
+          "result_sha256": "35ffbf7f8240c7b108756a0c2455216d951d8402154be0aa06adfde66c66d659",
+          "source_reading_sha256": "37d963e4285eff1cda3e555851f049b5345d550192e3f9751eb05d0a10cb777b"
+        },
+        {
+          "stage": "organization",
+          "physical_page": null,
+          "state": "completed",
+          "verdict": null,
+          "worker_id": "organization-ecdee561-20261103-a73f06ce",
+          "input_sha256": "7dde764d154b42365645eb77814a2ec767613d977bf13e51fddbc8c307e96291",
+          "result_sha256": "53f2500bc9ae66235ee22467c6b49aeb3b3ab8bcf044a609e5fbbc4821492b43",
+          "source_reading_sha256": null
+        }
+      ],
+      "articles": [
+        {
+          "title": "Title page — FOREIGN RELATIONS OF THE UNITED STATES, 1969–1976, VOLUME XVII: CHINA, 1969–1972",
+          "pages": [
+            1
+          ],
+          "bibliography": {
+            "status": "unclaimed"
+          }
+        }
+      ],
+      "manifest": {
+        "path": "state/codex/documents/ecdee561c79014d46c0077b8/document.json",
+        "sha256": "e29cb14920c0ae6c12e72f4818314f49a543684f6c633031060b224e7a2c26cb"
+      },
+      "publication": {
+        "path": "state/codex/documents/ecdee561c79014d46c0077b8/publication.json",
+        "sha256": "e5d8f34c72c44ff00ce4d28558dd66765208ed058717bb17545946f987cdb06d"
+      },
+      "published_markdown": {
+        "path": "state/codex/documents/ecdee561c79014d46c0077b8/document.md",
+        "sha256": "a8b9224527c5dee32cf4558f23d44072e13c3c40cf57cbf1ec50bb87dcbf5bf4"
+      },
+      "search": {
+        "query": "PLURIBUS",
+        "physical_pages": [
+          1
+        ],
+        "passed": true
+      },
+      "runs": [
+        {
+          "receipt": {
+            "path": "state/codex/runs/ecdee561c79014d46c0077b8/20261102T225403744729Z/receipt.json",
+            "sha256": "41352f2dedebf87a32d6e278c8b489421f93f05a552f410062d05aac6e30e80a"
+          },
+          "events": {
+            "path": "state/codex/runs/ecdee561c79014d46c0077b8/20261102T225403744729Z/events.jsonl",
+            "sha256": "3a3cacde38326fdc34dd2c050c0c1b14c970f4db4ba1ed479ec3e31742c2772d"
+          },
+          "native_subagents": [
+            "01a19e7a-fa2b-7ea1-9a54-05623bca2982",
+            "01a19e7f-dae9-78e0-8627-22e76f927555",
+            "01a19e84-6690-7662-a968-6110d971e59c"
+          ],
+          "returncode": 0,
+          "manual_stage_claim_or_submission": false
+        }
+      ]
+    }
+  ],
+  "pending_real_document": {
+    "document_id": "cbec19f647466977e1fc52ac",
+    "source_sha256": "cbec19f647466977e1fc52ac4fd7ce9308a0f058449be2b4a3287663a730b911",
+    "state": "pending",
+    "run_state": "waiting_human",
+    "revision": 3,
+    "page_states": [
+      {
+        "physical_page": 1,
+        "state": "pending"
+      },
+      {
+        "physical_page": 2,
+        "state": "approved"
+      }
+    ],
+    "issue": [
+      "第1页第五条“苏北[政/攻]势”关键笔画存在读法分歧，原件细节及隔离字形复查后仍未唯一确定，转人工确认；不再自动重跑。"
+    ],
+    "handoff_receipt": {
+      "task_id": "c8ca079e0edb4a378b7f29b94593a267",
+      "worker_id": "/root/fusion_audit",
+      "input_sha256": "1756791f0418c04423147f20174f94d4374cfad2483a39e6b718ca7edbe9e07b",
+      "result_sha256": "c1f9574315f49e7236d48a58f23996c530cab55ccbfce4e08fa036eb363dd271",
+      "approval_type": "machine",
+      "human_approval": false,
+      "sealed_gold_approval": false,
+      "origin": "codex_original_audit_handoff",
+      "created_at": 1793660500.1336713
+    },
+    "handoff_evidence_sha256": "2697c37539e35ec9513bb50a72798d75b9058b975c4b19ab12054524522e4ea5",
+    "manifest": {
+      "path": "state/codex/documents/cbec19f647466977e1fc52ac/document.json",
+      "sha256": "fbf99bedace43dce9f5a04cb3f54b8ef4cf586198427623bbb8a49bb9040f93a"
+    },
+    "historical_publication_revisions": [
+      1,
+      2
+    ],
+    "old_search_explicitly_warns_revision_pending": true,
+    "not_a_content_repair_success": true,
+    "audit_amendment": "The first audit stated 政 too confidently. Isolated source strokes remained unresolved; no majority vote or forced replacement was used."
+  },
+  "synthetic_test": {
+    "document_id": "c57726303f2f6662dc4eb641",
+    "state_root": "state/codex-fusion-ui-20261103",
+    "synthetic_only_not_real_source_acceptance": true,
+    "state": "published",
+    "run_state": "succeeded",
+    "approval_type": "mixed",
+    "native_codex_returncode": 0,
+    "mcp_only_runtime_verified": true,
+    "receipt": {
+      "path": "state/codex-fusion-ui-20261103/runs/c57726303f2f6662dc4eb641/20261102T221517826647Z/receipt.json",
+      "sha256": "868aa62de7c22f9ceb34fc25d676d4d4ebadec5bf06c83e37f9edf6ffa5c6c33"
+    }
+  },
+  "engineering": {
+    "pytest_passed": 96,
+    "junit": {
+      "path": "reports/codex-fusion.xml",
+      "sha256": "a489d8705a681ac7863e9c71b29c4ad9fd3c8b7bf999157daed7fddbe8ee373f"
+    },
+    "ruff": "passed",
+    "changed_python_format": "passed",
+    "node_script_syntax": "passed",
+    "skill_validation": "passed",
+    "wheel_asset_and_source_check": "passed",
+    "git_diff_check": "passed"
+  },
+  "evidence": [
+    {
+      "path": "output/codex-fusion-20261103/configured-mcp.json",
+      "sha256": "c851e833115bb11dff6de02219b7f9dff6778346d884987c26471d9396231d50"
+    },
+    {
+      "path": "output/codex-fusion-20261103/browser-checks.json",
+      "sha256": "8c9e780c93868393d6535d36ef31f6e78a390782e8f3bbff56f117540b3be338"
+    },
+    {
+      "path": "output/codex-fusion-20261103/original-first-audit.json",
+      "sha256": "9986d2c03f6afdf70f828360e068acf3b9298313d6997a499de63164e6c0ca81"
+    },
+    {
+      "path": "output/codex-fusion-20261103/final-content-audit.json",
+      "sha256": "6180fb59b219a5ebe19855251bc5d7e859a7a0869ccccad15170c6ea90c13207"
+    },
+    {
+      "path": "output/codex-fusion-20261103/audit-amendment-isolated-glyph.json",
+      "sha256": "c49a17dae90ad5af0a27259c01b6ffcc05c78ba0d0e2349d90d55a11934bd5bc"
+    },
+    {
+      "path": "output/codex-fusion-20261103/isolated-glyph-review.json",
+      "sha256": "a825ed07284ee07201f4d495152b66afe73f703b4681cd2d9f74aa57e9ed117c"
+    },
+    {
+      "path": "output/codex-fusion-20261103/real-handoff.json",
+      "sha256": "aadeb3121a274e1593b2713b15b3b2f7efb51081f843d9c206b3963cf921fbf2"
+    },
+    {
+      "path": "output/codex-fusion-20261103/revision-recovery.json",
+      "sha256": "9e54e0818778fff1e1b1e027b0c76904979a81b81f1da5a71d1958b2122f0a6a"
+    },
+    {
+      "path": "output/codex-fusion-20261103/frus-original-first-audit.json",
+      "sha256": "2f5744ec484f732aeae9c25c71ad51f20991149c5b69c1267db171720de79563"
+    },
+    {
+      "path": "output/codex-fusion-20261103/frus-native-original-first-audit.json",
+      "sha256": "f39a434609d0250b56d758b7b1da92cb869c792956a8c04599600ab7a9f81d0e"
+    },
+    {
+      "path": "output/codex-fusion-20261103/frus-mixed-final-audit.json",
+      "sha256": "43d6d82a0f71c8a6948b1ce930b88754d460ad0e152762dc84ca50355ddd68c3"
+    },
+    {
+      "path": "output/codex-fusion-20261103/frus-native-final-audit.json",
+      "sha256": "996f9146e08acdcbb8ed0bda57e05eda5ce4e1f0d5be22e1d496992b26b966fc"
+    },
+    {
+      "path": "output/codex-fusion-20261103/draft-protection.png",
+      "sha256": "c8746005ad5ee11702657ac77db81b72fed1090ab8afc747a31aab49fc8d570c"
+    },
+    {
+      "path": "output/codex-fusion-20261103/real-human-handoff.png",
+      "sha256": "5c4979c04a859dfef42556cad3b19c9e97706f7c7331004da2332610975c8393"
+    },
+    {
+      "path": "output/codex-fusion-20261103/default-workbench-final.png",
+      "sha256": "b7dcef8b7b75ba2617dc88cbbd298cf838541609aa76d6e9dee8acb0efb33b24"
+    },
+    {
+      "path": "output/codex-fusion-20261103/default-library-search.png",
+      "sha256": "9eaa48845e098fc9d70beecc7735831fde5dddfddbcc26a92dc0be705433d64d"
+    },
+    {
+      "path": "output/codex-fusion-20261103/visual-review.json",
+      "sha256": "0ae2b88f9a0a6a675cb5b58a92e70648a42d308400bf968bc0003c4b5230ad3d"
+    }
+  ],
+  "limitations": [
+    "Selected excerpts do not estimate whole-book accuracy.",
+    "A current machine approval is not human or sealed-gold acceptance.",
+    "The historical Ningxia glyph remains unresolved; prior publications are preserved.",
+    "Existing legacy stores were not automatically migrated or globally re-audited."
+  ]
+}

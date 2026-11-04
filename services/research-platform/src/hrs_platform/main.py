@@ -23,9 +23,18 @@ def create_app(settings=None, engine=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        bridge = None
+        if owned_engine and settings.processing_backend == "codex":
+            from hrs_platform.services.codex_bridge import CodexBridge
+
+            bridge = CodexBridge(settings, engine)
+            app.state.codex_bridge = bridge
+            bridge.start()
         try:
             yield
         finally:
+            if bridge:
+                bridge.stop()
             if owned_engine:
                 engine.dispose()
 
@@ -49,4 +58,22 @@ def create_app(settings=None, engine=None):
         )
 
     app.include_router(api_router)
+    # Existing React workbench, API and uploads can share one local origin.
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    distribution = Path(settings.project_root) / "services/review-workbench/dist"
+    if distribution.is_dir():
+        app.mount("/assets", StaticFiles(directory=distribution / "assets"), name="assets")
+
+        @app.get("/{path:path}", include_in_schema=False)
+        def workbench(path: str):
+            if path.startswith(("api/", "internal/", "health/", "uploads/")):
+                from fastapi import HTTPException
+
+                raise HTTPException(404)
+            return FileResponse(distribution / "index.html")
+
     return app

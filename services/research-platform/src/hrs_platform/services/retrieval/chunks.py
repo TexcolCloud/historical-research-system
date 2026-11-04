@@ -11,12 +11,13 @@ from html import unescape
 from html.parser import HTMLParser
 from uuid import UUID, uuid5
 
+from hrs_codex.navigation import fragment_navigation
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from markdown_it import MarkdownIt
 
 from hrs_platform.services.documents.footnotes import resolve_footnotes
 
-CHUNK_RULE = "structure-1400-160-v6-evidence-scopes"
+CHUNK_RULE = "structure-1400-160-v8-navigation"
 NOTE = re.compile(r"(?m)^ {0,3}\[\^([^\]\n]+)\]:")
 IMAGE = re.compile(r'!\[([^\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\n]|\([^()\n]*\))*)\)')
 
@@ -45,7 +46,12 @@ def source_excerpt(chapter, start, end):
                 }
             )
         offset = stop
+    pages = sorted({p for s in sources for p in s["pages"]})
+    spans = [(s["source_record"].get("page", s["pages"][0]),
+              s["source_record"].get("original_start", 0) + s["start"] - next(p["start"] for p in chapter["parts"] if p["span_id"] == s["span_id"]),
+              s["source_record"].get("original_start", 0) + s["end"] - next(p["start"] for p in chapter["parts"] if p["span_id"] == s["span_id"])) for s in sources]
     return {
+        **fragment_navigation(chapter.get("navigation", {}), pages, spans),
         "id": str(uuid5(UUID(chapter["id"]), f"{start}:{end}")),
         "book_id": str(chapter["book_id"]),
         "chapter_id": str(chapter["id"]),
@@ -55,7 +61,7 @@ def source_excerpt(chapter, start, end):
         "start": start,
         "end": end,
         "sources": sources,
-        "pages": sorted({p for s in sources for p in s["pages"]}),
+        "pages": pages,
     }
 
 
@@ -318,7 +324,7 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
                 for a, b, role in dict.fromkeys(additions)
                 if not start <= a < b <= end
             ]
-            path = list(dict.fromkeys([chapter["title"], *block["path"]]))
+            path = list(dict.fromkeys([chapter["title"], *hit.get("toc_path", []), *block["path"]]))
             projection = embedding_text("\n".join([book_title, " / ".join(path), hit["text"], *(c["text"] for c in context)]))
             yield {
                 **hit,

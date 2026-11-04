@@ -435,6 +435,197 @@
         }
       }
     },
+    "/api/v2/runs/{run_id}/navigation": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Navigation",
+        "operationId": "navigation_api_v2_runs__run_id__navigation_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigationReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/runs/{run_id}/navigation/{entry_id}/decision": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Navigation Decision",
+        "operationId": "navigation_decision_api_v2_runs__run_id__navigation__entry_id__decision_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NavigationDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigationReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/runs/{run_id}/pause": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Pause",
+        "operationId": "pause_api_v2_runs__run_id__pause_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunControlReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/runs/{run_id}/resume": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Resume",
+        "operationId": "resume_api_v2_runs__run_id__resume_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunControlReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/runs/{run_id}": {
       "get": {
         "tags": [
@@ -1106,6 +1297,16 @@
             }
           },
           {
+            "name": "include_navigation",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Navigation"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -1350,6 +1551,27 @@
         }
       }
     },
+    "/api/v2/runtime": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Runtime",
+        "operationId": "runtime_api_v2_runtime_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -1391,6 +1613,41 @@
   },
   "components": {
     "schemas": {
+      "ActiveTask": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage"
+        ],
+        "title": "ActiveTask"
+      },
       "BookSummary": {
         "properties": {
           "id": {
@@ -1438,6 +1695,21 @@
             "type": "integer",
             "title": "Revision",
             "default": 0
+          },
+          "pending_count": {
+            "type": "integer",
+            "title": "Pending Count",
+            "default": 0
+          },
+          "navigation_pending_count": {
+            "type": "integer",
+            "title": "Navigation Pending Count",
+            "default": 0
+          },
+          "revision_pending": {
+            "type": "boolean",
+            "title": "Revision Pending",
+            "default": false
           }
         },
         "type": "object",
@@ -2440,6 +2712,332 @@
         "type": "object",
         "title": "HistoricalDate"
       },
+      "NavigationDecision": {
+        "properties": {
+          "expected_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Sha256"
+          },
+          "target_page": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Page"
+          },
+          "target_anchor": {
+            "type": "string",
+            "title": "Target Anchor",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_sha256"
+        ],
+        "title": "NavigationDecision"
+      },
+      "NavigationEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "level": {
+            "type": "integer",
+            "title": "Level"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Path"
+          },
+          "source_page": {
+            "type": "integer",
+            "title": "Source Page"
+          },
+          "source_anchor": {
+            "type": "string",
+            "title": "Source Anchor"
+          },
+          "source_image": {
+            "type": "string",
+            "title": "Source Image"
+          },
+          "target_label": {
+            "type": "string",
+            "title": "Target Label"
+          },
+          "target_end_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target End Label"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NavigationTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Url"
+          },
+          "target_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Image"
+          },
+          "target_chapter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Chapter Id"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationTarget"
+            },
+            "type": "array",
+            "title": "Candidates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "level",
+          "path",
+          "source_page",
+          "source_anchor",
+          "source_image",
+          "target_label",
+          "status",
+          "reason"
+        ],
+        "title": "NavigationEntry"
+      },
+      "NavigationPage": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "headings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Headings"
+          },
+          "printed_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printed Label"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "headings"
+        ],
+        "title": "NavigationPage"
+      },
+      "NavigationReport": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "coverage_complete": {
+            "type": "boolean",
+            "title": "Coverage Complete",
+            "default": false
+          },
+          "approved_pages": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationPage"
+            },
+            "type": "array",
+            "title": "Approved Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "entries",
+          "version",
+          "sha256"
+        ],
+        "title": "NavigationReport"
+      },
+      "NavigationTarget": {
+        "properties": {
+          "physical_page": {
+            "type": "integer",
+            "title": "Physical Page"
+          },
+          "printed_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printed Label"
+          },
+          "anchor": {
+            "type": "string",
+            "title": "Anchor"
+          },
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "markdown_sha256": {
+            "type": "string",
+            "title": "Markdown Sha256"
+          },
+          "image_sha256": {
+            "type": "string",
+            "title": "Image Sha256"
+          },
+          "sequence": {
+            "type": "string",
+            "title": "Sequence",
+            "default": "body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "physical_page",
+          "anchor",
+          "start",
+          "markdown_sha256",
+          "image_sha256"
+        ],
+        "title": "NavigationTarget"
+      },
+      "PageProgress": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Total"
+          },
+          "extracted": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Extracted"
+          },
+          "reviewed": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Reviewed"
+          },
+          "approved": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Approved"
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pending"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "extracted",
+          "reviewed",
+          "approved",
+          "pending"
+        ],
+        "title": "PageProgress"
+      },
       "QuoteSelection": {
         "properties": {
           "unit_id": {
@@ -2584,6 +3182,17 @@
             "type": "string",
             "title": "Text"
           },
+          "proposed_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Text"
+          },
           "draft_text": {
             "anyOf": [
               {
@@ -2597,7 +3206,15 @@
           },
           "reasons": {
             "items": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              ]
             },
             "type": "array",
             "title": "Reasons"
@@ -2619,6 +3236,13 @@
             },
             "type": "array",
             "title": "Images"
+          },
+          "footnotes": {
+            "items": {
+              "$ref": "#/components/schemas/FootnoteLink"
+            },
+            "type": "array",
+            "title": "Footnotes"
           }
         },
         "type": "object",
@@ -2731,6 +3355,69 @@
         ],
         "title": "ReviewReceipt"
       },
+      "RunControlReceipt": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "state"
+        ],
+        "title": "RunControlReceipt"
+      },
+      "RunExecution": {
+        "properties": {
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "paused": {
+            "type": "boolean",
+            "title": "Paused",
+            "default": false
+          },
+          "automatic_work_remaining": {
+            "type": "boolean",
+            "title": "Automatic Work Remaining",
+            "default": false
+          },
+          "last_progress_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Progress At"
+          },
+          "active_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/ActiveTask"
+            },
+            "type": "array",
+            "title": "Active Tasks"
+          }
+        },
+        "type": "object",
+        "title": "RunExecution"
+      },
       "RunProgress": {
         "properties": {
           "stage": {
@@ -2808,10 +3495,62 @@
             "title": "Kind",
             "default": "book"
           },
+          "codex_document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Document Id"
+          },
+          "content_acceptance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Acceptance"
+          },
           "progress": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/RunProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "page_progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunExecution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scheduling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SchedulingReport"
               },
               {
                 "type": "null"
@@ -2829,6 +3568,96 @@
           "updated_at"
         ],
         "title": "RunSummary"
+      },
+      "RuntimeStatus": {
+        "properties": {
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "root": {
+            "type": "string",
+            "title": "Root"
+          },
+          "ocr_model": {
+            "type": "string",
+            "title": "Ocr Model"
+          },
+          "review_model": {
+            "type": "string",
+            "title": "Review Model"
+          },
+          "review_failure": {
+            "type": "string",
+            "title": "Review Failure"
+          },
+          "validation_scope": {
+            "type": "string",
+            "title": "Validation Scope"
+          }
+        },
+        "type": "object",
+        "required": [
+          "backend",
+          "workspace_id",
+          "root",
+          "ocr_model",
+          "review_model",
+          "review_failure",
+          "validation_scope"
+        ],
+        "title": "RuntimeStatus"
+      },
+      "SchedulingReport": {
+        "properties": {
+          "capacity": {
+            "type": "integer",
+            "title": "Capacity"
+          },
+          "workers": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Workers"
+          },
+          "active": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Active"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StageMetrics"
+            },
+            "type": "object",
+            "title": "Metrics"
+          },
+          "batch_size": {
+            "type": "integer",
+            "title": "Batch Size"
+          },
+          "cooldown_until": {
+            "type": "number",
+            "title": "Cooldown Until",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "capacity",
+          "workers",
+          "active",
+          "metrics",
+          "batch_size"
+        ],
+        "title": "SchedulingReport"
       },
       "SearchContext": {
         "properties": {
@@ -2876,6 +3705,42 @@
       },
       "SearchHit": {
         "properties": {
+          "toc_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Toc Path"
+          },
+          "toc_entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toc Entry Id"
+          },
+          "navigation_version": {
+            "type": "integer",
+            "title": "Navigation Version",
+            "default": 0
+          },
+          "printed_pages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Printed Pages"
+          },
+          "doc_kind": {
+            "type": "string",
+            "title": "Doc Kind",
+            "default": "content"
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -2983,6 +3848,50 @@
           "score"
         ],
         "title": "SearchHit"
+      },
+      "StageMetrics": {
+        "properties": {
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "active": {
+            "type": "integer",
+            "title": "Active"
+          },
+          "median_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Seconds"
+          },
+          "pages_per_minute": {
+            "type": "number",
+            "title": "Pages Per Minute"
+          },
+          "samples": {
+            "type": "integer",
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "completed",
+          "queued",
+          "active",
+          "pages_per_minute",
+          "samples"
+        ],
+        "title": "StageMetrics"
       },
       "StructureItem": {
         "properties": {

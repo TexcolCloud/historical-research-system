@@ -28,7 +28,9 @@ def value(result):
     content = result.structured_content
     if content is None:
         content = json.loads(next(block.text for block in result.content if block.type == "text"))
-    return content["result"] if isinstance(content, dict) and set(content) == {"result"} else content
+    return (
+        content["result"] if isinstance(content, dict) and set(content) == {"result"} else content
+    )
 
 
 async def submit(client, doc_id, task, result):
@@ -46,9 +48,57 @@ async def submit(client, doc_id, task, result):
 
 
 async def claim(client, doc_id, stage, worker):
-    return value(
+    task = value(
         await client.call_tool(
             "claim_task", {"document_id": doc_id, "stage": stage, "worker_id": worker}
+        )
+    )
+    if task is None or stage not in {"review", "verify"}:
+        return task
+    assert task["source_first_required"] is True
+    assert "markdown" not in task["inputs"]
+    assert "corrections" not in task["inputs"]
+    retained = value(
+        await client.call_tool("task_details", {"document_id": doc_id, "task_id": task["task_id"]})
+    )
+    assert "markdown" not in retained["inputs"]
+    premature = await client.call_tool(
+        "submit_task",
+        {
+            "document_id": doc_id,
+            "task_id": task["task_id"],
+            "lease_token": task["lease_token"],
+            "result": {"input_sha256": task["input_sha256"], "verdict": "approved", "issues": []},
+        },
+    )
+    assert premature.is_error
+    assert any("original-first" in block.text for block in premature.content if block.type == "text")
+    image = await client.call_tool(
+        "original_image",
+        {
+            "document_id": doc_id,
+            "page": task["page"],
+            "task_id": task["task_id"],
+            "lease_token": task["lease_token"],
+        },
+    )
+    metadata = json.loads(next(b.text for b in image.content if b.type == "text"))
+    return value(
+        await client.call_tool(
+            "review_candidate",
+            {
+                "document_id": doc_id,
+                "task_id": task["task_id"],
+                "lease_token": task["lease_token"],
+                "original_reading": {
+                    "image_sha256": metadata["image_sha256"],
+                    "image_receipt": metadata["image_receipt"],
+                    "observations": [
+                        "Synthetic protocol fixture: original pixels received before candidate exposure."
+                    ],
+                    "unresolved": [],
+                },
+            },
         )
     )
 
@@ -59,25 +109,46 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
     root = tmp_path / "library"
 
     async def scenario():
-        async with Client(server_parameters(root), mode="legacy", read_timeout_seconds=15) as client:
+        async with Client(
+            server_parameters(root), mode="legacy", read_timeout_seconds=15
+        ) as client:
             listing = await client.list_tools()
             names = {tool.name for tool in listing.tools}
             assert {
-                "workflow_instructions", "prepare_document", "claim_task", "submit_task",
-                "original_image", "publish_document", "search_library", "retry_task",
+                "workflow_instructions",
+                "prepare_document",
+                "claim_task",
+                "submit_task",
+                "original_image",
+                "publish_document",
+                "search_library",
+                "retry_task",
             } <= names
             instructions = await client.call_tool("workflow_instructions")
             assert not instructions.is_error
             assert "subagent" in instructions.content[0].text.lower()
             document = value(
-                await client.call_tool("prepare_document", {"source": str(source), "title": "MCP fixture"})
+                await client.call_tool(
+                    "prepare_document", {"source": str(source), "title": "MCP fixture"}
+                )
             )
             doc_id = document["id"]
+            # Exercise recovery of an explicit legacy correction/verification contract.
+            from hrs_codex.store import Store
+            retained = Store(root)
+            with retained.lock:
+                saved = retained._load(doc_id)
+                saved["processing_policy"]["review_failure"] = "verify"
+                retained._save(saved)
             assert document["source"]["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
             assert value(await client.call_tool("list_documents"))[0]["id"] == doc_id
-            image_result = await client.call_tool("original_image", {"document_id": doc_id, "page": 1})
+            image_result = await client.call_tool(
+                "original_image", {"document_id": doc_id, "page": 1}
+            )
             assert not image_result.is_error
-            evidence = json.loads(next(block.text for block in image_result.content if block.type == "text"))
+            evidence = json.loads(
+                next(block.text for block in image_result.content if block.type == "text")
+            )
             image = next(block for block in image_result.content if block.type == "image")
             pixels = base64.b64decode(image.data)
             assert hashlib.sha256(pixels).hexdigest() == evidence["image_sha256"]
@@ -93,22 +164,38 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
             detail_result = await client.call_tool(
                 "original_detail", {"document_id": doc_id, "page": 1, "box": [0, 0, 1, 1]}
             )
-            detail = json.loads(next(block.text for block in detail_result.content if block.type == "text"))
+            detail = json.loads(
+                next(block.text for block in detail_result.content if block.type == "text")
+            )
             bad_detail = {**detail, "image_sha256": "0" * 64}
             invalid_evidence = await client.call_tool(
                 "submit_task",
                 {
-                    "document_id": doc_id, "task_id": review["task_id"],
+                    "document_id": doc_id,
+                    "task_id": review["task_id"],
                     "lease_token": review["lease_token"],
-                    "result": {"input_sha256": review["input_sha256"], "verdict": "approved", "original_details": [bad_detail]},
+                    "result": {
+                        "input_sha256": review["input_sha256"],
+                        "verdict": "approved",
+                        "original_details": [bad_detail],
+                    },
                 },
             )
             assert invalid_evidence.is_error
             await submit(
-                client, doc_id, review,
+                client,
+                doc_id,
+                review,
                 {
-                    "verdict": "corrections", "markdown": "1939年",
-                    "corrections": [{"before": "1938", "after": "1939", "reason": "Synthetic correction fixture"}],
+                    "verdict": "corrections",
+                    "markdown": "1939年",
+                    "corrections": [
+                        {
+                            "before": "1938",
+                            "after": "1939",
+                            "reason": "Synthetic correction fixture",
+                        }
+                    ],
                     "original_details": [detail],
                 },
             )
@@ -119,7 +206,15 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
             assert verify["inputs"]["original_markdown"] == "1938年"
             await submit(client, doc_id, verify, {"verdict": "approved", "issues": []})
             organization = await claim(client, doc_id, "organization", "fixture-organizer")
-            await submit(client, doc_id, organization, {"articles": [{"title": "Fixture", "pages": [1]}]})
+            assert "markdown" not in organization["inputs"]["pages"][0]
+            approved = value(
+                await client.call_tool("approved_page_text", {"document_id": doc_id, "page": 1})
+            )
+            assert approved["markdown"] == "1939年"
+            assert approved["markdown_sha256"] == hashlib.sha256("1939年".encode()).hexdigest()
+            await submit(
+                client, doc_id, organization, {"articles": [{"title": "Fixture", "pages": [1]}]}
+            )
             published = value(await client.call_tool("publish_document", {"document_id": doc_id}))
             assert published["approval_type"] == "machine"
             assert published["human_approval"] is False
@@ -129,11 +224,22 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
             assert found[0]["document_id"] == doc_id
             assert found[0]["page"] == 1
         # A fresh subprocess reads the same evidence and completed state.
-        async with Client(server_parameters(root), mode="legacy", read_timeout_seconds=15) as client:
-            recovered = value(await client.call_tool("document_status", {"document_id": doc_id}))
+        async with Client(
+            server_parameters(root), mode="legacy", read_timeout_seconds=15
+        ) as client:
+            compact = value(await client.call_tool("document_status", {"document_id": doc_id}))
+            assert "markdown" not in compact["pages"][0]["approved"]
+            recovered = value(
+                await client.call_tool(
+                    "document_status", {"document_id": doc_id, "include_content": True}
+                )
+            )
             assert recovered["state"] == "published"
             assert recovered["pages"][0]["ocr"]["markdown"] == "1938年"
             assert recovered["pages"][0]["approved"]["markdown"] == "1939年"
+            assert not (
+                await client.call_tool("original_image", {"document_id": doc_id, "page": 1})
+            ).is_error
             detail_path = root / "documents" / doc_id / detail["image"]
             detail_path.write_bytes(b"changed detail")
             assert (await client.call_tool("search_library", {"query": "1939"})).is_error
@@ -149,7 +255,9 @@ def test_stdio_pending_pdf_cannot_publish_and_retry_retains_decision(tmp_path):
         writer.write(stream)
 
     async def scenario():
-        async with Client(server_parameters(tmp_path / "library"), mode="legacy", read_timeout_seconds=15) as client:
+        async with Client(
+            server_parameters(tmp_path / "library"), mode="legacy", read_timeout_seconds=15
+        ) as client:
             document = value(await client.call_tool("prepare_document", {"source": str(source)}))
             doc_id = document["id"]
             invalid = await client.call_tool(
@@ -159,7 +267,12 @@ def test_stdio_pending_pdf_cannot_publish_and_retry_retains_decision(tmp_path):
             ocr = await claim(client, doc_id, "ocr", "fixture-ocr")
             await submit(client, doc_id, ocr, {"markdown": "[无法辨认]"})
             review = await claim(client, doc_id, "review", "fixture-review")
-            await submit(client, doc_id, review, {"verdict": "pending", "issues": ["Synthetic unresolved scan"]})
+            await submit(
+                client,
+                doc_id,
+                review,
+                {"verdict": "pending", "issues": ["Synthetic unresolved scan"]},
+            )
             human_queue = value(await client.call_tool("human_review_queue"))
             assert human_queue[0]["document_id"] == doc_id
             assert human_queue[0]["page"] == 1
@@ -169,11 +282,15 @@ def test_stdio_pending_pdf_cannot_publish_and_retry_retains_decision(tmp_path):
             assert value(await client.call_tool("search_library", {"query": "无法辨认"})) == []
             assert await claim(client, doc_id, "organization", "fixture-organizer") is None
             retry = value(
-                await client.call_tool("retry_task", {"document_id": doc_id, "task_id": review["task_id"]})
+                await client.call_tool(
+                    "retry_task", {"document_id": doc_id, "task_id": review["task_id"]}
+                )
             )
             assert retry["retry_of"] == review["task_id"]
             previous = value(
-                await client.call_tool("task_details", {"document_id": doc_id, "task_id": review["task_id"]})
+                await client.call_tool(
+                    "task_details", {"document_id": doc_id, "task_id": review["task_id"]}
+                )
             )
             assert previous["state"] == "superseded"
             assert previous["result"]["issues"] == ["Synthetic unresolved scan"]
@@ -198,21 +315,37 @@ def test_stdio_original_detail_rerenders_pdf_and_uses_native_raster_frames(tmp_p
     root = tmp_path / "library"
 
     async def scenario():
-        async with Client(server_parameters(root), mode="legacy", read_timeout_seconds=15) as client:
+        async with Client(
+            server_parameters(root), mode="legacy", read_timeout_seconds=15
+        ) as client:
             for source, physical_page, expected_size, expected_crop in (
                 (pdf_source, 1, [600, 720], [300, 180, 600, 540]),
                 (raster_source, 2, [80, 60], [40, 15, 80, 45]),
             ):
-                document = value(await client.call_tool("prepare_document", {"source": str(source)}))
-                arguments = {"document_id": document["id"], "page": physical_page, "box": [0.5, 0.25, 1, 0.75]}
+                document = value(
+                    await client.call_tool("prepare_document", {"source": str(source)})
+                )
+                arguments = {
+                    "document_id": document["id"],
+                    "page": physical_page,
+                    "box": [0.5, 0.25, 1, 0.75],
+                }
                 result = await client.call_tool("original_detail", arguments)
                 assert not result.is_error, result.content
-                metadata = json.loads(next(block.text for block in result.content if block.type == "text"))
-                data = base64.b64decode(next(block.data for block in result.content if block.type == "image"))
+                metadata = json.loads(
+                    next(block.text for block in result.content if block.type == "text")
+                )
+                data = base64.b64decode(
+                    next(block.data for block in result.content if block.type == "image")
+                )
                 assert metadata["source_size"] == expected_size
                 assert metadata["crop_pixels"] == expected_crop
                 assert metadata["source_sha256"] == document["source"]["sha256"]
-                assert metadata["image_sha256"] == metadata["detail_sha256"] == hashlib.sha256(data).hexdigest()
+                assert (
+                    metadata["image_sha256"]
+                    == metadata["detail_sha256"]
+                    == hashlib.sha256(data).hexdigest()
+                )
                 directory = root / "documents" / document["id"]
                 assert (directory / metadata["image"]).read_bytes() == data
                 metadata_bytes = (directory / metadata["metadata"]).read_bytes()

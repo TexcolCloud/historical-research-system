@@ -32,6 +32,11 @@ def pending_document(tmp_path, pages=1):
     )
     store = Store(tmp_path / "library")
     doc_id = prepare(store, str(image), "Synthetic human review fixture")["id"]
+    # Retained correction/verification contracts remain readable and recoverable.
+    with store.lock:
+        doc = store._load(doc_id)
+        doc["processing_policy"]["review_failure"] = "verify"
+        store._save(doc)
     for page in range(1, pages + 1):
         complete(
             store, doc_id, "ocr", f"ocr-{page}", {"markdown": "1938年。<script>fixture</script>"}
@@ -70,7 +75,10 @@ def request(server, method="GET", path=None, form=None, origin=True):
         headers["Origin"] = "http://" + server.authority
     connection.request(
         method,
-        path or urlparse(server.review_url).path + "?" + urlparse(server.review_url).query,
+        path
+        or urlparse(server.review_url).path
+        + "?"
+        + urlparse(server.review_url).query.replace("view=tasks", "view=review"),
         urlencode(form).encode("utf-8") if form else None,
         headers,
     )
@@ -125,12 +133,13 @@ def test_local_form_preserves_drafts_rejects_stale_actions_and_resumes_publicati
             request(
                 server,
                 "POST",
-                action.replace(urlparse(server.review_url).query, "token=wrong"),
+                re.sub(r"token=[^&]+", "token=wrong", action),
                 form,
             )[0]
             == 409
         )
-        assert request(server, "POST", action, {**form, "confirmed": ""})[0] == 409
+        assert 'name="reviewer"' not in body.decode("utf-8")
+        assert 'type="checkbox"' not in body.decode("utf-8")
         assert store.status(doc_id)["pages"][0]["state"] == "pending"
         draft = {**form, "verdict": "pending", "markdown": "人工草稿，原字仍不确定。"}
         assert request(server, "POST", action, draft)[0] == 303

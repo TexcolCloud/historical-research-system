@@ -3,13 +3,51 @@ from uuid import UUID
 from fastapi import APIRouter, Header
 from fastapi.responses import Response
 
-from hrs_platform.api.deps import EngineDep, LibraryDep, OutputsDep, ReviewDep
+from hrs_platform.api.deps import EngineDep, LibraryDep, OutputsDep, ReviewDep, SettingsDep
 from hrs_platform.domain.errors import ServiceError
-from hrs_platform.schemas import ExecutionNode, RecoveryRequest, RunSummary, StructureReport
+from hrs_platform.schemas import (
+    ExecutionNode,
+    NavigationDecision,
+    NavigationReport,
+    RecoveryRequest,
+    RunControlReceipt,
+    RunSummary,
+    StructureReport,
+)
 from hrs_platform.services import books
 from hrs_platform.services.runs.recovery import retry_run
 
 router = APIRouter(tags=["runs"])
+
+
+@router.get("/api/v2/runs/{run_id}/navigation", response_model=NavigationReport)
+def navigation(settings: SettingsDep, engine: EngineDep, run_id: UUID) -> dict:
+    from hrs_platform.services.documents.navigation import Navigation
+
+    return Navigation(settings, engine).status(run_id)
+
+
+@router.post("/api/v2/runs/{run_id}/navigation/{entry_id}/decision", response_model=NavigationReport)
+def navigation_decision(
+    settings: SettingsDep, engine: EngineDep, run_id: UUID, entry_id: str, request: NavigationDecision
+) -> dict:
+    from hrs_platform.services.documents.navigation import Navigation
+
+    return Navigation(settings, engine).decide(run_id, entry_id, request)
+
+
+@router.post("/api/v2/runs/{run_id}/pause", response_model=RunControlReceipt)
+def pause(settings: SettingsDep, engine: EngineDep, run_id: UUID):
+    from hrs_platform.services.documents.navigation import Navigation
+
+    return Navigation(settings, engine).control(run_id, "pause")
+
+
+@router.post("/api/v2/runs/{run_id}/resume", response_model=RunControlReceipt)
+def resume(settings: SettingsDep, engine: EngineDep, run_id: UUID):
+    from hrs_platform.services.documents.navigation import Navigation
+
+    return Navigation(settings, engine).control(run_id, "resume")
 
 
 @router.get("/api/v2/runs/{run_id}", response_model=RunSummary)

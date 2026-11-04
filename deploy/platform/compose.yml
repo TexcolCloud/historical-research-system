@@ -73,6 +73,7 @@ services:
       dockerfile: deploy/platform/Dockerfile
     restart: unless-stopped
     environment: &application-environment
+      PLATFORM_PROCESSING_BACKEND: legacy
       PLATFORM_DATABASE_URL: ${PLATFORM_DOCKER_DATABASE_URL:?Set the V2 container database URL}
       PLATFORM_S3_ENDPOINT: http://host.docker.internal:58333
       PLATFORM_S3_BUCKET: ${INGEST_S3_BUCKET}

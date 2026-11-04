@@ -121,7 +121,9 @@ class Search:
         use_calibration=True,
         decompose=True,
         chapter_ids=None,
+        include_navigation=False,
     ):
+        self._include_navigation = include_navigation
         metrics = metrics if metrics is not None else {}
         try:
             with measured(metrics, "total_ms"):
@@ -143,6 +145,7 @@ class Search:
                         min_top_score=min_top_score,
                         use_calibration=use_calibration,
                         chapter_ids=chapter_ids,
+                        include_navigation=include_navigation,
                     )
                 return self._search(
                     query,
@@ -225,6 +228,8 @@ class Search:
         if not self.client.indices.exists(index=name):
             return []
         scope = self.active_scope(book_id)
+        if not getattr(self, "_include_navigation", False):
+            scope.append({"bool": {"must_not": [{"term": {"doc_kind": "navigation"}}]}})
         if chapter_ids is not None:
             scope.append({"terms": {"chapter_id": list(chapter_ids)}})
         policy = getattr(self, "_policy", {}) if semantic and use_calibration else {}

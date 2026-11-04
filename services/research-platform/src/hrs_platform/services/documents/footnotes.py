@@ -7,11 +7,40 @@ from collections import defaultdict
 from markdown_it import MarkdownIt
 
 DEFINITION = re.compile(r"^ {0,3}(?:\[\^([^\]\n]+)\]:|([①-⑳]))")
-REFERENCE = re.compile(r"\[\^([^\]\n]+)\](?!:)|([①-⑳])|<sup>\s*(\d{1,2}|[①-⑳])\s*</sup>", re.I)
+REFERENCE = re.compile(
+    r"\[\^([^\]\n]+)\](?!:)|([①-⑳])|<sup>\s*(\d{1,2}|[①-⑳])\s*</sup>"
+    r"|（([0-9]{1,2})）|〔([0-9]{1,2})〕|\(([0-9]{1,2})\)",
+    re.I,
+)
 
 
 def _key(label):
     return str(int(unicodedata.numeric(label))) if len(label) == 1 and "①" <= label <= "⑳" else label
+
+
+def export_footnotes(text, links, prefix):
+    """Create globally unique Markdown note IDs without changing canonical source or offsets."""
+    edits = []
+    for index, link in enumerate(links, 1):
+        key = f"{prefix}-{index}"
+        note = link["note"]
+        lines = text[note["marker_end"] : note["end"]].strip(" \n\r").splitlines()
+        if not lines:
+            continue
+        definition = f"[^{key}]: " + lines[0]
+        for line in lines[1:]:
+            definition += "\n" + (
+                line if not line.strip() or line.startswith(("    ", "\t")) else "    " + line
+            )
+        edits.append((note["start"], note["end"], definition + "\n\n"))
+        edits.extend((ref["start"], ref["end"], f"[^{key}]") for ref in link["references"])
+    end = len(text)
+    for start, stop, replacement in sorted(edits, reverse=True):
+        if not 0 <= start < stop <= end:
+            raise ValueError("Footnote export ranges overlap or escape canonical source")
+        text = text[:start] + replacement + text[stop:]
+        end = start
+    return text
 
 
 def resolve_footnotes(text, parts):
@@ -84,8 +113,11 @@ def resolve_footnotes(text, parts):
         start = match.start()
         if hidden(start) or any(n["note"]["start"] <= start < n["note"]["end"] for n in definitions):
             continue
+        parenthesized = any(match.group(n) for n in (4, 5, 6))
+        if parenthesized and not text[text.rfind("\n", 0, start) + 1 : start].strip():
+            continue  # Numbered paragraph openings are not inferred to be note references.
         candidates = by_key[_key(next(value for value in match.groups() if value))]
-        explicit = [n for n in candidates if n["explicit"]] if match[1] else []
+        explicit = [n for n in candidates if n["explicit"]] if match[1] or parenthesized else []
         if len(explicit) == 1 and len(candidates) == 1:
             chosen = explicit
         else:

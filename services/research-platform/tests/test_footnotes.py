@@ -1,4 +1,17 @@
-from hrs_platform.services.documents.footnotes import resolve_footnotes
+from hrs_platform.services.documents.footnotes import export_footnotes, resolve_footnotes
+
+
+def test_export_scopes_repeated_page_note_numbers_and_keeps_continuations():
+    pages = ["One[^1]\n\n[^1]: First\ncontinued.\n\n", "Two[^1]\n\n[^1]: Second.\n\n"]
+    text = "".join(pages)
+    notes = resolve_footnotes(
+        text, [{"text": value, "source": {"pages": [i + 1]}} for i, value in enumerate(pages)]
+    )
+    assert len(notes) == 2
+    exported = export_footnotes(text, notes, "c1")
+    assert exported.count("[^c1-1]") == 2 and exported.count("[^c1-2]") == 2
+    assert "\n    continued." in exported and "[^1]" not in exported
+    assert text == "".join(pages)
 
 
 def source_parts(*pages):
@@ -75,3 +88,17 @@ def test_retrieval_uses_same_page_scoping_for_printed_notes():
     assert all("仅计本年" not in c["text"] for c in first["context"])
     note = next(h for h in hits if h["kind"] == "note" and "仅计本年" in h["text"])
     assert any(c["role"] == "note_owner" and "丙地记录" in c["text"] for c in note["context"])
+
+
+def test_inline_parenthesized_markers_link_unique_explicit_cross_page_notes():
+    first = "（1）这是条目开头，不是脚注。\n\n叶管部（1）与韩冷〔2〕会合(3)。\n\n"
+    second = "[^1]: 部队说明。\n\n[^2]: 人物说明。\n\n[^3]: 地点说明。"
+    text = first + second
+    parts = [{"text": first, "source": {"pages": [1]}}, {"text": second, "source": {"pages": [2]}}]
+    links = resolve_footnotes(text, parts)
+    assert len(links) == 3 and all(len(n["references"]) == 1 for n in links)
+    assert all(r["start"] > 0 for n in links for r in n["references"])
+    duplicate = "\n\n[^1]: 另一项同号说明。"
+    assert (
+        len(resolve_footnotes(text + duplicate, parts + [{"text": duplicate, "source": {"pages": [3]}}])) == 2
+    )

@@ -1,0 +1,8 @@
+interface:
+  display_name: "史料处理"
+  short_description: "使用统一史料工作区进行PDF识别、独立核图审核、人工交接与可恢复发布"
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "historical_research"
+      description: "本项目注册的本地史料工作流 MCP"

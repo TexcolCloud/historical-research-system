@@ -12,6 +12,9 @@ const ExecutionPanel = lazy(
   () => import("@/features/execution/ExecutionPanel.tsx"),
 );
 const SearchPanel = lazy(() => import("@/features/search/SearchPanel.tsx"));
+const NavigationPanel = lazy(
+  () => import("@/features/library/NavigationPanel.tsx"),
+);
 export default function BookPage() {
   const { bookId = "" } = useParams();
   const [params, setParams] = useSearchParams();
@@ -74,6 +77,11 @@ export default function BookPage() {
         <div>
           <h1>{book.title}</h1>
           <p>以章节阅读，以原件核对，以证据研究。</p>
+          {book.revision_pending && (
+            <p role="note">
+              新版本正在复核，阅读和检索继续使用此前发布的版本。
+            </p>
+          )}
         </div>
         <DeleteBookButton book={book} />
       </div>
@@ -81,6 +89,7 @@ export default function BookPage() {
         <TabsList aria-label="书籍工作区">
           <TabsTrigger value="progress">处理进展</TabsTrigger>
           <TabsTrigger value="reader">阅读全文</TabsTrigger>
+          <TabsTrigger value="navigation">原书目录</TabsTrigger>
           <TabsTrigger value="review">内容核对</TabsTrigger>
           <TabsTrigger value="search">检索本书</TabsTrigger>
           <TabsTrigger value="execution">任务运行</TabsTrigger>
@@ -89,6 +98,8 @@ export default function BookPage() {
       <Suspense fallback={<p role="status">正在打开工作区…</p>}>
         {tab === "reader" ? (
           <ReaderPanel bookId={bookId} />
+        ) : tab === "navigation" && book.run_id ? (
+          <NavigationPanel runId={book.run_id} bookId={bookId} />
         ) : tab === "review" && book.run_id ? (
           <ReviewPanel
             runId={book.run_id}

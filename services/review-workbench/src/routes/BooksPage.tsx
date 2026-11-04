@@ -13,6 +13,8 @@ const states: Record<string, string> = {
   uploading: "正在上传",
   queued: "等待处理",
   processing: "正在处理",
+  running: "正在处理",
+  paused: "已暂停",
   awaiting_review: "需要核对",
   ready_for_ingestion: "核验完成 · 等待入库",
   ready: "已入库",
@@ -36,8 +38,16 @@ export default function BooksPage() {
           book.title.toLowerCase().includes(search.toLowerCase()) &&
           (filter === "all" ||
             (filter === "review"
-              ? book.state === "awaiting_review"
-              : ["uploading", "queued", "processing"].includes(book.state))),
+              ? book.state === "awaiting_review" ||
+                (book.pending_count ?? 0) > 0 ||
+                (book.navigation_pending_count ?? 0) > 0
+              : [
+                  "uploading",
+                  "queued",
+                  "processing",
+                  "running",
+                  "paused",
+                ].includes(book.state))),
       ),
     [books.data, filter, search],
   );
@@ -114,6 +124,12 @@ export default function BooksPage() {
                   <span className="platform-status" data-state={book.state}>
                     {states[book.state] ?? book.state}
                   </span>
+                  {(book.pending_count ?? 0) > 0 && (
+                    <p>{book.pending_count} 页待核对</p>
+                  )}
+                  {(book.navigation_pending_count ?? 0) > 0 && (
+                    <p>{book.navigation_pending_count} 项目录位置待确认</p>
+                  )}
                 </div>
                 <ArrowUpRight size={18} />
               </button>

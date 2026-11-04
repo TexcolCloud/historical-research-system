@@ -29,6 +29,11 @@ export function RenderedMarkdown({
         (_, alt: string, name: string) =>
           `![${alt}](${assetBaseUrl}/docling-assets/${encodeURIComponent(name)})`,
       );
+    if (assetBaseUrl)
+      reading = reading.replace(
+        /!\[([^\]]*)\]\((pages\/\d+\.png|evidence\/details\/[\w.-]+\.png)\)/g,
+        (_, alt: string, path: string) => `![${alt}](${assetBaseUrl}/${path})`,
+      );
     return safeHtml(reading);
   }, [markdown, footnotes, prefix, assetBaseUrl]);
   return (

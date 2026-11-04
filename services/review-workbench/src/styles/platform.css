@@ -554,6 +554,10 @@ a:focus-visible {
   border: 1px solid #d9e3ea;
   margin-top: 12px;
 }
+.platform-reading aside figure { margin: 12px 0; }
+.platform-reading aside img { display: block; width: 100%; height: auto; margin-top: 12px; border: 1px solid #d9e3ea; }
+.platform-review-content details pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.platform-markdown-source { width: 100%; min-height: 24rem; padding: 16px; border: 1px solid #c5d3dc; border-radius: 6px; font-family: ui-monospace, monospace; font-size: 14px; line-height: 1.7; resize: vertical; }
 .platform-reading select {
   background: white;
   border: 1px solid #d9e3ea;
@@ -983,6 +987,31 @@ a:focus-visible {
   padding: 30px;
   margin-top: 24px;
 }
+.platform-navigation {
+  max-width: 1080px;
+  margin-top: 24px;
+  padding: 28px;
+  border: 1px solid #dfe7ed;
+  border-radius: 12px;
+  background: white;
+}
+.platform-navigation > p,
+.platform-navigation nav p {
+  color: #566e7e;
+  line-height: 1.7;
+}
+.platform-navigation nav ol { list-style: none; padding: 0; }
+.platform-navigation nav li { padding: 16px 0; border-bottom: 1px solid #e8edf1; }
+.platform-navigation a { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.platform-navigation label { display: block; margin: 16px 0; }
+.platform-navigation select,
+.platform-navigation input { display: block; margin-top: 6px; width: min(100%, 32rem); padding: 9px; border: 1px solid #c5d3dc; border-radius: 6px; }
+.platform-process details { margin-top: 14px; overflow-x: auto; }
+.platform-process details table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.platform-process details th,
+.platform-process details td { padding: 9px; border-bottom: 1px solid #e8edf1; text-align: left; white-space: nowrap; }
+.platform-review-content details summary,
+.platform-process details summary { cursor: pointer; padding: 8px 0; }
 .platform-process progress {
   display: block;
   width: min(100%, 24rem);

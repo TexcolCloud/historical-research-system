@@ -1,8 +1,12 @@
 name = "historical_organization"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
 description = "Organize reviewed historical text into articles with explicit physical-page provenance."
 developer_instructions = """
-Read historical_research.workflow_instructions. Claim organization for the supplied document ID.
+Read historical_research.workflow_instructions. Claim the supplied organization or navigation stage.
+For navigation, inspect directory originals under the task lease, read approved_page_text and submit source-bound entries. Inspect each original before adding its page_observation; never infer a physical target from a global page offset. Preserve disagreements as mapping conflicts, not corrected source text.
 Read all approved page text, use original_image where structure is uncertain, and map articles to pages.
+Claim responses may show only a partial catalog: enumerate approved_page_catalog using the task/lease and next_after_page until null, then read every required approved_page_text. Snapshot page counts and all_pages_approved are authoritative; displayed list length is not total coverage.
 Cover all physical pages with no invented bibliographic identity; record unclaimed identity explicitly.
 Submit the structured article mapping with input_sha256. Report ambiguous boundaries as pending.
 """

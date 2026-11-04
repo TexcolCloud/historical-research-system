@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import PlatformApp from "@/app/App.tsx";
+import WorkspaceBoundary from "@/app/WorkspaceBoundary.tsx";
 import { HashRouter } from "react-router-dom";
 import "@/styles/theme.css";
 import "@/styles/platform.css";
@@ -14,7 +15,9 @@ const query = new QueryClient({
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={query}>
     <HashRouter>
-      <PlatformApp />
+      <WorkspaceBoundary>
+        <PlatformApp />
+      </WorkspaceBoundary>
     </HashRouter>
   </QueryClientProvider>,
 );

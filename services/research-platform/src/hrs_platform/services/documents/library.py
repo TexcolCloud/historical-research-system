@@ -108,8 +108,12 @@ def reviewed_spans(markdown, pages, corrections, run_id):
                     "pages": original_pages,
                     "original_start": start,
                     "original_end": end,
-                    "human_decision_id": edit.get("decision_id") if edit and edit.get("reviewer", "human-ui") == "human-ui" else None,
-                    "machine_decision_id": edit.get("decision_id") if edit and edit.get("reviewer", "human-ui") != "human-ui" else None,
+                    "human_decision_id": edit.get("decision_id")
+                    if edit and edit.get("reviewer", "human-ui") == "human-ui"
+                    else None,
+                    "machine_decision_id": edit.get("decision_id")
+                    if edit and edit.get("reviewer", "human-ui") != "human-ui"
+                    else None,
                 },
             }
         )
@@ -137,6 +141,8 @@ class Library:
         if status["pending_count"]:
             raise ValueError("Human review must finish before ingestion or partitioning.")
         run = get_run(self.engine, run_id)
+        if (run["result"] or {}).get("codex_document_id") and not (run["result"] or {}).get("published"):
+            raise ValueError("Native Codex processing has not completed its whole-document publication gate.")
         bundle = self.review.read_json(run["conversion"])
         spans = self._source_spans(run_id, bundle)
         if not spans:
@@ -148,7 +154,7 @@ class Library:
                 "spans": spans,
                 "source_sha256": run["source"]["sha256"],
                 "review_revision": status["revision"],
-                "page_count": bundle['manifest']["page_count"],
+                "page_count": bundle["manifest"]["page_count"],
             },
             {"conversion": run["conversion"]["sha256"], "review_revision": status["revision"]},
         )
@@ -160,7 +166,11 @@ class Library:
         with self.engine.connect() as connection:
             rows = (
                 connection.execute(
-                    select(db.review_issues, db.review_decisions.c.id.label("decision_id"), db.review_decisions.c.receipt.label("decision_receipt"))
+                    select(
+                        db.review_issues,
+                        db.review_decisions.c.id.label("decision_id"),
+                        db.review_decisions.c.receipt.label("decision_receipt"),
+                    )
                     .join(db.review_decisions, db.review_decisions.c.issue_id == db.review_issues.c.id)
                     .where(db.review_issues.c.run_id == run_id, db.review_issues.c.replacement.is_not(None))
                 )
@@ -188,39 +198,75 @@ class Library:
         """Reuse retained structure and current decisions; no OCR or model calls."""
         run = get_run(self.engine, run_id)
         status = self.review.status(run_id)
-        dependency = {'policy': STRUCTURE_POLICY, 'conversion': run['conversion'],
-                      'review_revision': status['revision']}
-        key = 'reading-structure:' + fingerprint(dependency)
-        if run['conversion']:
+        dependency = {
+            "policy": STRUCTURE_POLICY,
+            "conversion": run["conversion"],
+            "review_revision": status["revision"],
+        }
+        key = "reading-structure:" + fingerprint(dependency)
+        if run["conversion"]:
             cached = self.outputs.get(run_id, key, dependency)
             if cached is not None:
                 return cached
-            bundle = self.review.read_json(run['conversion'])
-            files = bundle['files']
+            bundle = self.review.read_json(run["conversion"])
+            files = bundle["files"]
             spans = self._source_spans(run_id, bundle)
-            parts = [{'span_id': s['id'], 'start': s['start_offset'], 'end': s['end_offset'],
-                      'text': s['selected_text'], 'source': s['source_record']} for s in spans]
-            completion = self.review.read_json(files['completion.json'])['pages'] if 'completion.json' in files else []
-            pages = {p['page'] for p in bundle['manifest']['pages']}
-            if (run['result'] or {}).get('review_initialized'):
+            parts = [
+                {
+                    "span_id": s["id"],
+                    "start": s["start_offset"],
+                    "end": s["end_offset"],
+                    "text": s["selected_text"],
+                    "source": s["source_record"],
+                }
+                for s in spans
+            ]
+            completion = (
+                self.review.read_json(files["completion.json"])["pages"] if "completion.json" in files else []
+            )
+            pages = {p["page"] for p in bundle["manifest"]["pages"]}
+            if (run["result"] or {}).get("codex_document_id"):
+                approved = {
+                    p["page"] for p in bundle["manifest"]["pages"] if p["status"] == "release-accepted"
+                }
+            elif (run["result"] or {}).get("review_initialized"):
                 with self.engine.connect() as connection:
-                    pending = connection.execute(select(db.review_issues.c.page, db.review_issues.c.content).where(
-                        db.review_issues.c.run_id == run_id, db.review_issues.c.state == 'pending')).mappings().all()
-                unresolved = {p for row in pending for p in self.review.read_json(row['content']).get('pages', [row['page']])}
+                    pending = (
+                        connection.execute(
+                            select(db.review_issues.c.page, db.review_issues.c.content).where(
+                                db.review_issues.c.run_id == run_id, db.review_issues.c.state == "pending"
+                            )
+                        )
+                        .mappings()
+                        .all()
+                    )
+                unresolved = {
+                    p
+                    for row in pending
+                    for p in self.review.read_json(row["content"]).get("pages", [row["page"]])
+                }
                 approved = pages - unresolved
             else:
-                approved = {p['page'] for p in bundle['manifest']['pages'] if p['status'] == 'release-accepted'}
+                approved = {
+                    p["page"] for p in bundle["manifest"]["pages"] if p["status"] == "release-accepted"
+                }
         else:
             draft = self.review.ocr_draft(run)
             if draft is None:
-                return {'policy': STRUCTURE_POLICY, 'available': False, 'items': []}
+                return {"policy": STRUCTURE_POLICY, "available": False, "items": []}
             files, checkpoint = draft
-            parts = [{'text': p['text'] + '\n\n', 'source': {'pages': [p['page']]}} for p in checkpoint['pages']]
+            parts = [
+                {"text": p["text"] + "\n\n", "source": {"pages": [p["page"]]}} for p in checkpoint["pages"]
+            ]
             completion, approved = [], set()
-        metadata = self.review.read_json(files['paddle-restructure.json']) if 'paddle-restructure.json' in files else {}
-        document = {'text': ''.join(p['text'] for p in parts), 'parts': parts}
+        metadata = (
+            self.review.read_json(files["paddle-restructure.json"])
+            if "paddle-restructure.json" in files
+            else {}
+        )
+        document = {"text": "".join(p["text"] for p in parts), "parts": parts}
         report = describe_structure(document, metadata, completion, approved)
-        return self.outputs.put(run_id, key, report, dependency) if run['conversion'] else report
+        return self.outputs.put(run_id, key, report, dependency) if run["conversion"] else report
 
     async def organize(self, run_id):
         source = self.prepare(run_id)
@@ -229,8 +275,11 @@ class Library:
         if cached:
             return cached
         structure = self.structure(run_id)
-        heading_evidence = [{k: item[k] for k in ('title', 'pages', 'level')}
-                            for item in structure['items'] if item['kind'] == 'heading' and item['status'] == 'ready']
+        heading_evidence = [
+            {k: item[k] for k in ("title", "pages", "level")}
+            for item in structure["items"]
+            if item["kind"] == "heading" and item["status"] == "ready"
+        ]
         batches = list(batches_for(spans, 12000))
         overview = await self.models.run(
             run_id,
@@ -238,7 +287,7 @@ class Library:
             BOOK_SYSTEM
             + "\n本步只制定 organization_outline。heading_candidates 来自整书扫描，可能包括小节和重复页眉。"
             "结合目录及首尾内容确定顶层章、序跋和附录，不把物理页或下级小节单独当成章。",
-            {**outline_context(spans), 'source_heading_hierarchy': heading_evidence},
+            {**outline_context(spans), "source_heading_hierarchy": heading_evidence},
             BookOutline,
             validate=lambda value: validate_outline(value.model_dump()),
         )
@@ -246,8 +295,11 @@ class Library:
         for index, batch in enumerate(batches):
             payload = {
                 "organization_outline": outline,
-                'source_heading_hierarchy': [h for h in heading_evidence if any(
-                    p in h['pages'] for s in batch for p in s['source_record']['pages'])],
+                "source_heading_hierarchy": [
+                    h
+                    for h in heading_evidence
+                    if any(p in h["pages"] for s in batch for p in s["source_record"]["pages"])
+                ],
                 "opened_items": [event["title"] for event in events if event["kind"] == "article"],
                 "active_boundary": events[-1] if events else None,
                 "units": [
@@ -312,10 +364,15 @@ class Library:
         structure = self.structure(run_id)
         rows = []
         for position, group in enumerate(organization["groups"]):
-            group = {**group, 'structure_policy': STRUCTURE_POLICY,
-                     'structure': project_structure(structure, group['parts'])}
+            group = {
+                **group,
+                "structure_policy": STRUCTURE_POLICY,
+                "structure": project_structure(structure, group["parts"]),
+            }
             identity = str(uuid5(UUID(run_id), f"chapter:{position}"))
-            content = self.review.objects.put_bytes(json.dumps(group, ensure_ascii=False).encode("utf-8"), run_id=run_id)
+            content = self.review.objects.put_bytes(
+                json.dumps(group, ensure_ascii=False).encode("utf-8"), run_id=run_id
+            )
             rows.append(
                 {
                     "id": identity,
@@ -331,6 +388,7 @@ class Library:
             )
         with self.engine.begin() as connection:
             from hrs_platform.services.deletion import require_active
+
             require_active(connection, run["book_id"])
             current = (
                 connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
@@ -389,130 +447,266 @@ class Library:
         import subprocess
 
         run = get_run(self.engine, run_id)
-        if not run['result'].get('published') or run['pending_count']:
-            raise ValueError('Errata require a published book with no pending review.')
-        dependency = {'amendments': amendments, 'conversion': run['conversion']}
-        step = 'library-amendment:' + fingerprint(dependency)
+        if not run["result"].get("published") or run["pending_count"]:
+            raise ValueError("Errata require a published book with no pending review.")
+        if run["result"].get("codex_document_id"):
+            from hrs_codex.store import Store
+            from hrs_codex.workspace import resolve_workspace
+
+            store = Store(resolve_workspace(self.settings.codex_root))
+            changes = []
+            for request in amendments:
+                chapter = self.chapter(request["chapter_id"])
+                if str(chapter["run_id"]) != str(run_id):
+                    raise ValueError("Errata belong to another run")
+                for edit in request["changes"]:
+                    start, before, after = edit["start"], edit["before"], edit["after"]
+                    if (
+                        not before
+                        or len(before) != len(after)
+                        or chapter["text"][start : start + len(before)] != before
+                    ):
+                        raise ValueError("Errata must match a nonempty same-length source range.")
+                    offset = 0
+                    for part in chapter["parts"]:
+                        end = offset + len(part["text"])
+                        if offset <= start < start + len(before) <= end and len(part["source"]["pages"]) == 1:
+                            changes.append(
+                                {
+                                    "page": part["source"]["pages"][0],
+                                    "start": part["source"]["original_start"] + start - offset,
+                                    "before": before,
+                                    "after": after,
+                                }
+                            )
+                            break
+                        offset = end
+                    else:
+                        raise ValueError("Erratum crosses source ownership boundaries.")
+            return store.propose_revision(run["result"]["codex_document_id"], changes)
+        dependency = {"amendments": amendments, "conversion": run["conversion"]}
+        step = "library-amendment:" + fingerprint(dependency)
         prior = self.outputs.get(run_id, step, dependency)
         if prior:
             return prior
-        chapters = [self.chapter(r['id']) for r in self.chapters(run['book_id'])]
+        chapters = [self.chapter(r["id"]) for r in self.chapters(run["book_id"])]
         bodies, originals, scopes = {}, {}, {}
         for request in amendments:
-            if request['chapter_id'] in bodies:
-                raise ValueError('Combine errata for the same chapter in one request.')
-            chapter = next(c for c in chapters if str(c['id']) == request['chapter_id'])
-            if chapter['content']['sha256'] != request['expected_content_sha256']:
-                raise ValueError('Chapter changed before errata verification.')
-            body = self.review.read_json(chapter['content'])
+            if request["chapter_id"] in bodies:
+                raise ValueError("Combine errata for the same chapter in one request.")
+            chapter = next(c for c in chapters if str(c["id"]) == request["chapter_id"])
+            if chapter["content"]["sha256"] != request["expected_content_sha256"]:
+                raise ValueError("Chapter changed before errata verification.")
+            body = self.review.read_json(chapter["content"])
             seen = set()
-            for edit in request['changes']:
-                start, before, after = edit['start'], edit['before'], edit['after']
+            for edit in request["changes"]:
+                start, before, after = edit["start"], edit["before"], edit["after"]
                 end = start + len(before)
-                if start < 0 or not before or len(before) != len(after) or chapter['text'][start:end] != before:
-                    raise ValueError('Errata must match a nonempty same-length source range.')
+                if (
+                    start < 0
+                    or not before
+                    or len(before) != len(after)
+                    or chapter["text"][start:end] != before
+                ):
+                    raise ValueError("Errata must match a nonempty same-length source range.")
                 if seen.intersection(range(start, end)):
-                    raise ValueError('Overlapping errata.')
+                    raise ValueError("Overlapping errata.")
                 seen.update(range(start, end))
                 offset = 0
-                for part in body['parts']:
-                    stop = offset + len(part['text'])
+                for part in body["parts"]:
+                    stop = offset + len(part["text"])
                     if offset <= start < end <= stop:
-                        pages = part['source']['pages']
-                        if len(pages) != 1 or part['source'].get('human_decision_id'):
-                            raise ValueError('Errata cannot overwrite an explicit human edit or an ambiguous page range.')
+                        pages = part["source"]["pages"]
+                        if len(pages) != 1 or part["source"].get("human_decision_id"):
+                            raise ValueError(
+                                "Errata cannot overwrite an explicit human edit or an ambiguous page range."
+                            )
                         page = pages[0]
-                        part['text'] = part['text'][:start-offset] + after + part['text'][end-offset:]
+                        part["text"] = part["text"][: start - offset] + after + part["text"][end - offset :]
                         scopes.setdefault(page, []).append(after)
                         break
                     offset = stop
                 else:
-                    raise ValueError('Erratum crosses source ownership boundaries.')
-            originals[request['chapter_id']] = chapter['content']
-            bodies[request['chapter_id']] = body
+                    raise ValueError("Erratum crosses source ownership boundaries.")
+            originals[request["chapter_id"]] = chapter["content"]
+            bodies[request["chapter_id"]] = body
         if not scopes:
-            raise ValueError('No errata supplied.')
-        bundle = self.review.read_json(run['conversion'])
+            raise ValueError("No errata supplied.")
+        bundle = self.review.read_json(run["conversion"])
         page_text = {}
         for chapter in chapters:
-            parts = bodies.get(str(chapter['id']), chapter)['parts']
+            parts = bodies.get(str(chapter["id"]), chapter)["parts"]
             for part in parts:
-                if len(part['source']['pages']) == 1:
-                    page = part['source']['pages'][0]
-                    page_text[page] = page_text.get(page, '') + part['text']
+                if len(part["source"]["pages"]) == 1:
+                    page = part["source"]["pages"][0]
+                    page_text[page] = page_text.get(page, "") + part["text"]
         receipts = []
-        output = self.settings.cache_root / str(run_id) / step.replace(':', '-')
+        output = self.settings.cache_root / str(run_id) / step.replace(":", "-")
         for number, revised in scopes.items():
             if any(page_text[number].count(text) != 1 for text in revised):
-                raise ValueError('The revised review scope is not unique on its page.')
+                raise ValueError("The revised review scope is not unique on its page.")
             pages = []
-            for page in bundle['manifest']['pages']:
-                if abs(page['page'] - number) > 1:
+            for page in bundle["manifest"]["pages"]:
+                if abs(page["page"] - number) > 1:
                     continue
-                image = self.review.objects.materialize(bundle['files'][page['image']], output / page['image'])
-                pages.append({**page, 'text': page_text.get(page['page'], ''), 'image_path': str(image),
-                    'verified': False, 'receipts': [], 'changes': [], 'concerns': [],
-                    **({'review_scope': [{'text': text, 'start': page_text[number].index(text),
-                        'end': page_text[number].index(text)+len(text), 'reasons': ['核对这一处修订后的原文，保留其余既有审核决定。']}
-                        for text in revised]} if page['page'] == number else {})})
-            packet = output / f'{number}-input.json'
-            packet.write_text(json.dumps(pages, ensure_ascii=False, default=str), 'utf-8')
-            target = output / f'{number}-result.json'
-            root = self.settings.project_root / 'services/document-extraction'
-            python = root / ('.venv/Scripts/python.exe' if os.name == 'nt' else '.venv/bin/python')
+                image = self.review.objects.materialize(
+                    bundle["files"][page["image"]], output / page["image"]
+                )
+                pages.append(
+                    {
+                        **page,
+                        "text": page_text.get(page["page"], ""),
+                        "image_path": str(image),
+                        "verified": False,
+                        "receipts": [],
+                        "changes": [],
+                        "concerns": [],
+                        **(
+                            {
+                                "review_scope": [
+                                    {
+                                        "text": text,
+                                        "start": page_text[number].index(text),
+                                        "end": page_text[number].index(text) + len(text),
+                                        "reasons": ["核对这一处修订后的原文，保留其余既有审核决定。"],
+                                    }
+                                    for text in revised
+                                ]
+                            }
+                            if page["page"] == number
+                            else {}
+                        ),
+                    }
+                )
+            packet = output / f"{number}-input.json"
+            packet.write_text(json.dumps(pages, ensure_ascii=False, default=str), "utf-8")
+            target = output / f"{number}-result.json"
+            root = self.settings.project_root / "services/document-extraction"
+            python = root / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
             # Reuse the conversion runtime rather than installing OCR dependencies in the platform.
-            process = subprocess.run([str(python), '-c',
-                'import json,sys; from pathlib import Path; '
-                'from document_extraction.settings import Settings; '
-                'from document_extraction.semantic_completion import complete_document; '
-                'pages=json.loads(Path(sys.argv[1]).read_text("utf-8")); '
-                'pages=[dict(p,image_path=Path(p["image_path"])) for p in pages]; '
-                'r=complete_document(pages, '
-                'Settings.load(Path(sys.argv[2])).vision_review, Path(sys.argv[3]), target_pages={int(sys.argv[4])}); '
-                'Path(sys.argv[5]).write_text(json.dumps(r,ensure_ascii=False,default=str),"utf-8")',
-                str(packet), str(root/'config/default.json'), str(output/str(number)), str(number), str(target)],
-                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=900, check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            process = subprocess.run(
+                [
+                    str(python),
+                    "-c",
+                    "import json,sys; from pathlib import Path; "
+                    "from document_extraction.settings import Settings; "
+                    "from document_extraction.semantic_completion import complete_document; "
+                    'pages=json.loads(Path(sys.argv[1]).read_text("utf-8")); '
+                    'pages=[dict(p,image_path=Path(p["image_path"])) for p in pages]; '
+                    "r=complete_document(pages, "
+                    "Settings.load(Path(sys.argv[2])).vision_review, Path(sys.argv[3]), target_pages={int(sys.argv[4])}); "
+                    'Path(sys.argv[5]).write_text(json.dumps(r,ensure_ascii=False,default=str),"utf-8")',
+                    str(packet),
+                    str(root / "config/default.json"),
+                    str(output / str(number)),
+                    str(number),
+                    str(target),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=900,
+                check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
             if process.returncode:
-                raise ValueError('Conversion review runtime failed: ' + process.stderr[-2000:])
-            result = json.loads(target.read_text('utf-8'))
-            checked = next(p for p in result['pages'] if p['page'] == number)
-            receipt = {k: checked[k] for k in ('page', 'verified', 'receipts', 'concerns', 'input_text_sha256', 'final_text_sha256')}
-            receipt['reviewer'] = result['reviewer']
-            self.outputs.put(run_id, step+':check:'+fingerprint(receipt), receipt, dependency)
-            if not checked['verified'] or checked['text'] != page_text[number]:
-                raise ValueError(f'Local original-image verification did not accept page {number}; source unchanged.')
+                raise ValueError("Conversion review runtime failed: " + process.stderr[-2000:])
+            result = json.loads(target.read_text("utf-8"))
+            checked = next(p for p in result["pages"] if p["page"] == number)
+            receipt = {
+                k: checked[k]
+                for k in (
+                    "page",
+                    "verified",
+                    "receipts",
+                    "concerns",
+                    "input_text_sha256",
+                    "final_text_sha256",
+                )
+            }
+            receipt["reviewer"] = result["reviewer"]
+            self.outputs.put(run_id, step + ":check:" + fingerprint(receipt), receipt, dependency)
+            if not checked["verified"] or checked["text"] != page_text[number]:
+                raise ValueError(
+                    f"Local original-image verification did not accept page {number}; source unchanged."
+                )
             receipts.append(receipt)
-        evidence = {'changes': amendments, 'receipts': receipts, 'machine_review': True, 'human_review': False,
-                    'previous_content': originals}
-        evidence_ref = self.review.objects.put_bytes(json.dumps(evidence, ensure_ascii=False).encode(), run_id=run_id)
+        evidence = {
+            "changes": amendments,
+            "receipts": receipts,
+            "machine_review": True,
+            "human_review": False,
+            "previous_content": originals,
+        }
+        evidence_ref = self.review.objects.put_bytes(
+            json.dumps(evidence, ensure_ascii=False).encode(), run_id=run_id
+        )
         references = {}
         for identity, body in bodies.items():
-            body.setdefault('amendments', []).append(evidence_ref)
-            for part in body['parts']:
-                if any(p in scopes for p in part['source']['pages']):
-                    part['source'].setdefault('amendments', []).append(evidence_ref)
-            references[identity] = self.review.objects.put_bytes(json.dumps(body, ensure_ascii=False).encode(), run_id=run_id)
-        saved = {'pages': sorted(scopes), 'content': references, 'evidence': evidence_ref, 'reindex_required': True}
-        saved_ref = self.review.objects.put_bytes(json.dumps(saved, ensure_ascii=False).encode(), run_id=run_id)
+            body.setdefault("amendments", []).append(evidence_ref)
+            for part in body["parts"]:
+                if any(p in scopes for p in part["source"]["pages"]):
+                    part["source"].setdefault("amendments", []).append(evidence_ref)
+            references[identity] = self.review.objects.put_bytes(
+                json.dumps(body, ensure_ascii=False).encode(), run_id=run_id
+            )
+        saved = {
+            "pages": sorted(scopes),
+            "content": references,
+            "evidence": evidence_ref,
+            "reindex_required": True,
+        }
+        saved_ref = self.review.objects.put_bytes(
+            json.dumps(saved, ensure_ascii=False).encode(), run_id=run_id
+        )
         with self.engine.begin() as connection:
-            current = connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update()).mappings().one()
-            if current['conversion'] != run['conversion'] or current['pending_count']:
-                raise ValueError('Source or review state changed during verification.')
+            current = (
+                connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
+                .mappings()
+                .one()
+            )
+            if current["conversion"] != run["conversion"] or current["pending_count"]:
+                raise ValueError("Source or review state changed during verification.")
             for identity, reference in references.items():
-                row = connection.execute(select(db.chapters).where(db.chapters.c.id == identity).with_for_update()).mappings().one()
-                if row['content'] != originals[identity]:
-                    raise ValueError('Chapter changed during verification.')
-                connection.execute(update(db.chapters).where(db.chapters.c.id == identity).values(content=reference))
-            connection.execute(update(db.runs).where(db.runs.c.id == run_id).values(
-                result={**current['result'], 'source_amendment': evidence_ref,
-                        'retrieval_generation': 'pending-amendment-' + evidence_ref['sha256']},
-                revision=current['revision']+1))
-            connection.execute(insert(db.events).values(book_id=run['book_id'], run_id=run_id,
-                kind='library.revised', payload={'pages': sorted(scopes), 'chapters': list(references)}))
+                row = (
+                    connection.execute(
+                        select(db.chapters).where(db.chapters.c.id == identity).with_for_update()
+                    )
+                    .mappings()
+                    .one()
+                )
+                if row["content"] != originals[identity]:
+                    raise ValueError("Chapter changed during verification.")
+                connection.execute(
+                    update(db.chapters).where(db.chapters.c.id == identity).values(content=reference)
+                )
+            connection.execute(
+                update(db.runs)
+                .where(db.runs.c.id == run_id)
+                .values(
+                    result={
+                        **current["result"],
+                        "source_amendment": evidence_ref,
+                        "retrieval_generation": "pending-amendment-" + evidence_ref["sha256"],
+                    },
+                    revision=current["revision"] + 1,
+                )
+            )
+            connection.execute(
+                insert(db.events).values(
+                    book_id=run["book_id"],
+                    run_id=run_id,
+                    kind="library.revised",
+                    payload={"pages": sorted(scopes), "chapters": list(references)},
+                )
+            )
             # Commit the checkpoint with the chapter pointers, so retries cannot reapply an edit.
-            connection.execute(insert(db.stage_outputs).values(run_id=run_id, step=step,
-                input_sha256=fingerprint(dependency), reference=saved_ref))
+            connection.execute(
+                insert(db.stage_outputs).values(
+                    run_id=run_id, step=step, input_sha256=fingerprint(dependency), reference=saved_ref
+                )
+            )
         return saved
 
     def chapter(self, chapter_id):
@@ -524,4 +718,4 @@ class Library:
             )
         if not row:
             raise ServiceError(404, "章节尚未发布。")
-        return {**row, **chapter_content(self.settings, row['content'])}
+        return {**row, **chapter_content(self.settings, row["content"])}

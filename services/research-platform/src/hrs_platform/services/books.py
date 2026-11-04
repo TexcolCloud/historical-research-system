@@ -150,6 +150,7 @@ def handle_tus(engine, settings, hook, authorization):
                 upload_id=session_id,
                 state="queued",
                 stage="verify_upload",
+                result={"processing_backend": settings.processing_backend},
                 source={"upload_key": key, "byte_length": upload.Size},
             )
         )
@@ -177,6 +178,8 @@ def book_query():
             db.books,
             db.runs.c.id.label("run_id"),
             db.runs.c.stage,
+            db.runs.c.result,
+            func.coalesce(db.runs.c.pending_count, 0).label("pending_count"),
             func.coalesce(db.runs.c.revision, 0).label("revision"),
         )
         .outerjoin(db.runs, (db.books.c.id == db.runs.c.book_id) & (db.runs.c.kind == "book"))

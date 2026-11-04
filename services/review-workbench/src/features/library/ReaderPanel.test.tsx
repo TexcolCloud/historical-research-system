@@ -23,9 +23,11 @@ test("reads a complete logical chapter first and opens only its associated origi
     codepoints: 8,
   };
   respondWith((request) =>
-    new URL(request.url).pathname.includes("/books/")
-      ? [chapter]
-      : { ...chapter, text: "连续的章节正文", parts: [] },
+    request.url.includes("/review-pages/")
+      ? { page: 7, image: "/original-7.png" }
+      : new URL(request.url).pathname.includes("/books/")
+        ? [chapter]
+        : { ...chapter, text: "连续的章节正文", parts: [] },
   );
   render(
     <QueryClientProvider client={new QueryClient()}>
@@ -37,9 +39,12 @@ test("reads a complete logical chapter first and opens only its associated origi
   await screen.findByText("连续的章节正文");
   expect(screen.queryByTitle("原书 PDF")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "对照原书" }));
-  expect(screen.getByTitle("原书 PDF").getAttribute("src")).toContain(
-    "original.pdf#page=7",
+  expect((await screen.findByAltText("原书第 7 页")).getAttribute("src")).toBe(
+    "/original-7.png",
   );
+  expect(
+    screen.getByRole("link", { name: "打开原 PDF" }).getAttribute("href"),
+  ).toContain("original.pdf#page=7");
   vi.restoreAllMocks();
 });
 
