@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { useId, useMemo } from "react";
+import { useId, useMemo, useRef, useEffect } from "react";
+import { highlightDom, type ReviewLocation } from "./review-highlights.ts";
 import { withFootnotes, type FootnoteLink } from "@/editor/footnotes.ts";
 
 function safeHtml(markdown: string) {
@@ -15,12 +16,19 @@ export function RenderedMarkdown({
   markdown,
   footnotes = [],
   assetBaseUrl,
+  highlights,
+  activeHighlight,
+  onHighlight,
 }: {
   markdown: string;
   footnotes?: FootnoteLink[];
   assetBaseUrl?: string;
+  highlights?: ReviewLocation[];
+  activeHighlight?: string;
+  onHighlight?: (id: string) => void;
 }) {
   const prefix = `footnotes-${useId()}`;
+  const root = useRef<HTMLDivElement>(null);
   const html = useMemo(() => {
     let reading = withFootnotes(markdown, footnotes, prefix);
     if (assetBaseUrl)
@@ -36,10 +44,29 @@ export function RenderedMarkdown({
       );
     return safeHtml(reading);
   }, [markdown, footnotes, prefix, assetBaseUrl]);
+  useEffect(() => {
+    if (root.current)
+      highlightDom(root.current, markdown, highlights ?? [], activeHighlight);
+  }, [html, markdown, highlights, activeHighlight]);
   return (
     <div
       className="prose"
+      ref={root}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const mark = (event.target as Element).closest<HTMLElement>(
+          "mark[data-review-id]",
+        );
+        if (mark?.dataset.reviewId) {
+          event.preventDefault();
+          onHighlight?.(mark.dataset.reviewId);
+        }
+      }}
       onClick={(event) => {
+        const mark = (event.target as Element).closest<HTMLElement>(
+          "mark[data-review-id]",
+        );
+        if (mark?.dataset.reviewId) onHighlight?.(mark.dataset.reviewId);
         const link = (event.target as Element).closest<HTMLAnchorElement>(
           "a[data-note-jump]",
         );

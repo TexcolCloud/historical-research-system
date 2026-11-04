@@ -95,7 +95,7 @@ def prepare(store: Store, source: str, title: str = "") -> dict:
                 "ocr_model": "gpt-6.1-terra",
                 "review_model": "gpt-6.1-sol",
                 "organization_model": "gpt-6.1-sol",
-                "review_failure": "human",
+                "review_failure": "bounded",
             }
             store._save(saved)
     return store.status(document["id"])

@@ -135,7 +135,7 @@ def run_codex(
     skill = PROJECT / ".agents/skills/historical-research/SKILL.md"
     prompt += (
         "\nStage model policy: MUST spawn OCR with agent_type=historical_ocr (gpt-6.1-terra), "
-        "review with agent_type=historical_review (gpt-6.1-sol), organization with "
+        "review and verify with agent_type=historical_review (gpt-6.1-sol), organization with "
         "agent_type=historical_organization (gpt-6.1-sol), also for navigation tasks. Do not override these worker models. "
         "Pass stage=navigation explicitly when ready. Review workers must include page_observation for "
         "approved pages (exact printed_label, literal headings, kind, numbering sequence); OCR preserves "
@@ -145,6 +145,12 @@ def run_codex(
         "Read processing_policy in document_status. For review_failure=human, a review which "
         "does not pass goes directly to humans: submit pending with precise issues and optional "
         "suggested Markdown; do not start automatic correction, verification, retries or fallback. "
+        "For review_failure=bounded, clear uniquely located corrections get one independent full-page verify; "
+        "pending disposition=disputed gets one fresh original-first verify of unchanged text. "
+        "Genuinely unreadable originals use disposition=unreadable and go straight to humans. "
+        "Verify cannot repair or retry. Every issue includes anchor={exact,prefix,suffix} from candidate "
+        "Markdown, focus, explanation, source_quote, candidate_quote, optional suggestion, "
+        "and boxes=[[left,top,right,bottom]] normalized to FULL retained page, image_precision=line|region. "
         "Technical failures still use technical recovery, never content approval."
     )
     if skill.exists():

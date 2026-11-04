@@ -7,6 +7,77 @@ import ReviewPanel from "@/features/review/ReviewPanel.tsx";
 import { client } from "@/client/api.ts";
 import { respondWith } from "@/test/responses.ts";
 afterEach(cleanup);
+test("located doubts highlight text, show source region, and require an explicit per-doubt decision", async () => {
+  const location = {
+    id: "doubt-1",
+    page: 1,
+    anchor: { exact: "石待辨渡口", prefix: "", suffix: "" },
+    focus: "待辨",
+    boxes: [[0.2, 0.3, 0.4, 0.5]],
+    image_precision: "region",
+    message: "字形待核",
+    source_reading: "石岔渡口",
+    candidate: "石待辨渡口",
+    suggestion: "岔",
+  };
+  const issue = {
+    id: "located",
+    run_id: "located-run",
+    page: 1,
+    revision: 1,
+    state: "pending",
+    text_sha256: "d".repeat(64),
+    text: "石待辨渡口",
+    images: ["/source.png"],
+    pages: [1],
+    kind: "page",
+    reasons: [{ explanation: "字形待核" }],
+    locations: [location],
+    resolutions: [],
+  };
+  respondWith((request) =>
+    new URL(request.url).pathname === "/api/v2/reviews" ? [issue] : issue,
+  );
+  const put = vi
+    .spyOn(client, "PUT")
+    .mockImplementation(async (_path, options) => ({
+      data: {
+        revision: 2,
+        draft_text: options!.body.text,
+        resolutions: options!.body.resolutions,
+      },
+      response: new Response(),
+    }));
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ReviewPanel runId="located-run" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("疑点 1 / 1");
+  expect(
+    document.querySelector('mark[data-review-id="doubt-1"]')?.textContent,
+  ).toBe("待辨");
+  expect(
+    screen
+      .getByLabelText("原图疑点框")
+      .querySelector("rect")
+      ?.getAttribute("x"),
+  ).toBe("0.2");
+  expect(
+    screen.getByRole("button", { name: "确认本页" }).hasAttribute("disabled"),
+  ).toBe(true);
+  await userEvent.click(screen.getByRole("button", { name: "保留当前识别" }));
+  await waitFor(() => expect(put).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "确认本页" }).hasAttribute("disabled"),
+    ).toBe(false),
+  );
+  expect(put.mock.calls[0][1]?.body.resolutions).toEqual([
+    { id: "doubt-1", action: "keep" },
+  ]);
+  put.mockRestore();
+});
 vi.mock("@/editor/LazyMarkdownEditor.tsx", () => ({
   MarkdownEditor: ({
     value,

@@ -93,6 +93,23 @@ class Navigation:
         with self.engine.begin() as connection:
             require_run_active(connection, str(run_id))
         store, doc_id = self.native(run_id)
+        if action == "resume":
+            from sqlalchemy import or_, select
+
+            from hrs_platform import models as db
+
+            with self.engine.connect() as connection:
+                protected = list(
+                    connection.scalars(
+                        select(db.review_issues.c.page).where(
+                            db.review_issues.c.run_id == str(run_id),
+                            or_(
+                                db.review_issues.c.draft.is_not(None), db.review_issues.c.state == "approved"
+                            ),
+                        )
+                    )
+                )
+            store.upgrade_review_policy(doc_id, protected_pages=protected)
         result = store.pause_document(doc_id) if action == "pause" else store.request_run(doc_id, resume=True)
         if action == "resume":
             ensure_workbench(store)

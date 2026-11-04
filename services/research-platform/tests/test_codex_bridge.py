@@ -60,6 +60,7 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(platform, t
         "review",
         {
             "verdict": "pending",
+            "disposition": "disputed",
             "issues": [
                 {
                     "location": "body",
@@ -69,6 +70,14 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(platform, t
                 }
             ],
         },
+    )
+    bridge.sync(get_run(engine, run_id))
+    assert RunSummary.model_validate(get_run(engine, run_id)).page_progress.reviewed == 0
+    finish(
+        bridge.store,
+        doc_id,
+        "verify",
+        {"verdict": "pending", "issues": bridge.store.status(doc_id)["pages"][0]["review"]["issues"]},
     )
     bridge.sync(get_run(engine, run_id))
     assert RunSummary.model_validate(get_run(engine, run_id)).page_progress.model_dump() == {

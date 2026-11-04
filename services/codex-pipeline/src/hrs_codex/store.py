@@ -601,6 +601,43 @@ class Store:
             self._save(doc)
             return request
 
+    def upgrade_review_policy(self, document_id: str, protected_pages=()) -> dict:
+        """Explicit resume migration; retain earlier decisions and all human-owned work."""
+        with self.lock:
+            doc = self._load(document_id)
+            if doc.get("processing_policy", {}).get("review_failure") == "bounded":
+                return {"reopened_pages": []}
+            if any(t["state"] == "leased" for t in doc["tasks"]):
+                raise ValueError("Pause active execution before changing review policy")
+            previous = dict(doc.get("processing_policy", {}))
+            doc.setdefault("processing_policy", {}).update(review_failure="bounded")
+            reopened = []
+            for page in doc["pages"]:
+                if page["state"] != "pending" or page["page"] in protected_pages:
+                    continue
+                history = [t for t in doc["tasks"] if t["page"] == page["page"]]
+                if any(t["stage"] == "human_review" for t in history) or page.get(
+                    "automatic_review_attempts"
+                ):
+                    continue
+                for task in history:
+                    if task["state"] == "pending":
+                        task["state"] = "superseded"
+                page["state"] = "awaiting_review"
+                doc["tasks"].append(self._new_task("review", page["page"]))
+                reopened.append(page["page"])
+            doc.setdefault("policy_history", []).append(
+                {
+                    "previous": previous,
+                    "at": time.time(),
+                    "reopened_pages": reopened,
+                    "protected_pages": list(protected_pages),
+                    "reason": "explicit_resume_bounded_review",
+                }
+            )
+            self._save(doc)
+            return {"reopened_pages": reopened}
+
     def report_task_failure(
         self, document_id: str, task_id: str, lease_token: str, code: str
     ) -> dict:
@@ -747,6 +784,7 @@ class Store:
                 raise ValueError("Task input hash mismatch")
             self._verify_details(doc, task, result)
             stage = task["stage"]
+            automatic_verification = False
             if (
                 stage == "review"
                 and doc.get("processing_policy", {}).get("review_failure") == "human"
@@ -834,7 +872,33 @@ class Store:
                     page["state"] = "approved"
                 elif verdict == "pending":
                     page["state"] = "pending"
+                    if (
+                        stage == "review"
+                        and doc.get("processing_policy", {}).get("review_failure") == "bounded"
+                        and result.get("disposition") == "disputed"
+                        and not page.get("automatic_review_attempts")
+                    ):
+                        page["candidate"] = {**text, **receipt, "corrections": []}
+                        result = {**result, "markdown": text["markdown"], "recheck_unchanged": True}
+                        page["automatic_review_attempts"] = 1
+                        page["state"] = "awaiting_verification"
+                        doc["tasks"].append(self._new_task("verify", page["page"]))
+                        automatic_verification = True
                 else:
+                    if (
+                        stage == "review"
+                        and doc.get("processing_policy", {}).get("review_failure") == "bounded"
+                        and task.get("source_reading", {}).get("reading", {}).get("unresolved")
+                    ):
+                        raise ValueError(
+                            "Unclear originals require pending, not automatic corrections"
+                        )
+                    if (
+                        stage == "review"
+                        and doc.get("processing_policy", {}).get("review_failure") == "bounded"
+                        and page.get("automatic_review_attempts")
+                    ):
+                        raise ValueError("Automatic review is limited to one attempt")
                     markdown, corrections = result.get("markdown"), result.get("corrections")
                     if not isinstance(markdown, str) or markdown == text["markdown"]:
                         raise ValueError("Corrections require changed markdown")
@@ -874,6 +938,7 @@ class Store:
                         "corrections": corrections,
                     }
                     page["state"] = "awaiting_verification"
+                    page["automatic_review_attempts"] = 1
                     doc["tasks"].append(self._new_task("verify", page["page"]))
                 page["review"] = {
                     **receipt,
@@ -959,7 +1024,9 @@ class Store:
                         ),
                     }
             task.update(
-                state="pending" if result.get("verdict") == "pending" else "completed",
+                state="pending"
+                if result.get("verdict") == "pending" and not automatic_verification
+                else "completed",
                 result=result,
                 receipt={**receipt, "result_sha256": digest(result)},
             )
@@ -1905,6 +1972,7 @@ class Store:
                 )
                 page.pop("candidate", None)
                 page.pop("review", None)
+                page.pop("automatic_review_attempts", None)
                 doc["tasks"].extend([task, self._new_task("review", number)])
             doc.update(state="processing", publication=None, organization=None)
             self._save(doc)

@@ -12,6 +12,7 @@ import time
 from uuid import UUID, uuid5
 
 from filelock import FileLock, Timeout
+from hrs_codex.review_locations import locate_issues
 from hrs_codex.scheduling import scheduling_plan
 from hrs_codex.server import prepare
 from hrs_codex.store import Store, digest
@@ -27,7 +28,7 @@ from hrs_platform.services.runs.outputs import Outputs, fingerprint
 from hrs_platform.services.storage import objects_for
 
 logger = logging.getLogger(__name__)
-PROJECTION_POLICY = "codex-platform-v6-navigation"
+PROJECTION_POLICY = "codex-platform-v7-review-localization"
 
 
 def article_groups(document, run_id):
@@ -392,7 +393,11 @@ class CodexBridge:
         doc = self.store.refresh_navigation(doc_id)
         navigation_sha = doc.get("navigation", {}).get("sha256")
         scheduling = scheduling_plan(doc)
-        latest_reviews = {t["page"]: t for t in doc["tasks"] if t["stage"] == "review"}
+        latest_reviews = {
+            t["page"]: t
+            for t in doc["tasks"]
+            if t["stage"] in {"review", "verify"} and t["state"] != "superseded"
+        }
         page_progress = {
             "total": len(doc["pages"]),
             "extracted": sum(bool(p.get("ocr")) for p in doc["pages"]),
@@ -561,6 +566,12 @@ class CodexBridge:
                     "codex_input_sha256": packet["input_sha256"],
                     "codex_revision": doc.get("revision", 1),
                     "proposed_text": packet.get("suggested_markdown"),
+                    "locations": locate_issues(
+                        packet["markdown"],
+                        page["review"]["issues"],
+                        page=page["page"],
+                        image_sha256=page["image_sha256"],
+                    ),
                 }
                 ref = self.objects.put_bytes(
                     json.dumps(content, ensure_ascii=False).encode(), run_id=run["id"]

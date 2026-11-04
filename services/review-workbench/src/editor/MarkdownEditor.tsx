@@ -11,6 +11,8 @@ import {
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import DOMPurify from "dompurify";
 import { splitMarkdown } from "@/editor/markdown.ts";
+import { resolveLocation, type ReviewLocation } from "./review-highlights.ts";
+import { ReviewDecoration, decorateEditor } from "./review-decoration.ts";
 
 /** Reject structures the visual editor cannot preserve. Source mode remains available. */
 export function tableEditProblem(raw: string): string | null {
@@ -90,10 +92,14 @@ function BlockEditor({
   raw,
   table,
   onChange,
+  highlights = [],
+  activeHighlight,
 }: {
   raw: string;
   table: boolean;
   onChange: (raw: string) => void;
+  highlights?: ReviewLocation[];
+  activeHighlight?: string;
 }) {
   const change = useRef(onChange);
   change.current = onChange;
@@ -105,6 +111,7 @@ function BlockEditor({
         trailingNode: false,
       }),
       Markdown,
+      ReviewDecoration,
       HtmlTable.configure({ resizable: false }),
       TableRow,
       TableCell,
@@ -138,6 +145,9 @@ function BlockEditor({
       );
     },
   });
+  useEffect(() => {
+    if (editor) decorateEditor(editor, raw, highlights, activeHighlight);
+  }, [editor, raw, highlights, activeHighlight]);
   useEffect(() => {
     editor?.commands.focus("start");
   }, [editor]);
@@ -226,13 +236,25 @@ function BlockEditor({
 export function MarkdownEditor({
   value,
   onChange,
+  highlights = [],
+  activeHighlight,
+  onHighlight,
 }: {
   value: string;
   onChange: (value: string) => void;
+  highlights?: ReviewLocation[];
+  activeHighlight?: string;
+  onHighlight?: (id: string) => void;
 }) {
   const [blocks, setBlocks] = useState(() => splitMarkdown(value));
   const [active, setActive] = useState<number | null>(null);
   const [message, setMessage] = useState("");
+  useEffect(() => {
+    if (blocks.map((b) => b.raw).join("") !== value) {
+      setBlocks(splitMarkdown(value));
+      setActive(null);
+    }
+  }, [value, blocks]);
   function update(index: number, raw: string) {
     const next = blocks.map((block, at) =>
       at === index ? { ...block, raw } : block,
@@ -252,6 +274,40 @@ export function MarkdownEditor({
       )}
       {blocks.map((block, index) => {
         if (!block.raw.trim()) return null;
+        const offset = blocks
+          .slice(0, index)
+          .reduce((n, b) => n + b.raw.length, 0);
+        const localHighlights = highlights.flatMap((l) => {
+          const range = resolveLocation(value, l);
+          if (
+            !range ||
+            range.start < offset ||
+            range.end > offset + block.raw.length
+          )
+            return [];
+          const start = range.start - offset,
+            end = range.end - offset;
+          if (start === end)
+            return [
+              {
+                ...l,
+                anchor: { exact: block.raw, prefix: "", suffix: "" },
+                focus: "",
+                insertion_offset: Array.from(block.raw.slice(0, start)).length,
+              },
+            ];
+          return [
+            {
+              ...l,
+              anchor: {
+                exact: block.raw.slice(start, end),
+                prefix: block.raw.slice(0, start),
+                suffix: block.raw.slice(end),
+              },
+              focus: block.raw.slice(start, end),
+            },
+          ];
+        });
         const table =
           block.type === "html" && /^\s*<table[\s>]/i.test(block.raw);
         const unsupported =
@@ -265,6 +321,8 @@ export function MarkdownEditor({
                 raw={block.raw}
                 table={table}
                 onChange={(raw) => update(index, raw)}
+                highlights={localHighlights}
+                activeHighlight={activeHighlight}
               />
             </div>
           );
@@ -298,7 +356,12 @@ export function MarkdownEditor({
                 HTML 注释已保留，可在源码中编辑
               </span>
             ) : (
-              <RenderedMarkdown markdown={block.raw} />
+              <RenderedMarkdown
+                markdown={block.raw}
+                highlights={localHighlights}
+                activeHighlight={activeHighlight}
+                onHighlight={onHighlight}
+              />
             )}
           </section>
         );

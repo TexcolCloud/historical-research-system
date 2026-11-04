@@ -1,3 +1,99 @@
+/* Display annotations never enter source Markdown or source image pixels. */
+.review-mark {
+  background: #fff0a8;
+  color: inherit;
+  border-radius: 2px;
+}
+.review-mark-active {
+  background: #ffe17b;
+  outline: 2px solid #9c6200;
+  outline-offset: 2px;
+}
+.review-focus {
+  padding: 16px;
+  border: 1px solid #d7c68e;
+  border-radius: 8px;
+  background: #fffcf0;
+  margin: 16px 0;
+}
+.review-sticky-controls {
+  position: sticky;
+  top: 8px;
+  z-index: 3;
+  background: white;
+  max-height: 46vh;
+  overflow: auto;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 8px;
+}
+.review-focus-index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.review-source-focus {
+  position: sticky;
+  top: 12px;
+}
+.review-source-focus figcaption {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.review-source-sheet {
+  position: relative;
+  touch-action: none;
+  cursor: crosshair;
+}
+.review-source-sheet img {
+  display: block;
+  width: 100%;
+  user-select: none;
+}
+.review-source-sheet > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.review-source-sheet rect {
+  pointer-events: auto;
+  cursor: pointer;
+  fill: #ffc92833;
+  stroke: #b26900;
+  stroke-width: 0.003;
+}
+.review-source-sheet rect[data-active="true"] {
+  stroke: #8b4300;
+  stroke-width: 0.005;
+  fill: #ffc92855;
+}
+.review-crop-scroll {
+  overflow: auto;
+  margin: 12px 0;
+  border: 1px solid #d7c68e;
+  background: white;
+}
+.review-crop-scroll svg {
+  display: block;
+  height: auto;
+  max-width: none;
+}
+.review-source-focus input[type="range"] {
+  width: 140px;
+  vertical-align: middle;
+}
+@media (max-width: 1400px) {
+  .platform-review-grid { grid-template-columns:minmax(0,1fr); }
+  .platform-review-grid > nav { display:flex; gap:8px; max-height:100px; overflow:auto; position:static; }
+  .platform-review-grid > nav button { min-width:124px; }
+  .platform-review-grid .platform-review-content { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .platform-review-grid .platform-review-content > article { padding:16px; }
+}
+@media (max-width: 800px) {
+  .platform-review-grid .platform-review-content { grid-template-columns:minmax(0,1fr); }
+  .review-sticky-controls { position:static; max-height:none; }
+}
 .platform-collection {
   display: grid;
   gap: 12px;
@@ -554,10 +650,32 @@ a:focus-visible {
   border: 1px solid #d9e3ea;
   margin-top: 12px;
 }
-.platform-reading aside figure { margin: 12px 0; }
-.platform-reading aside img { display: block; width: 100%; height: auto; margin-top: 12px; border: 1px solid #d9e3ea; }
-.platform-review-content details pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
-.platform-markdown-source { width: 100%; min-height: 24rem; padding: 16px; border: 1px solid #c5d3dc; border-radius: 6px; font-family: ui-monospace, monospace; font-size: 14px; line-height: 1.7; resize: vertical; }
+.platform-reading aside figure {
+  margin: 12px 0;
+}
+.platform-reading aside img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 12px;
+  border: 1px solid #d9e3ea;
+}
+.platform-review-content details pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.platform-markdown-source {
+  width: 100%;
+  min-height: 24rem;
+  padding: 16px;
+  border: 1px solid #c5d3dc;
+  border-radius: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  resize: vertical;
+}
 .platform-reading select {
   background: white;
   border: 1px solid #d9e3ea;
@@ -1000,18 +1118,53 @@ a:focus-visible {
   color: #566e7e;
   line-height: 1.7;
 }
-.platform-navigation nav ol { list-style: none; padding: 0; }
-.platform-navigation nav li { padding: 16px 0; border-bottom: 1px solid #e8edf1; }
-.platform-navigation a { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
-.platform-navigation label { display: block; margin: 16px 0; }
+.platform-navigation nav ol {
+  list-style: none;
+  padding: 0;
+}
+.platform-navigation nav li {
+  padding: 16px 0;
+  border-bottom: 1px solid #e8edf1;
+}
+.platform-navigation a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.platform-navigation label {
+  display: block;
+  margin: 16px 0;
+}
 .platform-navigation select,
-.platform-navigation input { display: block; margin-top: 6px; width: min(100%, 32rem); padding: 9px; border: 1px solid #c5d3dc; border-radius: 6px; }
-.platform-process details { margin-top: 14px; overflow-x: auto; }
-.platform-process details table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.platform-navigation input {
+  display: block;
+  margin-top: 6px;
+  width: min(100%, 32rem);
+  padding: 9px;
+  border: 1px solid #c5d3dc;
+  border-radius: 6px;
+}
+.platform-process details {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+.platform-process details table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
 .platform-process details th,
-.platform-process details td { padding: 9px; border-bottom: 1px solid #e8edf1; text-align: left; white-space: nowrap; }
+.platform-process details td {
+  padding: 9px;
+  border-bottom: 1px solid #e8edf1;
+  text-align: left;
+  white-space: nowrap;
+}
 .platform-review-content details summary,
-.platform-process details summary { cursor: pointer; padding: 8px 0; }
+.platform-process details summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
 .platform-process progress {
   display: block;
   width: min(100%, 24rem);

@@ -40,8 +40,11 @@ issue. It records machine uncertainty and protects the human handoff from anothe
 automatic retry. Preserve opposing observations; a prior publication is not gold.
 
 Use `historical_ocr` (GPT-6.1 Terra), `historical_review` and
-`historical_organization` (GPT-6.1 Sol). A failed new-policy review goes directly to
-the human queue. Preserve Markdown footnotes, note ownership, tables, retained
+`historical_organization` (GPT-6.1 Sol). New imports use bounded review: clear
+located repairs and explicitly disputed readings get one independent original-first
+full-page verification. Unreadable originals and failed verification go to humans.
+Retained human-only policies stay frozen until explicit migration/resume; protect
+human drafts and decisions. Preserve Markdown footnotes, note ownership, tables, retained
 figure images and exact article boundaries.
 
 Human decisions are made explicitly in the single-user local form. Preserve human drafts and

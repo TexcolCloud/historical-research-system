@@ -19,7 +19,7 @@ def runtime(settings: SettingsDep) -> RuntimeStatus:
         "root": workspace["root"],
         "ocr_model": "gpt-6.1-terra",
         "review_model": "gpt-6.1-sol",
-        "review_failure": "human",
+        "review_failure": "bounded",
         "validation_scope": "workflow_only"
         if (resolve_workspace(settings.codex_root) / ".workflow-test-authorization.json").exists()
         else "content",
