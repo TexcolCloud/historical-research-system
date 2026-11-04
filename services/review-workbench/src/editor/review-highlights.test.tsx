@@ -2,7 +2,47 @@
 import { test, expect } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
-import { resolveLocation } from "./review-highlights.ts";
+import {
+  resolveLocation,
+  suggestionEdit,
+  type ReviewLocation,
+} from "./review-highlights.ts";
+
+test("suggestions retain surrounding context, support insertion and reject ambiguous scope", () => {
+  const issue: ReviewLocation = {
+    id: "scope",
+    page: 1,
+    anchor: { exact: "甲错乙", prefix: "😀", suffix: "。" },
+    focus: "错",
+    boxes: [],
+    image_precision: "page",
+    message: "",
+    source_reading: "",
+    candidate: "甲错乙",
+    suggestion: "甲对乙",
+  };
+  expect(suggestionEdit("😀甲错乙。", issue)).toEqual({
+    start: 3,
+    end: 4,
+    replacement: "对",
+  });
+  expect(
+    suggestionEdit("😀甲错乙。", { ...issue, suggestion: "对" })?.replacement,
+  ).toBe("对");
+  expect(
+    suggestionEdit("😀甲错乙。", { ...issue, suggestion: "另一整句" }),
+  ).toBeNull();
+  expect(suggestionEdit("😀甲新文乙。", issue)).toBeNull();
+  expect(
+    suggestionEdit("😀甲乙。", {
+      ...issue,
+      anchor: { exact: "甲乙", prefix: "😀", suffix: "。" },
+      focus: "",
+      insertion_offset: 1,
+      suggestion: "甲补乙",
+    }),
+  ).toEqual({ start: 3, end: 3, replacement: "补" });
+});
 
 test("highlights the contextual occurrence across formatted text without changing Markdown", () => {
   const markdown = "😀甲石**待辨**渡口。乙石**待辨**渡口。";

@@ -94,6 +94,66 @@ vi.mock("@/editor/LazyMarkdownEditor.tsx", () => ({
   ),
 }));
 
+test("adopting a full-anchor proposal replaces only the focused error without duplicating context", async () => {
+  const issue = {
+    id: "scope",
+    run_id: "scope-run",
+    page: 1,
+    revision: 1,
+    state: "pending",
+    text_sha256: "a".repeat(64),
+    text: "开头甲错乙结尾",
+    images: [],
+    pages: [1],
+    kind: "page",
+    reasons: ["待核"],
+    resolutions: [],
+    locations: [
+      {
+        id: "scope-doubt",
+        page: 1,
+        anchor: { exact: "甲错乙", prefix: "开头", suffix: "结尾" },
+        focus: "错",
+        boxes: [],
+        image_precision: "page",
+        message: "待核",
+        candidate: "甲错乙",
+        source_reading: "甲对乙",
+        suggestion: "甲对乙",
+      },
+    ],
+  };
+  respondWith((request) =>
+    new URL(request.url).pathname === "/api/v2/reviews" ? [issue] : issue,
+  );
+  const put = vi
+    .spyOn(client, "PUT")
+    .mockImplementation(async (_path, options) => ({
+      data: {
+        revision: 2,
+        draft_text: options!.body.text,
+        resolutions: options!.body.resolutions,
+      },
+      response: new Response(),
+    }));
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ReviewPanel runId="scope-run" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("疑点 1 / 1");
+  await userEvent.click(screen.getByRole("button", { name: "采用建议并编辑" }));
+  expect(
+    (
+      screen.getByRole("textbox", {
+        name: "Markdown 源码",
+      }) as HTMLTextAreaElement
+    ).value,
+  ).toBe("开头甲对乙结尾");
+  await waitFor(() => expect(put).toHaveBeenCalled());
+  put.mockRestore();
+});
+
 test("autosave persists a draft and defer moves on without approving content", async () => {
   const first = {
     id: "draft-one",

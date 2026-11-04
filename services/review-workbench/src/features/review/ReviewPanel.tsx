@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { readLocations, resolveLocation } from "@/editor/review-highlights.ts";
+import {
+  readLocations,
+  resolveLocation,
+  suggestionEdit,
+} from "@/editor/review-highlights.ts";
 import ReviewFocus, { type Resolution } from "./ReviewFocus.tsx";
 import SourceFocus from "./SourceFocus.tsx";
 import { useOutletContext } from "react-router-dom";
@@ -262,10 +266,10 @@ function IssueEditor({
     if (!current) return;
     let next = resolutions.filter((r) => r.id !== current.id);
     if (action === "adopt" && replacement !== undefined) {
-      const range = resolveLocation(text, current);
+      const range = suggestionEdit(text, current);
       if (!range) return;
       const value =
-        text.slice(0, range.start) + replacement + text.slice(range.end);
+        text.slice(0, range.start) + range.replacement + text.slice(range.end);
       next = changeText(value).filter((r) => r.id !== current.id);
       setEditing(true);
       setSourceMode(true);

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button.tsx";
 import {
   resolveLocation,
+  suggestionEdit,
   type ReviewLocation,
 } from "@/editor/review-highlights.ts";
 export type Resolution = {
@@ -31,6 +32,7 @@ export default function ReviewFocus({
     issue = locations[index];
   if (!issue) return null;
   const located = resolveLocation(text, issue);
+  const proposed = suggestionEdit(text, issue);
   return (
     <section className="review-focus" aria-label="逐项疑点核对">
       <div className="platform-review-actions">
@@ -72,9 +74,11 @@ export default function ReviewFocus({
       <p>
         当前识别：
         <mark>
-          {located && located.start===located.end ? '▏（此处缺字）' : located
-            ? text.slice(located.start, located.end)
-            : issue.focus || issue.candidate || "未定位"}
+          {located && located.start === located.end
+            ? "▏（此处缺字）"
+            : located
+              ? text.slice(located.start, located.end)
+              : issue.focus || issue.candidate || "未定位"}
         </mark>
       </p>
       {issue.source_reading && (
@@ -84,6 +88,9 @@ export default function ReviewFocus({
         <p role="status">
           文字位置需重新确认：匹配缺失、重复或已被修改。可在源码中定位。
         </p>
+      )}
+      {issue.suggestion && !proposed && (
+        <p role="status">建议的替换范围需重新确认，请定位后自行修改。</p>
       )}
       <div className="platform-review-actions">
         <Button
@@ -95,7 +102,7 @@ export default function ReviewFocus({
         </Button>
         <Button
           variant="outline"
-          disabled={disabled || !located || !issue.suggestion}
+          disabled={disabled || !proposed}
           onClick={() => onResolve("adopt", issue.suggestion)}
         >
           采用建议并编辑

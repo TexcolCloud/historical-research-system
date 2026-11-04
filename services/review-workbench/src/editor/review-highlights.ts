@@ -79,6 +79,38 @@ export function resolveLocation(text: string, issue: ReviewLocation) {
   };
 }
 
+/** A full-anchor suggestion must retain the context outside the highlighted span. */
+export function suggestionEdit(text: string, issue: ReviewLocation) {
+  const range = resolveLocation(text, issue);
+  if (!range || !issue.suggestion) return null;
+  const exact = issue.anchor.exact;
+  const relative =
+    issue.insertion_offset !== undefined
+      ? Array.from(exact).slice(0, issue.insertion_offset).join("").length
+      : exact.indexOf(issue.focus);
+  const before = exact.slice(0, relative);
+  const after = exact.slice(
+    relative + (issue.insertion_offset !== undefined ? 0 : issue.focus.length),
+  );
+  const proposed = issue.suggestion;
+  if (
+    proposed.length >= before.length + after.length &&
+    proposed.startsWith(before) &&
+    proposed.endsWith(after)
+  )
+    return {
+      ...range,
+      replacement: proposed.slice(
+        before.length,
+        proposed.length - after.length,
+      ),
+    };
+  // Single-character proposals also have an unambiguous focus-only scope.
+  if (Array.from(proposed).length === 1)
+    return { ...range, replacement: proposed };
+  return null;
+}
+
 function visible(raw: string) {
   const parsed = new DOMParser().parseFromString(
     marked.parse(raw, { async: false }),
