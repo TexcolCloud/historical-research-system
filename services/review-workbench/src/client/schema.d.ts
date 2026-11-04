@@ -900,6 +900,19 @@ export interface components {
             /** Basis */
             basis?: string[];
         };
+        /** PageProgress */
+        PageProgress: {
+            /** Total */
+            total: number;
+            /** Extracted */
+            extracted: number;
+            /** Reviewed */
+            reviewed: number;
+            /** Approved */
+            approved: number;
+            /** Pending */
+            pending: number;
+        };
         /** QuoteSelection */
         QuoteSelection: {
             /** Unit Id */
@@ -1084,6 +1097,7 @@ export interface components {
             /** Content Acceptance */
             content_acceptance?: string | null;
             progress?: components["schemas"]["RunProgress"] | null;
+            page_progress?: components["schemas"]["PageProgress"] | null;
         };
         /** RuntimeStatus */
         RuntimeStatus: {

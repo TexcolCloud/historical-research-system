@@ -2466,6 +2466,44 @@
         "type": "object",
         "title": "HistoricalDate"
       },
+      "PageProgress": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Total"
+          },
+          "extracted": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Extracted"
+          },
+          "reviewed": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Reviewed"
+          },
+          "approved": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Approved"
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pending"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "extracted",
+          "reviewed",
+          "approved",
+          "pending"
+        ],
+        "title": "PageProgress"
+      },
       "QuoteSelection": {
         "properties": {
           "unit_id": {
@@ -2878,6 +2916,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/RunProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "page_progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageProgress"
               },
               {
                 "type": "null"

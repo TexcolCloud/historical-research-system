@@ -385,9 +385,18 @@ class CodexBridge:
             run = get_run(self.engine, run["id"])
         self.apply_decisions(run, doc)
         doc = self.store.status(doc_id)
+        latest_reviews = {t["page"]: t for t in doc["tasks"] if t["stage"] == "review"}
+        page_progress = {
+            "total": len(doc["pages"]),
+            "extracted": sum(bool(p.get("ocr")) for p in doc["pages"]),
+            "reviewed": sum(bool(t.get("result")) for t in latest_reviews.values()),
+            "approved": sum(p["state"] == "approved" for p in doc["pages"]),
+            "pending": sum(p["state"] == "pending" for p in doc["pages"]),
+        }
         key = fingerprint(
             {
                 "projection_policy": PROJECTION_POLICY,
+                "page_progress": page_progress,
                 "pages": doc["pages"],
                 "tasks": [(t["task_id"], t["state"]) for t in doc["tasks"]],
                 "organization": doc["organization"],
@@ -561,6 +570,7 @@ class CodexBridge:
                 "bridge_failures": 0,
                 "bridge_not_before": 0,
                 "codex_sync_sha256": key,
+                "codex_page_progress": page_progress,
                 "codex_projection_policy": PROJECTION_POLICY,
                 "review_initialized": True,
                 "published": bool(doc.get("publication") or doc.get("active_publication")),
@@ -568,7 +578,7 @@ class CodexBridge:
                 **({"codex_publication_sha256": publication_sha} if publication_sha else {}),
                 "progress": {
                     "stage": "vision",
-                    "completed": sum(p["state"] == "approved" for p in doc["pages"]),
+                    "completed": page_progress["reviewed"],
                     "total": len(doc["pages"]),
                 },
                 "content_acceptance": "workflow_test"

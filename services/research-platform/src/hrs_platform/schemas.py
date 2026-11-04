@@ -51,6 +51,14 @@ class RunProgress(BaseModel):
     total: int = Field(gt=0)
 
 
+class PageProgress(BaseModel):
+    total: int = Field(gt=0)
+    extracted: int = Field(ge=0)
+    reviewed: int = Field(ge=0)
+    approved: int = Field(ge=0)
+    pending: int = Field(ge=0)
+
+
 class DeletionReceipt(BaseModel):
     book_id: UUID
     state: str
@@ -77,6 +85,10 @@ class RunSummary(BaseModel):
     )
     progress: RunProgress | None = Field(
         default=None, validation_alias=AliasChoices("progress", AliasPath("result", "progress"))
+    )
+    page_progress: PageProgress | None = Field(
+        default=None,
+        validation_alias=AliasChoices("page_progress", AliasPath("result", "codex_page_progress")),
     )
 
 

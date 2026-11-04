@@ -12,6 +12,27 @@ import { respondWith } from "@/test/responses.ts";
 
 afterEach(cleanup);
 
+test("native per-page review does not mark unfinished OCR complete", async () => {
+  const run = {
+    id: "run", book_id: "book", kind: "book", state: "running", stage: "vision",
+    revision: 1, updated_at: "2026-11-04T00:00:00Z", pending_count: 0,
+    codex_document_id: "native-document",
+    page_progress: { total: 269, extracted: 19, reviewed: 6, approved: 6, pending: 0 },
+  };
+  respondWith((request) => request.url.includes("/structure")
+    ? { available: false, items: [], policy: "test" } : [run]);
+  const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={query}><RunDetails book={{
+    id: "book", run_id: "run", title: "真实测试材料", state: "running", stage: "vision",
+    created_at: "2026-11-04T00:00:00Z", revision: 1, revision_pending: false,
+  }} /></QueryClientProvider>);
+  await screen.findByText(/Codex 自动处理/);
+  expect(screen.getByRole("heading", { name: /识别正文/ }).closest("li")?.getAttribute("data-status")).toBe("current");
+  expect(screen.getByRole("heading", { name: /原件视觉核验/ }).closest("li")?.getAttribute("data-status")).toBe("current");
+  expect(screen.getByText("已识别 19 / 269 页")).toBeDefined();
+  expect(screen.getByText("已核验 6 / 269 页")).toBeDefined();
+});
+
 test.each(["model_transport_wait", "retrieval_wait", "vision_service_wait"])(
   "execution view distinguishes %s from manual retry",
   async (code) => {

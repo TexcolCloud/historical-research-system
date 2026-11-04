@@ -8,7 +8,7 @@ from PIL import Image
 from sqlalchemy import insert, update
 
 from hrs_platform import models as db
-from hrs_platform.schemas import ReviewDecision
+from hrs_platform.schemas import ReviewDecision, RunSummary
 from hrs_platform.services.books import get_run
 from hrs_platform.services.codex_bridge import CodexBridge, article_groups
 from hrs_platform.services.documents.library import Library
@@ -46,8 +46,23 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(platform, t
         )
     original = "Synthetic[^1]\n\n[^1]: A source-owned footnote.\n"
     finish(bridge.store, doc_id, "ocr", {"markdown": original})
+    bridge.sync(get_run(engine, run_id))
+    assert RunSummary.model_validate(get_run(engine, run_id)).page_progress.model_dump() == {
+        "total": 1,
+        "extracted": 1,
+        "reviewed": 0,
+        "approved": 0,
+        "pending": 0,
+    }
     finish(bridge.store, doc_id, "review", {"verdict": "pending", "issues": ["Synthetic test handoff"]})
     bridge.sync(get_run(engine, run_id))
+    assert RunSummary.model_validate(get_run(engine, run_id)).page_progress.model_dump() == {
+        "total": 1,
+        "extracted": 1,
+        "reviewed": 1,
+        "approved": 0,
+        "pending": 1,
+    }
     issues = bridge.review.list(run_id)
     assert len(issues) == 1 and not Library(settings, engine).chapters(book_id)
     issue = bridge.review.get(issues[0]["id"])
@@ -107,6 +122,7 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(platform, t
     assert candidate["content_approved"] is False
     bridge.sync(get_run(engine, run_id))
     assert library.chapter(chapter["id"])["text"] == chapter["text"]
+    assert RunSummary.model_validate(get_run(engine, run_id)).page_progress.reviewed == 0
     finish(bridge.store, doc_id, "review", {"verdict": "approved"})
     finish(bridge.store, doc_id, "organization", {"articles": [{"title": "Synthetic", "pages": [1]}]})
     bridge.store.publish(doc_id)
@@ -166,7 +182,7 @@ def test_shared_page_article_projection_is_complete_and_refuses_unlocated_bounda
 
 
 def test_native_deletion_keeps_shared_workspace_until_last_owner_stops(platform, tmp_path):
-    from hrs_platform.services.deletion import request_deletion, receipt
+    from hrs_platform.services.deletion import receipt, request_deletion
 
     settings, engine = platform
     settings = settings.model_copy(

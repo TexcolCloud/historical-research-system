@@ -27,6 +27,7 @@ export default function RunDetails({ book }: { book: Book }) {
   const run = runs.data?.find((row) => row.id === book.run_id);
   const done = run?.state === "completed" || (!run && book.state === "ready");
   const failed = run?.state === "failed";
+  const pageProgress = run?.page_progress;
   const active = ["organization", "indexing", "ingestion", "complete"].includes(
     book.stage ?? "",
   )
@@ -38,6 +39,13 @@ export default function RunDetails({ book }: { book: Book }) {
         : ["conversion", "ocr"].includes(book.stage ?? "")
           ? 1
           : 0;
+  const pageStatuses = pageProgress ? [
+    "done",
+    pageProgress.extracted === pageProgress.total ? "done" : "current",
+    pageProgress.reviewed === pageProgress.total ? "done" : pageProgress.extracted > 0 ? "current" : "waiting",
+    pageProgress.approved === pageProgress.total ? "done" : pageProgress.pending > 0 ? "current" : "waiting",
+    active >= 4 ? "current" : "waiting",
+  ] : null;
   return (
     <section className="platform-process">
       <div className="platform-process-heading">
@@ -52,16 +60,21 @@ export default function RunDetails({ book }: { book: Book }) {
         </h2>
         <p>已完成结果会保留，关闭页面不影响后台处理。</p>
         {run?.codex_document_id && <p>Codex 自动处理 · Terra 识别 → Sol 原图审核 → 文章组织与入库</p>}
+        {pageProgress && <p>识别与核验按页并行进行，各自完成全部页面后才显示“已完成”。</p>}
         {run?.content_acceptance === "workflow_test" && <p role="note">本材料用于流程测试；授权放行不代表内容准确率验收。</p>}
       </div>
       <ol className="platform-process-steps">
         {phases.map((phase, index) => {
           const status =
-            index < active || done
+            done
               ? "done"
-              : index === active
+              : pageStatuses?.[index] ?? (run?.codex_document_id && index === 1 && active < 4
                 ? "current"
-                : "waiting";
+                : index < active ? "done" : index === active
+                ? "current"
+                : "waiting");
+          const needsHuman = status === "current" && index === 3 &&
+            (book.state === "awaiting_review" || Boolean(pageProgress?.pending));
           return (
             <li key={phase.title} data-status={status}>
               <span className="platform-process-icon">
@@ -69,7 +82,7 @@ export default function RunDetails({ book }: { book: Book }) {
                   <Check size={20} />
                 ) : status === "current" &&
                   !failed &&
-                  book.state !== "awaiting_review" ? (
+                  book.state !== "awaiting_review" && !needsHuman ? (
                   <LoaderCircle size={20} className="platform-spin" />
                 ) : (
                   <Circle size={16} />
@@ -85,13 +98,20 @@ export default function RunDetails({ book }: { book: Book }) {
                         ? "等待前序完成"
                         : failed
                           ? "需要恢复"
-                          : book.state === "awaiting_review"
+                          : book.state === "awaiting_review" || needsHuman
                             ? "等待核对"
                             : "正在处理"}
                   </small>
                 </h3>
                 <p>{phase.description}</p>
-                {status === "current" && index === 2 && run?.progress && (
+                {pageProgress && (index === 1 || index === 2) && (
+                  <div aria-label={index === 1 ? "逐页识别进度" : "逐页核验进度"}>
+                    <progress value={index === 1 ? pageProgress.extracted : pageProgress.reviewed} max={pageProgress.total} />
+                    <p>{index === 1 ? "已识别" : "已核验"} {index === 1 ? pageProgress.extracted : pageProgress.reviewed} / {pageProgress.total} 页</p>
+                    {index === 2 && <p>其中已通过 {pageProgress.approved} 页，待人工处理 {pageProgress.pending} 页。</p>}
+                  </div>
+                )}
+                {!pageProgress && status === "current" && index === 2 && run?.progress && (
                   <div aria-label="逐页核验进度">
                     <progress
                       value={run.progress.completed}
@@ -104,7 +124,7 @@ export default function RunDetails({ book }: { book: Book }) {
                     <p>初轮结束后继续汇总与复核；已处理不代表内容已通过。</p>
                   </div>
                 )}
-                {status === "current" && book.state === "awaiting_review" && (
+                {needsHuman && (
                   <a href={`#/books/${book.id}?tab=review`}>
                     开始核对
                     {run?.pending_count ? ` · ${run.pending_count} 项` : ""} →
