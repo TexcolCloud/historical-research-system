@@ -35,30 +35,40 @@ test("directory editing stays inside the chosen entry and waiting evidence is no
       },
     ],
   };
-  respondWith(() => ({
-    version: 1,
-    sha256: "c".repeat(64),
-    coverage_complete: false,
-    state: "available",
-    approved_pages: [
-      {
-        page: 5,
-        printed_label: "4",
-        headings: ["第一章"],
-        image: "/page5.png",
-      },
-    ],
-    entries: [
-      entry,
-      {
-        ...entry,
-        id: "waiting",
-        title: "等待中的第二章",
-        status: "waiting_evidence",
-        candidates: [],
-      },
-    ],
-  }));
+  respondWith((request) =>
+    request.url.includes("review-pages")
+      ? {
+          page: 5,
+          page_count: 5,
+          text: "# 第一章\n本页正文。",
+          image: "/page5.png",
+          footnotes: [],
+        }
+      : {
+          version: 1,
+          sha256: "c".repeat(64),
+          coverage_complete: false,
+          state: "available",
+          approved_pages: [
+            {
+              page: 5,
+              printed_label: "4",
+              headings: ["第一章"],
+              image: "/page5.png",
+            },
+          ],
+          entries: [
+            entry,
+            {
+              ...entry,
+              id: "waiting",
+              title: "等待中的第二章",
+              status: "waiting_evidence",
+              candidates: [],
+            },
+          ],
+        },
+  );
   render(
     <MemoryRouter>
       <QueryClientProvider client={new QueryClient()}>
@@ -66,22 +76,21 @@ test("directory editing stays inside the chosen entry and waiting evidence is no
       </QueryClientProvider>
     </MemoryRouter>,
   );
-  const adjust = await screen.findAllByRole("button", { name: "核对目录位置" });
+  const adjust = await screen.findAllByRole("button", { name: "核对对应正文" });
   expect(adjust).toHaveLength(1);
   await userEvent.click(adjust[0]);
-  const editor = screen.getByRole("region", { name: "目录位置确认" });
+  const editor = screen.getByRole("region", { name: "目录跳转核对" });
   expect(editor.closest("li")?.textContent).toContain("第一章");
   expect(screen.queryByRole("button", { name: "暂不关联" })).toBeNull();
   expect(
-    within(editor).getByAltText("目录原件第 1 页").getAttribute("src"),
+    within(editor).getByAltText("目录原图 · PDF 第 1 页").getAttribute("src"),
   ).toBe("/toc.png");
-  const confirm = within(editor).getByRole("button", { name: "确认此位置" });
-  expect(confirm.hasAttribute("disabled")).toBe(true);
-  await userEvent.click(
-    within(editor).getByRole("button", { name: /选择候选.*原件5页/ }),
-  );
+  await screen.findByText("本页正文。");
+  const confirm = within(editor).getByRole("button", {
+    name: "就是这篇，确认跳转",
+  });
   expect(confirm.hasAttribute("disabled")).toBe(false);
   expect(
-    within(editor).getByAltText("候选正文原件第 5 页").getAttribute("src"),
+    within(editor).getByAltText("正文原图 · PDF 第 5 页").getAttribute("src"),
   ).toBe("/page5.png");
 });

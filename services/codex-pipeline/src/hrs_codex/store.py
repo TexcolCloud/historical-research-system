@@ -1145,7 +1145,12 @@ class Store:
                 from hrs_codex.navigation import target_evidence
 
                 target = target_evidence(p, target_anchor)
-            nav.setdefault("decisions", {})[entry_id] = {
+            decisions = nav.setdefault("decisions", {})
+            if entry_id in decisions:
+                nav.setdefault("decision_history", []).append(
+                    {"entry_id": entry_id, **decisions[entry_id]}
+                )
+            decisions[entry_id] = {
                 "source_sha256": entry["source_sha256"],
                 "target": target,
                 "at": time.time(),

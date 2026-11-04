@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import NavigationPanel from "./NavigationPanel.tsx";
@@ -9,6 +9,170 @@ import { respondWith } from "@/test/responses.ts";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+test("a changed evidence version reports beside the action and reloads before retrying", async () => {
+  const target = {
+    physical_page: 2,
+    anchor: "起源",
+    printed_label: "1",
+    start: 2,
+    markdown_sha256: "b".repeat(64),
+    image_sha256: "c".repeat(64),
+  };
+  const entry = {
+    id: "stale",
+    title: "起源",
+    level: 1,
+    path: ["起源"],
+    source_page: 1,
+    source_anchor: "起源 1",
+    source_image: "/toc.png",
+    target_label: "1",
+    status: "conflict",
+    reason: "需要核对",
+    candidates: [target],
+  };
+  let sha = "a".repeat(64);
+  const getReport = () => ({
+    state: "available",
+    version: 1,
+    sha256: sha,
+    coverage_complete: true,
+    entries: [entry],
+    approved_pages: [{ page: 2, headings: ["起源"], image: "/body.png" }],
+  });
+  respondWith((request) =>
+    request.url.includes("review-pages")
+      ? {
+          page: 2,
+          page_count: 2,
+          text: "# 起源\n正文。",
+          image: "/body.png",
+          footnotes: [],
+        }
+      : getReport(),
+  );
+  const post = vi
+    .spyOn(client, "POST")
+    .mockResolvedValueOnce({ response: new Response(null, { status: 409 }) })
+    .mockImplementation(async () => ({
+      data: {
+        ...getReport(),
+        entries: [{ ...entry, status: "matched_manual", target }],
+      },
+      response: new Response(),
+    }));
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NavigationPanel runId="run" bookId="book" reviewOnly />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("正文。");
+  await userEvent.click(
+    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(
+    within(screen.getByRole("group", { name: "目录裁决操作" })).getByRole(
+      "alert",
+    ),
+  ).toBe(alert);
+  sha = "d".repeat(64);
+  await userEvent.click(
+    screen.getByRole("button", { name: "重新载入核对证据" }),
+  );
+  await screen.findByText("正文。");
+  await userEvent.click(
+    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+  );
+  expect(post).toHaveBeenLastCalledWith(
+    "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
+    expect.objectContaining({
+      body: expect.objectContaining({ expected_sha256: sha }),
+    }),
+  );
+  await screen.findByRole("heading", { name: "当前目录核对完成" });
+});
+
+test("human task opens the candidate evidence and confirms it without a separate selection step", async () => {
+  const target = {
+    physical_page: 5,
+    printed_label: "4",
+    anchor: "第一章",
+    start: 2,
+    markdown_sha256: "b".repeat(64),
+    image_sha256: "c".repeat(64),
+  };
+  const entry = {
+    id: "direct",
+    title: "第一章",
+    level: 1,
+    path: ["第一章"],
+    source_page: 1,
+    source_anchor: "第一章 3",
+    source_image: "/toc.png",
+    target_label: "3",
+    status: "conflict",
+    reason: "存在重复目标或目录页码与正文不一致",
+    target: null,
+    candidates: [target],
+  };
+  const report = {
+    state: "available",
+    version: 1,
+    sha256: "a".repeat(64),
+    coverage_complete: false,
+    entries: [entry],
+    approved_pages: [
+      { page: 5, headings: ["第一章"], printed_label: "4", image: "/body.png" },
+    ],
+  };
+  respondWith((request) =>
+    request.url.includes("review-pages")
+      ? {
+          page: 5,
+          page_count: 5,
+          text: "# 第一章\n（一九三四年一月五日）\n这是正文开头。\n4",
+          image: "/body.png",
+          footnotes: [],
+        }
+      : report,
+  );
+  const post = vi.spyOn(client, "POST").mockResolvedValue({
+    data: {
+      ...report,
+      entries: [{ ...entry, status: "matched_manual", target }],
+    },
+    response: new Response(),
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NavigationPanel runId="run" bookId="book" reviewOnly />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("heading", {
+    name: "这条目录是否对应右侧这篇正文？",
+  });
+  await screen.findByText(/这是正文开头/);
+  expect(screen.getByText(/目录记载.*3.*系统识别.*4/)).toBeDefined();
+  expect(screen.queryByRole("combobox")).toBeNull();
+  expect(post).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+  );
+  expect(post).toHaveBeenCalledWith(
+    "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
+    expect.objectContaining({
+      body: {
+        expected_sha256: report.sha256,
+        target_page: 5,
+        target_anchor: "第一章",
+      },
+    }),
+  );
+  await screen.findByRole("heading", { name: "当前目录核对完成" });
+  expect(screen.getByText(/已确认.*第一章.*PDF 第 5 页/)).toBeDefined();
 });
 
 test("a conflicting printed page stays unlinked until a source-bound navigation decision", async () => {
@@ -43,7 +207,17 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
       },
     ],
   };
-  respondWith(() => report);
+  respondWith((request) =>
+    request.url.includes("review-pages")
+      ? {
+          page: 3,
+          page_count: 3,
+          text: "# 1936年\n正文开头。",
+          image: "/body.png",
+          footnotes: [],
+        }
+      : report,
+  );
   const post = vi.spyOn(client, "POST").mockResolvedValue({
     data: {
       ...report,
@@ -56,16 +230,16 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
       <NavigationPanel runId="run" bookId="book" />
     </QueryClientProvider>,
   );
-  await screen.findByText(/需要确认位置/);
+  await screen.findByText(/需要核对正文/);
   expect(screen.queryByText("阅读正文 →")).toBeNull();
   expect(
     screen.getByRole("link", { name: /目录原图/ }).getAttribute("href"),
   ).toBe("/original-toc.png");
-  await userEvent.click(screen.getByRole("button", { name: "核对目录位置" }));
+  await userEvent.click(screen.getByRole("button", { name: "核对对应正文" }));
+  await screen.findByText("正文开头。");
   await userEvent.click(
-    screen.getByRole("button", { name: /选择候选.*原件3页/ }),
+    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
   );
-  await userEvent.click(screen.getByRole("button", { name: "确认此位置" }));
   expect(post).toHaveBeenCalledWith(
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
     expect.objectContaining({
@@ -76,4 +250,84 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
       },
     }),
   );
+});
+
+test("confirmed directory entries can be reopened without turning a preview into another decision", async () => {
+  const target = {
+    physical_page: 2,
+    anchor: "起源",
+    printed_label: "1",
+    start: 2,
+    markdown_sha256: "b".repeat(64),
+    image_sha256: "c".repeat(64),
+  };
+  const entry = {
+    id: "reopen",
+    title: "起源",
+    level: 1,
+    path: ["起源"],
+    source_page: 1,
+    source_anchor: "起源 1",
+    source_image: "/toc.png",
+    target_label: "1",
+    status: "matched_manual",
+    reason: "人工确认",
+    target,
+    candidates: [target],
+  };
+  const report = {
+    state: "available",
+    version: 1,
+    sha256: "a".repeat(64),
+    coverage_complete: true,
+    entries: [entry],
+    approved_pages: [{ page: 2, headings: ["起源"], image: "/body.png" }],
+  };
+  respondWith((request) =>
+    request.url.includes("review-pages")
+      ? {
+          page: 2,
+          page_count: 2,
+          text: "# 起源\n正文。",
+          image: "/body.png",
+          footnotes: [],
+        }
+      : report,
+  );
+  const post = vi
+    .spyOn(client, "POST")
+    .mockResolvedValue({
+      data: {
+        ...report,
+        entries: [{ ...entry, status: "unlinked_manual", target: null }],
+      },
+      response: new Response(),
+    });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NavigationPanel runId="run" bookId="book" />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "修改跳转" }),
+  );
+  await screen.findByText("正文。");
+  expect(post).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "不是这篇，查找其他正文" }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "保留目录文字，不设置跳转" }),
+  );
+  expect(post).toHaveBeenCalledWith(
+    "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
+    expect.objectContaining({
+      body: {
+        expected_sha256: report.sha256,
+        target_page: null,
+        target_anchor: "",
+      },
+    }),
+  );
+  await screen.findByText("已确认不设置跳转");
 });

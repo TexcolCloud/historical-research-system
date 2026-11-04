@@ -1,35 +1,13 @@
 import { useEffect, useState } from "react";
 import {
   keepPreviousData,
-  queryOptions,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button.tsx";
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
-import { client } from "@/client/api.ts";
+import { reviewPageOptions as pageOptions } from "./review-page-query.ts";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
-
-const pageOptions = (runId: string, page: number) =>
-  queryOptions({
-    queryKey: ["platform", "conversion-page", runId, page],
-    queryFn: async ({ signal }) => {
-      const { data, response } = await client.GET(
-        "/api/v2/runs/{run_id}/review-pages/{page}",
-        {
-          signal,
-          params: { path: { run_id: runId, page } },
-        },
-      );
-      if (!data)
-        throw new Error(
-          response.status === 409
-            ? "识别底稿尚未保存，请等待 OCR 完成。"
-            : "暂时无法读取底稿，请重试。",
-        );
-      return data;
-    },
-  });
 
 export default function ConversionReader({ runId }: { runId: string }) {
   const [page, setPage] = useState(1);

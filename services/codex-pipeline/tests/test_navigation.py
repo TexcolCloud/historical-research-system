@@ -129,6 +129,9 @@ def test_directory_parses_before_book_complete_and_targets_resolve_later(tmp_pat
     assert unlinked["entries"][0]["status"] == "unlinked_manual"
     assert unlinked["entries"][0]["decision"]["final"] is True
     assert unlinked["entries"][0]["decision"]["content_approval"] is False
+    assert unlinked["decision_history"][0]["entry_id"] == entry["id"]
+    assert unlinked["decision_history"][0]["target"]["physical_page"] == 2
+    assert unlinked["decision_history"][0]["content_approval"] is False
 
 
 def test_same_page_multiple_headings_do_not_assign_wrong_directory_owner():
