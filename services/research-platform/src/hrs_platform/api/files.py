@@ -10,6 +10,7 @@ def download(objects, value):
         reference,
         headers={
             "Content-Disposition": "attachment; filename*=UTF-8''" + quote(title + ".md", safe=""),
+            "Cache-Control": "private, no-store",
         },
     )
 
