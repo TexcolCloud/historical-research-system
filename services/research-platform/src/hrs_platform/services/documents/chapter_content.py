@@ -22,7 +22,7 @@ def read_content(storage, reference):
                         access_key=access.get_secret_value(), secret_key=secret.get_secret_value())
     body = json.loads(objects.read_bytes(json.loads(reference)))
     text = ''.join(part['text'] for part in body['parts'])
-    content = {'text': text, 'parts': body['parts'], 'structure': body.get('structure', [])}
+    content = {'text': text, 'parts': body['parts'], 'structure': body.get('structure', []), 'navigation': body.get('navigation', {})}
     reading = reading_view(content)
     return {**content, 'reading_text': reading['text'], 'reading_footnotes': reading['footnotes'],
             'footnotes': reading['footnotes'] if reading['text'] == text else resolve_footnotes(text, body['parts'])}

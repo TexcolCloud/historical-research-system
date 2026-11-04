@@ -22,8 +22,13 @@ source for PDF routing, original-first review, fallback limits and publication.
    returned local URL in the Codex browser when the user needs progress, original
    images, human review or library search. The background executor persists progress
    and resumes after human approval; browser and chat history are not the task store.
-4. Distinguish queued, running, technical recovery, waiting for a person and
-   published. Show document IDs, affected physical pages, exact unresolved issues
+4. Distinguish queued, running, technical recovery, waiting for a person,
+   explicitly paused and published. Use scheduling_plan for bounded stage allocation; workers
+   handle at most two tasks per batch. Continue other pages while human pages wait.
+   Navigation tasks use historical_organization; follow the source-bound TOC
+   contract and preserve conflicts for the local UI. Never resume a paused source
+   without an explicit request.
+   Show document IDs, affected physical pages, exact unresolved issues
    and the dashboard link. A queued run or extracted candidate is not acceptance.
 5. After publication, use `search_library` to verify a real query and provide the
    retained Markdown and original-page evidence. A revision keeps the previous

@@ -118,7 +118,7 @@ def command(action, *, build=False):
         engine.dispose()
         stop_file = CONTROL / (uuid4().hex + ".stop")
         server = uvicorn.Server(
-            uvicorn.Config(create_app(settings=settings), host="127.0.0.1", port=18170)
+            uvicorn.Config(create_app(settings=settings), host="127.0.0.1", port=18170, timeout_graceful_shutdown=5)
         )
         atomic_json(
             record,

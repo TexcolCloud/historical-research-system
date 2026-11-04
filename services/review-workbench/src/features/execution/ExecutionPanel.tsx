@@ -11,6 +11,12 @@ const states: Record<string, string> = {
   completed: "已完成",
   failed: "未完成",
   waiting: "等待中",
+  paused: "已暂停",
+  queued: "排队中",
+  leased: "执行中",
+  ready: "等待处理",
+  pending: "待人工处理",
+  superseded: "已由后续处理替代",
 };
 export default function ExecutionPanel({ bookId }: { bookId: string }) {
   const [selectedRun, setSelectedRun] = useState("");

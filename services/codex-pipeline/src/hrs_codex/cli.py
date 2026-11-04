@@ -90,6 +90,8 @@ def run_codex(
         "mcp_servers.historical_research.required=true",
         "-c",
         "features.shell_tool=false",
+        "-c",
+        "agents.max_threads=8",
     ]
     if not store.root.is_relative_to(PROJECT):
         arguments.extend(["--add-dir", str(store.root)])
@@ -99,8 +101,10 @@ def run_codex(
         arguments.extend(["--model", "gpt-6.1-sol"])
     prompt = (
         f"Process historical-research document {document_id} using historical_research MCP. "
-        "Call workflow_instructions, then read document_status. You MUST delegate every ready OCR, "
-        "independent original-image review, correction verification and article organization stage "
+        "Call workflow_instructions, then read document_status. "
+        "Compact status page/task lists may be partial: judge completeness using page_count, "
+        "page_counts, all_pages_approved, task_counts and scheduling_plan, never displayed list length. "
+        "You MUST delegate every ready OCR, independent original-image review, correction verification and article organization stage "
         "to native Codex subagents. Skip stages whose work is already completed; a human-approved "
         "document awaiting organization needs only an organization worker. Native extraction candidates "
         "already have review tasks; do not OCR "
@@ -108,12 +112,21 @@ def run_codex(
         "image regions; assemble a complete page without duplicating native text. Give each worker the document ID and stage. Workers claim and "
         "submit tasks through MCP, opening original_image before OCR/review/verify. "
         "Use different workers for OCR and its review, and for corrections and verification. "
-        "Wait for all delegated results. Continue stages until published or pending evidence. "
+        "Use scheduling_plan before allocating workers and after every completed batch. "
+        "Honor its stage capacities and batch_size; each worker handles at most two pages then exits. "
+        "Close completed native agents to free slots; allocate free slots to the recommended stage. "
+        "Never interrupt active pages to rebalance. Pending human pages do not stop other OCR, "
+        "review or navigation work: continue until no automatic work remains. "
         "When native/mixed extraction misses visible content, wait for workers to finish then use "
         "fallback_page to obtain full-page OCR and independent review. For full-page content retry "
         "supply genuinely new original_detail evidence; bounded fallback exhaustion goes to humans. "
         "Unclear original pixels remain pending; technical failures are not content uncertainty. "
-        "If pending, report affected pages and reasons and the human_review_queue; "
+        "Only when no automatic work remains, report pending pages and human_review_queue. "
+        "For transport/rate-limit errors use report_task_failure, honor retry_after/cooldown; "
+        "use wait_for_work during cooldown, never create a content pending verdict for a technical error. "
+        "If automatic work remains but no stage has capacity and no workers are active, wait_for_work "
+        "until cooldown_until/next_ready_at instead of repeatedly spawning empty workers. "
+        "After three repeated technical failures end this coordinator with an explicit technical failure. "
         "the workspace workbench handles human decisions and automatically queues continuation. "
         "Never submit a human review form or impersonate a person. Never invent missing text or claim success. "
         "After all stages pass call publish_document and search_library to check publication. "
@@ -123,7 +136,12 @@ def run_codex(
     prompt += (
         "\nStage model policy: MUST spawn OCR with agent_type=historical_ocr (gpt-6.1-terra), "
         "review with agent_type=historical_review (gpt-6.1-sol), organization with "
-        "agent_type=historical_organization (gpt-6.1-sol). Do not override these worker models. "
+        "agent_type=historical_organization (gpt-6.1-sol), also for navigation tasks. Do not override these worker models. "
+        "Pass stage=navigation explicitly when ready. Review workers must include page_observation for "
+        "approved pages (exact printed_label, literal headings, kind, numbering sequence); OCR preserves "
+        "printed page labels. Navigation workers open TOC originals under their task lease and use "
+        "approved_page_text to submit entries with unique literal source_anchor, title, target_label, "
+        "source_page and level. Repeated or mismatched printed labels remain conflicts. "
         "Read processing_policy in document_status. For review_failure=human, a review which "
         "does not pass goes directly to humans: submit pending with precise issues and optional "
         "suggested Markdown; do not start automatic correction, verification, retries or fallback. "
@@ -176,7 +194,10 @@ def run_codex(
                         break
                     except subprocess.TimeoutExpired:
                         first = False
-                        if stop_event.is_set() or (store._directory(document_id) / ".cancel-requested").exists():
+                        if stop_event.is_set() or any(
+                            (store._directory(document_id) / marker).exists()
+                            for marker in (".cancel-requested", ".pause-requested")
+                        ):
                             stop_owned_process(process)
                             raise RuntimeError("Runner stopped; committed checkpoints retained")
     except BaseException as error:

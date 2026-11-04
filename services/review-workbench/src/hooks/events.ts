@@ -40,6 +40,7 @@ const eventSchema = z.object({
     run_kind: z.string().optional(),
     revision: z.number().optional(),
     pending_count: z.number().optional(),
+    navigation_pending_count: z.number().optional(),
   }),
 });
 
@@ -97,6 +98,14 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
     void query.invalidateQueries({ queryKey: ["platform", "cards", "all"] });
   }
   if (event.run_id) {
+    if (event.kind === "run.changed")
+      void query.invalidateQueries({
+        queryKey: ["platform", "conversion-page", event.run_id],
+      });
+    if (event.kind === "run.changed")
+      void query.invalidateQueries({
+        queryKey: ["platform", "navigation", event.run_id],
+      });
     void query.invalidateQueries({
       queryKey: ["platform", "run", event.run_id],
     });
@@ -127,7 +136,18 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
       current
         ? {
             ...current,
-            ...(event.payload.revision_pending !== undefined ? {revision_pending: Boolean(event.payload.revision_pending)} : {}),
+            ...(event.payload.pending_count !== undefined
+              ? { pending_count: event.payload.pending_count }
+              : {}),
+            ...(event.payload.navigation_pending_count !== undefined
+              ? {
+                  navigation_pending_count:
+                    event.payload.navigation_pending_count,
+                }
+              : {}),
+            ...(event.payload.revision_pending !== undefined
+              ? { revision_pending: Boolean(event.payload.revision_pending) }
+              : {}),
             ...(event.payload.state
               ? { state: event.payload.book_state ?? event.payload.state }
               : {}),
@@ -154,6 +174,15 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
         book.id === event.book_id
           ? {
               ...book,
+              ...(event.payload.pending_count !== undefined
+                ? { pending_count: event.payload.pending_count }
+                : {}),
+              ...(event.payload.navigation_pending_count !== undefined
+                ? {
+                    navigation_pending_count:
+                      event.payload.navigation_pending_count,
+                  }
+                : {}),
               ...(event.payload.state
                 ? { state: event.payload.book_state ?? event.payload.state }
                 : {}),

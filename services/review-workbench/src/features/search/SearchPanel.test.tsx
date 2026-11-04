@@ -63,7 +63,7 @@ test("search preserves the hit and exposes separately cited context and its chap
   await userEvent.click(screen.getByText("查看相关上下文、表头与注释"));
   expect(
     screen.getByRole("link", { name: "查看原件第 9 页" }).getAttribute("href"),
-  ).toContain("#page=9");
+  ).toBe("/books/book?tab=reader&chapter=chapter2&physicalPage=9");
   expect(
     screen.getByRole("link", { name: "阅读所在章节" }).getAttribute("href"),
   ).toBe("/books/book?tab=reader&chapter=chapter2");

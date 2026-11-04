@@ -6,7 +6,13 @@ import { Input } from "@/components/ui/input.tsx";
 import { client } from "@/client/api.ts";
 export default function SearchPanel({ bookId }: { bookId: string }) {
   const [text, setText] = useState(""),
-    [request, setRequest] = useState({ q: "", semantic: true, diverse: false }),
+    [request, setRequest] = useState({
+      q: "",
+      semantic: true,
+      diverse: false,
+      include_navigation: false,
+    }),
+    [includeNavigation, setIncludeNavigation] = useState(false),
     [semantic, setSemantic] = useState(true),
     [diverse, setDiverse] = useState(false);
   const results = useQuery({
@@ -27,7 +33,13 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (text.trim()) setRequest({ q: text.trim(), semantic, diverse });
+          if (text.trim())
+            setRequest({
+              q: text.trim(),
+              semantic,
+              diverse,
+              include_navigation: includeNavigation,
+            });
         }}
       >
         <Input
@@ -37,6 +49,14 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
           placeholder="查找人物、事件或关键词"
         />
         <Button type="submit">查找</Button>
+        <label>
+          <input
+            type="checkbox"
+            checked={includeNavigation}
+            onChange={(e) => setIncludeNavigation(e.target.checked)}
+          />
+          包含原书目录
+        </label>
         <label>
           <input
             type="checkbox"
@@ -71,6 +91,18 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
       {results.data?.map((hit) => (
         <article key={hit.id}>
           <h2>{hit.title}</h2>
+          {hit.doc_kind === "navigation" && <p>原书目录条目</p>}
+          {!!hit.toc_path?.length && (
+            <p>原书目录：{hit.toc_path.join(" / ")}</p>
+          )}
+          {!!hit.printed_pages?.length && (
+            <p>
+              印刷页：
+              {hit.printed_pages
+                .map((p) => String(p.label ?? "未知"))
+                .join("、")}
+            </p>
+          )}
           {(hit.section_path?.length ?? 0) > 1 && (
             <p>{hit.section_path?.join(" / ")}</p>
           )}
@@ -81,13 +113,11 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
               {hit.context?.map((part) => (
                 <div key={`${part.start}:${part.end}`}>
                   <p style={{ whiteSpace: "pre-wrap" }}>{part.text}</p>
-                  <a
-                    target="_blank"
-                    rel="noreferrer"
-                    href={`/api/v2/runs/${hit.run_id}/artifacts/original.pdf#page=${part.pages[0]}`}
+                  <Link
+                    to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}&physicalPage=${part.pages[0]}`}
                   >
                     查看原件第 {part.pages.join("、")} 页
-                  </a>
+                  </Link>
                 </div>
               ))}
             </details>
@@ -98,13 +128,11 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
           >
             阅读所在章节
           </Link>
-          <a
-            target="_blank"
-            rel="noreferrer"
-            href={`/api/v2/runs/${hit.run_id}/artifacts/original.pdf#page=${hit.pages[0]}`}
+          <Link
+            to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}&physicalPage=${hit.pages[0]}`}
           >
             查看原件第 {hit.pages.join("、")} 页
-          </a>
+          </Link>
         </article>
       ))}
     </section>

@@ -12,7 +12,10 @@ import { Button } from "@/components/ui/button.tsx";
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import { MarkdownEditor } from "@/editor/LazyMarkdownEditor.tsx";
 import { client, readReviewIssues } from "@/client/api.ts";
-import { applyReviewReceipt, issuesKey } from "@/features/review/review-cache.ts";
+import {
+  applyReviewReceipt,
+  issuesKey,
+} from "@/features/review/review-cache.ts";
 import type { components } from "@/client/schema.d.ts";
 import ConversionReader from "@/features/review/ConversionReader.tsx";
 
@@ -39,7 +42,8 @@ export default function ReviewPanel({
   state?: string;
 }) {
   const query = useQueryClient();
-  const workflowTest = useOutletContext<WorkspaceContext>()?.workflowTest ?? false;
+  const workflowTest =
+    useOutletContext<WorkspaceContext>()?.workflowTest ?? false;
   const busy =
     useIsMutating({ mutationKey: ["platform", "review-write", runId] }) > 0;
   const [selected, setSelected] = useState<string | null>(null),
@@ -48,7 +52,7 @@ export default function ReviewPanel({
   const preparing = ["upload", "conversion", "ocr", "vision"].includes(
     stage ?? "",
   );
-  const draftPreparing = ["upload", "conversion", "ocr"].includes(stage ?? "");
+  const draftPreparing = ["upload", "conversion"].includes(stage ?? "");
   const issues = useQuery({
     queryKey: issuesKey(runId),
     queryFn: ({ signal }) => readReviewIssues(runId, signal),
@@ -70,7 +74,7 @@ export default function ReviewPanel({
     setMessage(
       receipt.pending_count
         ? `决定已保存，剩余 ${receipt.pending_count} 项。`
-        : "本书核对已完成，系统将继续整理章节并入库。",
+        : "当前待办已处理完成。系统继续剩余自动任务，整书核验通过后整理入库。",
     );
   }
   return (
@@ -140,10 +144,20 @@ export default function ReviewPanel({
             </p>
           ) : current.data ? (
             <IssueEditor
-              key={`${current.data.id}:${current.data.revision}`}
+              key={current.data.id}
               issue={current.data}
               workflowTest={workflowTest}
               onSaved={saved}
+              onNext={() => {
+                const items = issues.data ?? [];
+                const i = items.findIndex((e) => e.id === currentId);
+                setSelected(items[(i + 1) % items.length]?.id ?? null);
+                setMessage(
+                  items.length > 1
+                    ? "本页保留待核对，已打开下一页。"
+                    : "本页已保留待核对，当前没有其他待办。",
+                );
+              }}
             />
           ) : (
             <p role="status">正在读取本项正文和原件…</p>
@@ -158,26 +172,35 @@ function IssueEditor({
   issue,
   onSaved,
   workflowTest,
+  onNext,
 }: {
   issue: components["schemas"]["ReviewIssue"];
   onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void;
   workflowTest: boolean;
+  onNext: () => void;
 }) {
   const query = useQueryClient(),
-    draftKey = ["platform", "review-edit", issue.id, issue.revision];
+    draftKey = ["platform", "review-edit", issue.id];
   const [editing, setEditing] = useState(Boolean(issue.draft_text)),
+    [sourceMode, setSourceMode] = useState(false),
     [text, setText] = useState(
       query.getQueryData<string>(draftKey) ?? issue.draft_text ?? issue.text,
     );
-  const [revision, setRevision] = useState(issue.revision);
+  const revisionRef = useRef(issue.revision),
+    savedText = useRef(issue.draft_text ?? issue.text),
+    latestText = useRef(text),
+    queue = useRef<Promise<unknown>>(Promise.resolve());
+  latestText.current = text;
   const draft = useMutation({
     mutationKey: ["platform", "review-write", issue.run_id],
-    mutationFn: async () => {
+    mutationFn: async (snapshot: string) => {
+      if (snapshot === savedText.current)
+        return { revision: revisionRef.current, draft_text: snapshot };
       const { data, response } = await client.PUT(
         "/api/v2/reviews/{issue_id}/draft",
         {
           params: { path: { issue_id: issue.id } },
-          body: { text, expected_revision: revision },
+          body: { text: snapshot, expected_revision: revisionRef.current },
         },
       );
       if (!data)
@@ -186,10 +209,11 @@ function IssueEditor({
             ? "草稿版本已变化，请重新读取。"
             : "草稿暂未保存，请重试。",
         );
+      revisionRef.current = data.revision;
+      savedText.current = data.draft_text;
       return data;
     },
     onSuccess: (data) => {
-      setRevision(data.revision);
       query.setQueryData(issueOptions(issue.id).queryKey, {
         ...issue,
         revision: data.revision,
@@ -197,21 +221,45 @@ function IssueEditor({
       });
     },
   });
+  function saveDraft(snapshot: string) {
+    const next = queue.current
+      .catch(() => undefined)
+      .then(() => draft.mutateAsync(snapshot));
+    queue.current = next;
+    return next;
+  }
+  const saveRef = useRef(saveDraft);
+  saveRef.current = saveDraft;
+  useEffect(() => {
+    if (!editing || text === savedText.current || draft.isError) return;
+    const timer = setTimeout(() => {
+      void saveRef.current(text).catch(() => undefined);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [text, editing, draft.isError]);
+  useEffect(
+    () => () => {
+      if (latestText.current !== savedText.current)
+        void saveRef.current(latestText.current).catch(() => undefined);
+    },
+    [],
+  );
   const request = useRef<components["schemas"]["ReviewDecision"] | null>(null);
   const changed = text !== issue.text;
   const mutation = useMutation({
     mutationKey: ["platform", "review-write", issue.run_id],
     mutationFn: async () => {
+      if (text !== savedText.current) await saveDraft(text);
       const action = changed ? "correct" : "confirm";
       if (
         !request.current ||
-        request.current.expected_revision !== revision ||
+        request.current.expected_revision !== revisionRef.current ||
         request.current.action !== action ||
         request.current.text !== (changed ? text : undefined)
       )
         request.current = {
           decision_id: crypto.randomUUID(),
-          expected_revision: revision,
+          expected_revision: revisionRef.current,
           expected_text_sha256: issue.text_sha256,
           action,
           ...(changed ? { text } : {}),
@@ -244,10 +292,12 @@ function IssueEditor({
             {mutation.isPending
               ? "正在保存…"
               : workflowTest
-                ? changed ? "保存修改并放行流程" : "按授权放行流程"
-              : changed
-                ? "保存修改并确认"
-                : "确认无误并放行"}
+                ? changed
+                  ? "保存修改并放行流程"
+                  : "按授权放行流程"
+                : changed
+                  ? "修改并确认"
+                  : "确认本页"}
           </Button>
           <Button
             variant="outline"
@@ -257,29 +307,72 @@ function IssueEditor({
             {editing ? "返回阅读" : "编辑正文"}
           </Button>
           {issue.proposed_text && !changed && (
-            <Button variant="outline" disabled={mutation.isPending || draft.isPending}
-              onClick={() => { setText(issue.proposed_text!); setEditing(true); query.setQueryData(draftKey, issue.proposed_text); }}>
+            <Button
+              variant="outline"
+              disabled={mutation.isPending || draft.isPending}
+              onClick={() => {
+                setText(issue.proposed_text!);
+                setEditing(true);
+                query.setQueryData(draftKey, issue.proposed_text);
+              }}
+            >
               采用模型建议并编辑
             </Button>
           )}
           {editing && (
             <Button
               variant="outline"
+              disabled={mutation.isPending}
+              onClick={() => setSourceMode(!sourceMode)}
+            >
+              {sourceMode ? "可视化编辑" : "Markdown 源码"}
+            </Button>
+          )}
+          {editing && (
+            <Button
+              variant="outline"
               disabled={mutation.isPending || draft.isPending}
-              onClick={() => draft.mutate()}
+              onClick={() => {
+                void saveDraft(text).catch(() => undefined);
+              }}
             >
               {draft.isPending ? "正在存草稿…" : "保存草稿"}
             </Button>
           )}
+          <Button
+            variant="outline"
+            disabled={mutation.isPending || draft.isPending}
+            onClick={() => {
+              void saveDraft(text)
+                .then(onNext)
+                .catch(() => undefined);
+            }}
+          >
+            暂不确定，下一页
+          </Button>
         </div>
         {mutation.isError && <p role="alert">{mutation.error.message}</p>}
         {draft.isError && <p role="alert">{draft.error.message}</p>}
         {draft.isSuccess && <p role="status">草稿已保存，尚未确认放行。</p>}
-        <ul className="platform-review-reasons">
-          {issue.reasons.map((reason) => (
-            <li key={reason}>{reviewReason(reason)}</li>
-          ))}
-        </ul>
+        <p className="platform-inline-status">
+          需要核对：
+          {issue.reasons[0]
+            ? reviewReason(issue.reasons[0]).slice(0, 160)
+            : "请对照原件确认本页。"}
+        </p>
+        <details>
+          <summary>完整机器报告 · {issue.reasons.length} 项</summary>
+          <ul className="platform-review-reasons">
+            {issue.reasons.map((reason, index) => (
+              <li key={index}>
+                {reviewReason(reason)}
+                {typeof reason !== "string" && (
+                  <pre>{JSON.stringify(reason, null, 2)}</pre>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
         {issue.kind === "figure" && (
           <p className="platform-inline-status">
             本项为插图或地图，请核对右侧原图及下方图说。图内标签保留在图片中；阅读视图隐藏了导出占位标记，编辑时仍保留完整底稿。
@@ -290,8 +383,21 @@ function IssueEditor({
             本项按整页展示，因为尚未完成核验或无法可靠定位到具体段落；并不表示页面中的每一段都有错误。
           </p>
         )}
-        <div inert={mutation.isPending || draft.isPending}>
-          {editing ? (
+        <div inert={mutation.isPending}>
+          {editing && sourceMode ? (
+            <textarea
+              className="platform-markdown-source"
+              aria-label="Markdown 源码"
+              spellCheck={false}
+              rows={24}
+              value={text}
+              onChange={(event) => {
+                setText(event.target.value);
+                query.setQueryData(draftKey, event.target.value);
+                draft.reset();
+              }}
+            />
+          ) : editing ? (
             <MarkdownEditor
               value={text}
               onChange={(value) => {
@@ -327,7 +433,28 @@ function IssueEditor({
   );
 }
 
-function reviewReason(reason: string) {
+function reviewReason(
+  reason: components["schemas"]["ReviewIssue"]["reasons"][number],
+): string {
+  if (typeof reason !== "string") {
+    const field = (...keys: string[]) =>
+      keys.map((k) => reason[k]).find((v) => typeof v === "string") as
+        string | undefined;
+    return (
+      [
+        field("location"),
+        field("issue", "description", "reason", "message"),
+        field("source_text", "source_reading", "original")
+          ? `原件读法：${field("source_text", "source_reading", "original")}`
+          : "",
+        field("candidate_text", "candidate")
+          ? `候选文字：${field("candidate_text", "candidate")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("；") || "请对照原件核对，详情见机器报告。"
+    );
+  }
   return reason
     .replaceAll("deepseek-review-incomplete", "本地视觉核验未完成")
     .replaceAll(

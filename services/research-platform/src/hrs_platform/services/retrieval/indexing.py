@@ -243,6 +243,10 @@ class BookIndexer:
                     "generation": {"type": "keyword"},
                     "retrieval_text": {"type": "text", "index": False},
                     "context": {"type": "object", "enabled": False},
+                    "doc_kind": {"type": "keyword"},
+                    "toc_entry_id": {"type": "keyword"},
+                    "toc_path": {"type": "keyword"},
+                    "printed_pages": {"type": "object", "enabled": False},
                 }
             },
         )

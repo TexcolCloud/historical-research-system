@@ -37,11 +37,33 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
     },
   });
   const requested = selected || params.get("chapter");
+  const requestedPage = Number(params.get("physicalPage"));
   const id =
     chapters.data?.find((item) => item.id === requested)?.id ||
+    chapters.data?.find(
+      (item) => requestedPage > 0 && item.pages.includes(requestedPage),
+    )?.id ||
     chapters.data?.[0]?.id ||
     "";
   const chapter = useQuery({ ...chapterOptions(id), enabled: Boolean(id) });
+  useEffect(() => {
+    const anchor = params.get("anchor");
+    if (!chapter.data || selected) return;
+    const literal = (anchor ?? "")
+      .replace(/^\s*#{1,6}\s+/, "")
+      .replace(/^\*\*|\*\*$/g, "")
+      .trim();
+    const heading = [
+      ...document.querySelectorAll(
+        ".platform-reading article h1,.platform-reading article h2,.platform-reading article h3,.platform-reading article h4,.platform-reading article h5,.platform-reading article h6",
+      ),
+    ].find((e) => e.textContent?.trim() === literal);
+    heading?.scrollIntoView({ block: "center" });
+    if (requestedPage > 0) {
+      setPage(requestedPage);
+      setOriginal(true);
+    }
+  }, [chapter.data, params, selected]);
   const index = chapters.data?.findIndex((item) => item.id === id) ?? -1;
   const next = chapters.data?.[index + 1],
     previous = chapters.data?.[index - 1];
@@ -179,14 +201,52 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
                     ))}
                 </select>
               </label>
-              <iframe
-                title="原书 PDF"
-                src={`/api/v2/runs/${chapter.data.run_id}/artifacts/original.pdf#page=${page ?? chapter.data.pages[0]}`}
+              <OriginalPage
+                runId={chapter.data.run_id}
+                page={page ?? chapter.data.pages[0]!}
               />
             </aside>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function OriginalPage({ runId, page }: { runId: string; page: number }) {
+  const original = useQuery({
+    queryKey: ["platform", "original-page", runId, page],
+    staleTime: Infinity,
+    queryFn: async ({ signal }) => {
+      const { data } = await client.GET(
+        "/api/v2/runs/{run_id}/review-pages/{page}",
+        { params: { path: { run_id: runId, page } }, signal },
+      );
+      if (!data) throw new Error("本页原图暂时无法读取，可重试或打开原 PDF。");
+      return data.image;
+    },
+  });
+  return (
+    <figure>
+      <a
+        href={`/api/v2/runs/${runId}/artifacts/original.pdf#page=${page}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        打开原 PDF
+      </a>
+      {original.isPending ? (
+        <p role="status">正在读取原书第 {page} 页…</p>
+      ) : original.isError ? (
+        <p role="alert">
+          {original.error.message}
+          <Button onClick={() => void original.refetch()}>重试</Button>
+        </p>
+      ) : (
+        <a href={original.data} target="_blank" rel="noreferrer">
+          <img src={original.data} alt={`原书第 ${page} 页`} />
+        </a>
+      )}
+    </figure>
   );
 }

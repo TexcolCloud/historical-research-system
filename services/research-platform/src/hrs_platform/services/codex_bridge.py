@@ -12,6 +12,7 @@ import time
 from uuid import UUID, uuid5
 
 from filelock import FileLock, Timeout
+from hrs_codex.scheduling import scheduling_plan
 from hrs_codex.server import prepare
 from hrs_codex.store import Store, digest
 from hrs_codex.workspace import ensure_workbench, resolve_workspace
@@ -26,7 +27,7 @@ from hrs_platform.services.runs.outputs import Outputs, fingerprint
 from hrs_platform.services.storage import objects_for
 
 logger = logging.getLogger(__name__)
-PROJECTION_POLICY = "codex-platform-v5-parenthesized-notes"
+PROJECTION_POLICY = "codex-platform-v6-navigation"
 
 
 def article_groups(document, run_id):
@@ -294,7 +295,7 @@ class CodexBridge:
             return connection.scalar(select(db.books.c.title).where(db.books.c.id == book_id))
 
     def apply_decisions(self, run, doc):
-        if doc["state"] != "pending":
+        if not any(p["state"] == "pending" for p in doc["pages"]):
             return
         with self.engine.connect() as connection:
             rows = (
@@ -339,8 +340,9 @@ class CodexBridge:
         if not self.due(run):
             return
         doc_id = run["result"]["codex_document_id"]
-        doc = self.store.status(doc_id)
+        doc = self.store.refresh_navigation(doc_id)
         publication_sha = (doc.get("publication") or {}).get("markdown_sha256")
+        navigation_sha = doc.get("navigation", {}).get("sha256")
         if (
             doc["state"] == "published"
             and run["result"].get("published")
@@ -349,7 +351,9 @@ class CodexBridge:
             and (
                 run["result"].get("codex_indexed_publication_sha256") != publication_sha
                 or run["result"].get("codex_indexed_projection_policy") != PROJECTION_POLICY
+                or run["result"].get("codex_indexed_navigation_sha256") != navigation_sha
             )
+            and run["result"].get("codex_projected_navigation_sha256") == navigation_sha
         ):
             from hrs_platform.services.retrieval.indexing import BookIndexer
 
@@ -369,6 +373,7 @@ class CodexBridge:
                             **indexed,
                             "codex_indexed_publication_sha256": publication_sha,
                             "codex_indexed_projection_policy": PROJECTION_POLICY,
+                            "codex_indexed_navigation_sha256": navigation_sha,
                             "bridge_failures": 0,
                             "bridge_not_before": 0,
                         },
@@ -384,7 +389,9 @@ class CodexBridge:
                 )
             run = get_run(self.engine, run["id"])
         self.apply_decisions(run, doc)
-        doc = self.store.status(doc_id)
+        doc = self.store.refresh_navigation(doc_id)
+        navigation_sha = doc.get("navigation", {}).get("sha256")
+        scheduling = scheduling_plan(doc)
         latest_reviews = {t["page"]: t for t in doc["tasks"] if t["stage"] == "review"}
         page_progress = {
             "total": len(doc["pages"]),
@@ -398,14 +405,21 @@ class CodexBridge:
                 "projection_policy": PROJECTION_POLICY,
                 "page_progress": page_progress,
                 "pages": doc["pages"],
-                "tasks": [(t["task_id"], t["state"]) for t in doc["tasks"]],
+                "tasks": [
+                    (t["task_id"], t["state"], t.get("claim", {}).get("started_at")) for t in doc["tasks"]
+                ],
                 "organization": doc["organization"],
                 "publication": doc["publication"],
+                "navigation": navigation_sha,
+                "scheduling": scheduling,
                 "request": doc.get("run_request", {}).get("state"),
             }
         )
         if run["result"].get("codex_sync_sha256") == key:
             return
+        previous_files = (
+            self.review.read_json(run["conversion"]).get("files", {}) if run.get("conversion") else {}
+        )
         files, boundaries, carrier, completion, texts = {}, [], [], [], []
         offset = 0
         for page in doc["pages"]:
@@ -415,8 +429,19 @@ class CodexBridge:
             boundaries.append({"page": page["page"], "start": offset, "end": offset + len(text)})
             offset += len(text)
             name = page["image"]
-            files[name] = self.objects.put_file(self.store._path(doc, name), "image/png", run_id=run["id"])
-            status = "release-accepted" if page["state"] == "approved" else "pending"
+            previous = previous_files.get(name, {})
+            files[name] = (
+                previous
+                if previous.get("sha256") == page["image_sha256"]
+                else self.objects.put_file(self.store._path(doc, name), "image/png", run_id=run["id"])
+            )
+            status = (
+                "release-accepted"
+                if page["state"] == "approved"
+                else "unreviewed-source"
+                if selected
+                else "awaiting-ocr"
+            )
             carrier.append(
                 {
                     "page": page["page"],
@@ -455,6 +480,7 @@ class CodexBridge:
                 raise ValueError("Markdown references a missing retained original image")
             files[relative] = self.objects.put_file(asset, "image/png", run_id=run["id"])
         saved("pages.json", {"pages": boundaries})
+        saved("navigation.json", doc.get("navigation", {}))
         saved("review-cards.json", {"cards": []})
         saved("completion.json", {"pages": completion})
         if (doc.get("organization") or {}).get("reading_structure"):
@@ -481,25 +507,32 @@ class CodexBridge:
         pending = [p for p in doc["pages"] if p["state"] == "pending"]
         request = doc.get("run_request", {})
         state = (
-            "completed"
+            "paused"
+            if request.get("pause_requested") or request.get("state") == "paused"
+            else "completed"
             if doc["state"] == "published"
             and run["result"].get("codex_indexed_publication_sha256") == publication_sha
             and run["result"].get("codex_indexed_projection_policy") == PROJECTION_POLICY
+            and run["result"].get("codex_indexed_navigation_sha256") == navigation_sha
             else "ready"
             if doc["state"] == "published"
             else "awaiting_review"
-            if pending
+            if pending and not scheduling["automatic_work_remaining"]
             else "failed"
             if request.get("state") == "retryable_error"
+            else "queued"
+            if request.get("state") == "pending"
             else "running"
         )
         stage = (
-            "complete"
+            "paused"
+            if state == "paused"
+            else "complete"
             if state == "completed"
             else "indexing"
             if state == "ready"
             else "review"
-            if pending
+            if pending and not scheduling["automatic_work_remaining"]
             else "organization"
             if all(p["state"] == "approved" for p in doc["pages"])
             else "vision"
@@ -571,11 +604,35 @@ class CodexBridge:
                 "bridge_not_before": 0,
                 "codex_sync_sha256": key,
                 "codex_page_progress": page_progress,
+                "codex_navigation_pending_count": sum(
+                    e["status"] == "conflict" for e in doc.get("navigation", {}).get("entries", [])
+                ),
+                "codex_scheduling": scheduling,
+                "codex_execution": {
+                    "state": request.get("state"),
+                    "paused": state == "paused",
+                    "automatic_work_remaining": scheduling["automatic_work_remaining"],
+                    "last_progress_at": scheduling.get("last_completion_at"),
+                    "active_tasks": [
+                        {
+                            "stage": t["stage"],
+                            "page": t["page"],
+                            "started_at": t.get("claim", {}).get("started_at"),
+                        }
+                        for t in doc["tasks"]
+                        if t["state"] == "leased" and t.get("claim", {}).get("expires_at", 0) > time.time()
+                    ],
+                },
                 "codex_projection_policy": PROJECTION_POLICY,
                 "review_initialized": True,
                 "published": bool(doc.get("publication") or doc.get("active_publication")),
                 "codex_revision_pending": bool(doc.get("active_publication") and doc["state"] != "published"),
                 **({"codex_publication_sha256": publication_sha} if publication_sha else {}),
+                **(
+                    {"codex_projected_navigation_sha256": navigation_sha}
+                    if doc["state"] == "published"
+                    else {}
+                ),
                 "progress": {
                     "stage": "vision",
                     "completed": page_progress["reviewed"],
@@ -616,6 +673,7 @@ class CodexBridge:
                         "stage": stage,
                         "revision": revision,
                         "pending_count": len(pending),
+                        "navigation_pending_count": result["codex_navigation_pending_count"],
                         "revision_pending": result["codex_revision_pending"],
                     },
                 )
@@ -625,8 +683,18 @@ class CodexBridge:
             "codex:coordinator",
             kind="agent",
             label="Codex 协调器",
-            objective="按识别、独立审核、人工处理、组织、索引顺序处理文档",
-            state="completed" if state == "completed" else "waiting" if pending else "running",
+            objective="逐页并行识别与独立核验；不确定项交人工；整书通过后整理入库",
+            state="completed"
+            if state == "completed"
+            else "paused"
+            if state == "paused"
+            else "queued"
+            if state == "queued"
+            else "waiting"
+            if state == "awaiting_review"
+            else "failed"
+            if state == "failed"
+            else "running",
             details={
                 "document_id": doc_id,
                 "processing_policy": doc.get("processing_policy"),
@@ -634,13 +702,20 @@ class CodexBridge:
             },
         )
         for task in doc["tasks"]:
+            label = {
+                "ocr": "识别正文",
+                "review": "原页核验",
+                "verify": "修正复核",
+                "navigation": "目录关联",
+                "organization": "文章整理",
+            }.get(task["stage"], task["stage"])
             self.outputs.node(
                 run["id"],
                 "codex:" + task["task_id"],
                 kind="agent",
                 parent=coordinator,
-                label=task["stage"],
-                objective=f"Codex {task['stage']} physical page {task['page']}",
+                label=label,
+                objective=f"{label} · 原件第 {task['page']} 页" if task["page"] else f"{label} · 整书任务",
                 state=task["state"],
                 details={k: task[k] for k in ("stage", "page", "state", "receipt", "result") if k in task},
             )
@@ -652,6 +727,8 @@ class CodexBridge:
             if (
                 run["result"].get("codex_publication_sha256") == doc["publication"]["markdown_sha256"]
                 and run["result"].get("codex_projection_policy") == PROJECTION_POLICY
+                and run["result"].get("codex_projected_navigation_sha256")
+                == doc.get("navigation", {}).get("sha256")
                 and connection.scalar(
                     select(func.count()).select_from(db.chapters).where(db.chapters.c.run_id == run["id"])
                 )
@@ -684,6 +761,7 @@ class CodexBridge:
         )
         rows = []
         for position, group in enumerate(groups):
+            group["navigation"] = doc.get("navigation", {})
             group["structure"] = project_structure(structure, group["parts"])
             ref = self.objects.put_bytes(json.dumps(group, ensure_ascii=False).encode(), run_id=run["id"])
             rows.append(

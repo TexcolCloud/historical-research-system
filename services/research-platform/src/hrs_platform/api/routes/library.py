@@ -21,6 +21,7 @@ def search(
     q: str = Query(min_length=1, max_length=1000),
     book_id: UUID | None = None,
     semantic: bool = True,
+    include_navigation: bool = False,
     limit: int = Query(default=8, ge=1, le=50),
     candidate_limit: int | None = Query(default=None, ge=1, le=100),
     rerank_limit: int | None = Query(default=None, ge=1, le=100),
@@ -40,6 +41,7 @@ def search(
         metrics=metrics,
         rerank_limit=rerank_limit,
         diverse=diverse,
+        include_navigation=include_navigation,
     )
     response.headers["Server-Timing"] = ", ".join(
         f"{name.removesuffix('_ms')};dur={value:.3f}"

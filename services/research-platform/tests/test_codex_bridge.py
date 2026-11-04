@@ -8,7 +8,7 @@ from PIL import Image
 from sqlalchemy import insert, update
 
 from hrs_platform import models as db
-from hrs_platform.schemas import ReviewDecision, RunSummary
+from hrs_platform.schemas import ReviewDecision, ReviewIssue, RunSummary
 from hrs_platform.services.books import get_run
 from hrs_platform.services.codex_bridge import CodexBridge, article_groups
 from hrs_platform.services.documents.library import Library
@@ -54,7 +54,22 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(platform, t
         "approved": 0,
         "pending": 0,
     }
-    finish(bridge.store, doc_id, "review", {"verdict": "pending", "issues": ["Synthetic test handoff"]})
+    finish(
+        bridge.store,
+        doc_id,
+        "review",
+        {
+            "verdict": "pending",
+            "issues": [
+                {
+                    "location": "body",
+                    "issue": "Synthetic test handoff",
+                    "candidate": "Synthetic",
+                    "source_reading": "Original",
+                }
+            ],
+        },
+    )
     bridge.sync(get_run(engine, run_id))
     assert RunSummary.model_validate(get_run(engine, run_id)).page_progress.model_dump() == {
         "total": 1,
@@ -66,6 +81,7 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(platform, t
     issues = bridge.review.list(run_id)
     assert len(issues) == 1 and not Library(settings, engine).chapters(book_id)
     issue = bridge.review.get(issues[0]["id"])
+    assert ReviewIssue.model_validate(issue).reasons[0]["location"] == "body"
     assert len(issue["footnotes"]) == 1
     bridge.review.decide(
         issue["id"],

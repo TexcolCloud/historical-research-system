@@ -72,6 +72,7 @@ async def claim(client, doc_id, stage, worker):
         },
     )
     assert premature.is_error
+    assert any("original-first" in block.text for block in premature.content if block.type == "text")
     image = await client.call_tool(
         "original_image",
         {

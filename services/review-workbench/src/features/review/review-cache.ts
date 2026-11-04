@@ -14,7 +14,12 @@ export function applyReviewReceipt(
   query.setQueryData<Book[]>(booksKey, (current) =>
     current?.map((book) =>
       book.run_id === receipt.run_id
-        ? { ...book, state: receipt.state, revision: receipt.revision }
+        ? {
+            ...book,
+            state: receipt.state,
+            revision: receipt.revision,
+            pending_count: receipt.pending_count,
+          }
         : book,
     ),
   );

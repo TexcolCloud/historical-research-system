@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -12,7 +13,7 @@ from uuid import uuid4
 
 from filelock import FileLock
 
-STAGES = {"ocr", "review", "verify", "organization"}
+STAGES = {"ocr", "review", "verify", "navigation", "organization"}
 
 
 def digest(value: bytes | str | dict | list) -> str:
@@ -64,9 +65,11 @@ class Store:
         atomic_json(self._directory(doc["id"]) / "document.json", doc)
 
     @staticmethod
-    def _require_active(doc: dict) -> None:
+    def _require_active(doc: dict, *, allow_paused: bool = False) -> None:
         if doc.get("run_request", {}).get("cancel_requested"):
             raise ValueError("Document cancellation requested; no further processing is allowed")
+        if not allow_paused and doc.get("run_request", {}).get("pause_requested"):
+            raise ValueError("Document is paused; explicitly resume before processing")
 
     def _path(self, doc: dict, relative: str) -> Path:
         directory = self._directory(doc["id"]).resolve()
@@ -77,7 +80,13 @@ class Store:
 
     @staticmethod
     def _new_task(stage: str, page: int | None = None) -> dict:
-        return {"task_id": uuid4().hex, "stage": stage, "page": page, "state": "ready"}
+        return {
+            "task_id": uuid4().hex,
+            "stage": stage,
+            "page": page,
+            "state": "ready",
+            "created_at": time.time(),
+        }
 
     def register_manifest(self, manifest: dict, title: str = "") -> dict:
         return self.register(
@@ -257,6 +266,21 @@ class Store:
         if not isinstance(evidence, list):
             raise ValueError("Detail evidence must be a list")
         for detail in evidence:
+            if isinstance(detail, dict) and set(detail) == {"image_sha256", "metadata_sha256"}:
+                matches = [
+                    p
+                    for p in (self._directory(doc["id"]) / "evidence/details").glob("*.json")
+                    if file_digest(p) == detail["metadata_sha256"]
+                ]
+                if len(matches) != 1:
+                    raise ValueError(
+                        "Unknown compact detail receipt; use hashes returned by original_detail"
+                    )
+                detail = {
+                    **json.loads(matches[0].read_text("utf-8")),
+                    **detail,
+                    "metadata": matches[0].relative_to(self._directory(doc["id"])).as_posix(),
+                }
             if (
                 not isinstance(detail, dict)
                 or detail.get("document_id") != doc["id"]
@@ -321,6 +345,39 @@ class Store:
                 "source_sha256": doc["source"]["sha256"],
             }
             if task_id is not None or lease_token is not None:
+                navigation_task = next(
+                    (
+                        t
+                        for t in doc["tasks"]
+                        if t["task_id"] == task_id and t["stage"] in {"navigation", "ocr"}
+                    ),
+                    None,
+                )
+                if navigation_task:
+                    if (
+                        navigation_task["state"] != "leased"
+                        or navigation_task["claim"]["lease_token"] != lease_token
+                        or navigation_task["claim"]["expires_at"] <= time.time()
+                    ):
+                        raise ValueError("Source image requires an active lease")
+                    allowed = (
+                        [navigation_task["page"]]
+                        if navigation_task["stage"] == "ocr"
+                        else [p["page"] for p in navigation_task["inputs"]["pages"]]
+                    )
+                    if page not in allowed:
+                        raise ValueError("Source image outside its claimed snapshot")
+                    access = navigation_task.setdefault("image_accesses", {}).setdefault(
+                        str(page),
+                        {
+                            **metadata,
+                            "receipt": uuid4().hex,
+                            "opened_at": time.time(),
+                            "worker_id": navigation_task["claim"]["worker_id"],
+                        },
+                    )
+                    self._save(doc)
+                    return {**metadata, "image_receipt": access["receipt"]}, data
                 task = self._active_review(doc, task_id, lease_token)
                 if task["page"] != page:
                     raise ValueError("Original image does not belong to the leased page")
@@ -402,7 +459,47 @@ class Store:
                 self._save(doc)
             return {**task, **task["claim"]}
 
+    def candidate_text(
+        self, document_id: str, task_id: str, lease_token: str, *, start: int = 0, limit: int = 2000
+    ) -> dict:
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            task = self._active_review(doc, task_id, lease_token)
+            if not task.get("source_reading"):
+                raise ValueError("Freeze original-image observations before reading candidate text")
+            text = task["inputs"]["markdown"]
+            if (
+                type(start) is not int
+                or type(limit) is not int
+                or not 0 <= start <= len(text)
+                or not 1 <= limit <= 4000
+            ):
+                raise ValueError(
+                    "Candidate range needs start within text and limit between 1 and 4000"
+                )
+            end = min(start + limit, len(text))
+            task.setdefault("candidate_accesses", []).append(
+                {
+                    "start": start,
+                    "end": end,
+                    "lease_token": lease_token,
+                    "markdown_sha256": digest(text),
+                }
+            )
+            self._save(doc)
+            return {
+                "task_id": task_id,
+                "markdown_sha256": digest(text),
+                "start": start,
+                "end": end,
+                "total_codepoints": len(text),
+                "markdown": text[start:end],
+            }
+
     def _inputs(self, doc: dict, task: dict) -> dict:
+        if task["stage"] == "navigation" and task.get("inputs"):
+            return task["inputs"]
         inputs = {
             "document_id": doc["id"],
             "source_sha256": doc["source"]["sha256"],
@@ -437,6 +534,22 @@ class Store:
                 if task["stage"] == "verify":
                     inputs["original_markdown"] = page["ocr"]["markdown"]
                     inputs["corrections"] = page["candidate"]["corrections"]
+        elif task["stage"] == "navigation":
+            from hrs_codex.navigation import fingerprint, toc_evidence
+
+            inputs["toc_sha256"] = fingerprint(toc_evidence(doc))
+            inputs["pages"] = [
+                {
+                    "page": p["page"],
+                    "image_sha256": p["image_sha256"],
+                    "markdown_sha256": p["approved"]["sha256"],
+                    "observation": p.get("observation"),
+                    "kind": p.get("observation", {}).get("kind", p.get("page_kind", "unknown")),
+                }
+                for p in doc["pages"]
+                if p.get("approved")
+            ]
+            inputs["previous_entries"] = (doc.get("navigation") or {}).get("source_entries", [])
         else:
             inputs["pages"] = [
                 {
@@ -457,6 +570,67 @@ class Store:
             inputs = task["inputs"] if "inputs" in task else self._inputs(doc, task)
             return {**task, "inputs": inputs}
 
+    def scheduling_plan(self, document_id: str) -> dict:
+        from hrs_codex.scheduling import scheduling_plan
+
+        with self.lock:
+            doc = self._load(document_id)
+            plan = scheduling_plan(doc)
+            scheduler = doc.setdefault("scheduler", {})
+            if (
+                scheduler.get("allocation") != plan["workers"]
+                or time.time() - scheduler.get("rebalanced_at", 0) >= 30
+            ):
+                scheduler.update(allocation=plan["workers"], rebalanced_at=time.time())
+                self._save(doc)
+            return plan
+
+    def pause_document(self, document_id: str) -> dict:
+        with self.lock:
+            doc = self._load(document_id)
+            request = doc.setdefault("run_request", {"state": "paused", "history": []})
+            request["pause_requested"] = True
+            if request.get("state") != "running":
+                request["state"] = "paused"
+                doc["state"] = "paused"
+                for task in doc["tasks"]:
+                    if task["state"] == "leased":
+                        task["state"] = "ready"
+            request.setdefault("history", []).append({"event": "user_paused", "at": time.time()})
+            (self._directory(document_id) / ".pause-requested").touch()
+            self._save(doc)
+            return request
+
+    def report_task_failure(
+        self, document_id: str, task_id: str, lease_token: str, code: str
+    ) -> dict:
+        if code not in {
+            "rate_limit",
+            "429",
+            "service_unavailable",
+            "transport",
+            "timeout",
+            "tool_error",
+        }:
+            raise ValueError("Use a supported technical failure code")
+        with self.lock:
+            doc = self._load(document_id)
+            task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
+            if task["state"] != "leased" or task["claim"]["lease_token"] != lease_token:
+                raise ValueError("Task does not have this active lease")
+            failures = task.setdefault("technical_failures", [])
+            failures.append({"code": code, "at": time.time(), "claim": dict(task["claim"])})
+            task["state"] = "ready"
+            task["retry_after"] = time.time() + min(300, 30 * 2 ** (len(failures) - 1))
+            if code in {"rate_limit", "429", "service_unavailable"}:
+                doc.setdefault("scheduler", {})["cooldown_until"] = task["retry_after"]
+            self._save(doc)
+            return {
+                "state": task["state"],
+                "retry_after": task["retry_after"],
+                "attempts": len(failures),
+            }
+
     def claim_task(
         self,
         document_id: str,
@@ -465,6 +639,7 @@ class Store:
         lease_seconds: int = 900,
         *,
         source_first: bool = False,
+        scheduled: bool = False,
     ) -> dict | None:
         if stage not in STAGES or not isinstance(worker_id, str) or not worker_id.strip():
             raise ValueError("A valid stage and nonempty worker ID are required")
@@ -474,8 +649,39 @@ class Store:
             doc = self._load(document_id)
             self._require_active(doc)
             self._verify_evidence(doc)
-            for task in doc["tasks"]:
+            if scheduled:
+                from hrs_codex.scheduling import scheduling_plan
+
+                plan = scheduling_plan(doc)
+                if plan["cooldown_until"] > time.time():
+                    return None
+                active = {
+                    t["claim"]["worker_id"]
+                    for t in doc["tasks"]
+                    if t["stage"] == stage
+                    and t["state"] == "leased"
+                    and t["claim"]["expires_at"] > time.time()
+                }
+                all_active = {
+                    t["claim"]["worker_id"]
+                    for t in doc["tasks"]
+                    if t["state"] == "leased" and t["claim"]["expires_at"] > time.time()
+                }
+                if worker_id in all_active or len(all_active) >= plan["capacity"]:
+                    return None
+                finished = sum(
+                    t.get("receipt", {}).get("worker_id") == worker_id for t in doc["tasks"]
+                )
+                if finished >= plan["batch_size"] or (
+                    worker_id not in active and len(active) >= plan["workers"][stage]
+                ):
+                    return None
+            from hrs_codex.scheduling import task_priority
+
+            for task in sorted(doc["tasks"], key=lambda t: task_priority(doc, t)):
                 if task["stage"] != stage or task["state"] not in {"ready", "leased"}:
+                    continue
+                if task.get("retry_after", 0) > time.time():
                     continue
                 if task["state"] == "leased" and task["claim"]["expires_at"] > time.time():
                     continue
@@ -488,11 +694,19 @@ class Store:
                     "worker_id": worker_id,
                     "lease_token": uuid4().hex,
                     "expires_at": time.time() + lease_seconds,
+                    "started_at": time.time(),
                     "input_sha256": digest(inputs),
                 }
                 if task.get("source_reading"):
                     task.setdefault("source_reading_history", []).append(task.pop("source_reading"))
                 task.pop("image_access", None)
+                task.pop("candidate_accesses", None)
+                task["bounded_candidate_required"] = (
+                    scheduled
+                    and source_first
+                    and stage in {"review", "verify"}
+                    and len(inputs.get("markdown", "")) > 2000
+                )
                 if source_first and stage in {"review", "verify"}:
                     task["source_first_required"] = True
                 task.update(state="leased", claim=claim, inputs=inputs)
@@ -548,6 +762,15 @@ class Store:
                 raise ValueError(
                     "Record original-first observations through review_candidate before judging the candidate"
                 )
+            if task.get("bounded_candidate_required") and result.get("verdict") != "pending":
+                covered = 0
+                for access in sorted(task.get("candidate_accesses", []), key=lambda a: a["start"]):
+                    if access["lease_token"] == lease_token and access["start"] <= covered:
+                        covered = max(covered, access["end"])
+                if covered < len(task["inputs"]["markdown"]):
+                    raise ValueError(
+                        "Read the complete candidate with candidate_text before submitting a verdict"
+                    )
             page = doc["pages"][task["page"] - 1] if task["page"] is not None else None
             receipt = {
                 "task_id": task_id,
@@ -557,13 +780,20 @@ class Store:
                 "human_approval": False,
                 "created_at": time.time(),
             }
+            if claim.get("started_at"):
+                receipt.update(
+                    duration_seconds=max(0, time.time() - claim["started_at"]),
+                    queue_seconds=max(
+                        0, claim["started_at"] - task.get("created_at", claim["started_at"])
+                    ),
+                )
             policy = doc.get("processing_policy", {})
             if policy:
                 receipt["configured_model"] = policy.get(
                     "ocr_model"
                     if stage == "ocr"
                     else "organization_model"
-                    if stage == "organization"
+                    if stage in {"organization", "navigation"}
                     else "review_model"
                 )
             if task.get("source_reading"):
@@ -575,6 +805,15 @@ class Store:
                         "OCR result requires markdown (empty is valid for a blank page)"
                     )
                 page["ocr"] = {**receipt, "markdown": markdown, "sha256": digest(markdown)}
+                if result.get("page_kind") in {
+                    "toc",
+                    "text",
+                    "frontmatter",
+                    "table",
+                    "figure",
+                    "unknown",
+                }:
+                    page["page_kind"] = result["page_kind"]
                 page["state"] = "awaiting_review"
                 doc["tasks"].append(self._new_task("review", page["page"]))
             elif stage in {"review", "verify"}:
@@ -642,6 +881,36 @@ class Store:
                     "issues": result.get("issues", []),
                     "normalizations": result.get("normalizations", []),
                 }
+            elif stage == "navigation":
+                from hrs_codex.navigation import observation, validate_proposal
+
+                for row in task["inputs"]["pages"]:
+                    current = doc["pages"][row["page"] - 1]
+                    if current.get("approved", {}).get("sha256") != row["markdown_sha256"]:
+                        raise ValueError("Navigation source changed during processing")
+                allowed = {p["page"] for p in task["inputs"]["pages"]}
+                for row in result.get("page_observations", []):
+                    if row.get("page") not in allowed:
+                        raise ValueError("Navigation observation outside its approved snapshot")
+                    p = doc["pages"][row["page"] - 1]
+                    if str(row["page"]) not in task.get("image_accesses", {}):
+                        raise ValueError("Navigation observations require original-image access")
+                    p["observation"] = observation(p, row)
+                entries = validate_proposal(doc, result.get("entries"))
+                if any(e["source_page"] not in allowed for e in entries):
+                    raise ValueError("Directory source outside the claimed snapshot")
+                if any(
+                    str(e["source_page"]) not in task.get("image_accesses", {}) for e in entries
+                ):
+                    raise ValueError("Navigation worker must inspect directory original images")
+                nav = doc.get("navigation") or {}
+                nav.update(
+                    source_entries=entries,
+                    parsed_toc_sha256=task["inputs"]["toc_sha256"],
+                    task_id=task_id,
+                    receipt=receipt,
+                )
+                doc["navigation"] = nav
             else:
                 if result.get("verdict") == "pending":
                     self._review_result(result)
@@ -694,9 +963,22 @@ class Store:
                 result=result,
                 receipt={**receipt, "result_sha256": digest(result)},
             )
+            if (
+                stage in {"review", "verify"}
+                and page.get("approved")
+                and result.get("page_observation")
+            ):
+                from hrs_codex.navigation import observation
+
+                page["observation"] = observation(page, result["page_observation"])
+                page["page_kind"] = page["observation"]["kind"]
+            self._refresh_navigation(doc)
             if all(p["state"] == "approved" for p in doc["pages"]):
                 if not any(
                     t["stage"] == "organization" and t["state"] != "superseded"
+                    for t in doc["tasks"]
+                ) and not any(
+                    t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
                     for t in doc["tasks"]
                 ):
                     doc["tasks"].append(self._new_task("organization"))
@@ -718,6 +1000,94 @@ class Store:
                 "task_state": task["state"],
                 "state": doc["state"],
             }
+
+    def _refresh_navigation(self, doc: dict) -> None:
+        from hrs_codex.navigation import fingerprint, observation, resolve_navigation, toc_evidence
+
+        for p in doc["pages"]:
+            if (
+                p.get("approved")
+                and not p.get("observation")
+                and re.search(
+                    r"(?mi)^\s*(?:#{1,6}\s*)?(?:目[ \t]*录|table of contents|contents)\s*$",
+                    p["approved"]["markdown"],
+                )
+            ):
+                p["page_kind"] = "toc"
+                p["kind_basis"] = "title-candidate-requires-navigation-original-review"
+            if (
+                p.get("approved")
+                and p.get("observation")
+                and p["observation"].get("markdown_sha256") != p["approved"]["sha256"]
+            ):
+                try:
+                    p["observation"] = observation(p, p["observation"])
+                except ValueError:
+                    p.pop("observation", None)
+        toc = toc_evidence(doc)
+        if (
+            toc
+            and fingerprint(toc) != (doc.get("navigation") or {}).get("parsed_toc_sha256")
+            and not any(
+                t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
+                for t in doc["tasks"]
+            )
+        ):
+            doc["tasks"].append(self._new_task("navigation"))
+        doc["navigation"] = resolve_navigation(doc)
+
+    def refresh_navigation(self, document_id: str) -> dict:
+        """Refresh source-bound derived metadata; never run recognition or grant content approval."""
+        with self.lock:
+            doc = self._load(document_id)
+            self._verify_evidence(doc)
+            before = (doc.get("navigation", {}).get("sha256"), len(doc["tasks"]))
+            self._refresh_navigation(doc)
+            if before != (doc["navigation"]["sha256"], len(doc["tasks"])):
+                self._save(doc)
+            return doc
+
+    def navigation_decision(
+        self,
+        document_id: str,
+        entry_id: str,
+        *,
+        expected_sha256: str,
+        target_page: int | None,
+        target_anchor: str = "",
+    ) -> dict:
+        with self.lock:
+            doc = self._load(document_id)
+            nav = doc.get("navigation") or {}
+            if nav.get("sha256") != expected_sha256:
+                raise ValueError("Navigation changed; reload before confirming")
+            entry = next(e for e in nav["entries"] if e["id"] == entry_id)
+            target = None
+            if target_page is not None:
+                if type(target_page) is not int or not 1 <= target_page <= len(doc["pages"]):
+                    raise ValueError("Unknown target physical page")
+                p = doc["pages"][target_page - 1]
+                if (
+                    not p.get("approved")
+                    or not target_anchor
+                    or p["approved"]["markdown"].count(target_anchor) != 1
+                ):
+                    raise ValueError(
+                        "Navigation confirmation needs an approved unique target anchor"
+                    )
+                from hrs_codex.navigation import target_evidence
+
+                target = target_evidence(p, target_anchor)
+            nav.setdefault("decisions", {})[entry_id] = {
+                "source_sha256": entry["source_sha256"],
+                "target": target,
+                "at": time.time(),
+                "approval_type": "human_navigation",
+                "content_approval": False,
+            }
+            self._refresh_navigation(doc)
+            self._save(doc)
+            return doc["navigation"]
 
     def retry_task(self, document_id: str, task_id: str) -> dict:
         with self.lock:
@@ -851,6 +1221,16 @@ class Store:
         if doc["state"] == "published":
             request["state"] = "succeeded"
             return request
+        if request.get("pause_requested"):
+            if not resume:
+                return request
+            request.pop("pause_requested", None)
+            if doc["state"] == "paused":
+                doc["state"] = (
+                    "pending"
+                    if any(p["state"] == "pending" for p in doc["pages"])
+                    else "processing"
+                )
         if request["state"] == "running":
             if resume and request["lease_expires_at"] <= time.time():
                 request["history"].append(
@@ -878,6 +1258,9 @@ class Store:
                 raise ValueError("This document is stopping for explicit deletion")
             self._verify_evidence(doc)
             request = self._request_run(doc, resume=resume)
+            if resume:
+                (self._directory(document_id) / ".pause-requested").unlink(missing_ok=True)
+                self._refresh_navigation(doc)
             self._save(doc)
             return request
 
@@ -898,6 +1281,8 @@ class Store:
                     continue
                 doc = json.loads(path.read_text(encoding="utf-8"))
                 request = doc.get("run_request")
+                if request and request.get("pause_requested"):
+                    continue
                 if not request or request["state"] not in {"pending", "retryable_error", "running"}:
                     continue
                 if request.get("technical_failures", 0) >= 3 or request.get("not_before", 0) > now:
@@ -965,6 +1350,14 @@ class Store:
                 doc["state"] = "cancelled"
                 self._save(doc)
                 return request
+            if request.get("pause_requested"):
+                for task in doc["tasks"]:
+                    if task["state"] == "leased":
+                        task["state"] = "ready"
+                request.update(state="paused", error=None, not_before=0)
+                doc["state"] = "paused"
+                self._save(doc)
+                return request
             if request["lease_expires_at"] <= now:
                 raise ValueError("Run lease expired; reclaim before finishing")
             active = [
@@ -995,6 +1388,10 @@ class Store:
                 self._verify_evidence(doc)
                 request.update(state="succeeded", error=None, not_before=0)
             elif continuation and all(p["state"] == "approved" for p in doc["pages"]):
+                request.update(state="pending", error=None, not_before=0)
+            elif any(t["state"] == "ready" for t in doc["tasks"]) and any(
+                p["state"] == "pending" for p in doc["pages"]
+            ):
                 request.update(state="pending", error=None, not_before=0)
             elif any(t["state"] == "pending" for t in doc["tasks"]):
                 request.update(state="waiting_human", error=None, not_before=0)
@@ -1290,7 +1687,7 @@ class Store:
                 raise ValueError("Workflow-test release requires explicit workspace authorization")
         with self.lock:
             doc = self._load(document_id)
-            self._require_active(doc)
+            self._require_active(doc, allow_paused=True)
             self._verify_evidence(doc)
             packet = self._human_packet(doc, page)
             if digest(packet) != input_sha256:
@@ -1337,12 +1734,22 @@ class Store:
             target["state"] = "approved" if verdict == "approved" else "pending"
             if verdict == "approved":
                 target["approved"] = {**receipt, "markdown": markdown, "sha256": digest(markdown)}
+            self._refresh_navigation(doc)
             if all(p["state"] == "approved" for p in doc["pages"]):
-                doc["tasks"].append(self._new_task("organization"))
+                if not any(
+                    t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
+                    for t in doc["tasks"]
+                ) and not any(
+                    t["stage"] == "organization" and t["state"] != "superseded"
+                    for t in doc["tasks"]
+                ):
+                    doc["tasks"].append(self._new_task("organization"))
                 doc["state"] = "processing"
                 self._request_run(doc, followup=True)
             else:
                 doc["state"] = "pending"
+                if verdict == "approved" and any(t["state"] == "ready" for t in doc["tasks"]):
+                    self._request_run(doc, followup=True)
             self._save(doc)
             return {
                 "document_id": document_id,
@@ -1608,6 +2015,13 @@ class Store:
             if not all(p["state"] == "approved" for p in doc["pages"]) or not doc["organization"]:
                 raise ValueError(
                     "Whole document must have approved pages and completed organization"
+                )
+            if any(
+                t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
+                for t in doc["tasks"]
+            ):
+                raise ValueError(
+                    "Complete directory parsing before publication; mapping conflicts may remain"
                 )
             if doc["state"] == "published":
                 if doc.get("active_publication"):

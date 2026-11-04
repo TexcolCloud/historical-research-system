@@ -39,6 +39,13 @@ class BookSummary(BaseModel):
     run_id: UUID | None = None
     stage: str | None = None
     revision: int = 0
+    pending_count: int = 0
+    navigation_pending_count: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "navigation_pending_count", AliasPath("result", "codex_navigation_pending_count")
+        ),
+    )
     revision_pending: bool = Field(
         default=False,
         validation_alias=AliasChoices("revision_pending", AliasPath("result", "codex_revision_pending")),
@@ -63,6 +70,38 @@ class DeletionReceipt(BaseModel):
     book_id: UUID
     state: str
     error: str | None = None
+
+
+class ActiveTask(BaseModel):
+    stage: str
+    page: int | None = None
+    started_at: float | None = None
+
+
+class RunExecution(BaseModel):
+    state: str | None = None
+    paused: bool = False
+    automatic_work_remaining: bool = False
+    last_progress_at: float | None = None
+    active_tasks: list[ActiveTask] = Field(default_factory=list)
+
+
+class StageMetrics(BaseModel):
+    completed: int
+    queued: int
+    active: int
+    median_seconds: float | None = None
+    pages_per_minute: float
+    samples: int
+
+
+class SchedulingReport(BaseModel):
+    capacity: int
+    workers: dict[str, int]
+    active: dict[str, int]
+    metrics: dict[str, StageMetrics]
+    batch_size: int
+    cooldown_until: float = 0
 
 
 class RunSummary(BaseModel):
@@ -90,6 +129,68 @@ class RunSummary(BaseModel):
         default=None,
         validation_alias=AliasChoices("page_progress", AliasPath("result", "codex_page_progress")),
     )
+    execution: RunExecution | None = Field(
+        default=None, validation_alias=AliasChoices("execution", AliasPath("result", "codex_execution"))
+    )
+    scheduling: SchedulingReport | None = Field(
+        default=None, validation_alias=AliasChoices("scheduling", AliasPath("result", "codex_scheduling"))
+    )
+
+
+class NavigationTarget(BaseModel):
+    physical_page: int
+    printed_label: str | None = None
+    anchor: str
+    start: int
+    markdown_sha256: str
+    image_sha256: str
+    sequence: str = "body"
+
+
+class NavigationEntry(BaseModel):
+    id: str
+    title: str
+    level: int
+    path: list[str]
+    source_page: int
+    source_anchor: str
+    source_image: str
+    target_label: str
+    target_end_label: str | None = None
+    status: str
+    reason: str
+    target: NavigationTarget | None = None
+    target_url: str | None = None
+    target_image: str | None = None
+    target_chapter_id: str | None = None
+    candidates: list[NavigationTarget] = Field(default_factory=list)
+
+
+class NavigationPage(BaseModel):
+    page: int
+    headings: list[str]
+    printed_label: str | None = None
+    image: str | None = None
+
+
+class NavigationReport(BaseModel):
+    state: str
+    entries: list[NavigationEntry]
+    version: int
+    sha256: str
+    coverage_complete: bool = False
+    approved_pages: list[NavigationPage] = Field(default_factory=list)
+
+
+class NavigationDecision(BaseModel):
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_page: int | None = Field(default=None, ge=1)
+    target_anchor: str = ""
+
+
+class RunControlReceipt(BaseModel):
+    document_id: str
+    state: str
 
 
 class TusUpload(BaseModel):
@@ -155,7 +256,7 @@ class ReviewIssue(ReviewIssueSummary):
     text: str
     proposed_text: str | None = None
     draft_text: str | None = None
-    reasons: list[str]
+    reasons: list[str | dict]
     kind: str
     pages: list[int]
     images: list[str]
@@ -286,6 +387,11 @@ class SearchContext(BaseModel):
 
 
 class SearchHit(BaseModel):
+    toc_path: list[str] = Field(default_factory=list)
+    toc_entry_id: str | None = None
+    navigation_version: int = 0
+    printed_pages: list[dict] = Field(default_factory=list)
+    doc_kind: str = "content"
     id: UUID
     book_id: UUID
     chapter_id: UUID

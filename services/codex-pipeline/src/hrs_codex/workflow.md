@@ -24,8 +24,9 @@ original_html}],merged_html}],titles:[{page,title,level}]}`. Table continuations
 must preserve every cell, row/column owner and number; the reading projection
 validates this against canonical text before adopting a merged display. If that
 cannot be verified, retain separate originals and explain the structural issue.
-For figures/maps retain the original carrier as Markdown image `![source figure](pages/000001.png)`
-using the actual physical page number (six digits); retain captions and readable
+For figures/maps retain the original carrier as a Markdown image using the EXACT
+retained page path supplied by the task (for example `![source figure](pages/00001.png)`).
+Never guess zero padding from the physical page number. Retain captions and readable
 labels too. Never invent an image filename or use an inaccessible external path.
 
 ## User entry and workspace
@@ -109,6 +110,14 @@ Use a unique `worker_id` for your subagent. `claim_task` returns `task_id`,
 candidate Markdown/hash or approved page collection. The lease lasts 15 minutes;
 expired leases can be claimed again. Never submit with another worker's lease.
 `document_status` is compact by default; use `task_details` for the assigned page
+and document-wide `page_count`, `page_counts`, `all_pages_approved`, `task_counts`
+for completion. Displayed page/task lists may be partial; they are never the full
+document count. Organization/navigation claims retain complete frozen hashes but
+show a bounded catalog. Enumerate ALL `approved_page_catalog` pages with the task
+and lease, advancing `after_page` through `next_after_page` until null,
+then use `approved_page_text`. `navigation_status` is also paginated via `start` /
+`next_start`. No omitted page is approved or skipped by these context limits.
+Use `task_details` for the assigned page
 and `approved_page_text` for organization. `include_content=true` is available for
 explicit diagnostics, not repeated whole-book polling. Raw geometry evidence is
 retained locally and hash-bound, rather than copied into every model request.
@@ -140,8 +149,18 @@ reading a candidate:
   "unresolved":[], "original_details":[]
 })`
 
-Use `original_detail` before freezing uncertain small print and attach its actual
-metadata. Original observations are fallible machine evidence, not gold; preserve
+Use `original_detail` before freezing uncertain small print. Attach its actual
+metadata, or preserve the returned `image_sha256` + `metadata_sha256` as a compact receipt pair when
+full crop metadata is unnecessary. The server resolves that exact retained file,
+verifies both hashes and checks its source/page; unknown pairs are rejected.
+After freezing, long candidates are available through `candidate_text` in bounded
+Unicode-codepoint ranges. Read from zero through `total_codepoints`, using each
+returned `end` for the next `start`, before a verdict. Range coverage is required
+for new long-page MCP claims; a truncated tool display is not a source defect.
+Validation errors explain the failed contract; fix arguments instead of calling
+them provider outages. Never approve partially read text.
+
+Original observations are fallible machine evidence, not gold; preserve
 uncertainties explicitly. This call freezes observations and returns the complete
 candidate for comparison. Observations cannot be rewritten after candidate
 exposure. If the source observations have unresolved issues, approval is blocked;
@@ -188,6 +207,51 @@ machine verdicts, input/output hashes and source image hashes. Codex verdicts ar
 machine decisions, never human review or sealed gold approval. Published text is
 searchable locally with physical-page and image provenance. Existing legacy data
 is preserved separately; this workflow does not generate historical research cards.
+
+## Bounded scheduling and source directory navigation
+
+The coordinator calls `scheduling_plan` before allocating and after each completed
+batch. At most seven workers (plus the coordinator) run concurrently. Each worker
+claims at most two tasks, then exits; retire completed agents before replacement.
+Actual per-stage receipt durations, review backlog and available work determine
+the next allocation. Do not interrupt an active page to rebalance. A pending human
+page never stops other work. Existing nonempty lanes hold their allocation for
+30 seconds to avoid oscillation; newly ready stages and freed capacity can be
+admitted sooner. A pending human
+page never stops other OCR, review or navigation work. Distinguish source uncertainty
+from technical failures: use `report_task_failure` and `wait_for_work` for cooldown,
+stop and report a technical failure after three repeated failures. Explicit pause
+stops owned execution and retains checkpoints; only explicit resume restarts it.
+
+Review approval should include `page_observation`:
+`{"kind":"toc|text|frontmatter|table|figure|unknown","printed_label":"exact printed label or null",
+"headings":["literal heading in approved Markdown"],"sequence":"source-supported numbering series"}`.
+Preserve printed labels in OCR Markdown; missing labels stay null. Sequences distinguish
+front matter, main text and genuine numbering resets, never guessed global offsets.
+
+An approved TOC queues `navigation`, using `historical_organization` (Sol), before
+whole-book organization. Claim its frozen approved-page snapshot; read
+`approved_page_text`. Open each directory `original_image` with task/lease. Return
+`{"input_sha256":"claimed hash","entries":[{"source_page":1,"source_anchor":"unique literal whole TOC entry",
+"title":"source title","target_label":"exact TOC page label","level":1,"sequence":"body"}]}`.
+An optional `target_title` must describe a visible title variant with `title_relation`
+evidence. Optional `page_observations` require opening those originals under the
+navigation lease. For a TOC range such as `38—130`, `target_label` is the printed
+START label `38`, with optional `target_end_label="130"`; preserve the entire range
+in `source_anchor`. Never use a whole range as a single-page label. Open originals
+for any title alias and do not fabricate a date/author/title relationship.
+Optional `page_observations` require opening those originals under the
+navigation lease. Never rewrite TOC text or force article boundaries from TOC entries.
+
+The store resolves only exact label + approved heading matches. Duplicate targets,
+label discrepancies and conflicting sequences remain conflicts; missing evidence
+waits until full page coverage before reporting not_found. Mapping conflicts do not
+approve content or block otherwise valid body publication. Human mapping choices
+are available only in the local UI, bound to the navigation/source/target hashes.
+Navigation metadata is versioned separately; corrections do not change canonical
+text, footnote ownership or character offsets. Index generations include the
+navigation snapshot through immutable chapter hashes. Default content search
+excludes only explicitly tagged directory carriers; users may include directories.
 
 ## Human handoff
 

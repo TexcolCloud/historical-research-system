@@ -6,6 +6,39 @@ import pytest
 from test_store import complete, document
 
 
+def test_compact_detail_receipts_and_bounded_candidate_access(tmp_path):
+    from PIL import Image
+
+    from hrs_codex.details import original_detail
+    from hrs_codex.server import prepare
+    from hrs_codex.store import Store
+
+    source = tmp_path / "raster.png"
+    Image.new("RGB", (60, 80), "white").save(source)
+    store = Store(tmp_path / "library")
+    doc_id = prepare(store, str(source))["id"]
+    candidate = "甲😀" * 3000
+    complete(store, doc_id, "ocr", "ocr", {"markdown": candidate})
+    task = store.claim_task(doc_id, "review", "review", source_first=True, scheduled=True)
+    with pytest.raises(ValueError, match="observations"):
+        store.candidate_text(doc_id, task["task_id"], task["lease_token"])
+    original = reading(store, doc_id, task)
+    detail, _ = original_detail(store, doc_id, 1, [0, 0, 1, 1])
+    short = {k: detail[k] for k in ("image_sha256", "metadata_sha256")}
+    store.review_candidate(
+        doc_id, task["task_id"], task["lease_token"], {**original, "original_details": [short]}
+    )
+    with pytest.raises(ValueError, match="complete candidate"):
+        submit(store, doc_id, task, {"verdict": "approved"})
+    chunks = [
+        store.candidate_text(doc_id, task["task_id"], task["lease_token"], start=i, limit=1000)
+        for i in range(0, len(candidate), 1000)
+    ]
+    assert "".join(c["markdown"] for c in chunks) == candidate
+    assert all(c["total_codepoints"] == len(candidate) for c in chunks)
+    submit(store, doc_id, task, {"verdict": "approved"})
+
+
 def reading(store, doc_id, task, *, unresolved=None):
     metadata, _ = store.original_page(
         doc_id, task["page"], task_id=task["task_id"], lease_token=task["lease_token"]

@@ -23,6 +23,8 @@ test.each(["queued", "uploading"])(
       stage: "verify_upload",
       revision: 0,
       revision_pending: false,
+      pending_count: 0,
+      navigation_pending_count: 0,
       created_at: "2026-09-13",
     };
     const query = new QueryClient();

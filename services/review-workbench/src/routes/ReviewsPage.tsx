@@ -11,8 +11,11 @@ export default function ReviewsPage() {
     queryFn: ({ signal }) => readBooks(signal),
   });
   const pending =
-    books.data?.filter((book) =>
-      ["awaiting_review", "failed"].includes(book.state),
+    books.data?.filter(
+      (book) =>
+        ["awaiting_review", "failed"].includes(book.state) ||
+        (book.pending_count ?? 0) > 0 ||
+        (book.navigation_pending_count ?? 0) > 0,
     ) ?? [];
   return (
     <>
@@ -45,7 +48,7 @@ export default function ReviewsPage() {
             <Link
               className="platform-collection-row"
               key={book.id}
-              to={`/books/${book.id}?tab=${book.state === "failed" ? "progress" : "review"}`}
+              to={`/books/${book.id}?tab=${book.state === "failed" ? "progress" : (book.pending_count ?? 0) > 0 || book.state === "awaiting_review" ? "review" : "navigation"}`}
             >
               <ClipboardCheck size={24} />
               <div>
@@ -53,7 +56,11 @@ export default function ReviewsPage() {
                 <p>
                   {book.state === "failed"
                     ? "处理未完成 · 查看原因并恢复"
-                    : "需要人工核对 · 对照原件逐项处理"}
+                    : (book.pending_count ?? 0) > 0
+                      ? `${book.pending_count} 页待核对 · ${book.state === "paused" ? "自动处理已暂停" : book.state === "running" ? "其余页面继续自动处理" : book.state === "queued" ? "自动任务排队中" : "确认后继续后续处理"}`
+                      : (book.navigation_pending_count ?? 0) > 0
+                        ? `${book.navigation_pending_count} 项目录位置需确认 · 不影响已核验正文`
+                        : "需要人工核对 · 对照原件逐项处理"}
                 </p>
               </div>
               <ArrowUpRight size={18} />
