@@ -244,6 +244,14 @@ class Review:
         if not row:
             raise ServiceError(404, "核对问题不存在。")
         body = self.read_json(row["content"])
+        from hrs_codex.review_locations import locate_issues
+
+        # Derived view only: old immutable packets/drafts retain their original evidence.
+        previous_locations = body.get("locations") or []
+        body["locations"] = locate_issues(
+            body["text"], body["reasons"], page=row["page"],
+            image_sha256=previous_locations[0].get("image_sha256", "") if previous_locations else "",
+        )
         return {
             **row,
             **body,
@@ -251,6 +259,7 @@ class Review:
                 body["text"], [{"text": body["text"], "source": {"pages": body["pages"]}}]
             ),
             "draft_text": self.objects.read_bytes(row["draft"]).decode("utf-8") if row["draft"] else None,
+            "resolutions": (row["draft"] or {}).get("review_resolutions", []),
             "images": [f"/api/v2/runs/{row['run_id']}/artifacts/{name}" for name in body["images"]],
         }
 
@@ -267,6 +276,8 @@ class Review:
         reference = self.objects.put_bytes(
             request.text.encode("utf-8"), "text/markdown; charset=utf-8", run_id=self.issue_run(issue_id)
         )
+        resolutions = [r.model_dump() for r in request.resolutions]
+        reference = {**reference, "review_resolutions": resolutions}
         with self.engine.begin() as connection:
             from hrs_platform.services.deletion import require_run_active
 
@@ -283,7 +294,7 @@ class Review:
             if row["state"] != "pending":
                 raise ServiceError(409, "本项已审核，不能再保存草稿。")
             if row["revision"] == request.expected_revision + 1 and row["draft"] == reference:
-                return {"revision": row["revision"], "draft_text": request.text}
+                return {"revision": row["revision"], "draft_text": request.text, "resolutions": resolutions}
             if row["revision"] != request.expected_revision:
                 raise ServiceError(409, "草稿版本发生变化，请重新读取当前问题。")
             revision = row["revision"] + 1
@@ -292,7 +303,7 @@ class Review:
                 .where(db.review_issues.c.id == str(issue_id))
                 .values(draft=reference, revision=revision)
             )
-        return {"revision": revision, "draft_text": request.text}
+        return {"revision": revision, "draft_text": request.text, "resolutions": resolutions}
 
     def decide(self, issue_id, request):
         return self._decide(issue_id, request)
@@ -365,6 +376,21 @@ class Review:
                 ):
                     return repeated["receipt"]
                 raise ServiceError(409, "该内容已被处理或版本已变化，请刷新当前问题。")
+            if request.resolutions is not None:
+                body = self.read_json(issue["content"])
+                expected = {r["id"] for r in body.get("locations", [])}
+                if not expected:
+                    from hrs_codex.review_locations import locate_issues
+
+                    expected = {
+                        r["id"]
+                        for r in locate_issues(
+                            body["text"], body["reasons"], page=issue["page"], image_sha256=""
+                        )
+                    }
+                resolved = {r.id for r in request.resolutions if r.action != "defer"}
+                if resolved != expected or len(request.resolutions) != len(expected):
+                    raise ServiceError(409, "请逐项处理疑点；暂不确定的内容仍需保留待审。")
             connection.execute(
                 update(db.review_issues)
                 .where(db.review_issues.c.id == issue_id)
@@ -401,6 +427,10 @@ class Review:
                         **receipt,
                         "reviewer": "local-qwen-machine" if machine_evidence else "human-ui",
                         "action": request.action,
+                        "resolutions": [r.model_dump() for r in request.resolutions or []],
+                        "resolved_text_sha256": digest(request.text)
+                        if request.text is not None
+                        else issue["text_sha256"],
                         **(
                             {
                                 "reviewer": "user-authorized-workflow-test",

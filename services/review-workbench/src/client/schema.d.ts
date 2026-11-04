@@ -884,6 +884,8 @@ export interface components {
             revision: number;
             /** Draft Text */
             draft_text: string;
+            /** Resolutions */
+            resolutions?: components["schemas"]["ReviewResolution"][];
         };
         /** DraftRelation */
         DraftRelation: {
@@ -1133,6 +1135,8 @@ export interface components {
             action: "confirm" | "correct";
             /** Text */
             text?: string | null;
+            /** Resolutions */
+            resolutions?: components["schemas"]["ReviewResolution"][] | null;
         };
         /** ReviewDraft */
         ReviewDraft: {
@@ -1140,6 +1144,8 @@ export interface components {
             expected_revision: number;
             /** Text */
             text: string;
+            /** Resolutions */
+            resolutions?: components["schemas"]["ReviewResolution"][];
         };
         /** ReviewIssue */
         ReviewIssue: {
@@ -1179,6 +1185,12 @@ export interface components {
             images: string[];
             /** Footnotes */
             footnotes?: components["schemas"]["FootnoteLink"][];
+            /** Locations */
+            locations?: {
+                [key: string]: unknown;
+            }[];
+            /** Resolutions */
+            resolutions?: components["schemas"]["ReviewResolution"][];
         };
         /** ReviewIssueSummary */
         ReviewIssueSummary: {
@@ -1226,6 +1238,16 @@ export interface components {
             next_issue_id: string | null;
             /** State */
             state: string;
+        };
+        /** ReviewResolution */
+        ReviewResolution: {
+            /** Id */
+            id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "keep" | "adopt" | "edit" | "defer";
         };
         /** RunControlReceipt */
         RunControlReceipt: {

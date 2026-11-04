@@ -137,7 +137,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
           </Button>
           <a
             className="platform-export"
-            href={`/api/v2/books/${bookId}/export`}
+            href={`/api/v2/books/${bookId}/export?download=latest`}
           >
             导出全书 Markdown
           </a>

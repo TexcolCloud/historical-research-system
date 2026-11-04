@@ -2445,6 +2445,13 @@
           "draft_text": {
             "type": "string",
             "title": "Draft Text"
+          },
+          "resolutions": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewResolution"
+            },
+            "type": "array",
+            "title": "Resolutions"
           }
         },
         "type": "object",
@@ -3116,6 +3123,20 @@
               }
             ],
             "title": "Text"
+          },
+          "resolutions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewResolution"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolutions"
           }
         },
         "additionalProperties": false,
@@ -3140,6 +3161,13 @@
             "maxLength": 200000,
             "minLength": 1,
             "title": "Text"
+          },
+          "resolutions": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewResolution"
+            },
+            "type": "array",
+            "title": "Resolutions"
           }
         },
         "additionalProperties": false,
@@ -3243,6 +3271,21 @@
             },
             "type": "array",
             "title": "Footnotes"
+          },
+          "locations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "resolutions": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewResolution"
+            },
+            "type": "array",
+            "title": "Resolutions"
           }
         },
         "type": "object",
@@ -3354,6 +3397,30 @@
           "state"
         ],
         "title": "ReviewReceipt"
+      },
+      "ReviewResolution": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "keep",
+              "adopt",
+              "edit",
+              "defer"
+            ],
+            "title": "Action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "action"
+        ],
+        "title": "ReviewResolution"
       },
       "RunControlReceipt": {
         "properties": {

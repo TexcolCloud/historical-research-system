@@ -9,7 +9,18 @@ Use the configured Codex model; inherit model/provider settings from the parent.
 New imports freeze `processing_policy`: OCR uses `historical_ocr` with
 `gpt-6.1-terra`; review uses `historical_review` with `gpt-6.1-sol`; organization
 uses `historical_organization` with `gpt-6.1-sol`. Spawn those exact agent types.
-When review_failure is human, any non-approval goes directly to the human queue,
+New imports use review_failure=bounded: one uniquely located correction proposal gets
+an independent original-first full-page verify. An explicitly disputed pending review
+gets one fresh verify of unchanged text, not adoption of the reviewer's reading.
+Verify may approve or remain pending, never repair or start another round. Unreadable
+originals use pending disposition=unreadable and go straight to humans.
+Every issue includes anchor={exact,prefix,suffix} copied from candidate Markdown,
+focus (substring), explanation, source_quote, candidate_quote and optional suggestion.
+Supply boxes=[[left,top,right,bottom]] normalized to the full retained page,
+image_precision=line|region, using inspected originals/crops. No guessed glyph boxes.
+Missing/ambiguous positions remain unlocated. Annotations do not change Markdown.
+For dense names/tables/dates or unreadable placeholders, OCR uses bounded crops.
+When retained review_failure is human, any non-approval goes directly to the human queue,
 with located issues and optional suggested_markdown. Do not automatically repair,
 retry or fallback after that review. Existing legacy verify tasks may still finish.
 Reviewer output may include source-bound structure observations: headings and

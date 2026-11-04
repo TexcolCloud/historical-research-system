@@ -213,6 +213,11 @@ class TusHook(BaseModel):
     Event: TusEvent
 
 
+class ReviewResolution(BaseModel):
+    id: str
+    action: Literal["keep", "adopt", "edit", "defer"]
+
+
 class ReviewDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decision_id: UUID
@@ -220,17 +225,20 @@ class ReviewDecision(BaseModel):
     expected_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     action: Literal["confirm", "correct"]
     text: str | None = Field(default=None, min_length=1, max_length=200000)
+    resolutions: list[ReviewResolution] | None = None
 
 
 class ReviewDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=1)
     text: str = Field(min_length=1, max_length=200000)
+    resolutions: list[ReviewResolution] = Field(default_factory=list)
 
 
 class DraftReceipt(BaseModel):
     revision: int
     draft_text: str
+    resolutions: list[ReviewResolution] = Field(default_factory=list)
 
 
 class ReviewReceipt(BaseModel):
@@ -261,6 +269,8 @@ class ReviewIssue(ReviewIssueSummary):
     pages: list[int]
     images: list[str]
     footnotes: list["FootnoteLink"] = Field(default_factory=list)
+    locations: list[dict] = Field(default_factory=list)
+    resolutions: list[ReviewResolution] = Field(default_factory=list)
 
 
 class FootnoteSpan(BaseModel):

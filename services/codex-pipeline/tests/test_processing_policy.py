@@ -1,4 +1,4 @@
-"""New single-user policy retains failed model work without an automatic repair loop."""
+"""Retained human-only policies stay frozen; newer imports use bounded verification."""
 
 import pytest
 from PIL import Image
@@ -24,6 +24,12 @@ def test_failed_sol_review_goes_to_human_and_test_release_is_not_content_accepta
     doc = prepare(store, str(image))
     assert doc["processing_policy"]["ocr_model"] == "gpt-6.1-terra"
     assert doc["processing_policy"]["review_model"] == "gpt-6.1-sol"
+    assert doc["processing_policy"]["review_failure"] == "bounded"
+    # This historical fixture explicitly retains the earlier human-only policy.
+    with store.lock:
+        retained = store._load(doc["id"])
+        retained["processing_policy"]["review_failure"] = "human"
+        store._save(retained)
     complete(store, doc["id"], "ocr", {"markdown": "1938[^1]\n\n[^1]: Synthetic note."})
     complete(
         store,
