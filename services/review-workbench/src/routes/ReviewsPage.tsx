@@ -4,6 +4,7 @@ import { ArrowUpRight, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { readBooks } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
+import { bookWorkspaceHref } from "@/features/books/workspace.ts";
 
 export default function ReviewsPage() {
   const books = useQuery({
@@ -45,14 +46,12 @@ export default function ReviewsPage() {
       ) : (
         <section className="platform-collection" aria-label="按书籍整理的待办">
           {pending.map((book) => (
-            <Link
-              className="platform-collection-row"
-              key={book.id}
-              to={`/books/${book.id}?tab=${book.state === "failed" ? "progress" : (book.pending_count ?? 0) > 0 || book.state === "awaiting_review" ? "review" : "navigation"}`}
-            >
+            <article className="platform-collection-row" key={book.id}>
               <ClipboardCheck size={24} />
               <div>
-                <h2>{book.title}</h2>
+                <h2>
+                  <Link to={bookWorkspaceHref(book)}>{book.title}</Link>
+                </h2>
                 <p>
                   {book.state === "failed"
                     ? "处理未完成 · 查看原因并恢复"
@@ -62,9 +61,26 @@ export default function ReviewsPage() {
                         ? `${book.navigation_pending_count} 项目录位置需确认 · 不影响已核验正文`
                         : "需要人工核对 · 对照原件逐项处理"}
                 </p>
+                <div className="workspace-task-links">
+                  {(book.pending_count ?? 0) > 0 && (
+                    <Link to={`/books/${book.id}?tab=review`}>
+                      核对正文 · {book.pending_count} 页
+                    </Link>
+                  )}
+                  {(book.navigation_pending_count ?? 0) > 0 && (
+                    <Link to={`/books/${book.id}?tab=review&task=navigation`}>
+                      确认目录 · {book.navigation_pending_count} 项
+                    </Link>
+                  )}
+                  {book.state === "failed" && (
+                    <Link to={`/books/${book.id}?tab=progress`}>
+                      查看异常并恢复
+                    </Link>
+                  )}
+                </div>
               </div>
               <ArrowUpRight size={18} />
-            </Link>
+            </article>
           ))}
         </section>
       )}

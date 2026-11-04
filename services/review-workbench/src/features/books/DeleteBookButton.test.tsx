@@ -40,7 +40,7 @@ test.each(["queued", "uploading"])(
       </QueryClientProvider>,
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "删除任务：技术夹具" }),
+      screen.getByRole("button", { name: "删除本书及处理数据：技术夹具" }),
     );
     expect(calls).toEqual([]);
     await userEvent.click(screen.getByRole("button", { name: "确认删除" }));

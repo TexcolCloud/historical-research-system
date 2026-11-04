@@ -1151,6 +1151,7 @@ class Store:
                 "at": time.time(),
                 "approval_type": "human_navigation",
                 "content_approval": False,
+                "final": True,
             }
             self._refresh_navigation(doc)
             self._save(doc)

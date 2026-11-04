@@ -44,30 +44,27 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
     ],
   };
   respondWith(() => report);
-  const post = vi
-    .spyOn(client, "POST")
-    .mockResolvedValue({
-      data: {
-        ...report,
-        entries: [{ ...report.entries[0]!, status: "matched_manual", target }],
-      },
-      response: new Response(),
-    });
+  const post = vi.spyOn(client, "POST").mockResolvedValue({
+    data: {
+      ...report,
+      entries: [{ ...report.entries[0]!, status: "matched_manual", target }],
+    },
+    response: new Response(),
+  });
   render(
     <QueryClientProvider client={new QueryClient()}>
       <NavigationPanel runId="run" bookId="book" />
     </QueryClientProvider>,
   );
-  await screen.findByText(/需确认页码/);
+  await screen.findByText(/需要确认位置/);
   expect(screen.queryByText("阅读正文 →")).toBeNull();
   expect(
     screen.getByRole("link", { name: /目录原图/ }).getAttribute("href"),
   ).toBe("/original-toc.png");
-  await userEvent.click(screen.getByRole("button", { name: "调整关联" }));
-  expect(
-    (screen.getByRole("combobox", { name: "目标原件页" }) as HTMLSelectElement)
-      .value,
-  ).toBe("3");
+  await userEvent.click(screen.getByRole("button", { name: "核对目录位置" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: /选择候选.*原件3页/ }),
+  );
   await userEvent.click(screen.getByRole("button", { name: "确认此位置" }));
   expect(post).toHaveBeenCalledWith(
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",

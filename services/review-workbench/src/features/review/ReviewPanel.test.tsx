@@ -64,13 +64,15 @@ test("located doubts highlight text, show source region, and require an explicit
       ?.getAttribute("x"),
   ).toBe("0.2");
   expect(
-    screen.getByRole("button", { name: "确认本页" }).hasAttribute("disabled"),
-  ).toBe(true);
-  await userEvent.click(screen.getByRole("button", { name: "保留当前识别" }));
+    Boolean(screen.queryByRole("button", { name: "提交本页审核结果" })),
+  ).toBe(false);
+  await userEvent.click(screen.getByRole("button", { name: "识别正确，保留" }));
   await waitFor(() => expect(put).toHaveBeenCalled());
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "确认本页" }).hasAttribute("disabled"),
+      screen
+        .getByRole("button", { name: "提交本页审核结果" })
+        .hasAttribute("disabled"),
     ).toBe(false),
   );
   expect(put.mock.calls[0][1]?.body.resolutions).toEqual([
@@ -142,19 +144,21 @@ test("adopting a full-anchor proposal replaces only the focused error without du
     </QueryClientProvider>,
   );
   await screen.findByText("疑点 1 / 1");
-  await userEvent.click(screen.getByRole("button", { name: "采用建议并编辑" }));
+  await userEvent.click(screen.getByRole("button", { name: "需要修改" }));
+  await userEvent.click(screen.getByRole("button", { name: "填入机器建议" }));
   expect(
     (
       screen.getByRole("textbox", {
-        name: "Markdown 源码",
+        name: "本处最终文字",
       }) as HTMLTextAreaElement
     ).value,
-  ).toBe("开头甲对乙结尾");
+  ).toBe("对");
+  await userEvent.click(screen.getByRole("button", { name: "保存修改并继续" }));
   await waitFor(() => expect(put).toHaveBeenCalled());
   put.mockRestore();
 });
 
-test("autosave persists a draft and defer moves on without approving content", async () => {
+test("autosave preserves unfinished work across page navigation without submitting a decision", async () => {
   const first = {
     id: "draft-one",
     run_id: "draft-run",
@@ -193,18 +197,18 @@ test("autosave persists a draft and defer moves on without approving content", a
     </QueryClientProvider>,
   );
   await screen.findByText("原文");
-  await userEvent.click(screen.getByRole("button", { name: "编辑正文" }));
-  await userEvent.click(screen.getByRole("button", { name: "Markdown 源码" }));
+  await userEvent.click(screen.getByRole("button", { name: "需要修改" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: "切换 Markdown 源码" }),
+  );
   await userEvent.clear(screen.getByRole("textbox", { name: "Markdown 源码" }));
   await userEvent.type(
     screen.getByRole("textbox", { name: "Markdown 源码" }),
     "修订草稿",
   );
   await waitFor(() => expect(writes).toEqual(["修订草稿"]), { timeout: 2000 });
-  await screen.findByText("草稿已保存，尚未确认放行。");
-  await userEvent.click(
-    screen.getByRole("button", { name: "暂不确定，下一页" }),
-  );
+  await screen.findByText("草稿已自动保存 · 尚未提交本页");
+  await userEvent.click(screen.getByRole("button", { name: "原件第 2 页" }));
   await screen.findByText("下一页");
   expect(post).not.toHaveBeenCalled();
   put.mockRestore();
@@ -287,10 +291,20 @@ test("confirmation uses the returned next issue immediately without a whole-page
     </QueryClientProvider>,
   );
   await screen.findByText("第一页正文");
-  await userEvent.click(screen.getByRole("button", { name: "确认本页" }));
+  await userEvent.click(screen.getByRole("button", { name: "识别正确，保留" }));
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: "提交本页审核结果" })
+        .hasAttribute("disabled"),
+    ).toBe(false),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "提交本页审核结果" }),
+  );
   expect(
     screen
-      .getByRole("button", { name: /原件第 2 页.*待人工核对/ })
+      .getByRole("button", { name: "原件第 2 页" })
       .hasAttribute("disabled"),
   ).toBe(true);
   complete();

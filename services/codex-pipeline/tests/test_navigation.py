@@ -120,6 +120,15 @@ def test_directory_parses_before_book_complete_and_targets_resolve_later(tmp_pat
     )
     assert nav["entries"][0]["status"] == "matched_manual"
     assert nav["entries"][0]["decision"]["content_approval"] is False
+    unlinked = store.navigation_decision(
+        doc_id,
+        entry["id"],
+        expected_sha256=nav["sha256"],
+        target_page=None,
+    )
+    assert unlinked["entries"][0]["status"] == "unlinked_manual"
+    assert unlinked["entries"][0]["decision"]["final"] is True
+    assert unlinked["entries"][0]["decision"]["content_approval"] is False
 
 
 def test_same_page_multiple_headings_do_not_assign_wrong_directory_owner():
@@ -151,3 +160,17 @@ def test_printed_range_uses_literal_start_label_and_retains_end():
     assert resolve_navigation(doc)["entries"][0]["target"]["physical_page"] == 2
     entries[0]["target_label"] = "1～3"
     assert resolve_navigation(doc)["entries"][0]["target"]["physical_page"] == 2
+
+
+def test_final_unlinked_navigation_is_distinct_from_legacy_deferred_decision():
+    doc = {"source": {"sha256": "a" * 64}, "pages": [page(1, "目录\n起源 1", "toc")]}
+    entries = validate_proposal(
+        doc, [{"source_page": 1, "title": "起源", "target_label": "1", "source_anchor": "起源 1"}]
+    )
+    decision = {"source_sha256": entries[0]["source_sha256"], "target": None}
+    doc["navigation"] = {"source_entries": entries, "decisions": {entries[0]["id"]: decision}}
+    assert resolve_navigation(doc)["entries"][0]["status"] == "unresolved"
+    decision["final"] = True
+    resolved = resolve_navigation(doc)["entries"][0]
+    assert resolved["status"] == "unlinked_manual"
+    assert resolved["target"] is None

@@ -3,6 +3,20 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { createBookUploader } from "@/features/uploads/uploads.ts";
 beforeEach(() => localStorage.clear());
 
+test("completed uploads retain their own book identity for the processing handoff", async () => {
+  const { uppy, prepare } = createBookUploader(async () => ({
+    book_id: "next-book",
+    session_id: "session",
+    token: "fixture",
+    endpoint: "/uploads/",
+    expires_at: "2099-01-01T00:00:00Z",
+  }));
+  const id = uppy.addFile({ name: "材料.pdf", data: new Blob(["%PDF-1.4"]) });
+  await prepare([id]);
+  expect(uppy.getFile(id).meta.book_id).toBe("next-book");
+  uppy.destroy();
+});
+
 test("deleting one book removes only its upload from the retry queue", async () => {
   const create = vi.fn().mockImplementation(async (request) => ({
     book_id: request.filename,

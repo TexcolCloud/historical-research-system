@@ -111,6 +111,94 @@ export function suggestionEdit(text: string, issue: ReviewLocation) {
   return null;
 }
 
+/** Locate a resolved edit by its unchanged surrounding context, including restored drafts. */
+export function decisionRange(text: string, issue: ReviewLocation) {
+  const exact = resolveLocation(text, issue);
+  if (exact) return exact;
+  const at =
+    issue.insertion_offset === undefined
+      ? issue.anchor.exact.indexOf(issue.focus)
+      : Array.from(issue.anchor.exact).slice(0, issue.insertion_offset).join("")
+          .length;
+  if (at < 0) return null;
+  const before = issue.anchor.prefix + issue.anchor.exact.slice(0, at);
+  const after =
+    issue.anchor.exact.slice(
+      at + (issue.insertion_offset === undefined ? issue.focus.length : 0),
+    ) + issue.anchor.suffix;
+  if (!before || !after) return null;
+  const left: number[] = [],
+    right: number[] = [];
+  if (!before) left.push(0);
+  else
+    for (let p = 0; (p = text.indexOf(before, p)) >= 0; p++)
+      left.push(p + before.length);
+  if (!after) right.push(text.length);
+  else for (let p = 0; (p = text.indexOf(after, p)) >= 0; p++) right.push(p);
+  if (left.length !== 1 || right.length !== 1 || left[0] > right[0])
+    return null;
+  return { start: left[0], end: right[0] };
+}
+
+/** Carry known positions through a single editor change; broad overlapping changes stay unlocated. */
+export function moveReviewLocations(
+  before: string,
+  after: string,
+  locations: ReviewLocation[],
+) {
+  if (before === after) return locations;
+  let start = 0,
+    end = before.length,
+    nextEnd = after.length;
+  while (start < end && start < nextEnd && before[start] === after[start])
+    start++;
+  while (
+    end > start &&
+    nextEnd > start &&
+    before[end - 1] === after[nextEnd - 1]
+  ) {
+    end--;
+    nextEnd--;
+  }
+  const delta = after.length - before.length;
+  return locations.map((location) => {
+    const range = decisionRange(before, location);
+    if (!range) return location;
+    let left = range.start,
+      right = range.end;
+    if (end <= left && start < left) {
+      left += delta;
+      right += delta;
+    } else if (start >= right && !(left === right && start === left)) {
+      /* position unchanged */
+    } else if (start >= left && end <= right) {
+      right += delta;
+    } else return location;
+    const a = Math.max(0, left - 32),
+      b = Math.min(after.length, right + 32);
+    const { insertion_offset: _old, ...rest } = location;
+    return {
+      ...rest,
+      focus: after.slice(left, right),
+      anchor:
+        left === right
+          ? {
+              exact: after.slice(a, b),
+              prefix: after.slice(Math.max(0, a - 24), a),
+              suffix: after.slice(b, b + 24),
+            }
+          : {
+              exact: after.slice(left, right),
+              prefix: after.slice(a, left),
+              suffix: after.slice(right, b),
+            },
+      ...(left === right
+        ? { insertion_offset: Array.from(after.slice(a, left)).length }
+        : {}),
+    };
+  });
+}
+
 function visible(raw: string) {
   const parsed = new DOMParser().parseFromString(
     marked.parse(raw, { async: false }),

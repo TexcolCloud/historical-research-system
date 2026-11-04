@@ -42,7 +42,7 @@ export default function DeleteBookButton({ book }: { book: Book }) {
         variant="ghost"
         size="sm"
         disabled={busy}
-        aria-label={`删除任务：${book.title}`}
+        aria-label={`删除本书及处理数据：${book.title}`}
         onClick={() => {
           deletion.reset();
           setOpen(true);
@@ -53,15 +53,15 @@ export default function DeleteBookButton({ book }: { book: Book }) {
           ? "正在删除…"
           : book.state === "delete_failed"
             ? "重试删除"
-            : "删除任务"}
+            : "删除本书及处理数据"}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除这本书的任务？</DialogTitle>
+            <DialogTitle>删除本书及全部处理数据？</DialogTitle>
             <DialogDescription>
               将删除《{book.title}
-              》及其上传文件、识别结果、章节和史料卡。正在执行的任务会自动终止，清理完成后从列表移除。此操作无法撤销。
+              》及其上传文件、识别结果、审核记录、章节、索引和历史派生记录。正在执行的任务会自动终止，清理完成后从列表移除。此操作无法撤销。
             </DialogDescription>
           </DialogHeader>
           {deletion.isError && <p role="alert">{deletion.error.message}</p>}

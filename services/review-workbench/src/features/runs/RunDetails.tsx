@@ -4,6 +4,7 @@ import { client, type Book } from "@/client/api.ts";
 import RetryRunButton from "@/features/runs/RetryRunButton.tsx";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { bookWorkspaceHref } from "@/features/books/workspace.ts";
 
 const phases = [
   { title: "接收原件", description: "文件上传与完整性校验" },
@@ -97,9 +98,28 @@ export default function RunDetails({ book }: { book: Book }) {
                   ? "处理需要恢复"
                   : book.state === "awaiting_review"
                     ? "有内容需要你核对"
-                    : "书籍正在处理中"}
+                    : (book.pending_count ?? 0) > 0 ||
+                        (book.navigation_pending_count ?? 0) > 0
+                      ? "有内容需要你确认"
+                      : "书籍正在处理中"}
         </h2>
         <p>已完成结果会保留，关闭页面不影响后台处理。</p>
+        {((book.pending_count ?? 0) > 0 ||
+          (book.navigation_pending_count ?? 0) > 0) && (
+          <div className="workspace-next-action">
+            <strong>
+              {book.pending_count ?? 0} 页正文待核对 ·{" "}
+              {book.navigation_pending_count ?? 0} 项目录待确认
+            </strong>
+            <a
+              className="workspace-primary-link"
+              href={`#${bookWorkspaceHref(book)}`}
+            >
+              开始人工核对 →
+            </a>
+            <p>你可以先完成待办，其他页面按当前运行状态继续处理。</p>
+          </div>
+        )}
         {run && !done && (run.codex_document_id || paused) && (
           <Button
             variant="outline"
@@ -296,12 +316,6 @@ export default function RunDetails({ book }: { book: Book }) {
                       <p>初轮结束后继续汇总与复核；已处理不代表内容已通过。</p>
                     </div>
                   )}
-                {needsHuman && (
-                  <a href={`#/books/${book.id}?tab=review`}>
-                    开始核对
-                    {run?.pending_count ? ` · ${run.pending_count} 项` : ""} →
-                  </a>
-                )}
               </div>
             </li>
           );

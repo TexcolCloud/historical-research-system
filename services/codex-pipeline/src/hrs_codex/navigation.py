@@ -244,11 +244,17 @@ def resolve_navigation(doc):
                 or p.get("approved", {}).get("sha256") == decision["target"]["markdown_sha256"]
             ):
                 row.update(
-                    status="matched_manual" if p else "unresolved",
+                    status="matched_manual"
+                    if p
+                    else "unlinked_manual"
+                    if decision.get("final")
+                    else "unresolved",
                     target=decision.get("target"),
                     decision=decision,
                     reason="用户确认的导航位置，不代表新增正文审批"
                     if p
+                    else "用户确认不建立关联，原目录保留"
+                    if decision.get("final")
                     else "用户选择暂不关联，原目录保留",
                 )
         if row["status"] == "waiting_evidence" and all(p.get("approved") for p in doc["pages"]):

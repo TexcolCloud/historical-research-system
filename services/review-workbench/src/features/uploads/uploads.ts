@@ -95,6 +95,7 @@ export function createBookUploader(
         persist();
       }
       uppy.setFileMeta(id, {
+        book_id: grant.book_id,
         session_id: grant.session_id,
         filename: file.name,
       });

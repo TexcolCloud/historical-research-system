@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import Dashboard from "@uppy/react/dashboard";
 import {
   Dialog,
@@ -23,11 +24,20 @@ export default function UploadPanel({
 }) {
   const [{ uppy, cancelBooks }] = useState(createBookUploader),
     query = useQueryClient();
+  const [completed, setCompleted] = useState<Record<string, string>>({});
   useEffect(() => {
     const refresh = () => {
       void query.invalidateQueries({ queryKey: booksKey });
     };
-    uppy.on("upload-success", refresh);
+    uppy.on("upload-success", (file) => {
+      refresh();
+      const bookId = file?.meta.book_id;
+      if (typeof bookId === "string")
+        setCompleted((previous) => ({
+          ...previous,
+          [bookId]: file?.name ?? "未命名材料",
+        }));
+    });
     const unsubscribe = query.getQueryCache().subscribe(() => {
       const closing =
         query
@@ -70,6 +80,26 @@ export default function UploadPanel({
           proudlyDisplayPoweredByUppy={false}
           note="PDF · 每个文件最大 256 MB · 支持暂停与继续"
         />
+        {Object.entries(completed).length > 0 && (
+          <section
+            className="workspace-upload-handoff"
+            aria-label="上传后的处理进展"
+          >
+            <h3>上传完成，系统自动接续处理</h3>
+            <p>排队、识别与核对状态以处理进展为准，无需另外启动 Codex。</p>
+            {Object.entries(completed)
+              .slice(-3)
+              .map(([id, name]) => (
+                <Link
+                  key={id}
+                  to={`/books/${id}?tab=progress`}
+                  onClick={() => onOpenChange(false)}
+                >
+                  查看《{name}》的处理进展 →
+                </Link>
+              ))}
+          </section>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -8,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import { readBooks } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
 import DeleteBookButton from "@/features/books/DeleteBookButton.tsx";
+import { bookWorkspaceHref } from "@/features/books/workspace.ts";
 import type { WorkspaceContext } from "@/app/AppShell.tsx";
 const states: Record<string, string> = {
   uploading: "正在上传",
@@ -110,7 +111,7 @@ export default function BooksPage() {
             <article key={book.id} className="platform-book-item">
               <button
                 className="platform-book"
-                onClick={() => navigate(`/books/${book.id}`)}
+                onClick={() => navigate(bookWorkspaceHref(book))}
               >
                 <div className="platform-book-cover" aria-hidden="true">
                   <BookOpen size={27} />

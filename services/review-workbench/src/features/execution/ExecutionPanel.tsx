@@ -15,7 +15,7 @@ const states: Record<string, string> = {
   queued: "排队中",
   leased: "执行中",
   ready: "等待处理",
-  pending: "待人工处理",
+  pending: "待处理",
   superseded: "已由后续处理替代",
 };
 export default function ExecutionPanel({ bookId }: { bookId: string }) {
@@ -126,8 +126,8 @@ function RunGraph({ runId }: { runId: string }) {
     <section className="execution-monitor">
       <div className="execution-heading">
         <h2>
-          {graph.nodes.filter((node) => node.kind === "agent").length} 个 Agent
-          · {graph.nodes.filter((node) => node.state === "running").length}{" "}
+          累计 {graph.nodes.length} 条处理记录 · 当前{" "}
+          {graph.nodes.filter((node) => node.state === "running").length}{" "}
           项执行中
         </h2>
         <Button
