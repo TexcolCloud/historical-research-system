@@ -7,6 +7,25 @@ import unicodedata
 from hrs_codex.hashing import digest
 
 KINDS = {"toc", "text", "frontmatter", "table", "figure", "unknown"}
+NAVIGATION_REVIEW_POLICY = "navigation-confirmation-v1"
+
+
+def navigation_requires_confirmation(entry):
+    """Unresolved links need a decision; automatic evidence collection does not."""
+    return entry.get("status") in {"conflict", "not_found", "unresolved"}
+
+
+def navigation_review_summary(navigation):
+    """Derive queue metadata without changing the source-bound navigation hash."""
+    entries = [
+        {**entry, "needs_confirmation": navigation_requires_confirmation(entry)}
+        for entry in navigation.get("entries", [])
+    ]
+    return {
+        **navigation,
+        "entries": entries,
+        "pending_count": sum(entry["needs_confirmation"] for entry in entries),
+    }
 
 
 def fingerprint(value):

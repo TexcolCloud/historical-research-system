@@ -20,7 +20,7 @@ export function navigationOptions(runId: string) {
 
 export function readingNavigationOptions(bookId: string) {
   return queryOptions<NavigationReport>({
-    queryKey: ["platform", "reading-navigation", bookId],
+    queryKey: queryKeys.readingNavigation(bookId),
     queryFn: async ({ signal }) => {
       const { data } = await client.GET(
         "/api/v2/books/{book_id}/reading-navigation",

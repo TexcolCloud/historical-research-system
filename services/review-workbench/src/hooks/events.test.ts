@@ -1,6 +1,61 @@
-import { expect, test } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { expect, test, vi } from "vitest";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { applyBookEvent, booksKey } from "@/hooks/events.ts";
+import { queryKeys } from "@/client/query-keys";
+
+test.each(["run.changed", "book.published", "library.revised"])(
+  "%s refreshes the published directory without substituting the live report",
+  async (kind) => {
+    const query = new QueryClient();
+    const publishedKey = queryKeys.readingNavigation("book");
+    const otherPublishedKey = queryKeys.readingNavigation("other");
+    const original = {
+      sha256: "old-published",
+      entries: [{ status: "not_found" }],
+    };
+    const updated = {
+      sha256: "new-published",
+      entries: [{ status: "unlinked_manual" }],
+    };
+    const live = {
+      sha256: "live-report",
+      entries: [{ status: "matched_manual" }],
+    };
+    query.setQueryData(publishedKey, original);
+    query.setQueryData(otherPublishedKey, original);
+    query.setQueryData(queryKeys.navigation("run"), live);
+    const reload = vi.fn(async () => updated);
+    const observer = new QueryObserver(query, {
+      queryKey: publishedKey,
+      queryFn: reload,
+      staleTime: Infinity,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    try {
+      expect(reload).not.toHaveBeenCalled();
+      applyBookEvent(
+        query,
+        JSON.stringify({
+          sequence: 12,
+          book_id: "book",
+          run_id: "run",
+          kind,
+          payload:
+            kind === "run.changed" ? { navigation_pending_count: 0 } : {},
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(query.getQueryData(publishedKey)).toEqual(updated),
+      );
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(query.getQueryData(queryKeys.navigation("run"))).toEqual(live);
+      expect(query.getQueryState(otherPublishedKey)?.isInvalidated).toBe(false);
+    } finally {
+      unsubscribe();
+      query.clear();
+    }
+  },
+);
 
 test("completed run events preserve the book's published reading state", () => {
   const query = new QueryClient();
@@ -57,6 +112,7 @@ test("page telemetry refreshes only run progress without invalidating reading or
     ["platform", "runs", "book"],
     ["platform", "issues", "run"],
     ["platform", "chapters", "book"],
+    queryKeys.readingNavigation("book"),
   ]) {
     query.setQueryData(key, []);
   }
@@ -77,6 +133,7 @@ test("page telemetry refreshes only run progress without invalidating reading or
     booksKey,
     ["platform", "issues", "run"],
     ["platform", "chapters", "book"],
+    queryKeys.readingNavigation("book"),
   ]) {
     expect(query.getQueryState(key)?.isInvalidated).toBe(false);
   }

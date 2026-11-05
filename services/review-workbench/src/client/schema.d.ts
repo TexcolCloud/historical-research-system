@@ -1132,6 +1132,11 @@ export interface components {
             status: string;
             /** Reason */
             reason: string;
+            /**
+             * Needs Confirmation
+             * @default false
+             */
+            needs_confirmation: boolean;
             target?: components["schemas"]["NavigationTarget"] | null;
             /** Target Url */
             target_url?: string | null;
@@ -1164,6 +1169,11 @@ export interface components {
             version: number;
             /** Sha256 */
             sha256: string;
+            /**
+             * Pending Count
+             * @default 0
+             */
+            pending_count: number;
             /**
              * Coverage Complete
              * @default false

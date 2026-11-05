@@ -81,6 +81,15 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
     void query.invalidateQueries({
       queryKey: queryKeys.runs(event.book_id),
     });
+  if (
+    (event.kind === "run.changed" &&
+      event.payload.navigation_pending_count !== undefined) ||
+    event.kind === "book.published" ||
+    event.kind === "library.revised"
+  )
+    void query.invalidateQueries({
+      queryKey: queryKeys.readingNavigation(event.book_id),
+    });
   if (event.payload.run_kind === "cards") {
     void query.invalidateQueries({
       queryKey: ["platform", "cards", event.book_id],

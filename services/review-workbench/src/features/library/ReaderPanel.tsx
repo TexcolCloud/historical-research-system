@@ -11,6 +11,7 @@ import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import { client } from "@/client/api.ts";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
 import { readingNavigationOptions } from "./navigation-query";
+import { navigationStatusLabel } from "./navigation-status";
 import {
   readingHref,
   readingRange,
@@ -230,7 +231,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
                 paddingInlineStart: `${Math.max(0, entry.level - 1) * 0.75}rem`,
               }}
             >
-              {entry.reading_target ? (
+              {entry.reading_target && !entry.needs_confirmation ? (
                 <Link
                   to={readingHref(bookId, entry.reading_target, {
                     returnTo: `/books/${bookId}?tab=reader&section=directory&tocEntry=${encodeURIComponent(entry.id)}`,
@@ -249,14 +250,31 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
                 <>
                   <span>
                     {entry.title}
-                    <small>{entry.target_label} · 暂无可靠正文位置</small>
+                    <small>
+                      {entry.target_label} · {navigationStatusLabel(entry)}
+                    </small>
                   </span>
-                  <Link
-                    className="reader-toc-management"
-                    to={`/books/${bookId}?tab=review&task=navigation&entry=${encodeURIComponent(entry.id)}`}
-                  >
-                    核对位置
-                  </Link>
+                  {entry.needs_confirmation && (
+                    <Link
+                      className="reader-toc-management"
+                      to={`/books/${bookId}?tab=review&task=navigation&entry=${encodeURIComponent(entry.id)}`}
+                    >
+                      核对位置
+                    </Link>
+                  )}
+                  {!entry.needs_confirmation &&
+                    (entry.target_image || entry.target_url) && (
+                      <a
+                        className="reader-toc-management"
+                        href={
+                          entry.target_image ?? entry.target_url ?? undefined
+                        }
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        查看对应原图
+                      </a>
+                    )}
                 </>
               )}
             </li>

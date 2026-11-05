@@ -4,6 +4,7 @@ from copy import deepcopy
 from functools import lru_cache
 from uuid import UUID, uuid5
 
+from hrs_codex.navigation import navigation_review_summary
 from hrs_codex.store import Store
 from hrs_codex.workspace import resolve_workspace
 
@@ -34,7 +35,7 @@ class Navigation:
         for entry in result["entries"]:
             entry["reading_target"] = targets.get(entry["id"])
             entry["target_chapter_id"] = targets[entry["id"]]["chapter_id"] if entry["id"] in targets else None
-        return result
+        return navigation_review_summary(result)
 
     def decide(self, run_id, entry_id, request):
         with self.engine.begin() as connection:

@@ -30,6 +30,7 @@ test("published reading directory uses its frozen report and source-bound text l
           source_image: "/toc.png",
           target_label: "4",
           status: "matched",
+          needs_confirmation: false,
           reason: "",
           target: {
             physical_page: 7,
@@ -90,6 +91,7 @@ test("an unlinked published entry still reaches its existing individual human ma
         source_image: "/toc.png",
         target_label: "9",
         status: "not_found",
+        needs_confirmation: true,
         reason: "未找到对应正文",
         target: null,
         reading_target: null,
@@ -151,6 +153,7 @@ test("a changed evidence version reports beside the action and reloads before re
     source_image: "/toc.png",
     target_label: "1",
     status: "conflict",
+    needs_confirmation: true,
     reason: "需要核对",
     candidates: [target],
   };
@@ -180,7 +183,15 @@ test("a changed evidence version reports beside the action and reloads before re
     .mockImplementation(async () => ({
       data: {
         ...getReport(),
-        entries: [{ ...entry, status: "matched_manual", target }],
+        pending_count: 0,
+        entries: [
+          {
+            ...entry,
+            status: "matched_manual",
+            needs_confirmation: false,
+            target,
+          },
+        ],
       },
       response: new Response(),
     }));
@@ -235,6 +246,7 @@ test("human task opens the candidate evidence and confirms it without a separate
     source_image: "/toc.png",
     target_label: "3",
     status: "conflict",
+    needs_confirmation: true,
     reason: "存在重复目标或目录页码与正文不一致",
     target: null,
     candidates: [target],
@@ -263,7 +275,15 @@ test("human task opens the candidate evidence and confirms it without a separate
   const post = vi.spyOn(client, "POST").mockResolvedValue({
     data: {
       ...report,
-      entries: [{ ...entry, status: "matched_manual", target }],
+      pending_count: 0,
+      entries: [
+        {
+          ...entry,
+          status: "matched_manual",
+          needs_confirmation: false,
+          target,
+        },
+      ],
     },
     response: new Response(),
   });
@@ -323,6 +343,7 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
         source_image: "/original-toc.png",
         target_label: "38",
         status: "conflict",
+        needs_confirmation: true,
         reason: "目录与正文页码不一致",
         target: null,
         candidates: [target],
@@ -343,7 +364,15 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
   const post = vi.spyOn(client, "POST").mockResolvedValue({
     data: {
       ...report,
-      entries: [{ ...report.entries[0]!, status: "matched_manual", target }],
+      pending_count: 0,
+      entries: [
+        {
+          ...report.entries[0]!,
+          status: "matched_manual",
+          needs_confirmation: false,
+          target,
+        },
+      ],
     },
     response: new Response(),
   });
@@ -394,6 +423,7 @@ test("confirmed directory entries can be reopened without turning a preview into
     source_image: "/toc.png",
     target_label: "1",
     status: "matched_manual",
+    needs_confirmation: false,
     reason: "人工确认",
     target,
     candidates: [target],
@@ -420,7 +450,15 @@ test("confirmed directory entries can be reopened without turning a preview into
   const post = vi.spyOn(client, "POST").mockResolvedValue({
     data: {
       ...report,
-      entries: [{ ...entry, status: "unlinked_manual", target: null }],
+      pending_count: 0,
+      entries: [
+        {
+          ...entry,
+          status: "unlinked_manual",
+          needs_confirmation: false,
+          target: null,
+        },
+      ],
     },
     response: new Response(),
   });

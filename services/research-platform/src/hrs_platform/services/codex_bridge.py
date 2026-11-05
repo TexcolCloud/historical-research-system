@@ -23,7 +23,12 @@ from hrs_platform.services.documents.review import Review
 from hrs_platform.services.native.artifacts import ProjectionArtifacts
 from hrs_platform.services.native.changes import NativeChanges
 from hrs_platform.services.native.commit import ProjectionCommit
-from hrs_platform.services.native.facts import PROJECTION_POLICY, projection_input, projection_state
+from hrs_platform.services.native.facts import (
+    NAVIGATION_REVIEW_POLICY,
+    PROJECTION_POLICY,
+    projection_input,
+    projection_state,
+)
 from hrs_platform.services.native.publication import NativePublication
 from hrs_platform.services.native.publication import article_groups as article_groups
 from hrs_platform.services.runs.outputs import Outputs, fingerprint
@@ -386,6 +391,7 @@ class CodexBridge:
         key = fingerprint(
             {
                 "projection_policy": PROJECTION_POLICY,
+                "navigation_review_policy": NAVIGATION_REVIEW_POLICY,
                 "page_progress": page_progress,
                 "pages": doc["pages"],
                 "tasks": [

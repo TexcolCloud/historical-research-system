@@ -82,6 +82,7 @@ function setup(initial = "/books/book?tab=reader&chapter=toc") {
             source_image: "/toc.png",
             target_label: "4",
             status: "matched",
+            needs_confirmation: false,
             reason: "",
             reading_target: target,
           },

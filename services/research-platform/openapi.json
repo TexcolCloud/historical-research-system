@@ -3136,6 +3136,11 @@
             "type": "string",
             "title": "Reason"
           },
+          "needs_confirmation": {
+            "type": "boolean",
+            "title": "Needs Confirmation",
+            "default": false
+          },
           "target": {
             "anyOf": [
               {
@@ -3275,6 +3280,12 @@
           "sha256": {
             "type": "string",
             "title": "Sha256"
+          },
+          "pending_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pending Count",
+            "default": 0
           },
           "coverage_complete": {
             "type": "boolean",

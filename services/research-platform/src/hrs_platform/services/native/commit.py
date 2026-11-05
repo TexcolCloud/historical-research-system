@@ -2,11 +2,16 @@
 
 import time
 
+from hrs_codex.navigation import navigation_requires_confirmation
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs_platform import models as db
-from hrs_platform.services.native.facts import PROJECTION_POLICY, runtime_control_for_document
+from hrs_platform.services.native.facts import (
+    NAVIGATION_REVIEW_POLICY,
+    PROJECTION_POLICY,
+    runtime_control_for_document,
+)
 
 
 class ProjectionCommit:
@@ -79,8 +84,10 @@ class ProjectionCommit:
                 "codex_projection_input": input_sha,
                 "codex_projected_sql_revision": revision,
                 "codex_page_progress": page_progress,
+                "codex_navigation_review_policy": NAVIGATION_REVIEW_POLICY,
                 "codex_navigation_pending_count": sum(
-                    e["status"] == "conflict" for e in doc.get("navigation", {}).get("entries", [])
+                    navigation_requires_confirmation(entry)
+                    for entry in doc.get("navigation", {}).get("entries", [])
                 ),
                 "codex_scheduling": scheduling,
                 "codex_execution": {

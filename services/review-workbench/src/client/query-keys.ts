@@ -7,5 +7,7 @@ export const queryKeys = {
   issues: (run: string) => ["platform", "issues", run] as const,
   issue: (id: string) => ["platform", "issue", id] as const,
   navigation: (run: string) => ["platform", "navigation", run] as const,
+  readingNavigation: (book: string) =>
+    ["platform", "reading-navigation", book] as const,
   recovery: (run: string) => ["platform", "recovery", run] as const,
 };
