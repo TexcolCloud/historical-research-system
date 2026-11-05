@@ -226,6 +226,12 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
             found = value(await client.call_tool("search_library", {"query": "1939"}))
             assert found[0]["document_id"] == doc_id
             assert found[0]["page"] == 1
+            transport = value(
+                await client.call_tool(
+                    "dispatch_work", {"document_id": doc_id, "active_session_tokens": []}
+                )
+            )
+            assert transport["assignments"] == [] and transport["retired_sessions"] == []
         # A fresh subprocess reads the same evidence and completed state.
         async with Client(
             server_parameters(root), mode="legacy", read_timeout_seconds=15

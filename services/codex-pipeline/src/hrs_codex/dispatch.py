@@ -32,13 +32,16 @@ class Dispatch:
     def sessions(self):
         return self.ledger.sessions()
 
-    def reserve(self, document_id):
+    def reserve(self, document_id, *, active_session_tokens=()):
         """Lease concrete work before allocating shared capacity to speculative warmup."""
         from hrs_codex.execution_policy import execution_policy
         from hrs_codex.scheduling import ready_tasks
 
         policy = execution_policy(self.store.root)
         with self.store.lock:
+            for token in active_session_tokens:
+                if self.session(token, allow_closed=True)["document_id"] != document_id:
+                    raise ValueError("Tracked native sessions must belong to this document")
             self.expire()
             plan = self.store.scheduling_plan(document_id)
             concrete = ready_tasks(self.store.checkpoints.read(document_id))
@@ -130,6 +133,11 @@ class Dispatch:
                         assignments.append(self.assignment(warm))
         return {
             "assignments": assignments,
+            "retired_sessions": [
+                token
+                for token in active_session_tokens
+                if self.session(token, allow_closed=True)["state"] == "exited"
+            ],
             "plan": plan,
             "sequence": self.ledger.sequence(),
             "sessions": [

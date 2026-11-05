@@ -316,9 +316,11 @@ def create_server(root: Path) -> MCPServer:
 
     @server.tool()
     @contract_errors
-    def dispatch_work(document_id: str) -> dict:
+    def dispatch_work(document_id: str, active_session_tokens: list[str] | None = None) -> dict:
         """Reserve concrete tasks and workspace capacity BEFORE spawning the assigned native roles."""
-        return store.dispatch.reserve(document_id)
+        return store.dispatch.reserve(
+            document_id, active_session_tokens=active_session_tokens or ()
+        )
 
     @server.tool(structured_output=False)
     @contract_errors

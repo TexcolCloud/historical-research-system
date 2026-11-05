@@ -103,6 +103,26 @@ def test_closing_a_worker_which_never_started_requeues_its_reserved_task(tmp_pat
     assert store.dispatch.close(assignment["session_token"], "never-started")["state"] == "exited"
 
 
+def test_dispatch_identifies_retired_native_threads_before_replacement_spawn(tmp_path):
+    from hrs_codex.execution_policy import configure_execution
+
+    store, identity = document(tmp_path, count=10)
+    configure_execution(store.root, capacity=2, overlap_reading=False)
+    assignments = store.dispatch.reserve(identity)["assignments"]
+    native_threads = {a["session_token"] for a in assignments}
+    assert len(native_threads) == 2
+    first, second = sorted(native_threads)
+    # MCP sessions can end before the coordinator receives both native completions.
+    for token in (first, second):
+        store.dispatch.close(token, "finished-before-parent-wait")
+    native_threads.remove(first)
+    result = store.dispatch.reserve(identity, active_session_tokens=list(native_threads))
+    assert result["retired_sessions"] == [second]
+    native_threads.difference_update(result["retired_sessions"])
+    native_threads.update(a["session_token"] for a in result["assignments"])
+    assert len(native_threads) <= 2
+
+
 def test_submission_timing_is_reported_without_rewriting_the_machine_receipt(tmp_path):
     store, identity = document(tmp_path)
     token = store.dispatch.reserve(identity)["assignments"][0]["session_token"]

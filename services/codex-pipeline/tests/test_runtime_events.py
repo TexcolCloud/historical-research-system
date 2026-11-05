@@ -75,6 +75,15 @@ def test_failed_spawn_without_native_id_still_returns_its_reservation():
     assert calls[0][1]["details"]["retry_after"] == 45
 
 
+def test_failed_spawn_without_diagnostic_defers_to_coordinator_tool_result():
+    calls = []
+    runtime = observer(calls)
+    # The native JSON summary omits "agent thread limit reached" from the tool result.
+    spawned(runtime, receiver_thread_ids=[], agents_states={}, status="failed")
+    assert calls == [], "An unspecified local spawn failure is not model pressure"
+    assert not runtime.reported_sessions
+
+
 def test_content_prose_and_metadata_warnings_never_trigger_pressure():
     calls = []
     runtime = observer(calls)
