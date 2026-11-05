@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
 import type { components } from "@/client/schema.d.ts";
 import RetryRunButton from "./RetryRunButton";
+import RuntimeControlNotice from "./RuntimeControlNotice";
 
 import { stageLabels as stages } from "./phase-display.ts";
 export default function RecoveryPanel({
@@ -27,11 +28,25 @@ export default function RecoveryPanel({
     run.state === "failed" && run.recovery?.state === "resumed"
       ? undefined
       : run.recovery;
+  const runtimeControl =
+    data?.unfinished_tasks === 0 ||
+    run.execution?.automatic_work_remaining === false
+      ? undefined
+      : (data?.runtime_control ?? run.scheduling?.runtime_control);
   const status =
-    saved?.state ?? (data?.state === "waiting" ? "available" : data?.state);
+    runtimeControl?.state === "blocked" &&
+    !["checking", "waiting"].includes(saved?.state ?? "")
+      ? "blocked"
+      : (saved?.state ??
+        (data?.state === "waiting" ? "available" : data?.state));
   const waiting = ["checking", "waiting", "retrying", "checkpoint"].includes(
     status ?? "",
   );
+  const visibleRuntime =
+    ["checking", "waiting"].includes(status ?? "") ||
+    (status === "blocked" && runtimeControl?.state !== "blocked")
+      ? undefined
+      : runtimeControl;
   const title =
     status === "retrying"
       ? "等待自动重试"
@@ -42,7 +57,9 @@ export default function RecoveryPanel({
           : status === "waiting"
             ? "等待上一次处理结束"
             : status === "blocked"
-              ? "恢复检查未通过"
+              ? runtimeControl?.state === "blocked"
+                ? "自动处理等待恢复"
+                : "恢复检查未通过"
               : status === "resumed" && run.state === "queued"
                 ? "已加入恢复队列"
                 : data?.automatic_checkpoint_used
@@ -61,7 +78,10 @@ export default function RecoveryPanel({
           <button onClick={() => void report.refetch()}>重新读取</button>
         </p>
       )}
-      <p>{saved?.reason || data?.reason}</p>
+      {(!visibleRuntime || visibleRuntime.state === "normal") && (
+        <p>{saved?.reason || data?.reason}</p>
+      )}
+      <RuntimeControlNotice control={visibleRuntime} />
       {data?.preserved_ocr != null && (
         <p>
           已保留：{data.preserved_ocr} 页识别，{data.preserved_approved ?? 0}{" "}

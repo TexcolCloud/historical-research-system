@@ -9,7 +9,7 @@ STAGES = ("ocr", "review", "verify", "navigation", "organization")
 
 def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading=False):
     now = time.time() if now is None else now
-    capacity = max(2, min(64, capacity))
+    capacity = max(1, min(64, capacity))
     tasks = doc["tasks"]
     active = {
         s: {
@@ -87,6 +87,7 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
             or (t["state"] == "leased" and t.get("claim", {}).get("expires_at", 0) <= now)
         )
         and t.get("retry_after", 0) <= now
+        and not t.get("technical_blocked")
     )
     work = {s: eligible[s] + len(active[s]) for s in STAGES}
     if overlap_reading and work["ocr"]:
@@ -130,6 +131,17 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
         and sum(workers.values()) < capacity
     ):
         workers["organization"] = 1
+    if capacity == 1:
+        # Recovery probes must perform ready work, rather than await a future candidate.
+        selected = next(
+            (
+                s
+                for s in ("verify", "review", "ocr", "navigation", "organization")
+                if eligible[s] or active[s]
+            ),
+            None,
+        )
+        workers = {stage: int(stage == selected) for stage in STAGES}
     scheduler = doc.get("scheduler", {})
     previous = scheduler.get("allocation", {})
     if (

@@ -6,7 +6,7 @@ from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs_platform import models as db
-from hrs_platform.services.native.facts import PROJECTION_POLICY
+from hrs_platform.services.native.facts import PROJECTION_POLICY, runtime_control_for_document
 
 
 class ProjectionCommit:
@@ -31,6 +31,11 @@ class ProjectionCommit:
         navigation_sha,
     ):
         request = doc.get("run_request", {})
+        if "runtime_control" in scheduling:
+            scheduling = {
+                **scheduling,
+                "runtime_control": runtime_control_for_document(doc, scheduling["runtime_control"]),
+            }
         with self.engine.begin() as connection:
             from hrs_platform.services.deletion import require_active
 

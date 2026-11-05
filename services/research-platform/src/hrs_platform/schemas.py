@@ -108,6 +108,24 @@ class StageMetrics(BaseModel):
     phase_medians: dict[str, float] = Field(default_factory=dict)
 
 
+class RuntimeControlScope(BaseModel):
+    scope: Literal["account", "model"]
+    model: str | None = None
+    state: Literal["normal", "cooldown", "probing", "recovering", "blocked"]
+    code: str | None = None
+    limit: int = Field(ge=0)
+    configured_limit: int = Field(ge=0)
+    retry_at: float | None = None
+    reason: str | None = None
+    failures: int = Field(default=0, ge=0)
+
+
+class RuntimeControlReport(BaseModel):
+    state: Literal["normal", "cooldown", "probing", "recovering", "blocked"] = "normal"
+    scopes: list[RuntimeControlScope] = Field(default_factory=list)
+    next_retry_at: float | None = None
+
+
 class SchedulingReport(BaseModel):
     capacity: int
     workers: dict[str, int]
@@ -117,6 +135,7 @@ class SchedulingReport(BaseModel):
     cooldown_until: float = 0
     runtime_counts: dict[str, int] = Field(default_factory=dict)
     workspace_occupied: int = 0
+    runtime_control: RuntimeControlReport | None = None
 
 
 class RecoveryReport(BaseModel):
@@ -133,6 +152,7 @@ class RecoveryReport(BaseModel):
     automatic_checkpoint_used: bool = False
     retry_limit: int = 3
     evidence_checked: bool = False
+    runtime_control: RuntimeControlReport | None = None
 
 
 class RunSummary(BaseModel):

@@ -40,6 +40,12 @@ class Store:
         self.tasks = TaskWorkflow(self.context, self.navigation)
         self.dispatch = Dispatch(self)
 
+    @property
+    def runtime_control(self):
+        from hrs_codex.runtime_control import RuntimeControl
+
+        return RuntimeControl(self.root, self.checkpoints.ledger)
+
     def document_directory(self, document_id):
         return self.checkpoints.directory(document_id)
 
@@ -144,8 +150,12 @@ class Store:
     def upgrade_review_policy(self, document_id: str, protected_pages=()):
         return self.tasks.upgrade_review_policy(document_id, protected_pages)
 
-    def report_task_failure(self, document_id: str, task_id: str, lease_token: str, code: str):
-        return self.tasks.report_task_failure(document_id, task_id, lease_token, code)
+    def report_task_failure(
+        self, document_id: str, task_id: str, lease_token: str, code: str, *, details=None
+    ):
+        return self.tasks.report_task_failure(
+            document_id, task_id, lease_token, code, details=details
+        )
 
     def claim_task(
         self,

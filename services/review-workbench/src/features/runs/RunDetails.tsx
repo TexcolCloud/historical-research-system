@@ -4,6 +4,9 @@ import { Check, LoaderCircle, Circle } from "lucide-react";
 import { client, type Book } from "@/client/api.ts";
 import RecoveryPanel from "@/features/runs/RecoveryPanel.tsx";
 import RetryRunButton from "@/features/runs/RetryRunButton.tsx";
+import RuntimeControlNotice, {
+  runtimeControlTitles,
+} from "./RuntimeControlNotice";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { bookWorkspaceHref } from "@/features/books/workspace.ts";
@@ -56,6 +59,25 @@ export default function RunDetails({ book }: { book: Book }) {
   const recoveryBusy = ["checking", "waiting"].includes(
     run?.recovery?.state ?? "",
   );
+  const runtimeControl =
+    !done && !paused && run?.execution?.automatic_work_remaining !== false
+      ? run?.scheduling?.runtime_control
+      : undefined;
+  const runtimeWaiting = ["cooldown", "probing", "blocked"].includes(
+    runtimeControl?.state ?? "",
+  );
+  const runtimeTitle =
+    runtimeControl && runtimeControl.state !== "normal"
+      ? runtimeControlTitles[runtimeControl.state]
+      : undefined;
+  const showRecovery = Boolean(
+    run?.codex_document_id &&
+    !done &&
+    (failed ||
+      queued ||
+      runtimeControl?.state === "blocked" ||
+      ["checking", "waiting", "blocked"].includes(run.recovery?.state ?? "")),
+  );
   const active = ["organization", "indexing", "ingestion", "complete"].includes(
     book.stage ?? "",
   )
@@ -96,27 +118,24 @@ export default function RunDetails({ book }: { book: Book }) {
         <h2>
           {paused
             ? "自动处理已暂停"
-            : run?.state === "queued"
-              ? "已排队，等待处理"
-              : done
-                ? "本书处理完成"
-                : failed
-                  ? "处理需要恢复"
-                  : book.state === "awaiting_review"
-                    ? "有内容需要你核对"
-                    : (book.pending_count ?? 0) > 0 ||
-                        (book.navigation_pending_count ?? 0) > 0
-                      ? "有内容需要你确认"
-                      : "书籍正在处理中"}
+            : runtimeTitle
+              ? runtimeTitle
+              : run?.state === "queued"
+                ? "已排队，等待处理"
+                : done
+                  ? "本书处理完成"
+                  : failed
+                    ? "处理需要恢复"
+                    : book.state === "awaiting_review"
+                      ? "有内容需要你核对"
+                      : (book.pending_count ?? 0) > 0 ||
+                          (book.navigation_pending_count ?? 0) > 0
+                        ? "有内容需要你确认"
+                        : "书籍正在处理中"}
         </h2>
         <p>已完成结果会保留，关闭页面不影响后台处理。</p>
-        {run?.codex_document_id &&
-          !done &&
-          (failed ||
-            queued ||
-            ["checking", "waiting", "blocked"].includes(
-              run.recovery?.state ?? "",
-            )) && <RecoveryPanel run={run} />}
+        {showRecovery && run && <RecoveryPanel run={run} />}
+        {!showRecovery && <RuntimeControlNotice control={runtimeControl} />}
         {run?.codex_document_id && (
           <details>
             <summary>查看自动处理方式</summary>
@@ -160,6 +179,7 @@ export default function RunDetails({ book }: { book: Book }) {
                   !failed &&
                   !paused &&
                   !queued &&
+                  !runtimeWaiting &&
                   book.state !== "awaiting_review" &&
                   !needsHuman ? (
                   <LoaderCircle size={20} className="platform-spin" />
@@ -278,16 +298,19 @@ export default function RunDetails({ book }: { book: Book }) {
           {pageProgress.pending} 页待你核对。
           {paused
             ? "恢复后，系统继续其余页面。"
-            : run?.execution?.automatic_work_remaining
-              ? failed
-                ? "其余页面的自动处理已停止，恢复后继续；可先核对已生成的待办。"
-                : "其余页面仍在自动处理，可同时核对。"
-              : "自动处理已结束，确认剩余内容后继续整理入库。"}
+            : runtimeWaiting
+              ? "服务恢复状态见上方提示，可先核对已生成的待办。"
+              : run?.execution?.automatic_work_remaining
+                ? failed
+                  ? "其余页面的自动处理已停止，恢复后继续；可先核对已生成的待办。"
+                  : "其余页面仍在自动处理，可同时核对。"
+                : "自动处理已结束，确认剩余内容后继续整理入库。"}
         </p>
       )}
       {run?.execution &&
         !done &&
         !recoveryBusy &&
+        (!runtimeControl || runtimeControl.state === "normal") &&
         !(failed && run.codex_document_id) && (
           <p role="status">
             {run.execution.coordinator_active
@@ -326,9 +349,10 @@ export default function RunDetails({ book }: { book: Book }) {
               {run.scheduling.workspace_occupied ?? 0} 个名额（含启动中）。
             </p>
           )}
-          {run.scheduling.cooldown_until > Date.now() / 1000 && (
-            <p>服务暂时限制请求，系统稍后自动重试。</p>
-          )}
+          {!runtimeControl &&
+            run.scheduling.cooldown_until > Date.now() / 1000 && (
+              <p>服务暂时限制请求，系统稍后自动重试。</p>
+            )}
           <table>
             <thead>
               <tr>

@@ -98,7 +98,10 @@ class Runner:
         try:
             self.execute(self.store, request["document_id"], stop_event=run_stop)
         except Exception as error:  # noqa: BLE001 - persist failures from the execution adapter
-            failure = {"type": type(error).__name__, "message": str(error)}
+            failure = getattr(error, "failure", None) or {
+                "type": type(error).__name__,
+                "message": str(error),
+            }
         finally:
             done.set()
             thread.join(timeout=5)

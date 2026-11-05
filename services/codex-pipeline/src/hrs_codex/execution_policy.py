@@ -1,7 +1,6 @@
 """Workspace execution limits, independent of frozen content acceptance policy."""
 
 import json
-import time
 from pathlib import Path
 
 from hrs_codex.checkpoints import atomic_json, read_snapshot
@@ -23,15 +22,19 @@ def validate(values):
     return result
 
 
-def execution_policy(root):
+def configured_policy(root):
     path = Path(root) / "execution-policy.json"
     values = json.loads(read_snapshot(path)) if path.exists() else {}
-    result = validate(values)
-    pressure = Path(root) / "execution-pressure.json"
-    if pressure.exists():
-        state = json.loads(read_snapshot(pressure))
-        if state["until"] > time.time():
-            result["capacity"] = min(result["capacity"], state["capacity"])
+    return validate(values)
+
+
+def execution_policy(root):
+    result = configured_policy(root)
+    if (Path(root) / "ledger.sqlite3").exists():
+        from hrs_codex.runtime_control import RuntimeControl
+
+        account = RuntimeControl(root).snapshot()["account"]
+        result["capacity"] = min(result["capacity"], account["limit"])
     return result
 
 
@@ -45,13 +48,10 @@ def configure_execution(root, *, capacity, batch_pages=8, overlap_reading=True):
 
 def record_pressure(root, code):
     """Called under the workspace command lock; reduce new admissions across books."""
-    current = execution_policy(root)
-    if code in {"rate_limit", "429", "service_unavailable"}:
-        atomic_json(
-            Path(root) / "execution-pressure.json",
-            {
-                "capacity": max(2, current["capacity"] // 2),
-                "until": time.time() + 300,
-                "code": code,
-            },
-        )
+    if (Path(root) / "ledger.sqlite3").exists():
+        from uuid import uuid4
+
+        from hrs_codex.runtime_control import RuntimeControl
+
+        return RuntimeControl(root).failure(code, "legacy:" + uuid4().hex, scope="account")
+    raise ValueError("Runtime control requires a writable ledger workspace")

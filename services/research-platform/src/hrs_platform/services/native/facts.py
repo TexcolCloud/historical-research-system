@@ -9,7 +9,48 @@ from hrs_platform.services.runs.outputs import fingerprint
 PROJECTION_POLICY = "codex-platform-v9-page-fragments"
 
 
-def projection_input(doc):
+def runtime_control_for_document(doc, control):
+    """Project shared runtime pressure only onto this document's remaining work."""
+    if not control:
+        return None
+    from hrs_codex.runtime_control import SOL, model_for_stage
+
+    policy = doc.get("processing_policy", {})
+    models = (
+        {
+            task.get("actual_model")
+            or task.get("claim", {}).get("actual_model")
+            or policy.get(
+                "ocr_model"
+                if task["stage"] == "ocr"
+                else "organization_model"
+                if task["stage"] in {"navigation", "organization"}
+                else "review_model"
+            )
+            or model_for_stage(task["stage"])
+            for task in doc["tasks"]
+            if task["state"] in {"ready", "leased"}
+        }
+        if doc["state"] != "published"
+        else set()
+    )
+    if models:
+        models.add(doc.get("run_request", {}).get("actual_model") or SOL)
+    scopes = [
+        scope
+        for scope in control.get("scopes", [])
+        if models and (scope["scope"] == "account" or scope.get("model") in models)
+    ]
+    priority = {"normal": 0, "recovering": 1, "probing": 2, "cooldown": 3, "blocked": 4}
+    state = max((scope["state"] for scope in scopes), key=priority.get, default="normal")
+    return {
+        "state": state,
+        "scopes": scopes,
+        "next_retry_at": min((scope["retry_at"] for scope in scopes if scope.get("retry_at")), default=None),
+    }
+
+
+def projection_input(doc, runtime_control=None):
     # Heartbeat extensions alone do not change the reading or execution projection.
     return fingerprint(
         {
@@ -36,12 +77,19 @@ def projection_input(doc):
                 for t in doc["tasks"]
             ],
             "scheduling": scheduling_plan(doc),
+            "runtime_control": runtime_control_for_document(doc, runtime_control)
+            if doc["state"] != "published" and any(t["state"] in {"ready", "leased"} for t in doc["tasks"])
+            else None,
         }
     )
 
 
 def projection_state(run, doc, scheduling, pending, publication_sha, navigation_sha):
     request = doc.get("run_request", {})
+    runtime = runtime_control_for_document(doc, scheduling.get("runtime_control"))
+    blocked = scheduling["automatic_work_remaining"] and (
+        (runtime and runtime["state"] == "blocked") or scheduling.get("technical_blocked", 0)
+    )
     state = (
         "paused"
         if request.get("pause_requested") or request.get("state") == "paused"
@@ -55,7 +103,7 @@ def projection_state(run, doc, scheduling, pending, publication_sha, navigation_
         else "awaiting_review"
         if pending and not scheduling["automatic_work_remaining"]
         else "failed"
-        if request.get("state") == "retryable_error"
+        if request.get("state") == "retryable_error" or blocked
         else "queued"
         if request.get("state") == "pending"
         else "running"

@@ -29,6 +29,22 @@ class TaskWorkflow:
             from hrs_codex.execution_policy import execution_policy
 
             plan = scheduling_plan(doc, **execution_policy(self.context.repository.root))
+            from hrs_codex.runtime_control import RuntimeControl
+
+            control = RuntimeControl(self.context.repository.root, self.context.repository.ledger)
+            plan["runtime_control"] = control.snapshot()
+            from hrs_codex.runtime_control import model_for_stage
+
+            remaining = {}
+            for stage in ("verify", "review", "ocr", "navigation", "organization"):
+                model = model_for_stage(stage)
+                gate = control.gate(model)
+                allowance = remaining.setdefault(model, gate["limit"] if gate["allowed"] else 0)
+                plan["workers"][stage] = min(plan["workers"][stage], allowance)
+                remaining[model] -= plan["workers"][stage]
+            plan["technical_blocked"] = sum(
+                bool(task.get("technical_blocked")) for task in doc["tasks"]
+            )
             if self.context.repository.ledger:
                 from collections import Counter
                 from statistics import median
@@ -99,24 +115,58 @@ class TaskWorkflow:
             return {"reopened_pages": reopened}
 
     def report_task_failure(
-        self, document_id: str, task_id: str, lease_token: str, code: str
+        self, document_id: str, task_id: str, lease_token: str, code: str, *, details=None
     ) -> dict:
         if code not in TECHNICAL_FAILURE_CODES:
             raise ValueError("Use a supported technical failure code")
-        with self.context.repository.lock:
+        from hrs_codex.runtime_control import RuntimeControl, model_for_stage
+
+        repository = self.context.repository
+        with repository.lock, repository.ledger.connect(write=True):
             doc = self.context.repository.read(document_id)
             task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
             if task["state"] != "leased" or task["claim"]["lease_token"] != lease_token:
+                if any(
+                    f["claim"]["lease_token"] == lease_token
+                    for f in task.get("technical_failures", [])
+                ):
+                    return {"state": task["state"], "duplicate": True}
                 raise LeaseConflict("Task does not have this active lease")
+            details = details or {}
+            control = RuntimeControl(repository.root, repository.ledger)
+            pressure = control.failure(
+                code,
+                "task:" + task_id + ":" + lease_token,
+                model=task["claim"].get("actual_model", model_for_stage(task["stage"])),
+                scope=details.get("scope", "account" if not details else "model"),
+                retry_after_seconds=details.get("retry_after"),
+                observed_capacity=(
+                    repository.ledger.capacity_used()
+                    if details.get("scope", "account" if not details else "model") == "account"
+                    else repository.ledger.model_capacity_used(
+                        task["claim"].get("actual_model", model_for_stage(task["stage"]))
+                    )
+                ),
+            )
             failures = task.setdefault("technical_failures", [])
-            failures.append({"code": code, "at": time.time(), "claim": dict(task["claim"])})
+            failures.append(
+                {
+                    "code": code,
+                    "at": time.time(),
+                    "claim": dict(task["claim"]),
+                    "event_id": details.get("event_id"),
+                    "evidence": details.get("evidence"),
+                }
+            )
             task["state"] = "ready"
-            task["retry_after"] = time.time() + min(300, 30 * 2 ** (len(failures) - 1))
-            if code in {"rate_limit", "429", "service_unavailable"}:
+            attempts = len(failures) - task.get("technical_retry_since", 0)
+            task["technical_blocked"] = attempts >= task.get("technical_retry_limit", 3)
+            task["retry_after"] = max(
+                time.time() + min(300, 30 * 2 ** min(attempts - 1, 4)),
+                pressure.get("retry_at", 0),
+            )
+            if details.get("scope", "account" if not details else "model") == "account":
                 doc.setdefault("scheduler", {})["cooldown_until"] = task["retry_after"]
-                from hrs_codex.execution_policy import record_pressure
-
-                record_pressure(self.context.repository.root, code)
             ledger = self.context.repository.ledger
             session = (
                 next(
@@ -135,11 +185,13 @@ class TaskWorkflow:
             )
             if session:
                 session.update(state="cooldown", expires_at=task["retry_after"], failure_code=code)
+                control.release(session["session_token"])
             self.commit(doc, session)
             return {
                 "state": task["state"],
                 "retry_after": task["retry_after"],
                 "attempts": len(failures),
+                "technical_blocked": task["technical_blocked"],
             }
 
     def claim_task(
@@ -176,6 +228,7 @@ class TaskWorkflow:
                 for task in doc["tasks"]
                 if task["stage"] == stage
                 and task["state"] in {"ready", "leased"}
+                and not task.get("technical_blocked")
                 and task.get("retry_after", 0) <= time.time()
                 and (task["state"] != "leased" or task["claim"]["expires_at"] <= time.time())
                 and (
@@ -189,7 +242,10 @@ class TaskWorkflow:
             ]
             return min(candidates, key=lambda task: task_priority(doc, task), default=None)
 
-        with self.context.verified_task(document_id, selector=select_candidate) as doc:
+        with (
+            self.context.verified_task(document_id, selector=select_candidate) as doc,
+            self.context.repository.ledger.connect(write=True),
+        ):
             require_active(doc)
             if scheduled:
                 from hrs_codex.execution_policy import execution_policy
@@ -232,13 +288,32 @@ class TaskWorkflow:
             inputs = self.context.inputs(doc, task)
             if inputs.get("prior_worker_id") == worker_id:
                 raise ValueError("Review and correction verification require a separate subagent")
+            from hrs_codex.runtime_control import RuntimeControl, model_for_stage
+
+            control = RuntimeControl(self.context.repository.root, self.context.repository.ledger)
+            model = (session or {}).get("actual_model", model_for_stage(stage))
+            lease_token = uuid4().hex
+            ledger = self.context.repository.ledger
+            owner = (session or {}).get("session_token", lease_token)
+            admission = control.admit(
+                model,
+                owner,
+                occupied=ledger.model_capacity_used(model, (session or {}).get("session_token")),
+                total_occupied=ledger.capacity_used((session or {}).get("session_token")),
+                lease_seconds=lease_seconds,
+            )
+            if not admission["allowed"]:
+                return None
             claim = {
                 "worker_id": worker_id,
-                "lease_token": uuid4().hex,
+                "lease_token": lease_token,
                 "expires_at": time.time() + lease_seconds,
                 "started_at": time.time(),
                 "input_sha256": digest(inputs),
             }
+            from hrs_codex.runtime_control import model_for_stage
+
+            claim["actual_model"] = (session or {}).get("actual_model", model_for_stage(stage))
             if task.get("source_reading"):
                 task.setdefault("source_reading_history", []).append(task.pop("source_reading"))
             task.pop("image_access", None)
@@ -418,16 +493,24 @@ class TaskWorkflow:
             }
             if session is not None and session.get("submission_sha256"):
                 session.setdefault("submissions", {})[session.pop("submission_sha256")] = outcome
-            self.commit(doc, session)
+            with self.context.repository.ledger.connect(write=True):
+                self.commit(doc, session)
+                from hrs_codex.runtime_control import RuntimeControl, model_for_stage
+
+                RuntimeControl(
+                    self.context.repository.root, self.context.repository.ledger
+                ).success(
+                    claim.get("actual_model", model_for_stage(stage)),
+                    session["session_token"] if session else lease_token,
+                    "submitted:" + task_id + ":" + lease_token,
+                )
             return outcome
 
     def commit(self, doc, session=None):
-        if session is None:
-            self.context.repository.write(doc)
-            return
         with self.context.repository.ledger.connect(write=True):
             self.context.repository.write(doc)
-            self.context.repository.ledger.save_session(session)
+            if session is not None:
+                self.context.repository.ledger.save_session(session)
 
     def retry_task(self, document_id: str, task_id: str) -> dict:
         with self.context.repository.lock:

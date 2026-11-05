@@ -92,7 +92,11 @@ free slots. If a native worker errors before it can call MCP (for example model 
 call finish_worker(session_token,worker_id,failure_code='service_unavailable' or the precise supported
 technical code), then close that native agent. This records capacity pressure and returns its lease;
 do not leave a failed starting reservation occupying the pool. Never mark a page pending for outages.
-After three repeated technical worker failures stop with an explicit error, retaining checkpoints.
+The durable runtime control owns worker failure budgets, per-model cooldown and single real-task
+probes. Honor dispatch_work's runtime_control, technical_blocked, cooldown_until and next_ready_at;
+do not reset pressure, switch models or invent your own worker retry counter. A capacity failure
+does not stop healthy stages. The process supervisor stops an idle coordinator when all automatic
+work is technically blocked, preserving checkpoints.
 Do not wait for an entire batch. Respect starting/idle/busy/cooldown sessions, which
 already occupy capacity. Do not spawn extra workers, repeatedly query status, plan allocations,
 read source text, OCR, review, organize or approve content yourself. A worker's open_task_packet
@@ -100,7 +104,7 @@ already contains original pixels, hashes, policy and stage rules. No workflow_in
 task_details calls are needed in this execution path. Do not import or enqueue yourself again.
 If no assignments exist but native agents remain active, wait for their completion. If no native
 agents remain but automatic_work_remaining is true, call wait_for_changes then dispatch_work;
-honor cooldown_until and next_ready_at. After three repeated technical failures stop explicitly;
+honor cooldown_until and next_ready_at. After three repeated unexpected MCP execution errors stop explicitly;
 do not create content uncertainty for outages. Pending human pages do not stop other ready work.
 For a worker's explicit report of missing visible content in native/mixed extraction, wait until
 active workers finish, then use fallback_page with that page, reason and source evidence. The tool

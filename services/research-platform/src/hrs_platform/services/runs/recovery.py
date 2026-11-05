@@ -124,7 +124,8 @@ def native_report(settings, engine, run_id):
         raise ServiceError(409, "本任务使用历史恢复入口。")
     saved = (run["result"] or {}).get("codex_recovery", {})
     try:
-        doc = Store(resolve_workspace(settings.codex_root)).status(identity)
+        store = Store(resolve_workspace(settings.codex_root))
+        doc = store.status(identity)
     except (OSError, ValueError):
         return {
             "state": "blocked",
@@ -167,6 +168,40 @@ def native_report(settings, engine, run_id):
         report.update(saved)
     if report["state"] == "waiting":
         report["reason"] = "上一次处理尚未结束，系统会在结束后继续恢复检查。"
+    if report["unfinished_tasks"]:
+        from hrs_platform.services.native.facts import runtime_control_for_document
+
+        control = runtime_control_for_document(doc, store.runtime_control.snapshot())
+        report["runtime_control"] = control
+        if control and saved.get("state") not in {"checking", "waiting"}:
+            if control["state"] == "blocked":
+                blocked = next(s for s in control["scopes"] if s["state"] == "blocked")
+                code = blocked.get("code")
+                report.update(
+                    state="blocked",
+                    retry_at=None,
+                    reason=(
+                        "登录状态需要修复，请重新登录后从断点恢复。"
+                        if code in {"authentication", "auth", "unauthorized", "login_required"}
+                        else "账户额度已用尽，请在额度恢复后从断点恢复。"
+                        if code in {"quota_exhausted", "insufficient_quota", "quota"}
+                        else "自动恢复已停止。请检查故障原因后从断点恢复。"
+                    ),
+                )
+            elif control["state"] in {"cooldown", "probing"} and not exhausted:
+                report.update(
+                    state="retrying",
+                    retry_at=control.get("next_retry_at"),
+                    reason="受限模型正在等待或尝试恢复，已保存结果保留，无需重复点击。",
+                )
+        if saved.get("state") not in {"checking", "waiting"} and any(
+            task.get("technical_blocked") and task["state"] in {"ready", "leased"} for task in doc["tasks"]
+        ):
+            report.update(
+                state="blocked",
+                retry_at=None,
+                reason="部分任务的自动尝试次数已达上限。已保存结果保留，请检查故障后从断点恢复。",
+            )
     report.setdefault("action", "从断点恢复")
     return report
 

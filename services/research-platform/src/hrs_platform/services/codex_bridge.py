@@ -43,6 +43,7 @@ class CodexBridge:
         self.thread = None
         self.verified_at = {}
         self.changes = NativeChanges(self.store.checkpoints)
+        self.runtime_projection_sha = None
         self.artifacts = ProjectionArtifacts(self.store, self.objects, self.review, engine)
         self.commit = ProjectionCommit(
             engine, workflow_test=(self.store.root / ".workflow-test-authorization.json").exists()
@@ -102,6 +103,10 @@ class CodexBridge:
                     self.changes.pending.setdefault(identity, set())
             except Exception as error:  # noqa: BLE001 - retain each independent run's recoverable failure
                 self.failure(event["run_id"], error)
+        runtime_sha = fingerprint(self.store.runtime_control.snapshot())
+        if runtime_sha != self.runtime_projection_sha:
+            self.runtime_projection_sha = runtime_sha
+            self.changes.reconcile_at = 0
         changed = self.changes.poll()
         if changed == []:
             self.delete_pending()
@@ -345,7 +350,7 @@ class CodexBridge:
             return
         doc_id = run["result"]["codex_document_id"]
         snapshot = self.store.status(doc_id)
-        input_sha = self.projection_input(snapshot)
+        input_sha = projection_input(snapshot, self.store.runtime_control.snapshot())
         unchanged = (
             run["result"].get("codex_projection_input") == input_sha
             and run["result"].get("codex_projected_sql_revision") == run["revision"]
@@ -374,7 +379,7 @@ class CodexBridge:
         run = self.publication.index_if_needed(run, doc)
         if self.apply_decisions(run, doc):
             doc = self.store.status(doc_id)
-        input_sha = self.projection_input(doc)
+        input_sha = projection_input(doc, self.store.runtime_control.snapshot())
         navigation_sha = doc.get("navigation", {}).get("sha256")
         scheduling = self.store.scheduling_plan(doc_id)
         page_progress = document_progress(doc)

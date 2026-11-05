@@ -1237,6 +1237,7 @@ export interface components {
              * @default false
              */
             evidence_checked: boolean;
+            runtime_control?: components["schemas"]["RuntimeControlReport"] | null;
         };
         /** RecoveryRequest */
         RecoveryRequest: {
@@ -1486,6 +1487,49 @@ export interface components {
             execution?: components["schemas"]["RunExecution"] | null;
             scheduling?: components["schemas"]["SchedulingReport"] | null;
         };
+        /** RuntimeControlReport */
+        RuntimeControlReport: {
+            /**
+             * State
+             * @default normal
+             * @enum {string}
+             */
+            state: "normal" | "cooldown" | "probing" | "recovering" | "blocked";
+            /** Scopes */
+            scopes?: components["schemas"]["RuntimeControlScope"][];
+            /** Next Retry At */
+            next_retry_at?: number | null;
+        };
+        /** RuntimeControlScope */
+        RuntimeControlScope: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "account" | "model";
+            /** Model */
+            model?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "normal" | "cooldown" | "probing" | "recovering" | "blocked";
+            /** Code */
+            code?: string | null;
+            /** Limit */
+            limit: number;
+            /** Configured Limit */
+            configured_limit: number;
+            /** Retry At */
+            retry_at?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Failures
+             * @default 0
+             */
+            failures: number;
+        };
         /** RuntimeStatus */
         RuntimeStatus: {
             /** Backend */
@@ -1535,6 +1579,7 @@ export interface components {
              * @default 0
              */
             workspace_occupied: number;
+            runtime_control?: components["schemas"]["RuntimeControlReport"] | null;
         };
         /** SearchContext */
         SearchContext: {

@@ -94,9 +94,11 @@ The project `historical-research` skill calls `workspace_status`, then
 library. Its durable executor starts native Codex coordinators and automatically
 resumes when the human form approves the last pending page. A browser/chat can
 close without losing submitted checkpoints. A queued run is not a completed run.
-Technical failures use persisted backoff and stop after three failures until an
-explicit resume; do not turn a network/service error into an unreadable-source
-verdict. An executing coordinator uses the lower-level tools below, not a second
+Technical failures use durable account/model admission and persisted backoff. A
+coordinator has three execution attempts and, when enabled, one additional validated
+checkpoint recovery. A task stops receiving automatic claims after three technical
+failures; explicit recovery grants a bounded new budget without changing content.
+Do not turn a network/service error into an unreadable-source verdict. An executing coordinator uses the lower-level tools below, not a second
 `process_document`/`resume_document` call for its own active run.
 
 ## PDF page routes
@@ -273,8 +275,24 @@ session. Explicit configure-execution settings select shared capacity (2–64) a
 warm batches (1–8), never a guarantee of account/provider throughput. Honor the
 returned capacity, batch_size and session_max_tasks; retire exited native agents
 before replacement. Original reading, prewarming and cooldown all occupy slots.
-Rate limits/service capacity errors reduce new admissions across the workspace for
-five minutes; active pages finish and document retry budgets remain bounded.
+Structured native runtime diagnostics and MCP reports enter one transactional failure
+path. Rate limits/service capacity errors reduce new admissions within the affected
+model or account. Cooldown uses explicit retry information when available, otherwise
+30/60/120/240/300-second backoff with stable jitter. Concurrent failures in one cooldown
+round reduce capacity only once. Original text and ordinary agent messages are never
+searched for outage keywords. Unexposed worker failures use lease timeout rather than
+an invented capacity diagnosis.
+
+Cooldown expiry permits one real, dependency-ready task probe. Prewarming cannot own
+that probe. Probe success is counted only after the actual result commits; pre-outage
+tasks, startup success and duplicate submissions cannot restore capacity. Recovery
+starts at one slot and increases by one after at least two successful results and
+30 seconds. Account and model limits both apply across books. Half-open coordinators
+restart serially without consuming the worker probe. Six failed rounds or 1800 seconds
+of unsuccessful cooldown/probing blocks that scope; healthy recovery is not subject to
+the waiting deadline. Quota exhaustion and authentication errors wait for explicit
+technical recovery. Models never change automatically. Active pages and original-first
+preflight reading finish; expired reading sessions count as technical timeouts.
 Actual per-stage receipt durations, review backlog and available work determine
 the next allocation. Do not interrupt an active page to rebalance. A pending human
 page never stops other work. Existing nonempty lanes hold their allocation for

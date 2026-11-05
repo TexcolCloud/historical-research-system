@@ -163,7 +163,10 @@ def create_server(root: Path) -> MCPServer:
         code: FailureCode,
     ) -> dict:
         """Retain technical failures separately from source uncertainty and reduce admissions."""
-        return store.report_task_failure(document_id, task_id, lease_token, code)
+        scope = "account" if code in {"authentication", "quota_exhausted"} else "model"
+        return store.report_task_failure(
+            document_id, task_id, lease_token, code, details={"scope": scope}
+        )
 
     @server.tool()
     @contract_errors
@@ -386,7 +389,12 @@ def create_server(root: Path) -> MCPServer:
         session_token: str, worker_id: str, failure_code: FailureCode | None = None
     ) -> dict:
         """Release an idle native worker; active pages must finish or report a technical failure."""
-        return store.dispatch.close(session_token, worker_id, failure_code=failure_code)
+        if failure_code is not None:
+            scope = "account" if failure_code in {"authentication", "quota_exhausted"} else "model"
+            return store.dispatch.fail_runtime(
+                session_token, worker_id, failure_code, details={"scope": scope}
+            )
+        return store.dispatch.close(session_token, worker_id)
 
     @server.tool()
     @contract_errors

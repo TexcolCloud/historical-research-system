@@ -59,7 +59,9 @@ class Dispatch:
                     for _ in range(max(0, missing)):
                         if occupied >= plan["capacity"]:
                             break
-                        warm = self.new_session(document_id, stage, plan)
+                        warm = self.new_session(document_id, stage, plan, prewarm=True)
+                        if warm is None:
+                            break
                         warm.update(task_id=None, prewarmed=True, overlap_reading=True)
                         self.ledger.save_session(warm)
                         live.append(warm)
@@ -78,19 +80,32 @@ class Dispatch:
                         for session in self.sessions()
                     )
                 ):
-                    warm = self.new_session(document_id, "review", plan)
-                    warm.update(task_id=None, prewarmed=True)
-                    self.ledger.save_session(warm)
-                    assignments.append(self.assignment(warm))
-                    occupied += 1
+                    warm = self.new_session(document_id, "review", plan, prewarm=True)
+                    if warm is None:
+                        pass
+                    else:
+                        warm.update(task_id=None, prewarmed=True)
+                        self.ledger.save_session(warm)
+                        assignments.append(self.assignment(warm))
+                        occupied += 1
         if not plan["paused"] and plan["cooldown_until"] <= time.time():
             for stage in ("verify", "review", "ocr", "navigation", "organization"):
-                if policy["overlap_reading"] and stage in {"review", "organization"}:
+                if (
+                    policy["overlap_reading"]
+                    and stage in {"review", "organization"}
+                    and any(
+                        s["stage"] == stage and s["state"] != "exited"
+                        for s in self.sessions()
+                        if s["document_id"] == document_id
+                    )
+                ):
                     continue
                 for _ in range(max(0, plan["workers"][stage] - plan["active"][stage])):
                     if occupied >= plan["capacity"]:
                         break
                     session = self.new_session(document_id, stage, plan)
+                    if session is None:
+                        break
                     token = session["session_token"]
                     task = self.store.tasks.claim_task(
                         document_id,
@@ -101,6 +116,7 @@ class Dispatch:
                         session=session,
                     )
                     if task is None:
+                        self.store.runtime_control.release(token)
                         break
                     assignments.append(self.assignment(session))
                     occupied += 1
@@ -118,8 +134,17 @@ class Dispatch:
             ],
         }
 
-    def new_session(self, document_id, stage, plan):
-        return {
+    def new_session(self, document_id, stage, plan, *, prewarm=False):
+        from hrs_codex.runtime_control import model_for_stage
+
+        model = model_for_stage(stage)
+        if prewarm and any(
+            scope["state"] != "normal"
+            for scope in self.store.runtime_control.snapshot()["scopes"]
+            if scope["scope"] == "account" or scope.get("model") == model
+        ):
+            return None
+        session = {
             "session_token": uuid4().hex,
             "document_id": document_id,
             "stage": stage,
@@ -129,7 +154,17 @@ class Dispatch:
             "expires_at": time.time() + max(180, plan["capacity"] * 10),
             "completed": 0,
             "max_tasks": plan["batch_size"],
+            "actual_model": model,
         }
+        with self.store.lock:
+            decision = self.store.runtime_control.admit(
+                model,
+                session["session_token"],
+                occupied=self.ledger.model_capacity_used(model),
+                total_occupied=self.ledger.capacity_used(),
+                lease_seconds=max(180, plan["capacity"] * 10),
+            )
+        return session if decision["allowed"] else None
 
     @staticmethod
     def assignment(session):
@@ -142,7 +177,23 @@ class Dispatch:
         for session in self.sessions():
             if session["state"] == "exited" or session["expires_at"] > now:
                 continue
-            self.end_session(session, "lease_expired")
+            if self.inflight(session):
+                self.fail_runtime(
+                    session["session_token"],
+                    session.get("worker_id", "expired-worker"),
+                    "timeout",
+                    details={"scope": "model", "event_id": "expired:" + session["session_token"]},
+                )
+            else:
+                self.end_session(session, "lease_expired")
+
+    @staticmethod
+    def inflight(session):
+        return session["state"] in {"starting", "busy"} or (
+            session["state"] == "idle"
+            and bool(session.get("preflight"))
+            and not session["preflight"].get("reading")
+        )
 
     def end_session(self, session, reason):
         """Return an unstarted reservation and close its slot in the same transaction."""
@@ -153,10 +204,12 @@ class Dispatch:
             if task["state"] == "leased" and task["claim"]["lease_token"] == session["lease_token"]:
                 task["state"] = "ready"
         session.update(state="exited", exit_reason=reason, exited_at=time.time())
-        if doc is not None:
-            self.store.tasks.commit(doc, session)
-        else:
-            self.ledger.save_session(session)
+        with self.ledger.connect(write=True):
+            self.store.runtime_control.release(session["session_token"])
+            if doc is not None:
+                self.store.tasks.commit(doc, session)
+            else:
+                self.ledger.save_session(session)
 
     def session(self, token, worker_id=None, *, allow_closed=False):
         session = next(
@@ -368,48 +421,122 @@ class Dispatch:
         return {**receipt, "state": "published", "publication": publication}
 
     def close(self, token, worker_id, *, failure_code=None):
+        if failure_code is not None:
+            return self.fail_runtime(token, worker_id, failure_code, details={"scope": "account"})
         with self.store.lock:
             session = self.session(token, worker_id, allow_closed=True)
             if session["state"] == "exited":
                 return {"state": "exited"}
-            if failure_code is not None:
-                from hrs_codex.contracts import TECHNICAL_FAILURE_CODES
-                from hrs_codex.execution_policy import record_pressure
-
-                if failure_code not in TECHNICAL_FAILURE_CODES:
-                    raise ValueError("Use a supported technical failure code")
-                doc = self.store.checkpoints.read(session["document_id"])
-                task = next(
-                    (
-                        t
-                        for t in doc["tasks"]
-                        if t["task_id"] == session.get("task_id")
-                        and t["state"] == "leased"
-                        and t["claim"]["lease_token"] == session.get("lease_token")
-                    ),
-                    None,
-                )
-                if task is not None:
-                    self.store.report_task_failure(
-                        doc["id"], task["task_id"], session["lease_token"], failure_code
-                    )
-                    session = self.session(token, worker_id, allow_closed=True)
-                else:
-                    record_pressure(self.store.root, failure_code)
-                    scheduler = doc.setdefault("scheduler", {})
-                    scheduler["cooldown_until"] = time.time() + 30
-                    scheduler.setdefault("runtime_failures", []).append(
-                        {
-                            "session_token": token,
-                            "stage": session["stage"],
-                            "code": failure_code,
-                            "at": time.time(),
-                        }
-                    )
-                    self.store.checkpoints.write(doc)
-                self.end_session(session, failure_code)
-                return {"state": "exited", "failure_code": failure_code}
             if session["state"] == "busy":
                 raise ValueError("Finish or report the active task before closing its session")
             self.end_session(session, "worker_finished")
             return {"state": "exited"}
+
+    def fail_runtime(self, token, worker_id, code, *, details):
+        """One transaction handles observed failures and MCP reports for the same lease."""
+        from hrs_codex.contracts import TECHNICAL_FAILURE_CODES
+        from hrs_codex.runtime_control import model_for_stage
+
+        if code not in TECHNICAL_FAILURE_CODES:
+            raise ValueError("Use a supported technical failure code")
+        with self.store.lock, self.ledger.connect(write=True):
+            session = self.session(token, worker_id, allow_closed=True)
+            if session["state"] == "exited":
+                return {"state": "exited", "duplicate": True}
+            doc = self.store.checkpoints.read(session["document_id"])
+            task = next(
+                (
+                    t
+                    for t in doc["tasks"]
+                    if t["task_id"] == session.get("task_id")
+                    and t["state"] == "leased"
+                    and t["claim"]["lease_token"] == session.get("lease_token")
+                ),
+                None,
+            )
+            details = {
+                **details,
+                "model": session.get("actual_model", model_for_stage(session["stage"])),
+            }
+            if task is not None:
+                self.store.tasks.report_task_failure(
+                    doc["id"],
+                    task["task_id"],
+                    session["lease_token"],
+                    code,
+                    details=details,
+                )
+                session = self.session(token, worker_id, allow_closed=True)
+            elif session.get("task_id"):
+                # A late report must not affect a result already committed or another lease.
+                self.end_session(session, "stale_runtime_failure")
+                return {"state": "exited", "stale": True}
+            elif session["state"] == "cooldown":
+                self.end_session(session, code)
+                return {"state": "exited", "duplicate": True}
+            else:
+                pressure = self.store.runtime_control.failure(
+                    code,
+                    "session:" + token,
+                    model=details["model"],
+                    scope=details.get("scope", "model"),
+                    retry_after_seconds=details.get("retry_after"),
+                    observed_capacity=(
+                        self.ledger.capacity_used()
+                        if details.get("scope") == "account"
+                        else self.ledger.model_capacity_used(details["model"])
+                    ),
+                )
+                scheduler = doc.setdefault("scheduler", {})
+                if details.get("scope") == "account":
+                    scheduler["cooldown_until"] = pressure.get("retry_at", time.time() + 30)
+                scheduler.setdefault("runtime_failures", []).append(
+                    {
+                        "session_token": token,
+                        "stage": session["stage"],
+                        "code": code,
+                        "at": time.time(),
+                        "details": details,
+                    }
+                )
+                self.store.checkpoints.write(doc)
+            self.end_session(session, code)
+            return {"state": "exited", "failure_code": code}
+
+    def runtime_stop_reason(self, document_id):
+        """Stop an owned idle coordinator once all remaining automatic work is blocked."""
+        from hrs_codex.runtime_control import model_for_stage
+
+        with self.store.lock:
+            self.expire()
+            doc = self.store.checkpoints.read(document_id)
+            remaining = [t for t in doc["tasks"] if t["state"] in {"ready", "leased"}]
+            if not remaining or doc.get("run_request", {}).get("pause_requested"):
+                return None
+            if any(
+                session["document_id"] == document_id
+                and session["expires_at"] > time.time()
+                and self.inflight(session)
+                for session in self.sessions()
+            ):
+                return None
+            if any(
+                t["state"] == "leased" and t["claim"]["expires_at"] > time.time() for t in remaining
+            ):
+                return None
+            gates = [
+                self.store.runtime_control.gate(model_for_stage(t["stage"]))
+                for t in remaining
+                if not t.get("technical_blocked")
+            ]
+            if any(g.get("state") != "blocked" for g in gates):
+                return None
+            return {
+                "type": "RuntimeFailure",
+                "code": "tool_error",
+                "scope": "model",
+                "model": "gpt-6.1-sol",
+                "message": "Automatic runtime recovery budget exhausted; checkpoints retained",
+                "reason": "runtime_blocked",
+                "event_id": "blocked:" + doc.get("run_request", {}).get("token", ""),
+            }

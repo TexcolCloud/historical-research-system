@@ -57,7 +57,7 @@ def recover(context, identity, recovery_id, *, automatic=False):
         return receipt
     try:
         with FileLock(context.repository.directory(identity) / ".executor.lock", timeout=0):
-            with context.verified(identity) as doc:
+            with context.verified(identity) as doc, context.repository.ledger.connect(write=True):
                 if receipt := doc.get("recoveries", {}).get(recovery_id):
                     return receipt
                 request = doc.get("run_request", {})
@@ -83,6 +83,10 @@ def recover(context, identity, recovery_id, *, automatic=False):
                         task["state"] = "ready"
                         reset.append(task["task_id"])
                 request = request_continuation(doc, resume=not automatic)
+                from hrs_codex.run_workflow import RunWorkflow
+
+                if status["unfinished_tasks"]:
+                    RunWorkflow(context, None).reset_runtime(doc, automatic=automatic)
                 request.update(
                     technical_failures=0,
                     retry_limit=1 if automatic else 3,

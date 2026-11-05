@@ -3403,6 +3403,16 @@
             "type": "boolean",
             "title": "Evidence Checked",
             "default": false
+          },
+          "runtime_control": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeControlReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4038,6 +4048,133 @@
         ],
         "title": "RunSummary"
       },
+      "RuntimeControlReport": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "cooldown",
+              "probing",
+              "recovering",
+              "blocked"
+            ],
+            "title": "State",
+            "default": "normal"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeControlScope"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Retry At"
+          }
+        },
+        "type": "object",
+        "title": "RuntimeControlReport"
+      },
+      "RuntimeControlScope": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "account",
+              "model"
+            ],
+            "title": "Scope"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "cooldown",
+              "probing",
+              "recovering",
+              "blocked"
+            ],
+            "title": "State"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Limit"
+          },
+          "configured_limit": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Configured Limit"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "failures": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failures",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "state",
+          "limit",
+          "configured_limit"
+        ],
+        "title": "RuntimeControlScope"
+      },
       "RuntimeStatus": {
         "properties": {
           "backend": {
@@ -4128,6 +4265,16 @@
             "type": "integer",
             "title": "Workspace Occupied",
             "default": 0
+          },
+          "runtime_control": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeControlReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

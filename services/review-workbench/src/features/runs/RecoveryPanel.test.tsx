@@ -57,3 +57,49 @@ test("recovery shows preserved work and one primary action, then retains the dur
   await screen.findByRole("button", { name: "恢复请求已保存" });
   expect(screen.getByText(/第 155 页/)).toBeTruthy();
 });
+
+test("quota blocking explains the condition beside the single checkpoint action", async () => {
+  const runtime = {
+    state: "blocked",
+    scopes: [
+      {
+        scope: "account",
+        model: null,
+        state: "blocked",
+        code: "quota_exhausted",
+        limit: 0,
+        configured_limit: 14,
+        retry_at: null,
+      },
+    ],
+  };
+  respondWith(() => ({
+    state: "blocked",
+    reason: "账户额度已用尽，请在额度恢复后从断点恢复。",
+    unfinished_tasks: 2,
+    preserved_ocr: 2,
+    preserved_approved: 1,
+    runtime_control: runtime,
+  }));
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RecoveryPanel
+        run={{
+          id: "run",
+          book_id: "book",
+          state: "failed",
+          stage: "vision",
+          revision: 1,
+          updated_at: "2026-11-06",
+          codex_document_id: "native",
+          pending_count: 0,
+          kind: "book",
+        }}
+      />
+    </QueryClientProvider>,
+  );
+  const notice = await screen.findByRole("status", { name: "自动恢复状态" });
+  expect(notice.textContent).toContain("当前账户：账户额度已用尽");
+  expect(screen.getAllByRole("button", { name: "从断点恢复" })).toHaveLength(1);
+  expect(screen.queryByText("系统正在尝试自动恢复，暂无需操作。")).toBeNull();
+});

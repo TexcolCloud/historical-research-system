@@ -36,17 +36,51 @@ class RunWorkflow:
             return request
 
     def request_run(self, document_id: str, *, resume: bool = False) -> dict:
-        with self.context.verified(document_id) as doc:
+        with (
+            self.context.verified(document_id) as doc,
+            self.context.repository.ledger.connect(write=True),
+        ):
             if doc.get("run_request", {}).get("cancel_requested"):
                 raise ValueError("This document is stopping for explicit deletion")
+            existing = doc.get("run_request", {})
+            if doc["state"] == "published":
+                return existing or request_continuation(doc)
+            if (
+                resume
+                and existing.get("state") == "running"
+                and existing.get("lease_expires_at", 0) > time.time()
+            ):
+                return existing
+            live_workers = any(
+                t["state"] == "leased" and t["claim"]["expires_at"] > time.time()
+                for t in doc["tasks"]
+            )
             request = request_continuation(doc, resume=resume)
             if resume:
                 (self.context.repository.directory(document_id) / ".pause-requested").unlink(
                     missing_ok=True
                 )
                 self.navigation.refresh_document(doc)
+                if not live_workers:
+                    self.reset_runtime(doc)
             self.context.repository.write(doc)
             return request
+
+    def reset_runtime(self, doc, *, automatic=False):
+        """An explicit recovery grants fresh technical budget without changing content."""
+        if not automatic:
+            from hrs_codex.runtime_control import RuntimeControl
+
+            RuntimeControl(self.context.repository.root, self.context.repository.ledger).reset()
+        for task in doc["tasks"]:
+            if task.get("technical_blocked"):
+                task.update(
+                    technical_blocked=False,
+                    technical_retry_since=len(task.get("technical_failures", [])),
+                    technical_retry_limit=1 if automatic else 3,
+                )
+                task["retry_after"] = 0
+        doc.setdefault("scheduler", {}).pop("cooldown_until", None)
 
     def claim_run(
         self, owner: str, lease_seconds: int = 900, *, document_id: str | None = None
@@ -82,6 +116,25 @@ class RunWorkflow:
                     continue
                 if request["state"] == "running" and request["lease_expires_at"] > now:
                     continue
+                from hrs_codex.runtime_control import RuntimeControl
+
+                control = RuntimeControl(
+                    self.context.repository.root, self.context.repository.ledger
+                )
+                actual_model = request.get("actual_model", "gpt-6.1-sol")
+                if not control.gate(actual_model)["allowed"]:
+                    continue
+                if control.gate(actual_model)["probe"] and any(
+                    (other := self.context.repository.read(other_id))
+                    .get("run_request", {})
+                    .get("state")
+                    == "running"
+                    and other["run_request"].get("lease_expires_at", 0) > now
+                    for other_id in self.context.repository.ids()
+                    if other_id != identity
+                ):
+                    # A coordinator launches the one real worker probe; it must not consume it.
+                    continue
                 # Model task leases outlive a crashed coordinator. Do not race its workers.
                 if any(
                     t["state"] == "leased" and t["claim"]["expires_at"] > now for t in doc["tasks"]
@@ -113,6 +166,7 @@ class RunWorkflow:
                     token=uuid4().hex,
                     lease_expires_at=now + lease_seconds,
                     attempts=request["attempts"] + 1,
+                    actual_model=actual_model,
                 )
                 request["ready_after"] = request["not_before"]
                 request["history"].append(
@@ -149,7 +203,10 @@ class RunWorkflow:
             ):
                 self.context.evidence.verify(doc)
 
-        with self.context.verified(document_id, validate) as doc:
+        with (
+            self.context.verified(document_id, validate) as doc,
+            self.context.repository.ledger.connect(write=True),
+        ):
             request = doc.get("run_request", {})
             if request.get("state") != "running" or request.get("token") != token:
                 raise LeaseConflict("Run does not have this active lease")
@@ -169,6 +226,24 @@ class RunWorkflow:
                 return request
             if request["lease_expires_at"] <= now:
                 raise LeaseConflict("Run lease expired; reclaim before finishing")
+            pressure = None
+            if (
+                isinstance(error, dict)
+                and error.get("code")
+                and error.get("reason") != "runtime_blocked"
+            ):
+                from hrs_codex.runtime_control import RuntimeControl
+
+                with self.context.repository.ledger.connect(write=True):
+                    pressure = RuntimeControl(
+                        self.context.repository.root, self.context.repository.ledger
+                    ).failure(
+                        error["code"],
+                        "run:" + token,
+                        model=error.get("model") or request.get("actual_model", "gpt-6.1-sol"),
+                        scope=error.get("scope", "model"),
+                        retry_after_seconds=error.get("retry_after"),
+                    )
             active = [
                 t["claim"]["expires_at"]
                 for t in doc["tasks"]
@@ -210,6 +285,8 @@ class RunWorkflow:
                     error="Coordinator exited before publication or content review decision",
                     not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
                 )
+            if pressure:
+                request["not_before"] = max(request["not_before"], pressure.get("retry_at", 0))
             request["ready_after"] = request["not_before"]
             request["history"].append(
                 {

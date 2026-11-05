@@ -3,7 +3,15 @@
 from typing import Literal, TypedDict, get_args
 
 FailureCode = Literal[
-    "rate_limit", "429", "service_unavailable", "transport", "timeout", "tool_error"
+    "rate_limit",
+    "429",
+    "service_unavailable",
+    "transport",
+    "timeout",
+    "tool_error",
+    "quota_exhausted",
+    "authentication",
+    "unknown",
 ]
 TECHNICAL_FAILURE_CODES = frozenset(get_args(FailureCode))
 
