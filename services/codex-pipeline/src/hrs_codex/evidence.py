@@ -36,7 +36,8 @@ class Evidence:
     def __init__(self, repository):
         self.repository = repository
 
-    def verify(self, doc: dict) -> None:
+    def verify(self, doc: dict, pages=None) -> None:
+        """A scoped check covers page history/dependencies; publication always uses all pages."""
         files = EvidenceFiles(self.repository.directory(doc["id"]))
         tasks = {t["task_id"]: t for t in doc["tasks"]}
         if (
@@ -45,6 +46,8 @@ class Evidence:
         ):
             raise EvidenceMismatch("Retained original source hash mismatch")
         for page in doc["pages"]:
+            if pages is not None and page["page"] not in pages:
+                continue
             if files.sha(self.repository.evidence_path(doc, page["image"])) != page["image_sha256"]:
                 raise EvidenceMismatch(f"Original page {page['page']} image hash mismatch")
             for field in ("ocr", "candidate", "approved"):
@@ -63,6 +66,8 @@ class Evidence:
                             f"Page {page['page']} {field} differs from its retained machine result"
                         )
         for task in doc["tasks"]:
+            if pages is not None and task["page"] not in pages:
+                continue
             readings = task.get("source_reading_history", []) + (
                 [task["source_reading"]] if task.get("source_reading") else []
             )
@@ -92,7 +97,7 @@ class Evidence:
             if task.get("result") is not None:
                 self.verify_details(doc, task, task["result"], files)
         organization = doc.get("organization")
-        if organization:
+        if organization and pages is None:
             task = next(t for t in doc["tasks"] if t["task_id"] == organization["task_id"])
             if organization["articles"] != task["result"]["articles"]:
                 raise EvidenceMismatch("Organization differs from its retained machine result")

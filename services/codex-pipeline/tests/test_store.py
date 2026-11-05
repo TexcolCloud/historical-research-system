@@ -1,7 +1,6 @@
 """The local queue must never publish unreviewed or stale evidence."""
 
 import hashlib
-import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -240,10 +239,9 @@ def test_claim_exclusion_stale_hash_and_lease_recovery(tmp_path):
             claim["lease_token"],
             {"input_sha256": "wrong", "markdown": "text"},
         )
-    path = store.root / "documents" / doc_id / "document.json"
-    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored = store.checkpoints.read(doc_id)
     stored["tasks"][0]["claim"]["expires_at"] = time.time() - 1
-    path.write_text(json.dumps(stored), encoding="utf-8")
+    store.checkpoints.write(stored)
     recovered = store.claim_task(doc_id, "ocr", "recovered")
     assert recovered["lease_token"] != claim["lease_token"]
     with pytest.raises(ValueError, match="active lease"):
@@ -370,10 +368,9 @@ def test_manifest_identity_and_published_artifact_integrity(tmp_path):
 def test_changed_saved_machine_result_rejected(tmp_path):
     store, doc_id = document(tmp_path)
     complete(store, doc_id, "ocr", "ocr", {"markdown": "原文"})
-    path = store.root / "documents" / doc_id / "document.json"
-    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored = store.checkpoints.read(doc_id)
     stored["tasks"][0]["result"]["markdown"] = "伪造文字"
-    path.write_text(json.dumps(stored), encoding="utf-8")
+    store.checkpoints.write(stored)
     with pytest.raises(ValueError, match="machine result|result hash"):
         store.claim_task(doc_id, "review", "review")
 
@@ -528,7 +525,7 @@ def test_run_request_deduplicates_renews_and_waits_for_task_lease(tmp_path, monk
     task = store.claim_task(doc_id, "ocr", "ocr", lease_seconds=100)
     assert store.renew_run(doc_id, run["token"], lease_seconds=1200)["lease_expires_at"] == 2200
     waiting = store.finish_run(doc_id, run["token"])
-    assert waiting["state"] == "retryable_error"
+    assert waiting["state"] == "waiting_workers"
     assert waiting["ready_after"] == task["expires_at"]
     assert waiting["technical_failures"] == 0
     assert store.claim_run("c") is None

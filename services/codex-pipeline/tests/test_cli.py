@@ -51,9 +51,9 @@ def test_runner_native_command_paths_model_inheritance_and_receipt(tmp_path, mon
     process = processes[0]
     assert process.arguments[0] == "codex executable with spaces"
     assert process.arguments[-1] == "-"
-    assert process.arguments[process.arguments.index("--cd") + 1] == str(execution.PROJECT)
+    assert process.arguments[process.arguments.index("--cd") + 1] == str(store.root / "runtime")
     assert process.arguments[process.arguments.index("--add-dir") + 1] == str(store.root)
-    assert process.options["cwd"] == execution.PROJECT
+    assert process.options["cwd"] == store.root / "runtime"
     assert process.options["stdin"] == subprocess.PIPE
     assert "features.shell_tool=false" in process.arguments
     assert "native Codex subagents" in process.prompt
@@ -90,8 +90,12 @@ def test_runtime_loads_project_skill_without_requiring_a_worker_shell(tmp_path, 
 
     monkeypatch.setattr(execution.subprocess, "Popen", launch)
     execution.run_codex(store, document_id)
-    assert skill.read_text("utf-8") in launched[0].prompt
-    assert "do not import or enqueue yourself again" in launched[0].prompt
+    # Runtime now gets narrow stage packets; importing a development skill is retired.
+    assert skill.read_text("utf-8") not in launched[0].prompt
+    assert "do not import or enqueue yourself again" in launched[0].prompt.lower()
+    assert "--ignore-user-config" in launched[0].arguments
+    assert "dispatch_work" in launched[0].prompt
+    assert len(launched[0].prompt) < 4000
 
 
 def test_runner_nonzero_exit_keeps_request_events_and_failure_receipt(tmp_path, monkeypatch):

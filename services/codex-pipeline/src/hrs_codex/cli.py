@@ -24,6 +24,9 @@ def _main() -> None:
     commands.add_parser("doctor")
     commands.add_parser("list")
     commands.add_parser("workspace")
+    commands.add_parser(
+        "migrate-ledger", help="Migrate a stopped workspace and seal legacy JSON snapshots"
+    )
     workbench_parser = commands.add_parser(
         "workbench", help="Run the unified workbench and durable executor"
     )
@@ -62,7 +65,9 @@ def _main() -> None:
 
         serve(store, args.port)
         return
-    if args.command == "prepare":
+    if args.command == "migrate-ledger":
+        result = store.checkpoints.migrate(store.verify_evidence)
+    elif args.command == "prepare":
         result = prepare(store, args.source, args.title)
     elif args.command == "status":
         result = store.status(args.document_id)

@@ -1,5 +1,3 @@
-import json
-
 from test_original_reading import reading, submit
 from test_store import complete, document
 
@@ -20,10 +18,9 @@ def test_policy_upgrade_is_explicit_paused_and_preserves_protected_pages(tmp_pat
 
 def test_disputed_review_gets_one_independent_unchanged_verification(tmp_path):
     store, doc_id = document(tmp_path)
-    path = store.document_directory(doc_id) / "document.json"
-    doc = json.loads(path.read_text("utf-8"))
+    doc = store.checkpoints.read(doc_id)
     doc["processing_policy"] = {"review_failure": "bounded"}
-    path.write_text(json.dumps(doc), "utf-8")
+    store.checkpoints.write(doc)
     complete(store, doc_id, "ocr", "ocr", {"markdown": "甲名"})
     first = store.claim_task(doc_id, "review", "review", source_first=True)
     store.review_candidate(

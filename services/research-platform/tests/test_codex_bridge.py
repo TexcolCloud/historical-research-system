@@ -47,6 +47,37 @@ def finish(store, doc_id, stage, result):
     )
 
 
+def test_bridge_consumes_native_changes_instead_of_rescanning_every_book(platform, tmp_path, monkeypatch):
+    settings, engine = platform
+    bridge = CodexBridge(settings.model_copy(update={"codex_root": tmp_path / "event-native"}), engine)
+    source = tmp_path / "event-source.png"
+    Image.new("RGB", (30, 40), "white").save(source)
+    identity = prepare(bridge.store, str(source))["id"]
+    book_id, run_id = str(uuid4()), str(uuid4())
+    with engine.begin() as connection:
+        connection.execute(insert(db.books).values(id=book_id, title="Event projection", state="processing"))
+        connection.execute(
+            insert(db.runs).values(
+                id=run_id,
+                book_id=book_id,
+                state="running",
+                stage="ocr",
+                source=bridge.objects.put_file(source),
+                result={"codex_document_id": identity, "processing_backend": "codex"},
+            )
+        )
+    calls = []
+    monkeypatch.setattr(bridge, "sync", lambda run: calls.append(str(run["id"])))
+    bridge.tick()
+    assert calls == [run_id]
+    calls.clear()
+    bridge.tick()
+    assert calls == []
+    bridge.store.claim_task(identity, "ocr", "event-worker")
+    bridge.tick()
+    assert calls == [run_id]
+
+
 def test_native_pending_review_old_ui_confirmation_reader_and_export(platform, tmp_path, monkeypatch):
     settings, engine = platform
     settings = settings.model_copy(update={"codex_root": tmp_path / "native"})

@@ -1,5 +1,34 @@
 # Historical research: native Codex subagent workflow
 
+## Default transactional execution
+
+The local execution engine uses `ledger.sqlite3` (SQLite/WAL) as its sole task
+write authority. Pages, tasks and document fields have independent record versions;
+results, follow-up tasks, native session updates and the durable event sequence
+commit together. JSON is an import/export or sealed historical snapshot.
+Existing JSON workspaces remain read-only until all executors are stopped and
+`hrs_codex.cli --root <workspace> migrate-ledger` validates and seals them.
+
+The coordinator calls `dispatch_work(document_id)`. The returned assignments already
+reserve concrete task leases and workspace capacity, including starting/prewarmed
+agents. Spawn each exact native `agent_type` with its session token. A worker calls
+`open_task_packet(session_token, worker_id)` to receive its stage-specific rules,
+processing policy, claim and original pixels in one response. Review/verify packets
+withhold candidates until `freeze_observations` freezes independent original reading;
+the response includes the first bounded candidate range. Read all remaining ranges
+through `candidate_text`. `submit_packet` commits the result and a minimal receipt;
+identical replays return the saved receipt. Reuse a worker for at most two tasks.
+Prewarmed reviewers wait on `wait_for_changes` without consuming a model turn per poll.
+Only native Codex subagents perform inference; Python threads supervise CLI processes.
+
+The coordinator replenishes assignments after each worker completes. It does not
+choose allocations, read source text or perform content approval itself. The CLI
+uses a small execution directory, fixed native roles and the configured account
+route, with unrelated skills/apps/plugins excluded. Login and global settings are
+unchanged. Independent original-first review, human protection and full publication
+checks below remain mandatory. The lower-level tools below remain compatible for
+direct/native interactive clients; default runtime sessions use the packets above.
+
 The MCP server stores evidence and validates state. Codex supplies all OCR, image
 review, correction verification and article organization. The coordinator MUST
 spawn native Codex subagents for these stages and wait for their results. Use
@@ -180,9 +209,9 @@ when justified. Corrections still require another worker's full original-first
 verify. Submissions without this reading receipt are rejected. Existing completed
 decisions and already-active legacy contracts remain historical evidence.
 
-Runtime coordinators use MCP tools only; the local bridge supplies the project
-skill verbatim and disables shell tools for that run and its workers. Coding-chat
-tools are unaffected. Rendering, evidence files and state writes belong to MCP.
+Runtime coordinators use MCP tools only; the local bridge supplies small stage
+packets and disables shell tools for that run and its workers. Coding-chat tools
+are unaffected. Rendering, evidence files and state writes belong to MCP.
 
 Call `submit_task(document_id, task_id, lease_token, result)`. Every result MUST
 include the claim's exact `input_sha256`. Examples below omit that repeated field:

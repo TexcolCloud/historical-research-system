@@ -96,7 +96,10 @@ def request_continuation(doc: dict, *, resume: bool = False, followup: bool = Fa
         request["history"].append({"event": "explicit_resume", "at": time.time()})
         request["technical_failures"] = 0
         request.update(
-            retry_limit=3, automatic_checkpoint_used=False, checkpoint_recovery_enabled=True
+            retry_limit=3,
+            automatic_checkpoint_used=False,
+            checkpoint_recovery_enabled=True,
+            error=None,
         )
     if request["state"] not in {"pending", "retryable_error"} or resume:
         request.update(state="pending", not_before=0)

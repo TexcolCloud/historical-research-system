@@ -10,7 +10,14 @@ PageState = Literal[
 ]
 DocumentState = Literal["processing", "pending", "ready", "published", "paused", "cancelled"]
 RunRequestState = Literal[
-    "pending", "running", "paused", "succeeded", "waiting_human", "retryable_error", "cancelled"
+    "pending",
+    "running",
+    "paused",
+    "succeeded",
+    "waiting_human",
+    "waiting_workers",
+    "retryable_error",
+    "cancelled",
 ]
 
 

@@ -48,11 +48,12 @@ def identity(store: Store) -> dict:
 
 def change_token(store: Store) -> str:
     """Cheap UI change detection; content approval still uses evidence hashes."""
+    if store.checkpoints.ledger:
+        return str(store.checkpoints.ledger.sequence())
     with store.lock:
         rows = []
-        for path in sorted((store.root / "documents").glob("*/document.json")):
-            stat = path.stat()
-            rows.append((path.parent.name, stat.st_mtime_ns, stat.st_size))
+        for document_id in store.checkpoints.ids():
+            rows.append((document_id, store.checkpoints.revision(document_id)))
     return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 

@@ -3,13 +3,14 @@
 import json
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from zipfile import ZIP_STORED, ZipFile
 
 from hrs_codex.hashing import digest, file_digest
 
 
 def snapshot_workspace(store, destination: Path) -> dict:
-    with store.lock:
+    with store.lock, TemporaryDirectory(prefix="hrs-ledger-backup-") as temporary:
         documents = [store.checkpoints.read(row["id"]) for row in store.list_documents()]
         for document in documents:
             if document.get("run_request", {}).get("state") == "running" or any(
@@ -21,7 +22,8 @@ def snapshot_workspace(store, destination: Path) -> dict:
             store.verify_evidence(document)
         paths = sorted(
             path
-            for path in (store.root / "documents").rglob("*")
+            for document in documents
+            for path in store.document_directory(document["id"]).rglob("*")
             if path.is_file() and not path.name.startswith(".") and not path.name.endswith(".lock")
         )
         paths += [
@@ -29,16 +31,21 @@ def snapshot_workspace(store, destination: Path) -> dict:
             for name in (".workspace.json", ".workflow-test-authorization.json")
             if (path := store.root / name).is_file()
         ]
+        files = {path.relative_to(store.root).as_posix(): path for path in paths}
+        if store.checkpoints.ledger:
+            database = Path(temporary) / "ledger.sqlite3"
+            store.checkpoints.ledger.backup(database)
+            files["ledger.sqlite3"] = database
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2 if store.checkpoints.ledger else 1,
             "kind": "quiesced-codex-workspace",
             "documents": [document["id"] for document in documents],
-            "files": {path.relative_to(store.root).as_posix(): file_digest(path) for path in paths},
+            "files": {name: file_digest(path) for name, path in files.items()},
         }
         # Exclusive creation prevents accidentally replacing an existing backup.
         with ZipFile(destination, "x", compression=ZIP_STORED) as archive:
-            for path in paths:
-                archive.write(path, path.relative_to(store.root).as_posix())
+            for name, path in files.items():
+                archive.write(path, name)
             archive.writestr("backup-manifest.json", json.dumps(manifest, ensure_ascii=False))
         return manifest
 
@@ -49,10 +56,9 @@ def restore_workspace(source: Path, destination: Path) -> Path:
         raise ValueError("Native restore destination must not exist")
     with ZipFile(source) as archive:
         manifest = json.loads(archive.read("backup-manifest.json"))
-        if (
-            manifest.get("kind") != "quiesced-codex-workspace"
-            or manifest.get("schema_version") != 1
-        ):
+        if manifest.get("kind") != "quiesced-codex-workspace" or manifest.get(
+            "schema_version"
+        ) not in {1, 2}:
             raise ValueError("Unsupported native backup manifest")
         if len(archive.namelist()) != len(manifest["files"]) + 1 or set(archive.namelist()) != {
             "backup-manifest.json",

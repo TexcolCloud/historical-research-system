@@ -27,7 +27,7 @@ def projection_input(doc):
                 k: v for k, v in doc.get("run_request", {}).items() if k not in {"claim", "updated_at"}
             },
             "tasks": [
-                {k: v for k, v in t.items() if k != "claim"}
+                {k: t[k] for k in ("task_id", "stage", "page", "state", "retry_after", "receipt") if k in t}
                 | {
                     "started_at": t.get("claim", {}).get("started_at"),
                     "active": t["state"] == "leased"

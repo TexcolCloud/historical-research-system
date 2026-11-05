@@ -15,6 +15,21 @@ class TaskInspection:
     def __init__(self, context):
         self.context = context
 
+    def approved_page_text(self, document_id, page):
+        with self.context.verified_page(document_id, page) as doc:
+            if type(page) is not int or not 1 <= page <= len(doc["pages"]):
+                raise ValueError("Unknown physical page")
+            row = doc["pages"][page - 1]
+            if row["state"] != "approved":
+                raise ValueError("Page has unresolved content")
+            return {
+                "document_id": document_id,
+                "page": page,
+                "image_sha256": row["image_sha256"],
+                "markdown": row["approved"]["markdown"],
+                "markdown_sha256": row["approved"]["sha256"],
+            }
+
     def original_page(
         self,
         document_id: str,
@@ -45,6 +60,7 @@ class TaskInspection:
             metadata = {
                 "document_id": document_id,
                 "page": page,
+                "image": row["image"],
                 "image_sha256": row["image_sha256"],
                 "source_sha256": doc["source"]["sha256"],
             }
@@ -104,7 +120,7 @@ class TaskInspection:
         self, document_id: str, task_id: str, lease_token: str, original_reading: dict
     ) -> dict:
         """Freeze source observations before exposing the candidate to a reviewer."""
-        with self.context.verified(document_id) as doc:
+        with self.context.verified_task(document_id, task_id=task_id) as doc:
             task = active_review(doc, task_id, lease_token)
             access = task.get("image_access")
             if (
@@ -152,7 +168,7 @@ class TaskInspection:
     def candidate_text(
         self, document_id: str, task_id: str, lease_token: str, *, start: int = 0, limit: int = 2000
     ) -> dict:
-        with self.context.verified(document_id) as doc:
+        with self.context.verified_task(document_id, task_id=task_id) as doc:
             task = active_review(doc, task_id, lease_token)
             if not task.get("source_reading"):
                 raise ValueError("Freeze original-image observations before reading candidate text")

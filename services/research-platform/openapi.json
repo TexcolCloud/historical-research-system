@@ -4116,6 +4116,18 @@
             "type": "number",
             "title": "Cooldown Until",
             "default": 0
+          },
+          "runtime_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Runtime Counts"
+          },
+          "workspace_occupied": {
+            "type": "integer",
+            "title": "Workspace Occupied",
+            "default": 0
           }
         },
         "type": "object",
@@ -4350,6 +4362,18 @@
           "samples": {
             "type": "integer",
             "title": "Samples"
+          },
+          "sample_window_seconds": {
+            "type": "number",
+            "title": "Sample Window Seconds",
+            "default": 0
+          },
+          "phase_medians": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Phase Medians"
           }
         },
         "type": "object",

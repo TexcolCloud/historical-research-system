@@ -5,6 +5,7 @@ from pathlib import Path
 from filelock import FileLock
 
 from hrs_codex.checkpoints import atomic_json as atomic_json
+from hrs_codex.dispatch import Dispatch
 from hrs_codex.hashing import digest as digest
 from hrs_codex.hashing import file_digest as file_digest
 from hrs_codex.human_review_workflow import HumanReviewWorkflow
@@ -31,6 +32,7 @@ class Store:
         self.source_import = SourceImport(self.context)
         self.task_inspection = TaskInspection(self.context)
         self.tasks = TaskWorkflow(self.context, self.navigation)
+        self.dispatch = Dispatch(self)
 
     def document_directory(self, document_id):
         return self.checkpoints.directory(document_id)
@@ -38,8 +40,8 @@ class Store:
     def artifact_path(self, snapshot, relative):
         return self.checkpoints.evidence_path(snapshot, relative)
 
-    def verify_evidence(self, snapshot):
-        return self.context.evidence.verify(snapshot)
+    def verify_evidence(self, snapshot, pages=None):
+        return self.context.evidence.verify(snapshot, pages)
 
     def review_packet(self, snapshot, page):
         """Build read-only review material from an already validated snapshot."""
@@ -71,8 +73,8 @@ class Store:
 
     def list_documents(self) -> list[dict]:
         documents = []
-        for path in sorted((self.context.repository.root / "documents").glob("*/document.json")):
-            doc = self.checkpoints.read(path.parent.name)
+        for document_id in self.checkpoints.ids():
+            doc = self.checkpoints.read(document_id)
             documents.append({key: doc[key] for key in ("id", "title", "state", "created_at")})
         return documents
 
@@ -126,6 +128,9 @@ class Store:
 
     def get_task(self, document_id: str, task_id: str):
         return self.task_inspection.get_task(document_id, task_id)
+
+    def approved_page_text(self, document_id: str, page: int):
+        return self.task_inspection.approved_page_text(document_id, page)
 
     def scheduling_plan(self, document_id: str):
         return self.tasks.scheduling_plan(document_id)

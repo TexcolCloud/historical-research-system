@@ -135,10 +135,9 @@ class ProjectionCommit:
                     else {"detail": str(request["error"]), "retryable": True},
                 )
             )
+            book_state = "ready" if state == "completed" else state
             connection.execute(
-                update(db.books)
-                .where(db.books.c.id == run["book_id"])
-                .values(state="ready" if state == "completed" else state)
+                update(db.books).where(db.books.c.id == run["book_id"]).values(state=book_state)
             )
             connection.execute(
                 insert(db.events).values(
@@ -147,6 +146,7 @@ class ProjectionCommit:
                     kind="run.changed",
                     payload={
                         "state": state,
+                        "book_state": book_state,
                         "stage": stage,
                         "revision": revision,
                         "pending_count": len(pending),

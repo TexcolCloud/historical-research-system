@@ -9,6 +9,13 @@ import { Button } from "@/components/ui/button.tsx";
 import { bookWorkspaceHref } from "@/features/books/workspace.ts";
 
 import { phases, stageLabels } from "./phase-display.ts";
+const timingLabels: Record<string, string> = {
+  queue_seconds: "队列等待",
+  startup_seconds: "代理启动",
+  original_reading_seconds: "原页阅读",
+  candidate_comparison_seconds: "候选核对",
+  submission_seconds: "提交保存",
+};
 export default function RunDetails({ book }: { book: Book }) {
   const query = useQueryClient();
   const control = useMutation({
@@ -311,6 +318,14 @@ export default function RunDetails({ book }: { book: Book }) {
             最多 {run.scheduling.capacity} 个工作代理，每批最多{" "}
             {run.scheduling.batch_size} 页；完成当前页后再调整分配。
           </p>
+          {run.scheduling.runtime_counts && (
+            <p>
+              正在启动 {run.scheduling.runtime_counts.starting ?? 0}， 正在处理{" "}
+              {run.scheduling.runtime_counts.busy ?? 0}， 等待任务{" "}
+              {run.scheduling.runtime_counts.idle ?? 0}； 工作区已占用{" "}
+              {run.scheduling.workspace_occupied ?? 0} 个名额（含启动中）。
+            </p>
+          )}
           {run.scheduling.cooldown_until > Date.now() / 1000 && (
             <p>服务暂时限制请求，系统稍后自动重试。</p>
           )}
@@ -321,7 +336,8 @@ export default function RunDetails({ book }: { book: Book }) {
                 <th>运行 / 建议</th>
                 <th>排队</th>
                 <th>单页中位耗时</th>
-                <th>近 5 分钟速度</th>
+                <th>分段中位耗时</th>
+                <th>实际采样速度</th>
               </tr>
             </thead>
             <tbody>
@@ -337,7 +353,23 @@ export default function RunDetails({ book }: { book: Book }) {
                       ? "采样中"
                       : `${m.median_seconds} 秒`}
                   </td>
-                  <td>{m.pages_per_minute} 项/分</td>
+                  <td>
+                    {Object.entries(m.phase_medians ?? {}).length
+                      ? Object.entries(m.phase_medians ?? {}).map(
+                          ([phase, seconds]) => (
+                            <div key={phase}>
+                              {timingLabels[phase] ?? phase}：{seconds} 秒
+                            </div>
+                          ),
+                        )
+                      : "暂无分段样本"}
+                  </td>
+                  <td>
+                    {m.samples ? `${m.pages_per_minute} 项/分` : "采样中"}
+                    {!!m.sample_window_seconds && (
+                      <small>（{m.sample_window_seconds} 秒窗口）</small>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

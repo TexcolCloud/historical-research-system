@@ -37,6 +37,10 @@ class ProjectionArtifacts:
             shared[(sha, media)] = files[name]
 
         offset = 0
+        reviews_by_page = {}
+        for task in doc["tasks"]:
+            if task["stage"] == "review" and task.get("result"):
+                reviews_by_page[task["page"]] = task
         for page in doc["pages"]:
             selected = page.get("approved") or page.get("candidate") or page.get("ocr")
             text = (selected or {}).get("markdown", "") + "\n\n"
@@ -69,15 +73,11 @@ class ProjectionArtifacts:
                     "acceptance_basis": (selected or {}).get("approval_type"),
                 }
             )
-            reviews = [
-                t
-                for t in doc["tasks"]
-                if t["page"] == page["page"] and t["stage"] == "review" and t.get("result")
-            ]
+            review = reviews_by_page.get(page["page"])
             completion.append(
                 {
                     "page": page["page"],
-                    "structure": reviews[-1]["result"].get("structure", {}) if reviews else {},
+                    "structure": review["result"].get("structure", {}) if review else {},
                 }
             )
 

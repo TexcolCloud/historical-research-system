@@ -13,7 +13,6 @@ from filelock import FileLock, Timeout
 from hrs_codex.application import prepare
 from hrs_codex.progress import page_progress as document_progress
 from hrs_codex.runner import Runner
-from hrs_codex.scheduling import scheduling_plan
 from hrs_codex.store import Store
 from hrs_codex.workspace import resolve_workspace
 from sqlalchemy import func, insert, or_, select, update
@@ -22,6 +21,7 @@ from hrs_platform import models as db
 from hrs_platform.services.books import get_run
 from hrs_platform.services.documents.review import Review
 from hrs_platform.services.native.artifacts import ProjectionArtifacts
+from hrs_platform.services.native.changes import NativeChanges
 from hrs_platform.services.native.commit import ProjectionCommit
 from hrs_platform.services.native.facts import PROJECTION_POLICY, projection_input, projection_state
 from hrs_platform.services.native.publication import NativePublication
@@ -42,6 +42,7 @@ class CodexBridge:
         self.stop_event = threading.Event()
         self.thread = None
         self.verified_at = {}
+        self.changes = NativeChanges(self.store.checkpoints)
         self.artifacts = ProjectionArtifacts(self.store, self.objects, self.review, engine)
         self.commit = ProjectionCommit(
             engine, workflow_test=(self.store.root / ".workflow-test-authorization.json").exists()
@@ -96,26 +97,46 @@ class CodexBridge:
         for event in events:
             try:
                 self.dispatch(event)
+                run = get_run(self.engine, event["run_id"])
+                if identity := (run["result"] or {}).get("codex_document_id"):
+                    self.changes.pending.setdefault(identity, set())
             except Exception as error:  # noqa: BLE001 - retain each independent run's recoverable failure
                 self.failure(event["run_id"], error)
+        changed = self.changes.poll()
+        if changed == []:
+            self.delete_pending()
+            return
         with self.engine.connect() as connection:
-            runs = (
-                connection.execute(
-                    select(db.runs)
-                    .join(db.books)
-                    .where(
-                        db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
-                        db.runs.c.result["codex_document_id"].astext.is_not(None),
-                    )
+            query = (
+                select(db.runs)
+                .join(db.books)
+                .where(
+                    db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
+                    db.runs.c.result["codex_document_id"].astext.is_not(None),
                 )
-                .mappings()
-                .all()
             )
+            if changed is not None:
+                query = query.where(db.runs.c.result["codex_document_id"].astext.in_(changed))
+            runs = connection.execute(query).mappings().all()
+        failed = set()
         for run in runs:
+            identity = run["result"]["codex_document_id"]
+            if not self.due(run):
+                failed.add(identity)
+                self.changes.retry_at[identity] = run["result"].get("bridge_not_before", time.time() + 30)
+                continue
             try:
                 self.sync(run)
             except Exception as error:  # noqa: BLE001 - a failed projection must not stop other books
+                failed.add(identity)
+                self.changes.retry_at[identity] = time.time() + 30
                 self.failure(run["id"], error)
+        for identity in {run["result"]["codex_document_id"] for run in runs} - failed:
+            self.changes.acknowledge(identity)
+        candidates = set(changed) if changed is not None else set(self.changes.pending)
+        for identity in candidates - {run["result"]["codex_document_id"] for run in runs}:
+            # A future intake/outbox event reintroduces newly linked documents.
+            self.changes.acknowledge(identity)
         self.delete_pending()
 
     def delete_pending(self):
@@ -339,16 +360,23 @@ class CodexBridge:
         if unchanged and not indexing and time.monotonic() - self.verified_at.get(doc_id, 0) < 60:
             return
         # A periodic full audit still detects external tampering. No acceptance uses this cache.
-        doc = self.store.refresh_navigation(doc_id)
-        self.verified_at[doc_id] = time.monotonic()
+        if self.store.checkpoints.ledger:
+            audit = indexing or time.monotonic() - self.verified_at.get(doc_id, 0) >= 60
+            self.store.verify_evidence(snapshot, None if audit else self.changes.pages(snapshot))
+            if audit:
+                self.verified_at[doc_id] = time.monotonic()
+            doc = snapshot
+        else:
+            doc = self.store.refresh_navigation(doc_id)
+            self.verified_at[doc_id] = time.monotonic()
         publication_sha = (doc.get("publication") or {}).get("markdown_sha256")
         navigation_sha = doc.get("navigation", {}).get("sha256")
         run = self.publication.index_if_needed(run, doc)
         if self.apply_decisions(run, doc):
-            doc = self.store.refresh_navigation(doc_id)
+            doc = self.store.status(doc_id)
         input_sha = self.projection_input(doc)
         navigation_sha = doc.get("navigation", {}).get("sha256")
-        scheduling = scheduling_plan(doc)
+        scheduling = self.store.scheduling_plan(doc_id)
         page_progress = document_progress(doc)
         key = fingerprint(
             {

@@ -58,11 +58,11 @@ def test_background_validation_does_not_block_status_or_overwrite_a_newer_snapsh
     verify = store.context.evidence.verify
     passes = []
 
-    def delayed(doc):
+    def delayed(doc, pages=None):
         passes.append(doc["title"])
         entered.set()
         assert release.wait(3)
-        verify(doc)
+        verify(doc, pages)
 
     monkeypatch.setattr(store.context.evidence, "verify", delayed)
     other = Store(store.root)
@@ -75,6 +75,7 @@ def test_background_validation_does_not_block_status_or_overwrite_a_newer_snapsh
                 status.pop("directory", None)
                 status.pop("counts", None)
                 status["title"] = "Concurrent edit retained"
+                status["pages"][0]["page_kind"] = "text"
                 other.checkpoints.write(status)
         finally:
             release.set()
@@ -90,6 +91,39 @@ def test_status_reads_last_atomic_commit_without_waiting_for_a_writer(tmp_path):
         with store.lock:
             read = pool.submit(other.status, doc_id)
             assert read.result(timeout=0.3)["id"] == doc_id
+
+
+def test_a_new_status_reader_does_not_wait_for_the_command_mutex(tmp_path):
+    store, doc_id = document(tmp_path)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with store.lock:
+            read = pool.submit(lambda: Store(store.root).status(doc_id))
+            assert read.result(timeout=0.3)["id"] == doc_id
+
+
+def test_dispatch_evidence_validation_does_not_block_pause(tmp_path, monkeypatch):
+    store, doc_id = document(tmp_path, count=2)
+    other = Store(store.root)
+    entered, release = Event(), Event()
+    verify = store.context.evidence.verify
+
+    def delayed(doc, pages=None):
+        entered.set()
+        assert release.wait(3)
+        verify(doc, pages)
+
+    monkeypatch.setattr(store.context.evidence, "verify", delayed)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        dispatch = pool.submit(store.dispatch.reserve, doc_id)
+        try:
+            assert entered.wait(2)
+            assert (
+                pool.submit(other.pause_document, doc_id).result(timeout=0.3)["state"] == "paused"
+            )
+        finally:
+            release.set()
+        with pytest.raises(ValueError, match="paused"):
+            dispatch.result(timeout=3)
 
 
 def test_opening_original_pixels_does_not_block_mutation(tmp_path, monkeypatch):

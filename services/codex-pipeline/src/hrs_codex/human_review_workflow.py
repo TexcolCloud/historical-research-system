@@ -24,10 +24,8 @@ class HumanReviewWorkflow:
         """All unresolved page reviews are available to people, including repeated failures."""
         with self.context.repository.lock:
             rows = []
-            for path in sorted(
-                (self.context.repository.root / "documents").glob("*/document.json")
-            ):
-                doc = json.loads(path.read_text(encoding="utf-8"))
+            for document_id in self.context.repository.ids():
+                doc = self.context.repository.read(document_id)
                 for page in doc["pages"]:
                     if page["state"] != "pending":
                         continue

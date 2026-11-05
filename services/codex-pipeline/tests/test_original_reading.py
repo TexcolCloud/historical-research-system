@@ -1,7 +1,5 @@
 """Synthetic protocol checks: original observations precede candidate judgment."""
 
-import json
-
 import pytest
 from test_store import complete, document
 
@@ -95,10 +93,9 @@ def test_reading_is_required_immutable_and_bound_to_final_decision(tmp_path):
         {"articles": [{"title": "Synthetic", "pages": [1]}]},
     )
     store.publish(doc_id)
-    path = store.document_directory(doc_id) / "document.json"
-    changed = json.loads(path.read_text("utf-8"))
+    changed = store.checkpoints.read(doc_id)
     changed["tasks"][1]["source_reading"]["reading"]["observations"] = ["Changed evidence"]
-    path.write_text(json.dumps(changed), encoding="utf-8")
+    store.checkpoints.write(changed)
     with pytest.raises(ValueError, match="reading evidence hash"):
         store.publish(doc_id)
 

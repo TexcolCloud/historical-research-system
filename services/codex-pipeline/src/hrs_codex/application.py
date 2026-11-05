@@ -9,11 +9,16 @@ from hrs_codex.store import Store
 def prepare(store: Store, source: str, title: str = "") -> dict:
     from hashlib import file_digest
 
+    store.checkpoints.require_writable()
     path = Path(source).expanduser().resolve(strict=True)
     with path.open("rb") as stream:
         document_id = file_digest(stream, "sha256").hexdigest()[:24]
-    manifest = render_document(path, store.root / "documents" / document_id)
-    document = store.register_manifest(manifest, title=title)
+    if store.checkpoints.exists(document_id):
+        document = store.status(document_id)
+        store.verify_evidence(document)
+    else:
+        manifest = render_document(path, store.root / "documents" / document_id)
+        document = store.register_manifest(manifest, title=title)
     store.freeze_policy(
         document["id"],
         {

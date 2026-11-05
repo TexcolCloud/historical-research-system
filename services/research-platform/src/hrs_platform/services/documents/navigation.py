@@ -25,11 +25,8 @@ class Navigation:
 
     def status(self, run_id):
         store, doc_id = self.native(run_id)
-        stat = (store.document_directory(doc_id) / "document.json").stat()
         return deepcopy(
-            navigation_snapshot(
-                store.root, doc_id, str(run_id), (stat.st_ino, stat.st_mtime_ns, stat.st_size)
-            )
+            navigation_snapshot(store.root, doc_id, str(run_id), store.checkpoints.revision(doc_id))
         )
 
     def decide(self, run_id, entry_id, request):

@@ -39,12 +39,32 @@ def scheduling_plan(doc, *, now=None, capacity=7):
             statistics.median(durations[-20:]) if durations else (60 if stage == "ocr" else 120)
         )
         recent = [t for t in completed if t["receipt"].get("created_at", 0) >= now - 300]
+        starts = [
+            t.get("claim", {}).get(
+                "started_at", t["receipt"]["created_at"] - t["receipt"].get("duration_seconds", 0)
+            )
+            for t in completed
+            if t["receipt"].get("created_at")
+        ]
+        window = min(300, max(1, now - min(starts))) if starts else 0
+        phases = {}
+        for field in (
+            "queue_seconds",
+            "startup_seconds",
+            "original_reading_seconds",
+            "candidate_comparison_seconds",
+        ):
+            samples = [t["receipt"][field] for t in completed[-20:] if field in t["receipt"]]
+            if samples:
+                phases[field] = round(statistics.median(samples), 1)
         metrics[stage] = {
             "completed": len(completed),
             "queued": queued[stage],
             "active": len(active[stage]),
             "median_seconds": round(seconds, 1) if durations else None,
-            "pages_per_minute": round(len(recent) / 5, 2),
+            "pages_per_minute": round(len(recent) * 60 / window, 2) if window else 0,
+            "sample_window_seconds": round(window, 1),
+            "phase_medians": phases,
             "samples": len(durations),
         }
     workers = dict.fromkeys(STAGES, 0)
@@ -81,7 +101,9 @@ def scheduling_plan(doc, *, now=None, capacity=7):
             if donor:
                 workers[donor] -= 1
         if sum(workers.values()) < capacity:
-            workers[stage] = 1
+            workers[stage] = (
+                min(work[stage], capacity - sum(workers.values())) if stage == "verify" else 1
+            )
     scheduler = doc.get("scheduler", {})
     previous = scheduler.get("allocation", {})
     if (

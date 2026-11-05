@@ -86,7 +86,8 @@ def create_server(root: Path) -> MCPServer:
         "Historical Research",
         instructions=(
             "Use native Codex subagents for OCR, review, correction verification and organization. "
-            "Read workflow_instructions first. Every reviewer opens original_image before judging. "
+            "Runtime sessions use dispatch_work and open_task_packet, which includes the stage contract. "
+            "Direct clients read workflow_instructions first. Every reviewer inspects original pixels before judging. "
             "Publish only after every page and organization task passes. Verdicts are machine decisions."
         ),
     )
@@ -225,20 +226,7 @@ def create_server(root: Path) -> MCPServer:
     @contract_errors
     def approved_page_text(document_id: str, page: int) -> dict:
         """Read one approved page with its hash; organization workers can inspect large documents page by page."""
-        doc = store.status(document_id)
-        if type(page) is not int or not 1 <= page <= len(doc["pages"]):
-            raise ValueError("Unknown physical page")
-        row = doc["pages"][page - 1]
-        if row["state"] != "approved":
-            raise ValueError("Page has unresolved content")
-        store.verify_evidence(doc)
-        return {
-            "document_id": document_id,
-            "page": page,
-            "image_sha256": row["image_sha256"],
-            "markdown": row["approved"]["markdown"],
-            "markdown_sha256": row["approved"]["sha256"],
-        }
+        return store.approved_page_text(document_id, page)
 
     @server.tool()
     @contract_errors
@@ -314,6 +302,94 @@ def create_server(root: Path) -> MCPServer:
                         "Read the COMPLETE candidate through candidate_text in bounded ranges before submitting a verdict."
                     )
         return task
+
+    @server.tool()
+    @contract_errors
+    def dispatch_work(document_id: str) -> dict:
+        """Reserve concrete tasks and workspace capacity BEFORE spawning the assigned native roles."""
+        return store.dispatch.reserve(document_id)
+
+    @server.tool(structured_output=False)
+    @contract_errors
+    def open_task_packet(session_token: str, worker_id: str) -> list:
+        """Bind a native worker; return stage rules, lease, policy and original pixels in one packet."""
+        from hrs_codex.runtime_policy import worker_instructions
+
+        task, metadata, data = store.dispatch.open(session_token, worker_id)
+        if task.get("state") in {"wait", "exited"}:
+            return [TextContent(type="text", text=json.dumps(task))]
+        stage = task["stage"]
+        if stage in {"organization", "navigation"}:
+            for page in task["inputs"]["pages"]:
+                page.pop("markdown", None)
+            task["snapshot_page_count"] = len(task["inputs"]["pages"])
+            task["inputs"]["pages"] = task["inputs"]["pages"][:20]
+        packet = {
+            "instructions": worker_instructions(stage),
+            "task": source_packet(task),
+            "original": metadata,
+        }
+        content = [TextContent(type="text", text=json.dumps(packet, ensure_ascii=False))]
+        if data is not None:
+            content.append(Image(data=data, format="png").to_image_content())
+        return content
+
+    @server.tool()
+    @contract_errors
+    def freeze_observations(session_token: str, worker_id: str, original_reading: dict) -> dict:
+        """Freeze independent source observations; return the first complete bounded candidate range."""
+        session = store.dispatch.session(session_token, worker_id)
+        task = store.review_candidate(
+            session["document_id"], session["task_id"], session["lease_token"], original_reading
+        )
+        candidate = store.candidate_text(
+            session["document_id"], session["task_id"], session["lease_token"], limit=4000
+        )
+        return {
+            "candidate": candidate,
+            "input_sha256": task["claim"]["input_sha256"],
+            "source_reading_sha256": task["source_reading"]["sha256"],
+        }
+
+    @server.tool()
+    @contract_errors
+    def submit_packet(session_token: str, worker_id: str, result: dict) -> dict:
+        """Atomically save result, follow-up tasks, native session outcome and a minimal receipt."""
+        return store.dispatch.submit(session_token, worker_id, result)
+
+    @server.tool()
+    @contract_errors
+    def finish_worker(session_token: str, worker_id: str) -> dict:
+        """Release an idle native worker; active pages must finish or report a technical failure."""
+        return store.dispatch.close(session_token, worker_id)
+
+    @server.tool()
+    @contract_errors
+    def wait_for_changes(after_sequence: int, seconds: int = 30) -> dict:
+        """Wait on the durable change feed without asking a model to poll or plan."""
+        import time
+
+        deadline = time.monotonic() + max(0, min(seconds, 30))
+        while store.checkpoints.ledger.sequence() <= after_sequence and time.monotonic() < deadline:
+            time.sleep(0.25)
+        return {"sequence": store.checkpoints.ledger.sequence()}
+
+    @server.tool(structured_output=False)
+    @contract_errors
+    def original_details(document_id: str, page: int, boxes: list[list[float]]) -> list:
+        """Inspect up to six bounded original crops in one request; each retains its own hash receipt."""
+        if not 1 <= len(boxes) <= 6:
+            raise ValueError("Request one to six original crop boxes")
+        content = []
+        for box in boxes:
+            metadata, data = render_original_detail(store, document_id, page, box)
+            content.extend(
+                [
+                    TextContent(type="text", text=json.dumps(metadata)),
+                    Image(data=data, format="png").to_image_content(),
+                ]
+            )
+        return content
 
     @server.tool()
     @contract_errors

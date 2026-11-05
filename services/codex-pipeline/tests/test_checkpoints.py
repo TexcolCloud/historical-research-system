@@ -30,12 +30,14 @@ def test_checkpoint_validation_restarts_after_a_concurrent_commit(tmp_path):
 
 
 def test_a_transient_snapshot_sharing_conflict_does_not_break_status(tmp_path, monkeypatch):
-    from hrs_codex.checkpoints import Checkpoints
+    import json
 
-    repository = Checkpoints(tmp_path)
+    from hrs_codex.checkpoints import atomic_json, read_snapshot
+
     document = {"id": "b" * 24, "title": "committed"}
-    repository.write(document)
-    path = repository.directory(document["id"]) / "document.json"
+    # JSON remains an import/export contract, not the live task database.
+    path = tmp_path / "document.json"
+    atomic_json(path, document)
     original = Path.open
     conflicts = []
 
@@ -46,5 +48,5 @@ def test_a_transient_snapshot_sharing_conflict_does_not_break_status(tmp_path, m
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", open_snapshot)
-    assert repository.read(document["id"]) == document
+    assert json.loads(read_snapshot(path)) == document
     assert len(conflicts) == 2

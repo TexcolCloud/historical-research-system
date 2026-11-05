@@ -4,6 +4,8 @@
 
 重构后的模块职责、去重边界与依赖规则见[架构说明](REFACTOR-20261105.md)，测试与20页真实材料结果见[本地验证](REFACTOR-VALIDATION-20261105.md)。
 
+后续性能重构已将任务写入、调度、执行上下文和投影改为事务化主链，见[执行引擎、旧工作区迁移与恢复](EXECUTION-ENGINE-20261105.md)及[最终本地验收](EXECUTION-ENGINE-VALIDATION-20261105.md)。旧 JSON 工作区升级前须停机迁移；新工作区自动使用 SQLite/WAL。
+
 ## 快速开始
 
 完整网页入口复用原项目的上传、核对、阅读、脚注、检索与导出；上传完成后自动写入同一 Codex 持久队列，无需在聊天中再次发出处理指令。准备 Docker Desktop、Python 3.11、uv、Node.js 和已登录的 Codex CLI，然后执行：

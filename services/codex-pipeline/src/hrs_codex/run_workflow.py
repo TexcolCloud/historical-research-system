@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import time
 from uuid import uuid4
@@ -56,20 +55,26 @@ class RunWorkflow:
             raise ValueError("Run owner and lease between 1 and 86400 seconds required")
         with self.context.repository.lock:
             now = time.time()
-            paths = (
-                [self.context.repository.directory(document_id) / "document.json"]
-                if document_id is not None
-                else sorted((self.context.repository.root / "documents").glob("*/document.json"))
-            )
-            for path in paths:
-                if not path.exists():
+            identities = [document_id] if document_id is not None else self.context.repository.ids()
+            for identity in identities:
+                if not self.context.repository.exists(identity):
                     continue
-                doc = json.loads(path.read_text(encoding="utf-8"))
+                doc = self.context.repository.read(identity)
                 request = doc.get("run_request")
                 if request and request.get("pause_requested"):
                     continue
-                if not request or request["state"] not in {"pending", "retryable_error", "running"}:
+                if not request or request["state"] not in {
+                    "pending",
+                    "retryable_error",
+                    "running",
+                    "waiting_workers",
+                }:
                     continue
+                if request["state"] == "waiting_workers" and not any(
+                    task["state"] == "leased" and task["claim"]["expires_at"] > now
+                    for task in doc["tasks"]
+                ):
+                    request["not_before"] = 0
                 if (
                     request.get("technical_failures", 0) >= request.get("retry_limit", 3)
                     or request.get("not_before", 0) > now
@@ -83,7 +88,9 @@ class RunWorkflow:
                 ):
                     continue
                 try:
-                    with FileLock(path.parent / ".executor.lock", timeout=0):
+                    with FileLock(
+                        self.context.repository.directory(identity) / ".executor.lock", timeout=0
+                    ):
                         pass
                 except Timeout:
                     continue
@@ -170,9 +177,9 @@ class RunWorkflow:
             continuation = request.pop("continuation_requested", False)
             if active:
                 request.update(
-                    state="retryable_error",
+                    state="retryable_error" if error is not None else "waiting_workers",
                     not_before=max(active),
-                    error=error or "Waiting for active task leases",
+                    error=error,
                 )
                 if error is not None:
                     request["technical_failures"] = request.get("technical_failures", 0) + 1
@@ -246,6 +253,8 @@ class RunWorkflow:
             for target in targets:
                 if target.exists():
                     shutil.rmtree(target)
+            if self.context.repository.ledger is not None:
+                self.context.repository.ledger.delete(document_id)
 
     def record_recovery_failure(self, document_id, expected_request, detail):
         with self.context.repository.lock:

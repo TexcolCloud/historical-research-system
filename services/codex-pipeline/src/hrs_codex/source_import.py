@@ -38,6 +38,7 @@ class SourceImport:
         original_name: str | None = None,
         media_type: str | None = None,
     ) -> dict:
+        self.context.repository.require_writable()
         source = Path(source).resolve()
         source_hash = file_digest(source)
         if expected_source_sha256 is not None and source_hash != expected_source_sha256:
@@ -47,7 +48,7 @@ class SourceImport:
             raise ValueError("Pages must be a nonempty consecutive physical page sequence")
         with FileLock(self.context.repository.root / f".register-{document_id}.lock", timeout=30):
             directory = self.context.repository.directory(document_id)
-            if (directory / "document.json").exists():
+            if self.context.repository.exists(document_id):
                 with self.context.verified(document_id) as existing:
                     return existing
             directory.mkdir(parents=True, exist_ok=True)
@@ -130,5 +131,6 @@ class SourceImport:
                 }
                 page["state"] = "awaiting_review"
                 doc["tasks"].append(new_task("review", page["page"]))
-            self.context.repository.write(doc)
+            with self.context.repository.lock:
+                self.context.repository.write(doc)
             return doc

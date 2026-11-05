@@ -104,6 +104,8 @@ class StageMetrics(BaseModel):
     median_seconds: float | None = None
     pages_per_minute: float
     samples: int
+    sample_window_seconds: float = 0
+    phase_medians: dict[str, float] = Field(default_factory=dict)
 
 
 class SchedulingReport(BaseModel):
@@ -113,6 +115,8 @@ class SchedulingReport(BaseModel):
     metrics: dict[str, StageMetrics]
     batch_size: int
     cooldown_until: float = 0
+    runtime_counts: dict[str, int] = Field(default_factory=dict)
+    workspace_occupied: int = 0
 
 
 class RecoveryReport(BaseModel):

@@ -137,7 +137,13 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
         ? { revision_pending: event.payload.revision_pending }
         : {}),
       ...(event.payload.state
-        ? { state: event.payload.book_state ?? event.payload.state }
+        ? {
+            state:
+              event.payload.book_state ??
+              (event.payload.state === "completed"
+                ? "ready"
+                : event.payload.state),
+          }
         : {}),
       ...(event.payload.stage ? { stage: event.payload.stage } : {}),
       ...(event.payload.revision !== undefined

@@ -346,8 +346,8 @@ class PublicationWorkflow:
         if not query.strip() or not 1 <= limit <= 100:
             raise ValueError("Nonempty query and limit between 1 and 100 are required")
         results = []
-        for path in sorted((self.context.repository.root / "documents").glob("*/document.json")):
-            doc = self.context.repository.read(path.parent.name)
+        for document_id in self.context.repository.ids():
+            doc = self.context.repository.read(document_id)
             revision_pending = bool(doc.get("active_publication") and doc["state"] != "published")
             revision_reason = (
                 doc.get("revision_history", [{}])[-1].get("reason") if revision_pending else None

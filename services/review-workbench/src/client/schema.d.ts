@@ -1526,6 +1526,15 @@ export interface components {
              * @default 0
              */
             cooldown_until: number;
+            /** Runtime Counts */
+            runtime_counts?: {
+                [key: string]: number;
+            };
+            /**
+             * Workspace Occupied
+             * @default 0
+             */
+            workspace_occupied: number;
         };
         /** SearchContext */
         SearchContext: {
@@ -1638,6 +1647,15 @@ export interface components {
             pages_per_minute: number;
             /** Samples */
             samples: number;
+            /**
+             * Sample Window Seconds
+             * @default 0
+             */
+            sample_window_seconds: number;
+            /** Phase Medians */
+            phase_medians?: {
+                [key: string]: number;
+            };
         };
         /** StructureItem */
         StructureItem: {
