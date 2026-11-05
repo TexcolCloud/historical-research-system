@@ -60,6 +60,7 @@ class Dispatch:
                 if not any(task["stage"] == stage for task in concrete):
                     continue
                 with self.store.lock:
+                    self.make_room(stage, plan)
                     live = [
                         s
                         for s in self.sessions()
@@ -150,9 +151,13 @@ class Dispatch:
         gate = self.store.runtime_control.gate(model)
         if not gate["allowed"]:
             return
+        capacity = min(plan["capacity"], self.store.runtime_control.snapshot()["account"]["limit"])
         while True:
-            full = self.ledger.capacity_used() >= plan["capacity"]
-            model_full = self.ledger.model_capacity_used(model) >= gate["limit"]
+            occupied = self.ledger.capacity_used()
+            model_occupied = self.ledger.model_capacity_used(model)
+            full = occupied >= capacity
+            model_full = model_occupied >= gate["limit"]
+            overcommitted = occupied > capacity or model_occupied > gate["limit"]
             if not full and not model_full:
                 return
             waiting = []
@@ -166,7 +171,7 @@ class Dispatch:
                 if model_full and not full and model_for_stage(session["stage"]) != model:
                     continue
                 doc = self.store.checkpoints.read(session["document_id"])
-                if any(
+                if not overcommitted and any(
                     task["stage"] == session["stage"]
                     and (
                         not session.get("preflight_page")
