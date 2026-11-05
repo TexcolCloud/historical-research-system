@@ -23,6 +23,12 @@ class Store:
         self.context = WorkflowContext(root)
         self.checkpoints = self.context.repository
         self.root, self.lock = self.checkpoints.root, self.checkpoints.lock
+        if self.checkpoints.created:
+            from hrs_codex.execution_policy import configure_execution
+
+            with self.lock:
+                if not (self.root / "execution-policy.json").exists():
+                    configure_execution(self.root, capacity=14)
         self.navigation = NavigationWorkflow(self.context)
         self.runs = RunWorkflow(self.context, self.navigation)
         self.publications = PublicationWorkflow(self.context, self.runs)

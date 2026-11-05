@@ -94,8 +94,11 @@ def test_speed_uses_observed_window_instead_of_a_fixed_five_minute_denominator()
         ],
     }
     metric = scheduling_plan(doc, now=960)["metrics"]["review"]
-    assert metric["pages_per_minute"] == 6
-    assert metric["sample_window_seconds"] == 60
+    assert metric["pages_per_minute"] == 7.2
+    assert metric["sample_window_seconds"] == 50
+    later = scheduling_plan(doc, now=2000)["metrics"]["review"]
+    assert later["pages_per_minute"] == metric["pages_per_minute"]
+    assert later["sample_window_seconds"] == metric["sample_window_seconds"]
 
 
 def test_independent_verification_uses_spare_capacity_instead_of_serializing_pages():

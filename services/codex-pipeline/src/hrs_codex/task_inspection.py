@@ -11,9 +11,69 @@ from hrs_codex.workflow_rules import (
 )
 
 
+def validate_original_reading(context, doc, task, access, reading):
+    """The same source/observation gate applies before and after OCR is available."""
+    if (
+        not access
+        or not isinstance(reading, dict)
+        or reading.get("image_receipt") != access["receipt"]
+        or reading.get("image_sha256") != access["image_sha256"]
+    ):
+        raise ValueError(
+            "Open original_image with this task and lease before recording observations"
+        )
+    observations, unresolved = reading.get("observations"), reading.get("unresolved", [])
+    if (
+        not isinstance(observations, list)
+        or not observations
+        or any(not isinstance(s, str) or not s.strip() for s in observations)
+    ):
+        raise ValueError("Original reading requires nonempty source observations")
+    if not isinstance(unresolved, list) or any(
+        not isinstance(s, str) or not s.strip() for s in unresolved
+    ):
+        raise ValueError("Unresolved original observations must be a list of issues")
+    context.evidence.verify_details(doc, task, reading)
+
+
 class TaskInspection:
     def __init__(self, context):
         self.context = context
+
+    def approved_pages_text(self, document_id, task_id, lease_token, *, after_page=0, limit=8):
+        """Return whole frozen pages in a bounded batch; never truncate apparatus."""
+        if (
+            type(after_page) is not int
+            or after_page < 0
+            or type(limit) is not int
+            or not 1 <= limit <= 8
+        ):
+            raise ValueError("Approved-page batch needs after_page >= 0 and limit between 1 and 8")
+        task = self.get_task(document_id, task_id)
+        if (
+            task["stage"] not in {"organization", "navigation"}
+            or task["state"] != "leased"
+            or task["claim"]["lease_token"] != lease_token
+            or task["claim"]["expires_at"] <= time.time()
+        ):
+            raise ValueError("Approved-page batch requires an active organization/navigation lease")
+        frozen = [p for p in task["inputs"]["pages"] if p["page"] > after_page]
+        pages, size = [], 0
+        for reference in frozen[:limit]:
+            page = self.approved_page_text(document_id, reference["page"])
+            if any(
+                page[field] != reference[field] for field in ("image_sha256", "markdown_sha256")
+            ):
+                raise ValueError("Approved page differs from the frozen organization snapshot")
+            if pages and size + len(page["markdown"]) > 16000:
+                break
+            pages.append(page)
+            size += len(page["markdown"])
+        return {
+            "pages": pages,
+            "total_pages": len(task["inputs"]["pages"]),
+            "next_after_page": pages[-1]["page"] if len(pages) < len(frozen) else None,
+        }
 
     def approved_page_text(self, document_id, page):
         with self.context.verified_page(document_id, page) as doc:
@@ -123,28 +183,7 @@ class TaskInspection:
         with self.context.verified_task(document_id, task_id=task_id) as doc:
             task = active_review(doc, task_id, lease_token)
             access = task.get("image_access")
-            if (
-                not access
-                or not isinstance(original_reading, dict)
-                or original_reading.get("image_receipt") != access["receipt"]
-                or original_reading.get("image_sha256") != access["image_sha256"]
-            ):
-                raise ValueError(
-                    "Open original_image with this task and lease before recording observations"
-                )
-            observations = original_reading.get("observations")
-            unresolved = original_reading.get("unresolved", [])
-            if (
-                not isinstance(observations, list)
-                or not observations
-                or any(not isinstance(s, str) or not s.strip() for s in observations)
-            ):
-                raise ValueError("Original reading requires nonempty source observations")
-            if not isinstance(unresolved, list) or any(
-                not isinstance(s, str) or not s.strip() for s in unresolved
-            ):
-                raise ValueError("Unresolved original observations must be a list of issues")
-            self.context.evidence.verify_details(doc, task, original_reading)
+            validate_original_reading(self.context, doc, task, access, original_reading)
             if task.get("source_reading"):
                 if task["source_reading"]["reading"] != original_reading:
                     raise ValueError(

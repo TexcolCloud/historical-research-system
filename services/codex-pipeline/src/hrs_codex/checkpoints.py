@@ -46,6 +46,7 @@ def atomic_json(path: Path, value: dict) -> None:
 
 class Checkpoints:
     def __init__(self, root: Path):
+        self.created = False
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         # One process lock serializes local document mutations; split by
@@ -60,6 +61,7 @@ class Checkpoints:
             return
         with self.lock:
             legacy = any((self.root / "documents").glob("*/document.json"))
+            self.created = not path.exists() and not legacy
             self.ledger = Ledger(path) if path.exists() or not legacy else None
 
     def directory(self, document_id: str) -> Path:

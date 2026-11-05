@@ -17,9 +17,26 @@ processing policy, claim and original pixels in one response. Review/verify pack
 withhold candidates until `freeze_observations` freezes independent original reading;
 the response includes the first bounded candidate range. Read all remaining ranges
 through `candidate_text`. `submit_packet` commits the result and a minimal receipt;
-identical replays return the saved receipt. Reuse a worker for at most two tasks.
+identical replays return the saved receipt. Reuse a worker only up to the returned
+session_max_tasks (legacy two; configured warm sessions up to eight), also bounded
+by 48,000 processed characters. Never reuse an OCR agent as its reviewer.
 Prewarmed reviewers wait on `wait_for_changes` without consuming a model turn per poll.
 Only native Codex subagents perform inference; Python threads supervise CLI processes.
+
+After the last organization result passes, submit_packet immediately runs the
+existing full-book evidence/publication gate and returns its publication receipt.
+It does not wait for coordinator cleanup. Already-published documents need no
+second publish call; explicit pause/cancel still wins. Pending pages never publish.
+
+Opt-in overlap_reading allows review sessions to inspect original pixels while OCR
+runs. Source-only preflight packets contain no candidate or candidate hash. Freeze
+observations with freeze_observations, then open_task_packet waits for OCR and binds
+the immutable source-only evidence to the concrete review lease. A frozen preflight
+cannot be changed, reused for another page/worker, or used as approval by itself.
+Unresolved observations still block approval; verification remains a separate agent.
+Organization receives complete approved-page batches with hashes; follow
+approved_pages.next_after_page using approved_pages_text until null. Do not refetch
+already supplied page text. The whole book must pass before organization/publication.
 
 The coordinator replenishes assignments after each worker completes. It does not
 choose allocations, read source text or perform content approval itself. The CLI
@@ -251,8 +268,13 @@ is preserved separately; this workflow does not generate historical research car
 ## Bounded scheduling and source directory navigation
 
 The coordinator calls `scheduling_plan` before allocating and after each completed
-batch. At most seven workers (plus the coordinator) run concurrently. Each worker
-claims at most two tasks, then exits; retire completed agents before replacement.
+batch. Legacy workspaces default to seven shared worker slots and two tasks per
+session. Explicit configure-execution settings select shared capacity (2–64) and
+warm batches (1–8), never a guarantee of account/provider throughput. Honor the
+returned capacity, batch_size and session_max_tasks; retire exited native agents
+before replacement. Original reading, prewarming and cooldown all occupy slots.
+Rate limits/service capacity errors reduce new admissions across the workspace for
+five minutes; active pages finish and document retry budgets remain bounded.
 Actual per-stage receipt durations, review backlog and available work determine
 the next allocation. Do not interrupt an active page to rebalance. A pending human
 page never stops other work. Existing nonempty lanes hold their allocation for

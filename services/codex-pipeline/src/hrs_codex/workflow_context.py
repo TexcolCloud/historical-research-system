@@ -20,8 +20,11 @@ class WorkflowContext:
     def verified_page(self, document_id, page):
         return self._scoped(document_id, lambda doc: page)
 
-    def verified_task(self, document_id, task_id=None, stage=None):
+    def verified_task(self, document_id, task_id=None, stage=None, selector=None):
         def page_for(doc):
+            if selector is not None:
+                task = selector(doc)
+                return task["page"] if task else 0
             import time
 
             from hrs_codex.scheduling import task_priority

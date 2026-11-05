@@ -20,6 +20,7 @@ TOOLS = [
     "original_detail",
     "original_details",
     "approved_page_text",
+    "approved_pages_text",
     "approved_page_catalog",
     "report_task_failure",
     "document_status",
@@ -54,6 +55,9 @@ def account_route():
 
 
 def command(executable, root, document_id, logs, model, project):
+    from hrs_codex.execution_policy import execution_policy
+
+    policy = execution_policy(root)
     runtime = root / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     (runtime / ".hrs-runtime-root").touch()
@@ -66,13 +70,15 @@ def command(executable, root, document_id, logs, model, project):
         "plugins._default.enabled": False,
         "skills.bundled.enabled": False,
         "skills.include_instructions": False,
-        "agents.max_threads": 8,
+        "agents.max_threads": max(8, policy["capacity"]),
         "mcp_servers.historical_research.command": sys.executable,
         "mcp_servers.historical_research.args": ["-m", "hrs_codex.cli", "--root", str(root), "mcp"],
         "mcp_servers.historical_research.default_tools_approval_mode": "approve",
         "mcp_servers.historical_research.required": True,
         "mcp_servers.historical_research.enabled_tools": TOOLS,
     }
+    if policy["overlap_reading"]:
+        settings["model_reasoning_effort"] = "low"
     skill_roots = [
         Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "skills",
         Path.home() / ".agents/skills",
@@ -125,4 +131,8 @@ def command(executable, root, document_id, logs, model, project):
                 f"agents.{name}.description={json.dumps('Native historical source worker: ' + name)}",
             ]
         )
-    return arguments, coordinator_instructions(document_id), runtime
+    return (
+        arguments,
+        coordinator_instructions(document_id, batch_pages=policy["batch_pages"]),
+        runtime,
+    )

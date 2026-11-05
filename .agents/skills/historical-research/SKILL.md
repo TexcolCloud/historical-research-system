@@ -24,7 +24,10 @@ source for PDF routing, original-first review, fallback limits and publication.
    and resumes after human approval; browser and chat history are not the task store.
 4. Distinguish queued, running, technical recovery, waiting for a person,
    explicitly paused and published. Use scheduling_plan for bounded stage allocation; workers
-   handle at most two tasks per batch. Continue other pages while human pages wait.
+   honor returned batch_size/session_max_tasks (legacy two; configured warm sessions up to eight).
+   Source-only preflight packets allow independent original reading during OCR;
+   freeze observations before candidate exposure and follow the returned packet contract.
+   Continue other pages while human pages wait.
    Navigation tasks use historical_organization; follow the source-bound TOC
    contract and preserve conflicts for the local UI. Never resume a paused source
    without an explicit request.

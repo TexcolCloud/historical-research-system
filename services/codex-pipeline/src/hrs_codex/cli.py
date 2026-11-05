@@ -27,6 +27,12 @@ def _main() -> None:
     commands.add_parser(
         "migrate-ledger", help="Migrate a stopped workspace and seal legacy JSON snapshots"
     )
+    execution = commands.add_parser(
+        "configure-execution", help="Set shared capacity and warm-worker limits"
+    )
+    execution.add_argument("--capacity", type=int, required=True)
+    execution.add_argument("--batch-pages", type=int, default=8)
+    execution.add_argument("--overlap-reading", action=argparse.BooleanOptionalAction, default=True)
     workbench_parser = commands.add_parser(
         "workbench", help="Run the unified workbench and durable executor"
     )
@@ -65,7 +71,16 @@ def _main() -> None:
 
         serve(store, args.port)
         return
-    if args.command == "migrate-ledger":
+    if args.command == "configure-execution":
+        from hrs_codex.execution_policy import configure_execution
+
+        result = configure_execution(
+            root,
+            capacity=args.capacity,
+            batch_pages=args.batch_pages,
+            overlap_reading=args.overlap_reading,
+        )
+    elif args.command == "migrate-ledger":
         result = store.checkpoints.migrate(store.verify_evidence)
     elif args.command == "prepare":
         result = prepare(store, args.source, args.title)

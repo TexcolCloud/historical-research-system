@@ -28,7 +28,11 @@ def snapshot_workspace(store, destination: Path) -> dict:
         )
         paths += [
             path
-            for name in (".workspace.json", ".workflow-test-authorization.json")
+            for name in (
+                ".workspace.json",
+                ".workflow-test-authorization.json",
+                "execution-policy.json",
+            )
             if (path := store.root / name).is_file()
         ]
         files = {path.relative_to(store.root).as_posix(): path for path in paths}

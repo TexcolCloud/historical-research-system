@@ -4,13 +4,13 @@ import json
 from collections import Counter
 from functools import wraps
 from pathlib import Path
-from typing import Literal
 
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import TextContent
 
 from hrs_codex.application import prepare as prepare
+from hrs_codex.contracts import FailureCode
 from hrs_codex.details import original_detail as render_original_detail
 from hrs_codex.store import Store
 
@@ -160,9 +160,7 @@ def create_server(root: Path) -> MCPServer:
         document_id: str,
         task_id: str,
         lease_token: str,
-        code: Literal[
-            "rate_limit", "429", "service_unavailable", "transport", "timeout", "tool_error"
-        ],
+        code: FailureCode,
     ) -> dict:
         """Retain technical failures separately from source uncertainty and reduce admissions."""
         return store.report_task_failure(document_id, task_id, lease_token, code)
@@ -227,6 +225,16 @@ def create_server(root: Path) -> MCPServer:
     def approved_page_text(document_id: str, page: int) -> dict:
         """Read one approved page with its hash; organization workers can inspect large documents page by page."""
         return store.approved_page_text(document_id, page)
+
+    @server.tool()
+    @contract_errors
+    def approved_pages_text(
+        document_id: str, task_id: str, lease_token: str, after_page: int = 0, limit: int = 8
+    ) -> dict:
+        """Read complete frozen approved pages in bounded batches, retaining footnotes and hashes."""
+        return store.task_inspection.approved_pages_text(
+            document_id, task_id, lease_token, after_page=after_page, limit=limit
+        )
 
     @server.tool()
     @contract_errors
@@ -311,11 +319,19 @@ def create_server(root: Path) -> MCPServer:
 
     @server.tool(structured_output=False)
     @contract_errors
-    def open_task_packet(session_token: str, worker_id: str) -> list:
+    def open_task_packet(session_token: str, worker_id: str, wait_seconds: int = 25) -> list:
         """Bind a native worker; return stage rules, lease, policy and original pixels in one packet."""
+        import time
+
         from hrs_codex.runtime_policy import worker_instructions
 
+        deadline = time.monotonic() + max(0, min(wait_seconds, 30))
         task, metadata, data = store.dispatch.open(session_token, worker_id)
+        while task.get("state") == "wait" and time.monotonic() < deadline:
+            sequence = task["sequence"]
+            while store.checkpoints.ledger.sequence() <= sequence and time.monotonic() < deadline:
+                time.sleep(0.2)
+            task, metadata, data = store.dispatch.open(session_token, worker_id)
         if task.get("state") in {"wait", "exited"}:
             return [TextContent(type="text", text=json.dumps(task))]
         stage = task["stage"]
@@ -326,9 +342,27 @@ def create_server(root: Path) -> MCPServer:
             task["inputs"]["pages"] = task["inputs"]["pages"][:20]
         packet = {
             "instructions": worker_instructions(stage),
-            "task": source_packet(task),
+            "task": task if task.get("state") == "preflight" else source_packet(task),
             "original": metadata,
         }
+        if stage == "organization":
+            packet["approved_pages"] = store.task_inspection.approved_pages_text(
+                task["inputs"]["document_id"], task["task_id"], task["lease_token"]
+            )
+        if task.get("state") == "preflight":
+            packet["instructions"] += (
+                "\nThis is a source-only preflight: no candidate or task lease exists yet. Inspect original pixels now; call freeze_observations with session_token, worker_id and original_reading. If it returns wait, call open_task_packet; your observations stay frozen. Never invent a task ID or input hash."
+            )
+        elif task.get("source_reading"):
+            packet["candidate"] = store.candidate_text(
+                task["document_id"] if "document_id" in task else task["inputs"]["document_id"],
+                task["task_id"],
+                task["lease_token"],
+                limit=4000,
+            )
+            packet["instructions"] += (
+                "\nYour preflight observations are already frozen and bound to this task. Compare the supplied candidate; read any remaining ranges. Do not freeze observations again."
+            )
         content = [TextContent(type="text", text=json.dumps(packet, ensure_ascii=False))]
         if data is not None:
             content.append(Image(data=data, format="png").to_image_content())
@@ -338,18 +372,7 @@ def create_server(root: Path) -> MCPServer:
     @contract_errors
     def freeze_observations(session_token: str, worker_id: str, original_reading: dict) -> dict:
         """Freeze independent source observations; return the first complete bounded candidate range."""
-        session = store.dispatch.session(session_token, worker_id)
-        task = store.review_candidate(
-            session["document_id"], session["task_id"], session["lease_token"], original_reading
-        )
-        candidate = store.candidate_text(
-            session["document_id"], session["task_id"], session["lease_token"], limit=4000
-        )
-        return {
-            "candidate": candidate,
-            "input_sha256": task["claim"]["input_sha256"],
-            "source_reading_sha256": task["source_reading"]["sha256"],
-        }
+        return store.dispatch.freeze(session_token, worker_id, original_reading)
 
     @server.tool()
     @contract_errors
@@ -359,9 +382,11 @@ def create_server(root: Path) -> MCPServer:
 
     @server.tool()
     @contract_errors
-    def finish_worker(session_token: str, worker_id: str) -> dict:
+    def finish_worker(
+        session_token: str, worker_id: str, failure_code: FailureCode | None = None
+    ) -> dict:
         """Release an idle native worker; active pages must finish or report a technical failure."""
-        return store.dispatch.close(session_token, worker_id)
+        return store.dispatch.close(session_token, worker_id, failure_code=failure_code)
 
     @server.tool()
     @contract_errors

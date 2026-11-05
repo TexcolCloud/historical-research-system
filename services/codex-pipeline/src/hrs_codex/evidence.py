@@ -80,6 +80,19 @@ class Evidence:
                 ):
                     raise EvidenceMismatch("Original reading page hash mismatch")
                 self.verify_details(doc, task, reading["reading"], files)
+                if preflight := reading["reading"].get("preflight"):
+                    if (
+                        digest({k: v for k, v in preflight.items() if k != "sha256"})
+                        != preflight.get("sha256")
+                        or preflight["reading"]
+                        != {k: v for k, v in reading["reading"].items() if k != "preflight"}
+                        or preflight["access"]["source_sha256"] != doc["source"]["sha256"]
+                        or preflight["access"]["worker_id"] != reading["worker_id"]
+                        or preflight["access"]["page"] != task["page"]
+                        or preflight["access"]["receipt"] != reading["image_access"]["receipt"]
+                        or preflight["frozen_at"] > reading["created_at"]
+                    ):
+                        raise EvidenceMismatch("Preflight original observation evidence mismatch")
             if task.get("source_first_required") and task.get("result") is not None:
                 if (
                     not task.get("source_reading")

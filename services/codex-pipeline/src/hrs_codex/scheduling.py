@@ -7,9 +7,9 @@ from collections import Counter
 STAGES = ("ocr", "review", "verify", "navigation", "organization")
 
 
-def scheduling_plan(doc, *, now=None, capacity=7):
+def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading=False):
     now = time.time() if now is None else now
-    capacity = max(2, min(7, capacity))
+    capacity = max(2, min(64, capacity))
     tasks = doc["tasks"]
     active = {
         s: {
@@ -38,15 +38,26 @@ def scheduling_plan(doc, *, now=None, capacity=7):
         seconds = (
             statistics.median(durations[-20:]) if durations else (60 if stage == "ocr" else 120)
         )
-        recent = [t for t in completed if t["receipt"].get("created_at", 0) >= now - 300]
+        sample_end = (
+            now
+            if queued[stage] or active[stage]
+            else max((t["receipt"].get("created_at", now) for t in completed), default=now)
+        )
+        recent = [t for t in completed if t["receipt"].get("created_at", 0) >= sample_end - 300]
         starts = [
-            t.get("claim", {}).get(
-                "started_at", t["receipt"]["created_at"] - t["receipt"].get("duration_seconds", 0)
+            min(
+                t.get("claim", {}).get(
+                    "started_at",
+                    t["receipt"]["created_at"] - t["receipt"].get("duration_seconds", 0),
+                ),
+                t.get("source_reading", {})
+                .get("image_access", {})
+                .get("opened_at", t["receipt"]["created_at"]),
             )
             for t in completed
             if t["receipt"].get("created_at")
         ]
-        window = min(300, max(1, now - min(starts))) if starts else 0
+        window = min(300, max(1, sample_end - min(starts))) if starts else 0
         phases = {}
         for field in (
             "queue_seconds",
@@ -78,11 +89,18 @@ def scheduling_plan(doc, *, now=None, capacity=7):
         and t.get("retry_after", 0) <= now
     )
     work = {s: eligible[s] + len(active[s]) for s in STAGES}
+    if overlap_reading and work["ocr"]:
+        # Blind original reading can run before the candidate exists.
+        work["review"] += work["ocr"]
     if work["ocr"] and work["review"]:
         ocr = metrics["ocr"]["median_seconds"] or 60
-        review = metrics["review"]["median_seconds"] or 120
+        review = metrics["review"]["median_seconds"] or (60 if overlap_reading else 120)
+        if overlap_reading and min(metrics["ocr"]["samples"], metrics["review"]["samples"]) < 3:
+            # A measured OCR time versus an unmeasured review prior is not a ratio.
+            # Hold balanced warm lanes until both populations have real samples.
+            ocr = review = 60
         ocr_slots = max(1, min(capacity - 1, round(capacity * ocr / (ocr + review))))
-        if work["review"] >= 8:
+        if (queued["review"] if overlap_reading else work["review"]) >= 8:
             ocr_slots = max(1, ocr_slots - 1)
         workers["review"] = min(work["review"], capacity - ocr_slots)
         workers["ocr"] = min(work["ocr"], capacity - workers["review"])
@@ -104,6 +122,14 @@ def scheduling_plan(doc, *, now=None, capacity=7):
             workers[stage] = (
                 min(work[stage], capacity - sum(workers.values())) if stage == "verify" else 1
             )
+    if (
+        overlap_reading
+        and not work["organization"]
+        and not doc.get("organization")
+        and 0 < sum(p["state"] not in {"approved", "pending"} for p in doc["pages"]) <= 8
+        and sum(workers.values()) < capacity
+    ):
+        workers["organization"] = 1
     scheduler = doc.get("scheduler", {})
     previous = scheduler.get("allocation", {})
     if (
@@ -130,7 +156,7 @@ def scheduling_plan(doc, *, now=None, capacity=7):
         "workers": workers,
         "active": {s: len(active[s]) for s in STAGES},
         "metrics": metrics,
-        "batch_size": 2,
+        "batch_size": batch_pages,
         "rebalance_seconds": 30,
         "human_pending": sum(p["state"] == "pending" for p in doc["pages"]),
         "automatic_work_remaining": bool(sum(queued.values()) or any(active.values())),
@@ -145,7 +171,9 @@ def scheduling_plan(doc, *, now=None, capacity=7):
             ),
             default=0,
         ),
-        "policy": "measured-small-batches-v1",
+        "policy": "overlapped-original-reading-v2"
+        if overlap_reading
+        else "measured-small-batches-v1",
     }
 
 

@@ -1,6 +1,11 @@
 """Names for persisted workflow values; serialization remains plain versioned JSON."""
 
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, get_args
+
+FailureCode = Literal[
+    "rate_limit", "429", "service_unavailable", "transport", "timeout", "tool_error"
+]
+TECHNICAL_FAILURE_CODES = frozenset(get_args(FailureCode))
 
 MachineStage = Literal["ocr", "review", "verify", "navigation", "organization"]
 TaskStage = MachineStage | Literal["extraction", "human_review", "machine_handoff"]

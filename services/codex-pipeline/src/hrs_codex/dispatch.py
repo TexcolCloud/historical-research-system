@@ -3,9 +3,10 @@
 import logging
 import sqlite3
 import time
+from copy import deepcopy
 from uuid import uuid4
 
-from hrs_codex.errors import LeaseConflict
+from hrs_codex.errors import LeaseConflict, WorkflowStopped
 from hrs_codex.hashing import digest
 
 ROLES = {
@@ -33,14 +34,41 @@ class Dispatch:
 
     def reserve(self, document_id):
         """Reserve concrete task leases before asking the coordinator to spawn anything."""
+        from hrs_codex.execution_policy import execution_policy
+
+        policy = execution_policy(self.store.root)
         with self.store.lock:
             self.expire()
             plan = self.store.scheduling_plan(document_id)
             occupied = self.ledger.capacity_used()
             assignments = []
+            live = [
+                s
+                for s in self.sessions()
+                if s["document_id"] == document_id and s["state"] != "exited"
+            ]
+            if (
+                policy["overlap_reading"]
+                and not plan["paused"]
+                and plan["cooldown_until"] <= time.time()
+            ):
+                # OCR and blind reading reserve one shared budget. A warmed organization
+                # worker waits for full approval; it receives no partial organization input.
+                for stage in ("review", "organization"):
+                    missing = plan["workers"][stage] - sum(s["stage"] == stage for s in live)
+                    for _ in range(max(0, missing)):
+                        if occupied >= plan["capacity"]:
+                            break
+                        warm = self.new_session(document_id, stage, plan)
+                        warm.update(task_id=None, prewarmed=True, overlap_reading=True)
+                        self.ledger.save_session(warm)
+                        live.append(warm)
+                        assignments.append(self.assignment(warm))
+                        occupied += 1
             if not plan["paused"] and plan["cooldown_until"] <= time.time():
                 if (
-                    plan["workers"]["ocr"] >= 2
+                    not policy["overlap_reading"]
+                    and plan["workers"]["ocr"] >= 2
                     and not plan["metrics"]["review"]["queued"]
                     and occupied < plan["capacity"]
                     and not any(
@@ -50,42 +78,20 @@ class Dispatch:
                         for session in self.sessions()
                     )
                 ):
-                    warm = {
-                        "session_token": uuid4().hex,
-                        "document_id": document_id,
-                        "stage": "review",
-                        "agent_type": ROLES["review"],
-                        "state": "starting",
-                        "reserved_at": time.time(),
-                        "expires_at": time.time() + 180,
-                        "completed": 0,
-                        "task_id": None,
-                        "prewarmed": True,
-                    }
+                    warm = self.new_session(document_id, "review", plan)
+                    warm.update(task_id=None, prewarmed=True)
                     self.ledger.save_session(warm)
-                    assignments.append(
-                        {
-                            key: warm[key]
-                            for key in ("session_token", "document_id", "stage", "agent_type")
-                        }
-                    )
+                    assignments.append(self.assignment(warm))
                     occupied += 1
         if not plan["paused"] and plan["cooldown_until"] <= time.time():
             for stage in ("verify", "review", "ocr", "navigation", "organization"):
+                if policy["overlap_reading"] and stage in {"review", "organization"}:
+                    continue
                 for _ in range(max(0, plan["workers"][stage] - plan["active"][stage])):
                     if occupied >= plan["capacity"]:
                         break
-                    token = uuid4().hex
-                    session = {
-                        "session_token": token,
-                        "document_id": document_id,
-                        "stage": stage,
-                        "agent_type": ROLES[stage],
-                        "state": "starting",
-                        "reserved_at": time.time(),
-                        "expires_at": time.time() + 180,
-                        "completed": 0,
-                    }
+                    session = self.new_session(document_id, stage, plan)
+                    token = session["session_token"]
                     task = self.store.tasks.claim_task(
                         document_id,
                         stage,
@@ -96,12 +102,7 @@ class Dispatch:
                     )
                     if task is None:
                         break
-                    assignments.append(
-                        {
-                            key: session[key]
-                            for key in ("session_token", "document_id", "stage", "agent_type")
-                        }
-                    )
+                    assignments.append(self.assignment(session))
                     occupied += 1
         return {
             "assignments": assignments,
@@ -115,6 +116,25 @@ class Dispatch:
                 for session in self.sessions()
                 if session["state"] != "exited"
             ],
+        }
+
+    def new_session(self, document_id, stage, plan):
+        return {
+            "session_token": uuid4().hex,
+            "document_id": document_id,
+            "stage": stage,
+            "agent_type": ROLES[stage],
+            "state": "starting",
+            "reserved_at": time.time(),
+            "expires_at": time.time() + max(180, plan["capacity"] * 10),
+            "completed": 0,
+            "max_tasks": plan["batch_size"],
+        }
+
+    @staticmethod
+    def assignment(session):
+        return {
+            key: session[key] for key in ("session_token", "document_id", "stage", "agent_type")
         }
 
     def expire(self):
@@ -154,6 +174,8 @@ class Dispatch:
         return session
 
     def open(self, token, worker_id):
+        from hrs_codex.read_ahead import ReadAhead
+
         with self.store.lock:
             session = self.session(token, worker_id)
             if session["state"] == "cooldown":
@@ -169,6 +191,16 @@ class Dispatch:
                 )
                 self.ledger.save_session(session)
             if session["state"] == "idle":
+                if session.get("preflight") and "reading" not in session["preflight"]:
+                    return (
+                        {
+                            "state": "wait",
+                            "sequence": self.ledger.sequence(),
+                            "instructions": "Freeze your original observations before requesting the candidate.",
+                        },
+                        None,
+                        None,
+                    )
                 task = self.store.tasks.claim_task(
                     session["document_id"],
                     session["stage"],
@@ -178,15 +210,31 @@ class Dispatch:
                     session=session,
                 )
                 if task is None:
+                    if (
+                        session.get("overlap_reading")
+                        and session["stage"] == "review"
+                        and not session.get("preflight")
+                    ):
+                        if packet := ReadAhead(self.store).begin(session, worker_id):
+                            return packet
                     doc = self.store.status(session["document_id"])
                     if (
                         session.get("prewarmed")
-                        and not session["completed"]
+                        and (session.get("overlap_reading") or not session["completed"])
                         and any(
-                            task["stage"] == "ocr" and task["state"] in {"ready", "leased"}
+                            task["stage"]
+                            in (
+                                {"ocr", "review", "verify", "navigation"}
+                                if session["stage"] == "organization"
+                                else {"ocr"}
+                            )
+                            and task["state"] in {"ready", "leased"}
                             for task in doc["tasks"]
                         )
                     ):
+                        if session["expires_at"] < time.time() + 60:
+                            session["expires_at"] = time.time() + 180
+                            self.ledger.save_session(session)
                         return (
                             {
                                 "state": "wait",
@@ -217,7 +265,13 @@ class Dispatch:
                 worker_id=worker_id, state="busy", expires_at=task["claim"]["expires_at"]
             )
             self.store.tasks.commit(doc, session)
+            if session.get("preflight") and not task.get("source_reading"):
+                task = ReadAhead(self.store).bind(session, task)
             task = {**task, **task["claim"], "processing_policy": doc.get("processing_policy", {})}
+            task["session_max_tasks"] = session.get("max_tasks", 2)
+        if task.get("source_reading", {}).get("reading", {}).get("preflight"):
+            access = task["source_reading"]["image_access"]
+            return task, {**access, "image_receipt": access["receipt"]}, None
         metadata, pixels = (
             self.store.original_page(
                 session["document_id"],
@@ -230,12 +284,38 @@ class Dispatch:
         )
         return task, metadata, pixels
 
+    def freeze(self, token, worker_id, reading):
+        from hrs_codex.read_ahead import ReadAhead
+
+        with self.store.lock:
+            session = self.session(token, worker_id)
+            if session.get("preflight"):
+                ReadAhead(self.store).freeze(session, worker_id, reading)
+                if not session.get("task_id"):
+                    task, _, _ = self.open(token, worker_id)
+                    if task.get("state") == "wait":
+                        return task
+            else:
+                self.store.review_candidate(
+                    session["document_id"], session["task_id"], session["lease_token"], reading
+                )
+            session = self.session(token, worker_id)
+        task = self.store.get_task(session["document_id"], session["task_id"])
+        candidate = self.store.candidate_text(
+            session["document_id"], session["task_id"], session["lease_token"], limit=4000
+        )
+        return {
+            "candidate": candidate,
+            "input_sha256": task["claim"]["input_sha256"],
+            "source_reading_sha256": task["source_reading"]["sha256"],
+        }
+
     def submit(self, token, worker_id, result):
         session = self.session(token, worker_id, allow_closed=True)
         submission_sha256 = digest(result)
         if receipt := session.get("submissions", {}).get(submission_sha256):
             return {
-                **receipt,
+                **self.publish_ready(receipt),
                 "already_committed": True,
                 "session_state": session["state"],
                 "sequence": self.ledger.sequence(),
@@ -243,6 +323,7 @@ class Dispatch:
         if session["state"] != "busy" or session["expires_at"] <= time.time():
             raise ValueError("Session has no active task to submit")
         session["submission_sha256"] = submission_sha256
+        result = deepcopy(result)
         started = time.perf_counter()
         try:
             receipt = self.store.tasks.submit_task(
@@ -256,7 +337,7 @@ class Dispatch:
             retained = self.session(token, worker_id, allow_closed=True)
             if saved := retained.get("submissions", {}).get(submission_sha256):
                 return {
-                    **saved,
+                    **self.publish_ready(saved),
                     "already_committed": True,
                     "session_state": retained["state"],
                     "sequence": self.ledger.sequence(),
@@ -269,17 +350,65 @@ class Dispatch:
                 "Committed result retained; submission telemetry unavailable"
             )
         return {
-            **receipt,
+            **self.publish_ready(receipt),
             "session_state": session["state"],
             "completed": session["completed"],
             "sequence": self.ledger.sequence(),
         }
 
-    def close(self, token, worker_id):
+    def publish_ready(self, receipt):
+        """The existing full-book gate, immediately after the last organization commit."""
+        if receipt.get("state") != "ready":
+            return receipt
+        try:
+            publication = self.store.publish(receipt["document_id"])
+        except WorkflowStopped:
+            # An explicit pause/cancel wins over automatic publication.
+            return {**receipt, "state": self.store.status(receipt["document_id"])["state"]}
+        return {**receipt, "state": "published", "publication": publication}
+
+    def close(self, token, worker_id, *, failure_code=None):
         with self.store.lock:
             session = self.session(token, worker_id, allow_closed=True)
             if session["state"] == "exited":
                 return {"state": "exited"}
+            if failure_code is not None:
+                from hrs_codex.contracts import TECHNICAL_FAILURE_CODES
+                from hrs_codex.execution_policy import record_pressure
+
+                if failure_code not in TECHNICAL_FAILURE_CODES:
+                    raise ValueError("Use a supported technical failure code")
+                doc = self.store.checkpoints.read(session["document_id"])
+                task = next(
+                    (
+                        t
+                        for t in doc["tasks"]
+                        if t["task_id"] == session.get("task_id")
+                        and t["state"] == "leased"
+                        and t["claim"]["lease_token"] == session.get("lease_token")
+                    ),
+                    None,
+                )
+                if task is not None:
+                    self.store.report_task_failure(
+                        doc["id"], task["task_id"], session["lease_token"], failure_code
+                    )
+                    session = self.session(token, worker_id, allow_closed=True)
+                else:
+                    record_pressure(self.store.root, failure_code)
+                    scheduler = doc.setdefault("scheduler", {})
+                    scheduler["cooldown_until"] = time.time() + 30
+                    scheduler.setdefault("runtime_failures", []).append(
+                        {
+                            "session_token": token,
+                            "stage": session["stage"],
+                            "code": failure_code,
+                            "at": time.time(),
+                        }
+                    )
+                    self.store.checkpoints.write(doc)
+                self.end_session(session, failure_code)
+                return {"state": "exited", "failure_code": failure_code}
             if session["state"] == "busy":
                 raise ValueError("Finish or report the active task before closing its session")
             self.end_session(session, "worker_finished")

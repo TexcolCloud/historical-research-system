@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from uuid import uuid4
 
-from hrs_codex.contracts import MachineStage, TaskReceipt
+from hrs_codex.contracts import TECHNICAL_FAILURE_CODES, MachineStage, TaskReceipt
 from hrs_codex.errors import LeaseConflict
 from hrs_codex.hashing import digest
 from hrs_codex.task_results import apply_navigation, apply_ocr, apply_organization, apply_review
@@ -26,7 +26,9 @@ class TaskWorkflow:
 
         with self.context.repository.lock:
             doc = self.context.repository.read(document_id)
-            plan = scheduling_plan(doc)
+            from hrs_codex.execution_policy import execution_policy
+
+            plan = scheduling_plan(doc, **execution_policy(self.context.repository.root))
             if self.context.repository.ledger:
                 from collections import Counter
                 from statistics import median
@@ -99,14 +101,7 @@ class TaskWorkflow:
     def report_task_failure(
         self, document_id: str, task_id: str, lease_token: str, code: str
     ) -> dict:
-        if code not in {
-            "rate_limit",
-            "429",
-            "service_unavailable",
-            "transport",
-            "timeout",
-            "tool_error",
-        }:
+        if code not in TECHNICAL_FAILURE_CODES:
             raise ValueError("Use a supported technical failure code")
         with self.context.repository.lock:
             doc = self.context.repository.read(document_id)
@@ -119,6 +114,9 @@ class TaskWorkflow:
             task["retry_after"] = time.time() + min(300, 30 * 2 ** (len(failures) - 1))
             if code in {"rate_limit", "429", "service_unavailable"}:
                 doc.setdefault("scheduler", {})["cooldown_until"] = task["retry_after"]
+                from hrs_codex.execution_policy import record_pressure
+
+                record_pressure(self.context.repository.root, code)
             ledger = self.context.repository.ledger
             session = (
                 next(
@@ -159,12 +157,45 @@ class TaskWorkflow:
             raise ValueError("A valid stage and nonempty worker ID are required")
         if not 1 <= lease_seconds <= 86400:
             raise ValueError("Lease must be between 1 and 86400 seconds")
-        with self.context.verified_task(document_id, stage=stage) as doc:
+
+        def select_candidate(doc):
+            from hrs_codex.scheduling import task_priority
+
+            reservations = {}
+            if scheduled and stage == "review" and self.context.repository.ledger:
+                reservations = {
+                    row["preflight_page"]: row["session_token"]
+                    for row in self.context.repository.ledger.sessions()
+                    if row["document_id"] == document_id
+                    and row.get("preflight_page")
+                    and row["state"] != "exited"
+                    and row["expires_at"] > time.time()
+                }
+            candidates = [
+                task
+                for task in doc["tasks"]
+                if task["stage"] == stage
+                and task["state"] in {"ready", "leased"}
+                and task.get("retry_after", 0) <= time.time()
+                and (task["state"] != "leased" or task["claim"]["expires_at"] <= time.time())
+                and (
+                    not (session or {}).get("preflight_page")
+                    or task["page"] == session["preflight_page"]
+                )
+                and (
+                    task["page"] not in reservations
+                    or reservations[task["page"]] == (session or {}).get("session_token")
+                )
+            ]
+            return min(candidates, key=lambda task: task_priority(doc, task), default=None)
+
+        with self.context.verified_task(document_id, selector=select_candidate) as doc:
             require_active(doc)
             if scheduled:
+                from hrs_codex.execution_policy import execution_policy
                 from hrs_codex.scheduling import scheduling_plan
 
-                plan = scheduling_plan(doc)
+                plan = scheduling_plan(doc, **execution_policy(self.context.repository.root))
                 if plan["cooldown_until"] > time.time():
                     return None
                 ledger = self.context.repository.ledger
@@ -195,45 +226,36 @@ class TaskWorkflow:
                     worker_id not in active and len(active) >= plan["workers"][stage]
                 ):
                     return None
-            from hrs_codex.scheduling import task_priority
-
-            for task in sorted(doc["tasks"], key=lambda t: task_priority(doc, t)):
-                if task["stage"] != stage or task["state"] not in {"ready", "leased"}:
-                    continue
-                if task.get("retry_after", 0) > time.time():
-                    continue
-                if task["state"] == "leased" and task["claim"]["expires_at"] > time.time():
-                    continue
-                inputs = self.context.inputs(doc, task)
-                if inputs.get("prior_worker_id") == worker_id:
-                    raise ValueError(
-                        "Review and correction verification require a separate subagent"
-                    )
-                claim = {
-                    "worker_id": worker_id,
-                    "lease_token": uuid4().hex,
-                    "expires_at": time.time() + lease_seconds,
-                    "started_at": time.time(),
-                    "input_sha256": digest(inputs),
-                }
-                if task.get("source_reading"):
-                    task.setdefault("source_reading_history", []).append(task.pop("source_reading"))
-                task.pop("image_access", None)
-                task.pop("candidate_accesses", None)
-                task["bounded_candidate_required"] = (
-                    scheduled
-                    and source_first
-                    and stage in {"review", "verify"}
-                    and len(inputs.get("markdown", "")) > 2000
-                )
-                if source_first and stage in {"review", "verify"}:
-                    task["source_first_required"] = True
-                task.update(state="leased", claim=claim, inputs=inputs)
-                if session is not None:
-                    session.update(task_id=task["task_id"], lease_token=claim["lease_token"])
-                self.commit(doc, session)
-                return {**task, **claim}
-            return None
+            task = select_candidate(doc)
+            if task is None:
+                return None
+            inputs = self.context.inputs(doc, task)
+            if inputs.get("prior_worker_id") == worker_id:
+                raise ValueError("Review and correction verification require a separate subagent")
+            claim = {
+                "worker_id": worker_id,
+                "lease_token": uuid4().hex,
+                "expires_at": time.time() + lease_seconds,
+                "started_at": time.time(),
+                "input_sha256": digest(inputs),
+            }
+            if task.get("source_reading"):
+                task.setdefault("source_reading_history", []).append(task.pop("source_reading"))
+            task.pop("image_access", None)
+            task.pop("candidate_accesses", None)
+            task["bounded_candidate_required"] = (
+                scheduled
+                and source_first
+                and stage in {"review", "verify"}
+                and len(inputs.get("markdown", "")) > 2000
+            )
+            if source_first and stage in {"review", "verify"}:
+                task["source_first_required"] = True
+            task.update(state="leased", claim=claim, inputs=inputs)
+            if session is not None:
+                session.update(task_id=task["task_id"], lease_token=claim["lease_token"])
+            self.commit(doc, session)
+            return {**task, **claim}
 
     def submit_task(
         self, document_id: str, task_id: str, lease_token: str, result: dict, session=None
@@ -317,6 +339,17 @@ class TaskWorkflow:
                 receipt["candidate_comparison_seconds"] = max(
                     0, time.time() - reading["created_at"]
                 )
+                if preflight := reading["reading"].get("preflight"):
+                    source_seconds = max(
+                        0, preflight["frozen_at"] - preflight["access"]["opened_at"]
+                    )
+                    receipt["original_reading_seconds"] = source_seconds
+                    receipt["dependency_wait_seconds"] = max(
+                        0, reading["created_at"] - preflight["frozen_at"]
+                    )
+                    receipt["duration_seconds"] += source_seconds
+                    if session is not None and not session.get("completed"):
+                        receipt["startup_seconds"] = session.get("startup_seconds", 0)
             if stage == "ocr":
                 apply_ocr(doc, task, result, receipt)
             elif stage in {"review", "verify"}:
@@ -366,10 +399,17 @@ class TaskWorkflow:
                 completed = session.get("completed", 0) + 1
                 session.update(
                     completed=completed,
-                    state="exited" if completed >= 2 else "idle",
+                    state="exited" if completed >= session.get("max_tasks", 2) else "idle",
                     expires_at=time.time() + 180,
                     last_completion_at=time.time(),
                 )
+                session["processed_characters"] = session.get("processed_characters", 0) + len(
+                    task["inputs"].get("markdown", task["result"].get("markdown", ""))
+                )
+                if session["processed_characters"] >= 48000:
+                    session["state"] = "exited"
+                session.pop("preflight_page", None)
+                session.pop("preflight", None)
             outcome = {
                 "document_id": doc["id"],
                 "task_id": task_id,

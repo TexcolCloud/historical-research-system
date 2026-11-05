@@ -24,6 +24,10 @@ def document(tmp_path, count=1):
             }
         )
     store = Store(tmp_path / "data")
+    # Preserve the legacy seven-slot/two-page protocol fixture explicitly.
+    from hrs_codex.execution_policy import configure_execution
+
+    configure_execution(store.root, capacity=7, batch_pages=2, overlap_reading=False)
     doc = store.register(source, pages, title="Historical evidence")
     return store, doc["id"]
 

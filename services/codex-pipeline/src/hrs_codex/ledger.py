@@ -287,18 +287,20 @@ class Ledger:
                 )
 
     def capacity_used(self, excluding_session=None):
-        sessions = [
-            session
-            for session in self.sessions()
-            if session["state"] in {"starting", "idle", "busy", "cooldown"}
-            and session["expires_at"] > time.time()
-        ]
-        managed = {(session["document_id"], session.get("task_id")) for session in sessions}
+        # Session/task handoff commits together; sample both from that same revision.
+        now = time.time()
         with self.connect() as connection:
+            sessions = [
+                session
+                for session in self.sessions()
+                if session["state"] in {"starting", "idle", "busy", "cooldown"}
+                and session["expires_at"] > now
+            ]
+            managed = {(session["document_id"], session.get("task_id")) for session in sessions}
             leases = list(
                 connection.execute(
                     "SELECT document_id,key FROM records WHERE kind='task' AND json_extract(value,'$.value.state')='leased' AND json_extract(value,'$.value.claim.expires_at')>?",
-                    (time.time(),),
+                    (now,),
                 )
             )
         return sum(session["session_token"] != excluding_session for session in sessions) + sum(
