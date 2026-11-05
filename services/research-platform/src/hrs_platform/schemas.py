@@ -225,6 +225,7 @@ class NavigationEntry(BaseModel):
     target_end_label: str | None = None
     status: str
     reason: str
+    needs_confirmation: bool = False
     target: NavigationTarget | None = None
     target_url: str | None = None
     target_image: str | None = None
@@ -245,6 +246,7 @@ class NavigationReport(BaseModel):
     entries: list[NavigationEntry]
     version: int
     sha256: str
+    pending_count: int = Field(default=0, ge=0)
     coverage_complete: bool = False
     page_count: int | None = Field(default=None, ge=0)
     approved_pages: list[NavigationPage] = Field(default_factory=list)

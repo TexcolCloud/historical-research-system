@@ -2,6 +2,7 @@
 
 import time
 
+from hrs_codex.navigation import NAVIGATION_REVIEW_POLICY, navigation_requires_confirmation
 from hrs_codex.scheduling import scheduling_plan
 
 from hrs_platform.services.runs.outputs import fingerprint
@@ -55,6 +56,11 @@ def projection_input(doc, runtime_control=None):
     return fingerprint(
         {
             "policy": PROJECTION_POLICY,
+            "navigation_review_policy": NAVIGATION_REVIEW_POLICY,
+            "navigation_pending_count": sum(
+                navigation_requires_confirmation(entry)
+                for entry in doc.get("navigation", {}).get("entries", [])
+            ),
             "coordinator_active": doc.get("run_request", {}).get("state") == "running"
             and doc.get("run_request", {}).get("lease_expires_at", 0) > time.time(),
             "state": doc["state"],

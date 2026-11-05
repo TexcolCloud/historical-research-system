@@ -7,25 +7,15 @@ import { Button } from "@/components/ui/button.tsx";
 import NavigationReview, {
   type NavigationChoice,
 } from "./NavigationReview.tsx";
-import type { components } from "@/client/schema.d.ts";
 import {
   navigationOptions,
   readingNavigationOptions,
 } from "./navigation-query";
 import { readingHref } from "./reader-location";
-
-type Entry = components["schemas"]["NavigationEntry"];
-const labels: Record<string, string> = {
-  matched: "可点击跳转",
-  matched_manual: "已确认跳转",
-  unlinked_manual: "已确认不设置跳转",
-  conflict: "需要确认目录跳转",
-  waiting_evidence: "等待系统核验",
-  not_found: "未找到对应正文",
-  unresolved: "尚未设置跳转",
-};
-const linked = (e: Entry) =>
-  ["matched", "matched_manual", "unlinked_manual"].includes(e.status);
+import {
+  navigationCompleted as linked,
+  navigationStatusLabel,
+} from "./navigation-status";
 export default function NavigationPanel({
   runId,
   bookId,
@@ -51,7 +41,7 @@ export default function NavigationPanel({
     [message, setMessage] = useState(""),
     [restart, setRestart] = useState(0);
   const entries = report.data?.entries ?? [],
-    attention = entries.filter((e) => e.status === "conflict");
+    attention = entries.filter((e) => e.needs_confirmation);
   const incompleteMessage =
     bookState === "paused"
       ? "自动处理已暂停。请在处理进展中继续处理，新的目录项目将在核对后列出。"
@@ -62,9 +52,13 @@ export default function NavigationPanel({
           : "目录尚未全部核对，请在处理进展中查看剩余页面的状态。";
   const activeId = readingOnly
     ? null
-    : (selected ?? (reviewOnly ? attention[0]?.id : null));
+    : (entries.find((entry) => entry.id === selected)?.id ??
+      (reviewOnly ? attention[0]?.id : null));
   const editor = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    setSelected(entryId ?? null);
+  }, [entryId]);
   useEffect(() => {
     if (selected) editor.current?.scrollIntoView?.({ block: "start" });
   }, [selected]);
@@ -124,14 +118,15 @@ export default function NavigationPanel({
           : `已确认：《${title}》保留目录文字，不设置跳转。`,
       );
       query.setQueryData(queryKeys.navigation(runId), data);
+      void query.invalidateQueries({
+        queryKey: queryKeys.readingNavigation(bookId),
+      });
       setSelected(
         reviewOnly
-          ? (data.entries.find((e) => e.status === "conflict")?.id ?? null)
+          ? (data.entries.find((e) => e.needs_confirmation)?.id ?? null)
           : null,
       );
-      const navigation_pending_count = data.entries.filter(
-        (e) => e.status === "conflict",
-      ).length;
+      const navigation_pending_count = data.pending_count;
       updateBooks(
         query,
         (book) => book.id === bookId,
@@ -144,11 +139,11 @@ export default function NavigationPanel({
     ? entries.filter((e) => e.id === activeId)
     : entries.filter((e) =>
         filter === "attention"
-          ? e.status === "conflict"
+          ? e.needs_confirmation
           : filter === "linked"
             ? linked(e)
             : filter === "waiting"
-              ? !linked(e) && e.status !== "conflict"
+              ? !linked(e) && !e.needs_confirmation
               : true,
       );
   function choose(id: string) {
@@ -205,7 +200,7 @@ export default function NavigationPanel({
                 ["linked", `已设置或确认 · ${entries.filter(linked).length}`],
                 [
                   "waiting",
-                  `尚未设置 · ${entries.filter((e) => !linked(e) && e.status !== "conflict").length}`,
+                  `等待核验 · ${entries.filter((e) => !linked(e) && !e.needs_confirmation).length}`,
                 ],
                 ["all", `全部目录 · ${entries.length}`],
               ].map(([value, label]) => (
@@ -265,7 +260,7 @@ export default function NavigationPanel({
                         </p>
                       </div>
                       <span className="workspace-status-tag">
-                        {labels[e.status] ?? "尚未设置跳转"}
+                        {navigationStatusLabel(e)}
                       </span>
                     </header>
                     <div className="navigation-entry-links">
@@ -300,9 +295,7 @@ export default function NavigationPanel({
                           disabled={decision.isPending}
                           onClick={() => choose(e.id)}
                         >
-                          {e.status === "conflict"
-                            ? "确认目录跳转"
-                            : "修改跳转"}
+                          {e.needs_confirmation ? "确认目录跳转" : "修改跳转"}
                         </Button>
                       )}
                     </div>

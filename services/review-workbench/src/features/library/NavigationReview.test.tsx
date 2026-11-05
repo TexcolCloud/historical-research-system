@@ -26,10 +26,12 @@ const entry: components["schemas"]["NavigationEntry"] = {
   source_image: "/toc.png",
   target_label: "3",
   status: "conflict",
+  needs_confirmation: true,
   reason: "目录与正文页码不一致",
   candidates: [target],
 };
 const report: components["schemas"]["NavigationReport"] = {
+  pending_count: 1,
   state: "available",
   version: 1,
   sha256: "c".repeat(64),

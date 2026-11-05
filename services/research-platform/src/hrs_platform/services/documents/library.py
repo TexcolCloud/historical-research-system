@@ -758,8 +758,10 @@ class Library:
         """Read the navigation frozen with the visible publication, including during revision."""
         from copy import deepcopy
 
+        from hrs_codex.navigation import navigation_review_summary
+
         rows = self.chapters(book_id)
-        empty = {"state": "not_published", "entries": [], "version": 0, "sha256": "",
+        empty = {"state": "not_published", "entries": [], "version": 0, "sha256": "", "pending_count": 0,
                  "coverage_complete": False, "page_labels": [], "approved_pages": []}
         if not rows:
             return empty
@@ -788,4 +790,6 @@ class Library:
             entry["target_url"] = f"/api/v2/runs/{run_id}/artifacts/original.pdf#page={page}" if page else None
             entry["reading_target"] = targets.get(entry["id"])
             entry["target_chapter_id"] = targets[entry["id"]]["chapter_id"] if entry["id"] in targets else None
-        return {**empty, **navigation, "entries": navigation.get("entries", []), "page_count": len(images) or None}
+        return navigation_review_summary(
+            {**empty, **navigation, "entries": navigation.get("entries", []), "page_count": len(images) or None}
+        )

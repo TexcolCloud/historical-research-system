@@ -22,6 +22,7 @@ test("directory editing stays inside the chosen entry and waiting evidence is no
     source_image: "/toc.png",
     target_label: "3",
     status: "conflict",
+    needs_confirmation: true,
     reason: "目录与正文页码不一致",
     target: null,
     candidates: [
@@ -64,6 +65,7 @@ test("directory editing stays inside the chosen entry and waiting evidence is no
               id: "waiting",
               title: "等待中的第二章",
               status: "waiting_evidence",
+              needs_confirmation: false,
               candidates: [],
             },
           ],
