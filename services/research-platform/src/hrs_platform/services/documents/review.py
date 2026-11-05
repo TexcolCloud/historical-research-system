@@ -71,26 +71,38 @@ class Review:
         files, manifest = bundle["files"], bundle["manifest"]
         if not 1 <= page <= manifest["page_count"]:
             raise ServiceError(404, "原件页码超出范围。")
-        boundary = next(
-            row
-            for row in json.loads(read(files[manifest["page_boundaries"]]))["pages"]
-            if row["page"] == page
-        )
         original = next(row for row in manifest["pages"] if row["page"] == page)
-        text = read(files[manifest["candidate_markdown"]]).decode("utf-8")
+        if manifest.get("page_markdown"):
+            text = read(files[original["markdown"]]).decode("utf-8")
+        else:
+            boundary = next(
+                row
+                for row in json.loads(read(files[manifest["page_boundaries"]]))["pages"]
+                if row["page"] == page
+            )
+            text = read(files[manifest["candidate_markdown"]]).decode("utf-8")[
+                boundary["start"] : boundary["end"]
+            ]
         return {
             "page": page,
             "page_count": manifest["page_count"],
-            "text": text[boundary["start"] : boundary["end"]],
+            "text": text,
             "image": f"/api/v2/runs/{run_id}/artifacts/{original['image']}",
             "machine_status": original["status"],
             "extraction_method": original.get("extraction_method", "ocr"),
             "acceptance_basis": original.get("acceptance_basis"),
             "footnotes": resolve_footnotes(
-                text[boundary["start"] : boundary["end"]],
-                [{"text": text[boundary["start"] : boundary["end"]], "source": {"pages": [page]}}],
+                text,
+                [{"text": text, "source": {"pages": [page]}}],
             ),
         }
+
+    def markdown(self, bundle):
+        """Portable whole-book Markdown is assembled only when requested or published."""
+        files, manifest = bundle["files"], bundle["manifest"]
+        if manifest.get("page_markdown") and manifest["candidate_markdown"] not in files:
+            return "".join(self.read_cached(files[p["markdown"]]).decode("utf-8") for p in manifest["pages"])
+        return self.objects.read_bytes(files[manifest["candidate_markdown"]]).decode("utf-8")
 
     def initialize(self, run_id):
         from hrs_platform.services.books import get_run
@@ -102,7 +114,7 @@ class Review:
             raise ValueError("Conversion evidence is required before review.")
         bundle = self.read_json(run["conversion"])
         files, manifest = bundle["files"], bundle["manifest"]
-        markdown = self.objects.read_bytes(files[manifest["candidate_markdown"]]).decode("utf-8")
+        markdown = self.markdown(bundle)
         cards = self.read_json(files[manifest["review_cards"]])["cards"]
         by_scope = {}
         covered_pages = set()
@@ -249,7 +261,9 @@ class Review:
         # Derived view only: old immutable packets/drafts retain their original evidence.
         previous_locations = body.get("locations") or []
         body["locations"] = locate_issues(
-            body["text"], body["reasons"], page=row["page"],
+            body["text"],
+            body["reasons"],
+            page=row["page"],
             image_sha256=previous_locations[0].get("image_sha256", "") if previous_locations else "",
         )
         return {
@@ -482,7 +496,12 @@ class Review:
         if name == "original.pdf":
             reference = run["source"] if run["source"].get("sha256") else None
         elif run["conversion"]:
-            reference = self.read_json(run["conversion"])["files"].get(name)
+            bundle = self.read_json(run["conversion"])
+            reference = bundle["files"].get(name)
+            if name == "document.md" and not reference and bundle["manifest"].get("page_markdown"):
+                reference = self.objects.put_bytes(
+                    self.markdown(bundle).encode("utf-8"), "text/markdown; charset=utf-8", run_id=run_id
+                )
         else:
             draft = self.ocr_draft(run)
             reference = draft[0].get(name) if draft else None

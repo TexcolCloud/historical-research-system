@@ -1,6 +1,9 @@
 import { expect, test } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { applyReviewReceipt, issuesKey } from "@/features/review/review-cache.ts";
+import {
+  applyReviewReceipt,
+  issuesKey,
+} from "@/features/review/review-cache.ts";
 
 test("a saved decision immediately removes only its issue and preserves the prefetched next page", () => {
   const query = new QueryClient();
@@ -20,6 +23,13 @@ test("a saved decision immediately removes only its issue and preserves the pref
     ...next,
     text: "已预取的正文",
   });
+  query.setQueryData(["platform", "book", "book"], {
+    id: "book",
+    run_id: "run",
+    state: "running",
+    pending_count: 2,
+    navigation_pending_count: 1,
+  });
   applyReviewReceipt(query, {
     decision_id: "decision",
     issue_id: "first",
@@ -30,6 +40,10 @@ test("a saved decision immediately removes only its issue and preserves the pref
     state: "awaiting_review",
   });
   expect(query.getQueryData(issuesKey("run"))).toEqual([next]);
+  expect(query.getQueryData(["platform", "book", "book"])).toMatchObject({
+    pending_count: 1,
+    navigation_pending_count: 1,
+  });
   expect(
     query.getQueryState(["platform", "issue", "next"])?.isInvalidated,
   ).toBe(false);

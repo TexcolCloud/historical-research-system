@@ -1,10 +1,9 @@
-from hrs_platform.services.runs.lifecycle import RunLifecycle
 import pytest
-from hrs_platform.domain.errors import TaskError
 from test_review import seed
 
-from hrs_platform.services.runs.outputs import Outputs
-from hrs_platform.services.runs.outputs import execution_parent
+from hrs_platform.domain.errors import TaskError
+from hrs_platform.services.runs.lifecycle import RunLifecycle
+from hrs_platform.services.runs.outputs import Outputs, execution_parent
 
 
 def test_total_request_budget_is_not_a_local_output_error(platform):
@@ -63,8 +62,8 @@ def test_service_recovery_is_visible_and_cleared_when_activity_resumes(platform,
     import asyncio
     from types import SimpleNamespace
 
-    from hrs_platform.services.books import get_run
     from hrs_platform.jobs.pipeline import PipelineActivities
+    from hrs_platform.services.books import get_run
 
     settings, engine = platform
     run, _ = seed(engine)
@@ -96,3 +95,53 @@ def test_service_recovery_is_visible_and_cleared_when_activity_resumes(platform,
     pipeline.record_pipeline_failure(run)
     stopped = get_run(engine, run)
     assert stopped["state"] == "failed" and stopped["error"]["code"] == "model_transport_exhausted"
+
+
+def test_execution_projection_reuses_unchanged_objects_and_emits_only_changes(platform, monkeypatch):
+    from sqlalchemy import func, select
+
+    from hrs_platform import models as db
+
+    settings, engine = platform
+    run, _ = seed(engine)
+    outputs = Outputs(settings, engine)
+    rows = [dict(key=f"page:{i}", kind="agent", label="Review", objective=f"Page {i}",
+                 state="completed", details={"page": i}) for i in range(1000)]
+    outputs.nodes(run, rows)
+    before = {r["id"]: r["finished_at"] for r in outputs.list_nodes(run)}
+    writes = []
+    put = outputs.objects.put_bytes
+    monkeypatch.setattr(outputs.objects, "put_bytes", lambda *a, **kw: (writes.append(1), put(*a, **kw))[1])
+    with engine.connect() as connection:
+        count = connection.scalar(select(func.count()).select_from(db.events))
+    outputs.nodes(run, rows)
+    assert not writes
+    with engine.connect() as connection:
+        assert connection.scalar(select(func.count()).select_from(db.events)) == count
+    rows[510] = {**rows[510], "state": "failed", "details": {"page": 510, "error": "timeout"}}
+    outputs.nodes(run, rows)
+    assert len(writes) == 1
+    after = outputs.list_nodes(run)
+    assert sum(r["finished_at"] != before[r["id"]] for r in after) == 1
+    with engine.connect() as connection:
+        assert connection.scalar(select(func.count()).select_from(db.events)) == count + 1
+
+
+def test_execution_window_has_true_counts_and_bounded_history(platform):
+    from uuid import uuid4
+
+    from sqlalchemy import insert
+
+    from hrs_platform import models as db
+    settings, engine = platform
+    run, _ = seed(engine)
+    with engine.begin() as connection:
+        connection.execute(insert(db.execution_nodes), [dict(id=str(uuid4()), run_id=run, kind="agent",
+            label="Review", objective=f"Page {i}", state="leased" if i == 999 else "completed") for i in range(1000)])
+    outputs = Outputs(settings, engine)
+    current = outputs.window(run)
+    assert current["total"] == 1000 and current["matching"] == 1
+    assert len(current["records"]) == 1
+    history = outputs.window(run, history=True, offset=40)
+    assert len(history["records"]) == 40 and history["matching"] == 1000
+    assert sum(s["count"] for s in history["stages"]) == 1000

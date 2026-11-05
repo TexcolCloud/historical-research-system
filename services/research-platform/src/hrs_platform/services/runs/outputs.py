@@ -1,12 +1,13 @@
 """Small SQL references to immutable S3 outputs and actual execution events."""
 
+import hashlib
 import json
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from uuid import UUID, uuid5
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs_platform import models as db
@@ -48,7 +49,9 @@ class Outputs:
         return json.loads(self.objects.read_bytes(row["reference"]))
 
     def put(self, run_id, step, value, dependency):
-        reference = self.objects.put_bytes(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"), run_id=run_id)
+        reference = self.objects.put_bytes(
+            json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"), run_id=run_id
+        )
         with self.engine.begin() as connection:
             connection.execute(
                 pg_insert(db.stage_outputs)
@@ -74,52 +77,94 @@ class Outputs:
         return value
 
     def node(self, run_id, key, *, kind, label, objective, state="running", parent=None, details=None):
-        identity = str(uuid5(UUID(run_id), key))
         if progress := execution_progress.get():
             progress.update(step=label, state=state)
-        reference = (
-            self.objects.put_bytes(json.dumps(details, ensure_ascii=False, default=str).encode("utf-8"), run_id=run_id)
-            if details is not None
-            else None
-        )
-        with self.engine.begin() as connection:
-            connection.execute(
-                pg_insert(db.execution_nodes)
-                .values(
-                    id=identity,
-                    run_id=run_id,
-                    parent_id=parent,
+        return self.nodes(
+            run_id,
+            [
+                dict(
+                    key=key,
                     kind=kind,
                     label=label,
                     objective=objective,
                     state=state,
-                    details=reference,
+                    parent=parent,
+                    details=details,
                 )
-                .on_conflict_do_update(
-                    index_elements=["id"],
-                    set_={
-                        "state": state,
-                        "finished_at": func.now() if state in {"completed", "failed"} else None,
-                        **({"details": reference} if reference else {}),
-                    },
-                )
+            ],
+        )[0]
+
+    def nodes(self, run_id, records):
+        """Project a batch; prepare changed evidence outside the short SQL commit."""
+        identities = [str(uuid5(UUID(run_id), row["key"])) for row in records]
+        with self.engine.connect() as connection:
+            previous = {
+                r["id"]: r
+                for r in connection.execute(
+                    select(db.execution_nodes).where(db.execution_nodes.c.run_id == run_id)
+                ).mappings()
+            }
+        changed = []
+        for identity, record in zip(identities, records, strict=True):
+            row = dict(
+                id=identity,
+                run_id=run_id,
+                parent_id=record.get("parent"),
+                kind=record["kind"],
+                label=record["label"],
+                objective=record["objective"],
+                state=record.get("state", "running"),
             )
-            book_id = connection.scalar(select(db.runs.c.book_id).where(db.runs.c.id == run_id))
-            connection.execute(
-                insert(db.events).values(
-                    book_id=book_id,
-                    run_id=run_id,
-                    kind="execution.changed",
-                    payload={
-                        "node_id": identity,
-                        "parent_id": parent,
-                        "kind": kind,
-                        "label": label,
-                        "state": state,
-                    },
-                )
+            old = previous.get(identity)
+            data = (
+                json.dumps(record["details"], ensure_ascii=False, default=str).encode("utf-8")
+                if record.get("details") is not None
+                else None
             )
-        return identity
+            sha = hashlib.sha256(data).hexdigest() if data is not None else None
+            same_details = data is None or (old and (old["details"] or {}).get("sha256") == sha)
+            if old and same_details and all(old[k] == v for k, v in row.items()):
+                continue
+            row["details"] = (
+                (old or {}).get("details") if same_details else self.objects.put_bytes(data, run_id=run_id)
+            )
+            row["finished_at"] = func.now() if row["state"] in {"completed", "failed"} else None
+            changed.append(row)
+        if changed:
+            statement = pg_insert(db.execution_nodes).values(changed)
+            columns = ("parent_id", "kind", "label", "objective", "state", "details")
+            with self.engine.begin() as connection:
+                from hrs_platform.services.deletion import require_run_active
+
+                require_run_active(connection, run_id)
+                applied = connection.scalars(
+                    statement.on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={k: getattr(statement.excluded, k) for k in (*columns, "finished_at")},
+                        where=or_(
+                            *(
+                                getattr(db.execution_nodes.c, k).is_distinct_from(
+                                    getattr(statement.excluded, k)
+                                )
+                                for k in columns
+                            )
+                        ),
+                    ).returning(db.execution_nodes.c.id)
+                ).all()
+                if applied:
+                    book_id = connection.scalar(select(db.runs.c.book_id).where(db.runs.c.id == run_id))
+                    connection.execute(
+                        insert(db.events).values(
+                            book_id=book_id,
+                            run_id=run_id,
+                            kind="execution.changed",
+                            payload={
+                                "node_ids": list(applied),
+                                **({"node_id": applied[0]} if len(applied) == 1 else {}),
+                            },
+                        )
+                    )
+        return identities
 
     def list_nodes(self, run_id):
         with self.engine.connect() as connection:
@@ -131,6 +176,44 @@ class Outputs:
                 ).mappings()
             )
 
+    def window(self, run_id, *, history=False, label=None, offset=0):
+        # Summary and selected window share one snapshot; history stays on the server.
+        with self.engine.connect().execution_options(isolation_level="REPEATABLE READ") as connection:
+            base = db.execution_nodes.c.run_id == str(run_id)
+            stages = list(
+                connection.execute(
+                    select(
+                        db.execution_nodes.c.label, db.execution_nodes.c.state, func.count().label("count")
+                    )
+                    .where(base)
+                    .group_by(db.execution_nodes.c.label, db.execution_nodes.c.state)
+                    .order_by(db.execution_nodes.c.label, db.execution_nodes.c.state)
+                ).mappings()
+            )
+            query = select(db.execution_nodes).where(base)
+            if label:
+                query = query.where(db.execution_nodes.c.label == label)
+            if not history:
+                query = query.where(
+                    db.execution_nodes.c.state.in_(["running", "leased", "failed", "waiting", "paused"])
+                )
+            matching = connection.scalar(select(func.count()).select_from(query.subquery()))
+            records = list(
+                connection.execute(
+                    query.order_by(db.execution_nodes.c.started_at.desc(), db.execution_nodes.c.id)
+                    .offset(offset)
+                    .limit(40)
+                ).mappings()
+            )
+            return dict(
+                total=sum(s["count"] for s in stages),
+                matching=matching,
+                stages=stages,
+                records=records,
+                offset=offset,
+                limit=40,
+            )
+
     @contextmanager
     def operation(self, run_id, key, label, *, kind="component", objective=None, parent=None):
         properties = {"kind": kind, "label": label, "objective": objective or label, "parent": parent}
@@ -139,7 +222,12 @@ class Outputs:
         try:
             yield identity
         except BaseException as error:
-            waiting = isinstance(error, TaskError) and error.type in {"model_transport_wait", "retrieval_wait", "vision_service_wait", "card_batch_yield"}
+            waiting = isinstance(error, TaskError) and error.type in {
+                "model_transport_wait",
+                "retrieval_wait",
+                "vision_service_wait",
+                "card_batch_yield",
+            }
             self.node(
                 run_id,
                 key,
@@ -194,7 +282,9 @@ class Outputs:
         }
 
     def reserve_request(self, run_id, step, value, maximum):
-        reference = self.objects.put_bytes(json.dumps(value, ensure_ascii=False).encode("utf-8"), run_id=run_id)
+        reference = self.objects.put_bytes(
+            json.dumps(value, ensure_ascii=False).encode("utf-8"), run_id=run_id
+        )
         with self.engine.begin() as connection:
             connection.execute(select(db.runs.c.id).where(db.runs.c.id == run_id).with_for_update()).one()
             prior = connection.scalar(
@@ -216,7 +306,6 @@ class Outputs:
                     run_id=run_id, step=step, input_sha256=fingerprint(value), reference=reference
                 )
             )
-
 
     def details(self, execution_id):
         with self.engine.connect() as connection:

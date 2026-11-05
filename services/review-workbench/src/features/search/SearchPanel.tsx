@@ -49,30 +49,37 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
           placeholder="查找人物、事件或关键词"
         />
         <Button type="submit">查找</Button>
-        <label>
-          <input
-            type="checkbox"
-            checked={includeNavigation}
-            onChange={(e) => setIncludeNavigation(e.target.checked)}
-          />
-          包含原书目录
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={semantic}
-            onChange={(e) => setSemantic(e.target.checked)}
-          />
-          研究检索（关闭后快速查词）
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={diverse}
-            onChange={(e) => setDiverse(e.target.checked)}
-          />
-          跨章节综合
-        </label>
+        <details className="workspace-search-options">
+          <summary>检索选项</summary>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeNavigation}
+              onChange={(e) => setIncludeNavigation(e.target.checked)}
+            />
+            包含原书目录
+          </label>
+          <label>
+            检索方式
+            <select
+              aria-label="检索方式"
+              value={semantic ? "meaning" : "literal"}
+              onChange={(e) => setSemantic(e.target.value === "meaning")}
+            >
+              <option value="meaning">按意思查找</option>
+              <option value="literal">按原文查词</option>
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={diverse}
+              onChange={(e) => setDiverse(e.target.checked)}
+            />
+            跨章节综合
+          </label>
+          <p>调整选项后点击“查找”应用。</p>
+        </details>
       </form>
       {results.isFetching && (
         <p role="status">

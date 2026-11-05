@@ -74,6 +74,6 @@ def create_app(settings=None, engine=None):
                 from fastapi import HTTPException
 
                 raise HTTPException(404)
-            return FileResponse(distribution / "index.html")
+            return FileResponse(distribution / "index.html", headers={"Cache-Control": "no-cache"})
 
     return app

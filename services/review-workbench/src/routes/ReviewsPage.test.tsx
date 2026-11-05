@@ -38,6 +38,6 @@ test("running content issues and independent directory conflicts stay discoverab
   ).toBe("/books/body?tab=review");
   expect(
     screen.getByRole("link", { name: /已发布的书/ }).getAttribute("href"),
-  ).toBe("/books/nav?tab=navigation");
+  ).toBe("/books/nav?tab=review&task=navigation");
   expect(screen.queryByText("暂时没有需要处理的内容")).toBeNull();
 });

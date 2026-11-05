@@ -53,7 +53,8 @@ test("search preserves the hit and exposes separately cited context and its chap
   await userEvent.click(screen.getByRole("button", { name: "查找" }));
   await screen.findByText("登记120吨");
   expect(new URL(requested).searchParams.get("semantic")).toBe("true");
-  await userEvent.click(screen.getByLabelText("研究检索（关闭后快速查词）"));
+  await userEvent.click(screen.getByText("检索选项"));
+  await userEvent.selectOptions(screen.getByLabelText("检索方式"), "literal");
   await userEvent.click(screen.getByLabelText("跨章节综合"));
   await userEvent.click(screen.getByRole("button", { name: "查找" }));
   await vi.waitFor(() =>

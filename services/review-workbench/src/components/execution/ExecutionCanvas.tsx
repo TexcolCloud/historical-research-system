@@ -170,6 +170,7 @@ export function ExecutionCanvas({
   return (
     <div className="execution-viewport" aria-label="可拖拽缩放的任务执行画布">
       <ReactFlow<RuntimeNode>
+        onlyRenderVisibleElements
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}

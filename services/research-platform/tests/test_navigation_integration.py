@@ -124,3 +124,31 @@ def test_navigation_metadata_reindexes_without_changing_body_or_footnotes(platfo
         assert all(not h["toc_path"] for h in search.search("运输记录", book, semantic=False))
     finally:
         indexer.client.indices.delete(index=settings.opensearch_index, ignore=[404])
+
+
+def test_navigation_read_reuses_only_the_same_committed_snapshot(platform, tmp_path, monkeypatch):
+    from hrs_codex.server import prepare
+    from hrs_codex.store import Store
+
+    from hrs_platform.services.documents.navigation import Navigation
+    settings, engine = platform
+    source = tmp_path / "snapshot.png"
+    Image.new("RGB", (30, 40), "white").save(source)
+    store = Store(tmp_path / "native-cache")
+    doc = prepare(store, str(source))
+    service = Navigation(settings, engine)
+    monkeypatch.setattr(service, "native", lambda _: (store, doc["id"]))
+    reads = []
+    status = store.status
+    def tracked(identity):
+        reads.append(identity)
+        return status(identity)
+    monkeypatch.setattr(Store, "status", lambda self, identity: tracked(identity))
+    # Keep the original bound method to observe real JSON parsing, not recursive monkeypatches.
+    first = service.status("00000000-0000-0000-0000-000000000001")
+    first["state"] = "caller mutation"
+    assert service.status("00000000-0000-0000-0000-000000000001")["state"] != "caller mutation"
+    assert len(reads) == 1
+    store.pause_document(doc["id"])
+    service.status("00000000-0000-0000-0000-000000000001")
+    assert len(reads) == 2

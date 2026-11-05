@@ -1,14 +1,16 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Query
 from fastapi.responses import Response
 
 from hrs_platform.api.deps import EngineDep, LibraryDep, OutputsDep, ReviewDep, SettingsDep
 from hrs_platform.domain.errors import ServiceError
 from hrs_platform.schemas import (
     ExecutionNode,
+    ExecutionWindow,
     NavigationDecision,
     NavigationReport,
+    RecoveryReport,
     RecoveryRequest,
     RunControlReceipt,
     RunSummary,
@@ -55,6 +57,13 @@ def get_run(engine: EngineDep, run_id: UUID):
     return books.get_run(engine, run_id)
 
 
+@router.get("/api/v2/runs/{run_id}/recovery", response_model=RecoveryReport)
+def recovery(settings: SettingsDep, engine: EngineDep, run_id: UUID):
+    from hrs_platform.services.runs.recovery import native_report
+
+    return native_report(settings, engine, str(run_id))
+
+
 @router.post("/api/v2/runs/{run_id}/retry", response_model=RunSummary)
 def retry(engine: EngineDep, run_id: UUID, request: RecoveryRequest):
     if books.get_run(engine, run_id)["kind"] == "cards":
@@ -66,6 +75,19 @@ def retry(engine: EngineDep, run_id: UUID, request: RecoveryRequest):
 def executions(engine: EngineDep, outputs: OutputsDep, run_id: UUID):
     books.get_run(engine, run_id)
     return outputs.list_nodes(run_id)
+
+
+@router.get("/api/v2/runs/{run_id}/execution-window", response_model=ExecutionWindow)
+def execution_window(
+    engine: EngineDep,
+    outputs: OutputsDep,
+    run_id: UUID,
+    history: bool = False,
+    label: str | None = Query(default=None, max_length=255),
+    offset: int = Query(default=0, ge=0),
+):
+    books.get_run(engine, run_id)
+    return outputs.window(run_id, history=history, label=label, offset=offset)
 
 
 @router.get("/api/v2/executions/{execution_id}/details")

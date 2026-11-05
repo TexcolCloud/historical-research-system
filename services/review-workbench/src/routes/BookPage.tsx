@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
+import { Button } from "@/components/ui/button.tsx";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
@@ -6,18 +7,23 @@ import { client, type Book } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
 import RunDetails from "@/features/runs/RunDetails.tsx";
 import DeleteBookButton from "@/features/books/DeleteBookButton.tsx";
-const ReaderPanel = lazy(() => import("@/features/library/ReaderPanel.tsx"));
+import { bookWorkspaceTab } from "@/features/books/workspace.ts";
+const ReadingWorkspace = lazy(
+  () => import("@/features/library/ReadingWorkspace.tsx"),
+);
 const ReviewPanel = lazy(() => import("@/features/review/ReviewPanel.tsx"));
 const ExecutionPanel = lazy(
   () => import("@/features/execution/ExecutionPanel.tsx"),
 );
-const SearchPanel = lazy(() => import("@/features/search/SearchPanel.tsx"));
 const NavigationPanel = lazy(
   () => import("@/features/library/NavigationPanel.tsx"),
 );
 export default function BookPage() {
   const { bookId = "" } = useParams();
   const [params, setParams] = useSearchParams();
+  const [diagnostics, setDiagnostics] = useState(
+    params.get("tab") === "execution",
+  );
   const cache = useQueryClient();
   const detail = useQuery({
     queryKey: ["platform", "book", bookId],
@@ -33,13 +39,22 @@ export default function BookPage() {
     },
   });
   const book = detail.data;
-  const tab =
-    params.get("tab") ||
-    (book?.state === "ready"
-      ? "reader"
-      : book?.state === "awaiting_review"
-        ? "review"
-        : "progress");
+  const requested = params.get("tab");
+  const directoryTask =
+    params.get("task") === "navigation" ||
+    (!params.get("task") &&
+      !book?.pending_count &&
+      (book?.navigation_pending_count ?? 0) > 0);
+  const tab = ["navigation", "search"].includes(requested ?? "")
+    ? "reader"
+    : requested === "execution"
+      ? "progress"
+      : requested || (book ? bookWorkspaceTab(book) : "progress");
+  function chooseTab(value: string) {
+    const next = new URLSearchParams(params);
+    next.set("tab", value);
+    setParams(next);
+  }
   if (detail.isPending) return <p role="status">正在读取书籍…</p>;
   if (!book)
     return (
@@ -73,10 +88,17 @@ export default function BookPage() {
       <Link to="/" className="platform-back">
         ← 全部书籍
       </Link>
-      <div className="platform-heading">
+      <div className="platform-heading book-heading">
         <div>
-          <h1>{book.title}</h1>
-          <p>以章节阅读，以原件核对，以证据研究。</p>
+          <h1 title={book.title}>{book.title}</h1>
+          <p>
+            {(book.pending_count ?? 0) > 0 ||
+            (book.navigation_pending_count ?? 0) > 0
+              ? `需要你处理：${book.pending_count ?? 0} 页正文核对 · ${book.navigation_pending_count ?? 0} 项目录确认`
+              : book.state === "ready"
+                ? "资料已入库，可阅读、检索和导出。"
+                : "系统按页自动处理，已有底稿可在阅读资料中查看。"}
+          </p>
           {book.revision_pending && (
             <p role="note">
               新版本正在复核，阅读和检索继续使用此前发布的版本。
@@ -85,33 +107,74 @@ export default function BookPage() {
         </div>
         <DeleteBookButton book={book} />
       </div>
-      <Tabs value={tab} onValueChange={(value) => setParams({ tab: value })}>
-        <TabsList aria-label="书籍工作区">
+      <Tabs value={tab} onValueChange={chooseTab}>
+        <TabsList aria-label="书籍工作区" className="workspace-main-tabs">
           <TabsTrigger value="progress">处理进展</TabsTrigger>
-          <TabsTrigger value="reader">阅读全文</TabsTrigger>
-          <TabsTrigger value="navigation">原书目录</TabsTrigger>
-          <TabsTrigger value="review">内容核对</TabsTrigger>
-          <TabsTrigger value="search">检索本书</TabsTrigger>
-          <TabsTrigger value="execution">任务运行</TabsTrigger>
+          <TabsTrigger value="review">人工核对</TabsTrigger>
+          <TabsTrigger value="reader">阅读资料</TabsTrigger>
         </TabsList>
       </Tabs>
       <Suspense fallback={<p role="status">正在打开工作区…</p>}>
         {tab === "reader" ? (
-          <ReaderPanel bookId={bookId} />
-        ) : tab === "navigation" && book.run_id ? (
-          <NavigationPanel runId={book.run_id} bookId={bookId} />
+          <ReadingWorkspace book={book} />
         ) : tab === "review" && book.run_id ? (
-          <ReviewPanel
-            runId={book.run_id}
-            stage={book.stage ?? undefined}
-            state={book.state}
-          />
-        ) : tab === "search" ? (
-          <SearchPanel bookId={bookId} />
-        ) : tab === "execution" ? (
-          <ExecutionPanel bookId={bookId} />
+          <section className="human-workspace">
+            <div
+              className="workspace-section-tabs"
+              role="group"
+              aria-label="核对任务类型"
+            >
+              <Button
+                variant={directoryTask ? "outline" : "default"}
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  next.set("task", "content");
+                  next.set("tab", "review");
+                  setParams(next);
+                }}
+              >
+                正文核对 · {book.pending_count ?? 0} 页
+              </Button>
+              <Button
+                variant={directoryTask ? "default" : "outline"}
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  next.set("task", "navigation");
+                  next.set("tab", "review");
+                  setParams(next);
+                }}
+              >
+                目录确认 · {book.navigation_pending_count ?? 0} 项
+              </Button>
+            </div>
+            {directoryTask ? (
+              <NavigationPanel
+                runId={book.run_id}
+                bookId={bookId}
+                reviewOnly
+                entryId={params.get("entry") ?? undefined}
+              />
+            ) : (
+              <ReviewPanel
+                bookId={bookId}
+                runId={book.run_id}
+                stage={book.stage ?? undefined}
+                state={book.state}
+              />
+            )}
+          </section>
         ) : (
-          <RunDetails book={book} />
+          <>
+            <RunDetails book={book} />
+            <details
+              className="workspace-diagnostics"
+              open={diagnostics}
+              onToggle={(e) => setDiagnostics(e.currentTarget.open)}
+            >
+              <summary>运行诊断与处理记录</summary>
+              {diagnostics && <ExecutionPanel bookId={bookId} />}
+            </details>
+          </>
         )}
       </Suspense>
     </>

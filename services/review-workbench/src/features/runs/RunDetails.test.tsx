@@ -9,6 +9,7 @@ vi.mock("@/components/execution/ExecutionCanvas.tsx", () => ({
   ExecutionCanvas: () => null,
 }));
 import { respondWith } from "@/test/responses.ts";
+import { client } from "@/client/api.ts";
 
 afterEach(cleanup);
 
@@ -243,4 +244,87 @@ test("historical card execution remains readable without restarting generation",
   );
   await screen.findByRole("option", { name: /历史史料卡任务/ });
   expect(screen.queryByRole("button", { name: "重试本阶段" })).toBeNull();
+});
+
+test("execution overview keeps true totals and requests history only on demand", async () => {
+  const requests: string[] = [];
+  respondWith((request) => {
+    requests.push(request.url);
+    return request.url.includes("execution-window")
+      ? {
+          total: 1012,
+          matching: request.url.includes("history=true") ? 1012 : 1,
+          offset: 0,
+          limit: 40,
+          stages: [
+            { label: "原页核验", state: "completed", count: 1011 },
+            { label: "原页核验", state: "failed", count: 1 },
+          ],
+          records: [],
+        }
+      : [{ id: "run", kind: "book", state: "running", revision: 1 }];
+  });
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <ExecutionPanel bookId="book" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText(/累计 1012 条处理记录/);
+  expect(requests.some((url) => url.includes("history=true"))).toBe(false);
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "查看历史记录" }));
+  await screen.findByRole("button", { name: "查看当前与异常" });
+  expect(requests.some((url) => url.includes("history=true"))).toBe(true);
+});
+
+test("switching execution windows preserves totals while the next batch loads", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const middleware = {
+    onRequest: async ({ request }: { request: Request }) => {
+      if (request.url.includes("history=true")) await gate;
+      return Response.json(
+        request.url.includes("execution-window")
+          ? {
+              total: 1012,
+              matching: 1012,
+              records: [],
+              stages: [],
+              offset: 0,
+              limit: 40,
+            }
+          : [{ id: "run", kind: "book", state: "running", revision: 1 }],
+      );
+    },
+  };
+  client.use(middleware);
+  const query = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  try {
+    render(
+      <QueryClientProvider client={query}>
+        <ExecutionPanel bookId="book" />
+      </QueryClientProvider>,
+    );
+    await screen.findByText(/累计 1012 条处理记录/);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "查看历史记录" }));
+    expect(screen.queryByText(/累计 1012 条处理记录/)).not.toBeNull();
+    expect(screen.getByRole("status").textContent).toContain(
+      "正在读取所选记录",
+    );
+  } finally {
+    release();
+    client.eject(middleware);
+    query.clear();
+  }
 });

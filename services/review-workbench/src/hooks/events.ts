@@ -102,10 +102,14 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
       void query.invalidateQueries({
         queryKey: ["platform", "conversion-page", event.run_id],
       });
-    if (event.kind === "run.changed")
+    if (event.kind === "run.changed") {
       void query.invalidateQueries({
         queryKey: ["platform", "navigation", event.run_id],
       });
+      void query.invalidateQueries({
+        queryKey: ["platform", "recovery", event.run_id],
+      });
+    }
     void query.invalidateQueries({
       queryKey: ["platform", "run", event.run_id],
     });

@@ -7,6 +7,17 @@ export function applyReviewReceipt(
   query: QueryClient,
   receipt: components["schemas"]["ReviewReceipt"],
 ) {
+  for (const [key, book] of query.getQueriesData<Book>({
+    queryKey: ["platform", "book"],
+  })) {
+    if (book?.run_id === receipt.run_id)
+      query.setQueryData(key, {
+        ...book,
+        state: receipt.state,
+        revision: receipt.revision,
+        pending_count: receipt.pending_count,
+      });
+  }
   query.setQueryData<components["schemas"]["ReviewIssueSummary"][]>(
     issuesKey(receipt.run_id),
     (current) => current?.filter((issue) => issue.id !== receipt.issue_id),

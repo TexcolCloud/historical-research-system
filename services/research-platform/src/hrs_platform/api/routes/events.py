@@ -7,9 +7,15 @@ from fastapi.responses import StreamingResponse
 from hrs_platform.api.deps import (
     EngineDep,
 )
-from hrs_platform.services.events import read_events
+from hrs_platform.schemas import WorkspaceSnapshot
+from hrs_platform.services.events import read_events, workspace_snapshot
 
 router = APIRouter(tags=["events"])
+
+
+@router.get("/api/v2/events/snapshot", response_model=WorkspaceSnapshot)
+def snapshot(engine: EngineDep):
+    return workspace_snapshot(engine)
 
 
 @router.get("/api/v2/events")

@@ -8,10 +8,11 @@ import os
 import re
 import shutil
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 STAGES = {"ocr", "review", "verify", "navigation", "organization"}
 
@@ -38,9 +39,43 @@ def atomic_json(path: Path, value: dict) -> None:
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        temporary.replace(path)
+        # Windows readers may briefly hold a sharing handle to the old snapshot.
+        for attempt in range(50):
+            try:
+                temporary.replace(path)
+                break
+            except PermissionError:
+                if attempt == 49:
+                    raise
+                time.sleep(0.01)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+class _EvidenceFiles:
+    """Per-pass receipts index: cache work, never trust a previous validation pass."""
+
+    def __init__(self, directory):
+        self.directory = directory
+        self.hashes, self.metadata = {}, {}
+        self.index = None
+
+    def sha(self, path):
+        if path not in self.hashes:
+            self.hashes[path] = file_digest(path)
+        return self.hashes[path]
+
+    def json(self, path):
+        if path not in self.metadata:
+            self.metadata[path] = json.loads(path.read_text(encoding="utf-8"))
+        return self.metadata[path]
+
+    def matching(self, sha):
+        if self.index is None:
+            self.index = {}
+            for path in (self.directory / "evidence/details").glob("*.json"):
+                self.index.setdefault(self.sha(path), []).append(path)
+        return self.index.get(sha, [])
 
 
 class Store:
@@ -63,6 +98,23 @@ class Store:
 
     def _save(self, doc: dict) -> None:
         atomic_json(self._directory(doc["id"]) / "document.json", doc)
+
+    @contextmanager
+    def _verified(self, document_id, validate=None):
+        """Validate an immutable snapshot without blocking readers or lease heartbeats."""
+        path = self._directory(document_id) / "document.json"
+        for _ in range(8):
+            snapshot = path.read_bytes()
+            doc = json.loads(snapshot)
+            (validate or self._verify_evidence)(doc)
+            with self.lock:
+                if path.read_bytes() != snapshot:
+                    continue
+                yield doc
+                return
+        raise ValueError(
+            "Document changed during evidence validation; retry with the current snapshot"
+        )
 
     @staticmethod
     def _require_active(doc: dict, *, allow_paused: bool = False) -> None:
@@ -115,12 +167,11 @@ class Store:
         document_id = source_hash[:24]
         if not pages or [p["page"] for p in pages] != list(range(1, len(pages) + 1)):
             raise ValueError("Pages must be a nonempty consecutive physical page sequence")
-        with self.lock:
+        with FileLock(self.root / f".register-{document_id}.lock", timeout=30):
             directory = self._directory(document_id)
             if (directory / "document.json").exists():
-                existing = self._load(document_id)
-                self._verify_evidence(existing)
-                return existing
+                with self._verified(document_id) as existing:
+                    return existing
             directory.mkdir(parents=True, exist_ok=True)
             retained_source = directory / ("source" + source.suffix.lower())
             if source != retained_source.resolve():
@@ -205,11 +256,12 @@ class Store:
             return doc
 
     def _verify_evidence(self, doc: dict) -> None:
+        files = _EvidenceFiles(self._directory(doc["id"]))
         tasks = {t["task_id"]: t for t in doc["tasks"]}
-        if file_digest(self._path(doc, doc["source"]["path"])) != doc["source"]["sha256"]:
+        if files.sha(self._path(doc, doc["source"]["path"])) != doc["source"]["sha256"]:
             raise ValueError("Retained original source hash mismatch")
         for page in doc["pages"]:
-            if file_digest(self._path(doc, page["image"])) != page["image_sha256"]:
+            if files.sha(self._path(doc, page["image"])) != page["image_sha256"]:
                 raise ValueError(f"Original page {page['page']} image hash mismatch")
             for field in ("ocr", "candidate", "approved"):
                 text = page.get(field)
@@ -238,7 +290,7 @@ class Store:
                     != doc["pages"][task["page"] - 1]["image_sha256"]
                 ):
                     raise ValueError("Original reading page hash mismatch")
-                self._verify_details(doc, task, reading["reading"])
+                self._verify_details(doc, task, reading["reading"], files)
             if task.get("source_first_required") and task.get("result") is not None:
                 if (
                     not task.get("source_reading")
@@ -254,30 +306,27 @@ class Store:
             ):
                 raise ValueError("Retained task result hash mismatch")
             if task.get("result") is not None:
-                self._verify_details(doc, task, task["result"])
+                self._verify_details(doc, task, task["result"], files)
         organization = doc.get("organization")
         if organization:
             task = next(t for t in doc["tasks"] if t["task_id"] == organization["task_id"])
             if organization["articles"] != task["result"]["articles"]:
                 raise ValueError("Organization differs from its retained machine result")
 
-    def _verify_details(self, doc: dict, task: dict, result: dict) -> None:
+    def _verify_details(self, doc: dict, task: dict, result: dict, files=None) -> None:
+        files = files or _EvidenceFiles(self._directory(doc["id"]))
         evidence = result.get("original_details", [])
         if not isinstance(evidence, list):
             raise ValueError("Detail evidence must be a list")
         for detail in evidence:
             if isinstance(detail, dict) and set(detail) == {"image_sha256", "metadata_sha256"}:
-                matches = [
-                    p
-                    for p in (self._directory(doc["id"]) / "evidence/details").glob("*.json")
-                    if file_digest(p) == detail["metadata_sha256"]
-                ]
+                matches = files.matching(detail["metadata_sha256"])
                 if len(matches) != 1:
                     raise ValueError(
                         "Unknown compact detail receipt; use hashes returned by original_detail"
                     )
                 detail = {
-                    **json.loads(matches[0].read_text("utf-8")),
+                    **files.json(matches[0]),
                     **detail,
                     "metadata": matches[0].relative_to(self._directory(doc["id"])).as_posix(),
                 }
@@ -291,33 +340,31 @@ class Store:
                 raise ValueError("Detail evidence source/page mismatch")
             for field in ("image", "metadata"):
                 path = detail.get(field)
-                if not isinstance(path, str) or file_digest(self._path(doc, path)) != detail.get(
+                if not isinstance(path, str) or files.sha(self._path(doc, path)) != detail.get(
                     field + "_sha256"
                 ):
                     raise ValueError("Detail evidence file hash mismatch")
-            retained = json.loads(self._path(doc, detail["metadata"]).read_text(encoding="utf-8"))
+            retained = files.json(self._path(doc, detail["metadata"]))
             if {
                 k: v for k, v in detail.items() if k not in {"metadata", "metadata_sha256"}
             } != retained:
                 raise ValueError("Detail evidence metadata mismatch")
 
     def status(self, document_id: str) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
-            doc["directory"] = str(self._directory(document_id))
-            doc["counts"] = {
-                state: sum(t["state"] == state for t in doc["tasks"])
-                for state in ("ready", "leased", "completed", "pending", "superseded")
-            }
-            return doc
+        doc = self._load(document_id)
+        doc["directory"] = str(self._directory(document_id))
+        doc["counts"] = {
+            state: sum(t["state"] == state for t in doc["tasks"])
+            for state in ("ready", "leased", "completed", "pending", "superseded")
+        }
+        return doc
 
     def list_documents(self) -> list[dict]:
-        with self.lock:
-            documents = []
-            for path in sorted((self.root / "documents").glob("*/document.json")):
-                doc = json.loads(path.read_text(encoding="utf-8"))
-                documents.append({key: doc[key] for key in ("id", "title", "state", "created_at")})
-            return documents
+        documents = []
+        for path in sorted((self.root / "documents").glob("*/document.json")):
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            documents.append({key: doc[key] for key in ("id", "title", "state", "created_at")})
+        return documents
 
     def original_page(
         self,
@@ -328,8 +375,9 @@ class Store:
         lease_token: str | None = None,
     ) -> tuple[dict, bytes]:
         """Read original pixels for pending, approved or published content alike."""
-        with self.lock:
-            doc = self._load(document_id)
+        pixels = {}
+
+        def validate(doc):
             if type(page) is not int or not 1 <= page <= len(doc["pages"]):
                 raise ValueError("Unknown physical page")
             if file_digest(self._path(doc, doc["source"]["path"])) != doc["source"]["sha256"]:
@@ -338,6 +386,10 @@ class Store:
             data = self._path(doc, row["image"]).read_bytes()
             if digest(data) != row["image_sha256"]:
                 raise ValueError("Original page image hash mismatch")
+            pixels["data"] = data
+
+        with self._verified(document_id, validate) as doc:
+            row, data = doc["pages"][page - 1], pixels["data"]
             metadata = {
                 "document_id": document_id,
                 "page": page,
@@ -412,9 +464,7 @@ class Store:
         self, document_id: str, task_id: str, lease_token: str, original_reading: dict
     ) -> dict:
         """Freeze source observations before exposing the candidate to a reviewer."""
-        with self.lock:
-            doc = self._load(document_id)
-            self._verify_evidence(doc)
+        with self._verified(document_id) as doc:
             task = self._active_review(doc, task_id, lease_token)
             access = task.get("image_access")
             if (
@@ -462,9 +512,7 @@ class Store:
     def candidate_text(
         self, document_id: str, task_id: str, lease_token: str, *, start: int = 0, limit: int = 2000
     ) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
-            self._verify_evidence(doc)
+        with self._verified(document_id) as doc:
             task = self._active_review(doc, task_id, lease_token)
             if not task.get("source_reading"):
                 raise ValueError("Freeze original-image observations before reading candidate text")
@@ -682,10 +730,8 @@ class Store:
             raise ValueError("A valid stage and nonempty worker ID are required")
         if not 1 <= lease_seconds <= 86400:
             raise ValueError("Lease must be between 1 and 86400 seconds")
-        with self.lock:
-            doc = self._load(document_id)
+        with self._verified(document_id) as doc:
             self._require_active(doc)
-            self._verify_evidence(doc)
             if scheduled:
                 from hrs_codex.scheduling import scheduling_plan
 
@@ -767,10 +813,8 @@ class Store:
         return verdict
 
     def submit_task(self, document_id: str, task_id: str, lease_token: str, result: dict) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
+        with self._verified(document_id) as doc:
             self._require_active(doc)
-            self._verify_evidence(doc)
             task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
             claim = task.get("claim", {})
             if task["state"] != "leased" or claim.get("lease_token") != lease_token:
@@ -1105,9 +1149,7 @@ class Store:
 
     def refresh_navigation(self, document_id: str) -> dict:
         """Refresh source-bound derived metadata; never run recognition or grant content approval."""
-        with self.lock:
-            doc = self._load(document_id)
-            self._verify_evidence(doc)
+        with self._verified(document_id) as doc:
             before = (doc.get("navigation", {}).get("sha256"), len(doc["tasks"]))
             self._refresh_navigation(doc)
             if before != (doc["navigation"]["sha256"], len(doc["tasks"])):
@@ -1122,10 +1164,20 @@ class Store:
         expected_sha256: str,
         target_page: int | None,
         target_anchor: str = "",
+        decision_id: str | None = None,
     ) -> dict:
+        request_sha = digest([entry_id, expected_sha256, target_page, target_anchor])
         with self.lock:
             doc = self._load(document_id)
             nav = doc.get("navigation") or {}
+            if decision_id:
+                if not isinstance(decision_id, str) or len(decision_id) > 128:
+                    raise ValueError("Invalid decision identity")
+                receipt = doc.get("navigation_receipts", {}).get(decision_id)
+                if receipt:
+                    if receipt["request_sha256"] != request_sha:
+                        raise ValueError("Decision identity belongs to a different request")
+                    return nav
             if nav.get("sha256") != expected_sha256:
                 raise ValueError("Navigation changed; reload before confirming")
             entry = next(e for e in nav["entries"] if e["id"] == entry_id)
@@ -1145,13 +1197,25 @@ class Store:
                 from hrs_codex.navigation import target_evidence
 
                 target = target_evidence(p, target_anchor)
-            nav.setdefault("decisions", {})[entry_id] = {
+            decisions = nav.setdefault("decisions", {})
+            if entry_id in decisions:
+                nav.setdefault("decision_history", []).append(
+                    {"entry_id": entry_id, **decisions[entry_id]}
+                )
+            decisions[entry_id] = {
                 "source_sha256": entry["source_sha256"],
                 "target": target,
                 "at": time.time(),
                 "approval_type": "human_navigation",
                 "content_approval": False,
+                "final": True,
             }
+            if decision_id:
+                doc.setdefault("navigation_receipts", {})[decision_id] = {
+                    "request_sha256": request_sha,
+                    "entry_id": entry_id,
+                    "at": time.time(),
+                }
             self._refresh_navigation(doc)
             self._save(doc)
             return doc["navigation"]
@@ -1189,9 +1253,7 @@ class Store:
         """Recover content through bounded full-page OCR; never reinterpret runtime failures."""
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("Fallback requires a content reason")
-        with self.lock:
-            doc = self._load(document_id)
-            self._verify_evidence(doc)
+        with self._verified(document_id) as doc:
             if doc.get("publication") or doc["state"] == "published":
                 raise ValueError("Published evidence requires a separate revision workspace")
             if type(page) is not int or not 1 <= page <= len(doc["pages"]):
@@ -1280,6 +1342,8 @@ class Store:
                 "state": "pending",
                 "attempts": 0,
                 "technical_failures": 0,
+                "checkpoint_recovery_enabled": True,
+                "retry_limit": 3,
                 "not_before": 0,
                 "ready_after": 0,
                 "history": [],
@@ -1308,22 +1372,28 @@ class Store:
                 if followup:
                     request["continuation_requested"] = True
                 return request
-        if request.get("technical_failures", 0) >= 3 and not resume:
+        if request.get("technical_failures", 0) >= request.get("retry_limit", 3) and not resume:
             return request
         if resume:
             request["history"].append({"event": "explicit_resume", "at": time.time()})
             request["technical_failures"] = 0
+            request.update(
+                retry_limit=3, automatic_checkpoint_used=False, checkpoint_recovery_enabled=True
+            )
         if request["state"] not in {"pending", "retryable_error"} or resume:
             request.update(state="pending", not_before=0)
         request["ready_after"] = request["not_before"]
         return request
 
+    def recover_run(self, document_id, recovery_id, *, automatic=False):
+        from hrs_codex.recovery import recover
+
+        return recover(self, document_id, recovery_id, automatic=automatic)
+
     def request_run(self, document_id: str, *, resume: bool = False) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
+        with self._verified(document_id) as doc:
             if doc.get("run_request", {}).get("cancel_requested"):
                 raise ValueError("This document is stopping for explicit deletion")
-            self._verify_evidence(doc)
             request = self._request_run(doc, resume=resume)
             if resume:
                 (self._directory(document_id) / ".pause-requested").unlink(missing_ok=True)
@@ -1352,7 +1422,10 @@ class Store:
                     continue
                 if not request or request["state"] not in {"pending", "retryable_error", "running"}:
                     continue
-                if request.get("technical_failures", 0) >= 3 or request.get("not_before", 0) > now:
+                if (
+                    request.get("technical_failures", 0) >= request.get("retry_limit", 3)
+                    or request.get("not_before", 0) > now
+                ):
                     continue
                 if request["state"] == "running" and request["lease_expires_at"] > now:
                     continue
@@ -1360,6 +1433,11 @@ class Store:
                 if any(
                     t["state"] == "leased" and t["claim"]["expires_at"] > now for t in doc["tasks"]
                 ):
+                    continue
+                try:
+                    with FileLock(path.parent / ".executor.lock", timeout=0):
+                        pass
+                except Timeout:
                     continue
                 if request["state"] == "running":
                     request["history"].append(
@@ -1406,8 +1484,17 @@ class Store:
             return request
 
     def finish_run(self, document_id: str, token: str, error: str | dict | None = None) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
+        def validate(doc):
+            request = doc.get("run_request", {})
+            if (
+                doc["state"] == "published"
+                and error is None
+                and not request.get("cancel_requested")
+                and not request.get("pause_requested")
+            ):
+                self._verify_evidence(doc)
+
+        with self._verified(document_id, validate) as doc:
             request = doc.get("run_request", {})
             if request.get("state") != "running" or request.get("token") != token:
                 raise ValueError("Run does not have this active lease")
@@ -1452,7 +1539,6 @@ class Store:
                     not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
                 )
             elif doc["state"] == "published":
-                self._verify_evidence(doc)
                 request.update(state="succeeded", error=None, not_before=0)
             elif continuation and all(p["state"] == "approved" for p in doc["pages"]):
                 request.update(state="pending", error=None, not_before=0)
@@ -1548,9 +1634,7 @@ class Store:
             raise ValueError(
                 "A machine auditor identity and an unresolved source issue are required"
             )
-        with self.lock:
-            doc = self._load(document_id)
-            self._verify_evidence(doc)
+        with self._verified(document_id) as doc:
             if type(page) is not int or not 1 <= page <= len(doc["pages"]):
                 raise ValueError("Unknown physical page")
             target = doc["pages"][page - 1]
@@ -1719,9 +1803,7 @@ class Store:
         }
 
     def human_packet(self, document_id: str, page: int) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
-            self._verify_evidence(doc)
+        with self._verified(document_id) as doc:
             packet = self._human_packet(doc, page)
             return {**packet, "input_sha256": digest(packet)}
 
@@ -1752,10 +1834,8 @@ class Store:
                 "enabled"
             ):
                 raise ValueError("Workflow-test release requires explicit workspace authorization")
-        with self.lock:
-            doc = self._load(document_id)
+        with self._verified(document_id) as doc:
             self._require_active(doc, allow_paused=True)
-            self._verify_evidence(doc)
             packet = self._human_packet(doc, page)
             if digest(packet) != input_sha256:
                 raise ValueError("Review input changed; reload before deciding")
@@ -1893,9 +1973,7 @@ class Store:
         """Reopen machine-reviewed pages while the last published version remains readable."""
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError("Revision requires a reason")
-        with self.lock:
-            doc = self._load(document_id)
-            self._verify_evidence(doc)
+        with self._verified(document_id) as doc:
             if doc["state"] != "published" or not doc.get("publication"):
                 raise ValueError("Only a published document can begin a new revision")
             if doc.get("run_request", {}).get("state") == "running":
@@ -1986,9 +2064,7 @@ class Store:
 
     def propose_revision(self, document_id: str, changes: list[dict]) -> dict:
         """Retain explicitly located errata as candidates for independent Sol review."""
-        with self.lock:
-            doc = self._load(document_id)
-            self._verify_evidence(doc)
+        with self._verified(document_id) as doc:
             if doc["state"] != "published" or not changes:
                 raise ValueError("Errata require a published source and explicit changes")
             by_page = {}
@@ -2076,10 +2152,8 @@ class Store:
             }
 
     def publish(self, document_id: str) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
+        with self._verified(document_id) as doc:
             self._require_active(doc)
-            self._verify_evidence(doc)
             if not all(p["state"] == "approved" for p in doc["pages"]) or not doc["organization"]:
                 raise ValueError(
                     "Whole document must have approved pages and completed organization"
@@ -2153,40 +2227,35 @@ class Store:
         if not query.strip() or not 1 <= limit <= 100:
             raise ValueError("Nonempty query and limit between 1 and 100 are required")
         results = []
-        with self.lock:
-            for path in sorted((self.root / "documents").glob("*/document.json")):
-                doc = json.loads(path.read_text(encoding="utf-8"))
-                revision_pending = bool(
-                    doc.get("active_publication") and doc["state"] != "published"
-                )
-                revision_reason = (
-                    doc.get("revision_history", [{}])[-1].get("reason")
-                    if revision_pending
-                    else None
-                )
-                if doc.get("active_publication"):
-                    doc = self._published_snapshot(doc, doc["active_publication"])
-                elif doc["state"] != "published":
+        for path in sorted((self.root / "documents").glob("*/document.json")):
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            revision_pending = bool(doc.get("active_publication") and doc["state"] != "published")
+            revision_reason = (
+                doc.get("revision_history", [{}])[-1].get("reason") if revision_pending else None
+            )
+            if doc.get("active_publication"):
+                doc = self._published_snapshot(doc, doc["active_publication"])
+            elif doc["state"] != "published":
+                continue
+            self._verify_evidence(doc)
+            for page in doc["pages"]:
+                markdown = page["approved"]["markdown"]
+                at = markdown.casefold().find(query.casefold())
+                if at < 0:
                     continue
-                self._verify_evidence(doc)
-                for page in doc["pages"]:
-                    markdown = page["approved"]["markdown"]
-                    at = markdown.casefold().find(query.casefold())
-                    if at < 0:
-                        continue
-                    results.append(
-                        {
-                            "document_id": doc["id"],
-                            "title": doc["title"],
-                            "page": page["page"],
-                            "excerpt": markdown[max(0, at - 80) : at + len(query) + 160],
-                            "image": str(self._path(doc, page["image"])),
-                            "image_sha256": page["image_sha256"],
-                            "markdown_sha256": page["approved"]["sha256"],
-                            "revision_pending": revision_pending,
-                            "revision_reason": revision_reason,
-                        }
-                    )
-                    if len(results) >= limit:
-                        return results
+                results.append(
+                    {
+                        "document_id": doc["id"],
+                        "title": doc["title"],
+                        "page": page["page"],
+                        "excerpt": markdown[max(0, at - 80) : at + len(query) + 160],
+                        "image": str(self._path(doc, page["image"])),
+                        "image_sha256": page["image_sha256"],
+                        "markdown_sha256": page["approved"]["sha256"],
+                        "revision_pending": revision_pending,
+                        "revision_reason": revision_reason,
+                    }
+                )
+                if len(results) >= limit:
+                    return results
         return results

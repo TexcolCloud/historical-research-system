@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ExecutionCanvas } from "@/components/execution/ExecutionCanvas.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { client } from "@/client/api.ts";
+import type { components } from "@/client/schema.d.ts";
 import { executionGraph } from "@/features/execution/execution-graph.ts";
 import "@/components/execution/agent-graph.css";
 import RetryRunButton from "@/features/runs/RetryRunButton.tsx";
@@ -15,7 +16,7 @@ const states: Record<string, string> = {
   queued: "排队中",
   leased: "执行中",
   ready: "等待处理",
-  pending: "待人工处理",
+  pending: "待处理",
   superseded: "已由后续处理替代",
 };
 export default function ExecutionPanel({ bookId }: { bookId: string }) {
@@ -84,6 +85,7 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
         )}
       {activeRun &&
         activeRun.kind !== "cards" &&
+        !activeRun.codex_document_id &&
         activeRun.state === "failed" &&
         id && (
           <RetryRunButton key={`${id}:${activeRun.revision}`} runId={id} />
@@ -95,19 +97,29 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
 function RunGraph({ runId }: { runId: string }) {
   const [selected, setSelected] = useState<string | null>(null),
     [revision, setRevision] = useState(0);
-  const records = useQuery({
-    queryKey: ["platform", "executions", runId],
+  const [history, setHistory] = useState(false),
+    [label, setLabel] = useState(""),
+    [offset, setOffset] = useState(0);
+  const records = useQuery<components["schemas"]["ExecutionWindow"]>({
+    queryKey: ["platform", "executions", runId, history, label, offset],
+    placeholderData: (previous) => previous,
     queryFn: async ({ signal }) => {
-      const { data } = await client.GET("/api/v2/runs/{run_id}/executions", {
-        params: { path: { run_id: runId } },
-        signal,
-      });
+      const { data } = await client.GET(
+        "/api/v2/runs/{run_id}/execution-window",
+        {
+          params: {
+            path: { run_id: runId },
+            query: { history, label: label || undefined, offset },
+          },
+          signal,
+        },
+      );
       if (!data) throw new Error("执行关系暂时无法读取。");
       return data;
     },
   });
   const graph = useMemo(
-    () => executionGraph(records.data ?? []),
+    () => executionGraph(records.data?.records ?? []),
     [records.data],
   );
   const detail = useQuery({
@@ -121,13 +133,15 @@ function RunGraph({ runId }: { runId: string }) {
       return data;
     },
   });
-  const chosen = records.data?.find((row) => row.id === selected);
+  const chosen = records.data?.records?.find((row) => row.id === selected);
   return (
     <section className="execution-monitor">
       <div className="execution-heading">
         <h2>
-          {graph.nodes.filter((node) => node.kind === "agent").length} 个 Agent
-          · {graph.nodes.filter((node) => node.state === "running").length}{" "}
+          累计 {records.data?.total ?? 0} 条处理记录 · 当前{" "}
+          {records.data?.stages
+            ?.filter((stage) => ["running", "leased"].includes(stage.state))
+            .reduce((sum, stage) => sum + stage.count, 0) ?? 0}{" "}
           项执行中
         </h2>
         <Button
@@ -137,6 +151,75 @@ function RunGraph({ runId }: { runId: string }) {
           整理布局
         </Button>
       </div>
+      <div className="execution-stage-overview" aria-label="各阶段累计记录">
+        {Array.from(
+          new Set(records.data?.stages?.map((stage) => stage.label) ?? []),
+        ).map((stage) => (
+          <Button
+            key={stage}
+            variant={label === stage ? "secondary" : "outline"}
+            onClick={() => {
+              setLabel(stage);
+              setHistory(true);
+              setOffset(0);
+              setSelected(null);
+            }}
+          >
+            {stage} ·{" "}
+            {records.data?.stages
+              ?.filter((item) => item.label === stage)
+              .reduce((sum, item) => sum + item.count, 0)}
+          </Button>
+        ))}
+      </div>
+      <div className="execution-heading">
+        {records.isPlaceholderData ? (
+          <p role="status">正在读取所选记录，暂显示上一批。</p>
+        ) : (
+          <p>
+            {history ? "历史记录" : "当前与异常"}
+            {label && ` · ${label}`} · 显示{" "}
+            {graph.nodes.length ? offset + 1 : 0}–{offset + graph.nodes.length}{" "}
+            / {records.data?.matching ?? 0} 条
+          </p>
+        )}
+        <Button
+          variant="outline"
+          onClick={() => {
+            setHistory(!history);
+            setOffset(0);
+            setLabel("");
+            setSelected(null);
+          }}
+        >
+          {history ? "查看当前与异常" : "查看历史记录"}
+        </Button>
+        <Button
+          variant="outline"
+          disabled={!offset || records.isFetching}
+          onClick={() => {
+            setOffset(Math.max(0, offset - 40));
+            setSelected(null);
+          }}
+        >
+          上一批
+        </Button>
+        <Button
+          variant="outline"
+          disabled={
+            offset + 40 >= (records.data?.matching ?? 0) || records.isFetching
+          }
+          onClick={() => {
+            setOffset(offset + 40);
+            setSelected(null);
+          }}
+        >
+          下一批
+        </Button>
+      </div>
+      {!records.isPending && !graph.nodes.length && !records.isError && (
+        <p>此范围没有处理记录。历史记录可按阶段查看。</p>
+      )}
       {records.isError && (
         <p role="alert">
           {records.error.message}
@@ -145,6 +228,7 @@ function RunGraph({ runId }: { runId: string }) {
       )}
       <div className="execution-body" data-detail={Boolean(chosen)}>
         <ExecutionCanvas
+          key={`${history}:${label}:${offset}:${records.isPlaceholderData}`}
           {...graph}
           selected={selected}
           revision={revision}
