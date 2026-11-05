@@ -223,7 +223,7 @@ function RunGraph({ runId }: { runId: string }) {
       {records.isError && (
         <p role="alert">
           {records.error.message}
-          <Button onClick={() => void records.refetch()}>重试</Button>
+          <Button onClick={() => void records.refetch()}>重新读取记录</Button>
         </p>
       )}
       <div className="execution-body" data-detail={Boolean(chosen)}>

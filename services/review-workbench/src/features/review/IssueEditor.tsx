@@ -111,8 +111,8 @@ export default function IssueEditor({
       if (!data)
         throw new Error(
           response.status === 409
-            ? "草稿版本已变化，请重新读取；当前文字已保留。"
-            : "草稿未保存，请重试。",
+            ? "草稿版本已更新，本页输入尚未写入最新版本。请先复制本页文字，再刷新页面核对。"
+            : "草稿保存失败，本页输入仍在当前窗口。请重试保存后再离开。",
         );
       revision.current = data.revision;
       savedText.current = data.draft_text;
@@ -221,10 +221,10 @@ export default function IssueEditor({
           { id: current.id, action },
         ]
       : resolutions;
-    setResolutions(decisions);
-    latestResolutions.current = decisions;
     try {
       await saveDraft(text, decisions);
+      setResolutions(decisions);
+      latestResolutions.current = decisions;
       setEditing(false);
       setEditRange(null);
       setPageReviewed(true);
@@ -274,8 +274,8 @@ export default function IssueEditor({
       if (!data)
         throw new Error(
           response.status === 409
-            ? "内容或版本已变化，请重新读取；当前草稿已保留。"
-            : "提交未确认，请重试；草稿已保留。",
+            ? "内容版本已更新，本页尚未提交。请先复制本页草稿，再刷新页面核对。"
+            : "尚未收到本页提交回执。草稿已保存，请重试提交以确认结果。",
         );
       return data;
     },
@@ -306,11 +306,11 @@ export default function IssueEditor({
         )}
         {ready && !editing ? (
           <section className="review-page-complete" aria-label="本页提交">
-            <h3>本页核对已完成</h3>
+            <h3>本页疑点已处理，等待提交</h3>
             <p>
               {changed
-                ? "修改已保存，请检查最终文字后提交本页。"
-                : "你已确认保留当前识别文字。"}
+                ? "草稿已保存。请检查最终文字，提交后本页才计入已通过。"
+                : "已记录保留当前文字的判断，提交后本页才计入已通过。"}
             </p>
             <Button
               disabled={
@@ -325,7 +325,7 @@ export default function IssueEditor({
                 ? "正在提交…"
                 : workflowTest
                   ? "按授权提交流程测试结果"
-                  : "提交本页审核结果"}
+                  : "提交本页并继续"}
             </Button>
             <Button
               variant="outline"
@@ -359,7 +359,7 @@ export default function IssueEditor({
           />
         ) : (
           <section className="review-focus">
-            <h3>对照右侧原图核对整页</h3>
+            <h3>对照原图核对整页</h3>
             <p>本页没有可靠的局部定位，请检查正文与原图。</p>
             {!editing && (
               <div className="review-judgment-actions">
@@ -466,14 +466,20 @@ export default function IssueEditor({
               variant="outline"
               disabled={busy}
               onClick={() => {
-                void saveDraft(text).catch(() => undefined);
+                if (draft.isError) void saveDraft(text).catch(() => undefined);
+                else submission.mutate();
               }}
             >
-              重试保存草稿
+              {draft.isError ? "重试保存草稿" : "重试提交本页"}
             </Button>
           </p>
         )}
-        {draft.isSuccess && (
+        {(draft.isPending || finishing) && (
+          <p role="status" className="review-save-status">
+            正在保存草稿，请等待保存完成。
+          </p>
+        )}
+        {draft.isSuccess && !draft.isPending && !finishing && (
           <p role="status" className="review-save-status">
             草稿已自动保存 · 尚未提交本页
           </p>
@@ -554,7 +560,7 @@ function reasonText(reason: Issue["reasons"][number]) {
         .join("；") || "请对照原件核对。"
     );
   return reason
-    .replaceAll("deepseek-review-incomplete", "本地视觉核验未完成")
+    .replaceAll("deepseek-review-incomplete", "原图核对未完成")
     .replaceAll(
       "independent-source-reading-failed",
       "原图独立初读未获得有效结果",

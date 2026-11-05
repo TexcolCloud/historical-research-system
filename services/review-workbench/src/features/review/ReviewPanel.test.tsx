@@ -64,14 +64,14 @@ test("located doubts highlight text, show source region, and require an explicit
       ?.getAttribute("x"),
   ).toBe("0.2");
   expect(
-    Boolean(screen.queryByRole("button", { name: "提交本页审核结果" })),
+    Boolean(screen.queryByRole("button", { name: "提交本页并继续" })),
   ).toBe(false);
   await userEvent.click(screen.getByRole("button", { name: "识别正确，保留" }));
   await waitFor(() => expect(put).toHaveBeenCalled());
   await waitFor(() =>
     expect(
       screen
-        .getByRole("button", { name: "提交本页审核结果" })
+        .getByRole("button", { name: "提交本页并继续" })
         .hasAttribute("disabled"),
     ).toBe(false),
   );
@@ -230,7 +230,7 @@ test.each([
         <ReviewPanel runId="pending-run" stage={stage} state="processing" />
       </QueryClientProvider>,
     );
-    await screen.findByRole("heading", { name: "识别与原件核验进行中" });
+    await screen.findByRole("heading", { name: "文字提取与原图核对进行中" });
     expect(
       screen.queryByRole("heading", { name: "当前没有待核对内容" }),
     ).toBeNull();
@@ -295,13 +295,11 @@ test("confirmation uses the returned next issue immediately without a whole-page
   await waitFor(() =>
     expect(
       screen
-        .getByRole("button", { name: "提交本页审核结果" })
+        .getByRole("button", { name: "提交本页并继续" })
         .hasAttribute("disabled"),
     ).toBe(false),
   );
-  await userEvent.click(
-    screen.getByRole("button", { name: "提交本页审核结果" }),
-  );
+  await userEvent.click(screen.getByRole("button", { name: "提交本页并继续" }));
   expect(
     screen
       .getByRole("button", { name: "原件第 2 页" })
@@ -342,7 +340,7 @@ test("map review explains the image carrier without rendering local file URLs as
     </QueryClientProvider>,
   );
   await screen.findByText("图1 行动图");
-  expect(screen.getByText("本地视觉核验未完成")).toBeDefined();
+  expect(screen.getByText("原图核对未完成")).toBeDefined();
   expect(screen.getByText(/本项为插图或地图/)).toBeDefined();
   expect(screen.queryByAltText("Image")).toBeNull();
   expect(screen.getByAltText("原书第 54 页").getAttribute("src")).toBe(

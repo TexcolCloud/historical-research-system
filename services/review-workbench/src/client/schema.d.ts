@@ -1138,6 +1138,8 @@ export interface components {
              * @default false
              */
             coverage_complete: boolean;
+            /** Page Count */
+            page_count?: number | null;
             /** Approved Pages */
             approved_pages?: components["schemas"]["NavigationPage"][];
         };

@@ -368,10 +368,10 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                 <section class="panel"><h2>原始证据</h2><div class="toolbar"><a href="{escape(image)}" target="_blank" rel="noopener">打开原图</a><a href="{escape(detail)}" target="_blank" rel="noopener">放大查看原图</a></div>
                 <div class="scan"><img src="{escape(image)}" alt="物理第 {packet["page"]} 页原图"></div>
                 <div class="evidence">原件 SHA-256<br>{packet["source_sha256"]}<br>页图 SHA-256<br>{packet["image_sha256"]}</div></section>
-                <section class="panel"><h2>人工核对</h2><p>先查看原图。能明确判读再确认整页；仍不清楚可保存草稿，继续待审。</p>
+                <section class="panel"><h2>人工核对</h2><p>对照原图，保留正确文字或修改为最终文字，再提交本页。保存进度仅暂存草稿，不提交审核结果。</p>
                 <form method="post" action="{escape(self.link("/decision"))}">{hidden}
                 <label for="markdown">整页正文（可修订）</label><textarea id="markdown" name="markdown">{escape(packet["markdown"])}</textarea>
-                <button name="verdict" value="approved">确认整页通过</button><button class="secondary" name="verdict" value="pending">保存草稿，继续待审</button>
+                <button name="verdict" value="approved">提交本页并确认通过</button><button class="secondary" name="verdict" value="pending">保存进度，稍后继续</button>
                 </form><details><summary>查看原始 OCR</summary><pre>{escape(packet["ocr_markdown"])}</pre></details>
                 <details><summary>查看机器尝试和人工历史</summary><pre>{history}</pre></details></section></div>'''
             sidebar = f'<nav aria-label="待审页面" data-live-section="review-queue"><h2>待审队列 · {len(queue)}</h2>{"".join(links)}</nav>'
@@ -448,7 +448,7 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                     note=form.get("note") or ("确认通过" if form["verdict"] == "approved" else "保存待定"),
                     verdict=form["verdict"],
                 )
-                message = "草稿已保存，页面继续待审。"
+                message = "草稿已保存，尚未提交本页审核结果。"
                 if result["page_state"] == "approved":
                     message = "人工决定已保存。其他页面仍待审。"
                     if result["state"] == "processing":

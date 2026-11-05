@@ -24,9 +24,9 @@ export default function SourceFocus({
         疑点原图 · 第 {issue.page} 页 ·{" "}
         {box
           ? issue.image_precision === "line"
-            ? "疑点所在行"
-            : "疑点所在区域"
-          : "尚未精确定位，可在原图拖框定位"}
+            ? "定位到行，请结合上下文核对"
+            : "仅定位到区域，请结合上下文核对"
+          : "需查看整页，可拖框放大疑点区域"}
       </figcaption>
       {box && (
         <>
@@ -140,7 +140,7 @@ export default function SourceFocus({
           </svg>
         </div>
         <p className="platform-inline-status">
-          可在原图拖框调整本次查看区域，原件与审核证据保持保留。
+          在原图上按住并拖动可框选放大区域，只调整本次查看范围。
         </p>
       </details>
       <a href={src} target="_blank" rel="noreferrer">

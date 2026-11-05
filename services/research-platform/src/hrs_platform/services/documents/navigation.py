@@ -83,6 +83,7 @@ def navigation_snapshot(root, doc_id, run_id, version):
     }
     result = {k: nav.get(k) for k in ("state", "entries", "page_labels", "version", "sha256")}
     result["coverage_complete"] = bool(nav.get("coverage_complete"))
+    result["page_count"] = len(doc["pages"])
     result["entries"] = [
         {
             **e,

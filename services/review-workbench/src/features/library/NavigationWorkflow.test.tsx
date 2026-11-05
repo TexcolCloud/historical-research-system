@@ -76,7 +76,7 @@ test("directory editing stays inside the chosen entry and waiting evidence is no
       </QueryClientProvider>
     </MemoryRouter>,
   );
-  const adjust = await screen.findAllByRole("button", { name: "核对对应正文" });
+  const adjust = await screen.findAllByRole("button", { name: "确认目录跳转" });
   expect(adjust).toHaveLength(1);
   await userEvent.click(adjust[0]);
   const editor = screen.getByRole("region", { name: "目录跳转核对" });

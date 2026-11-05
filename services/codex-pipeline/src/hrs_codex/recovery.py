@@ -8,7 +8,7 @@ from hrs_codex.store import digest
 
 
 class RecoveryWait(ValueError):
-    def __init__(self, retry_at, message="旧执行实例尚未退出，等待租约结束后继续检查。"):
+    def __init__(self, retry_at, message="上一次处理尚未结束，结束后将自动继续恢复检查。"):
         super().__init__(message)
         self.retry_at = retry_at
 

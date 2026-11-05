@@ -9,8 +9,8 @@ import { bookWorkspaceHref } from "@/features/books/workspace.ts";
 
 const phases = [
   { title: "接收原件", description: "文件上传与完整性校验" },
-  { title: "识别正文", description: "OCR 识别正文，保存原件和可恢复结果" },
-  { title: "原件视觉核验", description: "对照原书逐页核验已识别的内容" },
+  { title: "文字提取", description: "提取 PDF 文字或识别扫描页，逐页保存结果" },
+  { title: "原图核对", description: "对照原图逐页检查提取的文字" },
   { title: "人工核对", description: "处理机器发现的错误与不确定项" },
   { title: "整理与入库", description: "组装整书章节、建立出处与检索索引" },
 ];
@@ -116,10 +116,17 @@ export default function RunDetails({ book }: { book: Book }) {
               run.recovery?.state ?? "",
             )) && <RecoveryPanel run={run} />}
         {run?.codex_document_id && (
-          <p>Codex 自动处理 · Terra 识别 → Sol 原图审核 → 文章组织与入库</p>
+          <details>
+            <summary>查看自动处理方式</summary>
+            <p>
+              Codex 自动处理 · Terra 提取文字 → Sol 原图核对 → 文章整理与入库
+            </p>
+          </details>
         )}
         {pageProgress && (
-          <p>识别与核验按页并行进行，各自完成全部页面后才显示“已完成”。</p>
+          <p>
+            文字提取与原图核对按页并行进行，各自完成全部页面后才显示“已完成”。
+          </p>
         )}
         {run?.content_acceptance === "workflow_test" && (
           <p role="note">本材料用于流程测试；授权放行不代表内容准确率验收。</p>
@@ -199,8 +206,8 @@ export default function RunDetails({ book }: { book: Book }) {
                     </p>
                     {index === 2 && (
                       <p>
-                        其中已通过 {pageProgress.approved} 页，待人工处理{" "}
-                        {pageProgress.pending} 页。
+                        机器或人工最终通过 {pageProgress.approved}{" "}
+                        页，待人工处理 {pageProgress.pending} 页。
                       </p>
                     )}
                   </div>
@@ -276,22 +283,26 @@ export default function RunDetails({ book }: { book: Book }) {
               : "自动处理已结束，确认剩余内容后继续整理入库。"}
         </p>
       )}
-      {run?.execution && !done && !recoveryBusy && (
-        <p role="status">
-          {run.execution.coordinator_active
-            ? "本书协调器正在执行。"
-            : run.execution.state === "retryable_error"
-              ? run.execution.technical_failures >= run.execution.retry_limit
-                ? `本书自动处理已停止：连续 ${run.execution.technical_failures} 次技术失败。已完成结果保留，可从断点恢复。`
-                : `本书遇到技术故障，正在等待重试（${run.execution.technical_failures}/${run.execution.retry_limit}）。`
-              : paused
-                ? "本书已暂停。"
-                : "本书当前没有活动协调器。"}
-          {run.execution.retry_at && run.execution.retry_at > Date.now() / 1000
-            ? `预计 ${new Date(run.execution.retry_at * 1000).toLocaleTimeString()} 后重试。`
-            : ""}
-        </p>
-      )}
+      {run?.execution &&
+        !done &&
+        !recoveryBusy &&
+        !(failed && run.codex_document_id) && (
+          <p role="status">
+            {run.execution.coordinator_active
+              ? "本书正在自动处理。"
+              : run.execution.state === "retryable_error"
+                ? run.execution.technical_failures >= run.execution.retry_limit
+                  ? `本书自动处理已停止：连续 ${run.execution.technical_failures} 次技术失败。已完成结果保留，可从断点恢复。`
+                  : `本书遇到技术故障，正在等待重试（${run.execution.technical_failures}/${run.execution.retry_limit}）。`
+                : paused
+                  ? "本书已暂停。"
+                  : "本书当前没有正在执行的自动任务。"}
+            {run.execution.retry_at &&
+            run.execution.retry_at > Date.now() / 1000
+              ? `预计 ${new Date(run.execution.retry_at * 1000).toLocaleTimeString()} 后重试。`
+              : ""}
+          </p>
+        )}
       {run?.execution?.last_progress_at && (
         <p>
           最近完成：
@@ -306,7 +317,7 @@ export default function RunDetails({ book }: { book: Book }) {
             {run.scheduling.batch_size} 页；完成当前页后再调整分配。
           </p>
           {run.scheduling.cooldown_until > Date.now() / 1000 && (
-            <p>服务限流，正在冷却。已完成结果保留。</p>
+            <p>服务暂时限制请求，系统稍后自动重试。</p>
           )}
           <table>
             <thead>
@@ -348,7 +359,14 @@ export default function RunDetails({ book }: { book: Book }) {
           </table>
           {run.execution?.active_tasks?.map((t, i) => (
             <p key={i}>
-              {t.stage} · {t.page ? `原件第 ${t.page} 页` : "整书任务"}
+              {{
+                ocr: "文字提取",
+                review: "原图核对",
+                verify: "修正复核",
+                navigation: "目录关联",
+                organization: "文章整理",
+              }[t.stage] ?? "其他处理"}{" "}
+              · {t.page ? `原件第 ${t.page} 页` : "整书任务"}
               {t.started_at
                 ? ` · 开始于 ${new Date(t.started_at * 1000).toLocaleTimeString()}`
                 : ""}

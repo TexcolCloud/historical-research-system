@@ -209,6 +209,7 @@ class NavigationReport(BaseModel):
     version: int
     sha256: str
     coverage_complete: bool = False
+    page_count: int | None = Field(default=None, ge=0)
     approved_pages: list[NavigationPage] = Field(default_factory=list)
 
 

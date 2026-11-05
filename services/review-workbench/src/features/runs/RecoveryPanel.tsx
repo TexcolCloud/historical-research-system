@@ -4,8 +4,8 @@ import type { components } from "@/client/schema.d.ts";
 import RetryRunButton from "./RetryRunButton";
 
 const stages: Record<string, string> = {
-  ocr: "识别正文",
-  review: "原页核验",
+  ocr: "文字提取",
+  review: "原图核对",
   verify: "修正复核",
   navigation: "目录关联",
   organization: "文章整理",
@@ -41,11 +41,11 @@ export default function RecoveryPanel({
     status === "retrying"
       ? "等待自动重试"
       : status === "checkpoint"
-        ? "等待自动检查点恢复"
+        ? "准备从保存进度自动恢复"
         : status === "checking"
           ? "正在检查恢复条件"
           : status === "waiting"
-            ? "等待旧任务退出"
+            ? "等待上一次处理结束"
             : status === "blocked"
               ? "恢复检查未通过"
               : status === "resumed" && run.state === "queued"
@@ -59,7 +59,7 @@ export default function RecoveryPanel({
       aria-label="断点恢复"
     >
       <h3>{title}</h3>
-      {report.isPending && <p role="status">正在读取检查点摘要…</p>}
+      {report.isPending && <p role="status">正在读取已保存进度…</p>}
       {report.isError && (
         <p role="alert">
           {report.error.message}
@@ -74,11 +74,11 @@ export default function RecoveryPanel({
         </p>
       )}
       {data?.pending_human ? (
-        <p>{data.pending_human} 页仍需你核对，技术恢复不会代替内容裁决。</p>
+        <p>{data.pending_human} 页仍需你核对，可先前往人工核对处理。</p>
       ) : null}
       {data?.stage && (
         <p>
-          继续位置（以恢复检查为准）：{stages[data.stage] ?? data.stage}
+          预计继续位置（检查通过后确定）：{stages[data.stage] ?? "其他处理"}
           {data.page ? ` · 原件第 ${data.page} 页` : ""}。
         </p>
       )}
@@ -87,8 +87,8 @@ export default function RecoveryPanel({
           {status === "checking"
             ? "恢复请求已保存，后台正在检查。"
             : status === "waiting"
-              ? "旧任务退出后自动继续检查，无需重复点击。"
-              : "系统按有限预算自动恢复，失败后才需要手动操作。"}
+              ? "上一次处理结束后会自动继续检查，无需重复点击。"
+              : "系统正在尝试自动恢复，暂无需操作。"}
         </p>
       ) : (
         run.state === "failed" && (

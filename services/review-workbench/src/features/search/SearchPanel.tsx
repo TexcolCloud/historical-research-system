@@ -83,17 +83,19 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
       </form>
       {results.isFetching && (
         <p role="status">
-          {request.semantic ? "本地模型正在检索并重排相关内容…" : "正在查找…"}
+          {request.semantic ? "正在按意思查找相关内容…" : "正在按原文查找…"}
         </p>
       )}
       {results.isError && (
         <p role="alert">
           {results.error.message}
-          <Button onClick={() => void results.refetch()}>重试</Button>
+          <Button onClick={() => void results.refetch()}>重新查找</Button>
         </p>
       )}
       {results.data?.length === 0 && (
-        <p>没有找到相关内容。请调整关键词，或关闭研究检索后按原文查找。</p>
+        <p>
+          未找到相关内容。可缩短关键词，或在“检索方式”中选择“按原文查词”后重新查找。
+        </p>
       )}
       {results.data?.map((hit) => (
         <article key={hit.id}>

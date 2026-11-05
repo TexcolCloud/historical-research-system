@@ -13,7 +13,7 @@ const labels: Record<string, string> = {
   matched: "可点击跳转",
   matched_manual: "已确认跳转",
   unlinked_manual: "已确认不设置跳转",
-  conflict: "需要核对正文",
+  conflict: "需要确认目录跳转",
   waiting_evidence: "等待系统核验",
   not_found: "未找到对应正文",
   unresolved: "尚未设置跳转",
@@ -23,11 +23,13 @@ const linked = (e: Entry) =>
 export default function NavigationPanel({
   runId,
   bookId,
+  bookState,
   reviewOnly = false,
   entryId,
 }: {
   runId: string;
   bookId: string;
+  bookState?: string;
   reviewOnly?: boolean;
   entryId?: string;
 }) {
@@ -49,6 +51,14 @@ export default function NavigationPanel({
     [restart, setRestart] = useState(0);
   const entries = report.data?.entries ?? [],
     attention = entries.filter((e) => e.status === "conflict");
+  const incompleteMessage =
+    bookState === "paused"
+      ? "自动处理已暂停。请在处理进展中继续处理，新的目录项目将在核对后列出。"
+      : bookState === "failed"
+        ? "自动处理已停止。请在处理进展中从断点恢复，新的目录项目将在核对后列出。"
+        : ["running", "processing", "queued"].includes(bookState ?? "")
+          ? "目录尚未全部核对，新发现的项目会自动列出。"
+          : "目录尚未全部核对，请在处理进展中查看剩余页面的状态。";
   const activeId = selected ?? (reviewOnly ? attention[0]?.id : null);
   const editor = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -159,7 +169,7 @@ export default function NavigationPanel({
             <p className="navigation-queue-status">
               {attention.length
                 ? `还有 ${attention.length} 项目录需要核对。确认跳转只改变目录导航，正文与原件保留。`
-                : "当前待办均已处理。"}
+                : "当前没有需要你确认的目录项目。"}
             </p>
           ) : (
             <div
@@ -203,7 +213,7 @@ export default function NavigationPanel({
               <p>
                 {report.data.coverage_complete
                   ? "已确认的跳转可以在原书目录中试用或修改。"
-                  : "其他页面仍在自动核验，新发现的问题会继续出现在这里。"}
+                  : incompleteMessage}
               </p>
               <a href={`#/books/${bookId}?tab=reader&section=directory`}>
                 {message ? "试用目录跳转" : "浏览原书目录"}
@@ -253,7 +263,7 @@ export default function NavigationPanel({
                           onClick={() => choose(e.id)}
                         >
                           {e.status === "conflict"
-                            ? "核对对应正文"
+                            ? "确认目录跳转"
                             : "修改跳转"}
                         </Button>
                       )}
@@ -293,7 +303,7 @@ export default function NavigationPanel({
           </ol>
           {!report.data.coverage_complete && visible.length > 0 && (
             <p className="navigation-queue-status">
-              其余页面仍在核验，等待系统的目录条目无需人工处理。
+              {incompleteMessage} 标为“等待系统核验”的条目暂无需人工处理。
             </p>
           )}
         </>

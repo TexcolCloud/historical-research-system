@@ -92,12 +92,16 @@ export default function BookPage() {
         <div>
           <h1 title={book.title}>{book.title}</h1>
           <p>
-            {(book.pending_count ?? 0) > 0 ||
-            (book.navigation_pending_count ?? 0) > 0
-              ? `需要你处理：${book.pending_count ?? 0} 页正文核对 · ${book.navigation_pending_count ?? 0} 项目录确认`
-              : book.state === "ready"
-                ? "资料已入库，可阅读、检索和导出。"
-                : "系统按页自动处理，已有底稿可在阅读资料中查看。"}
+            {book.state === "failed"
+              ? "自动处理已停止，请在处理进展中从断点恢复。"
+              : book.state === "paused"
+                ? "自动处理已暂停，请在处理进展中点击“继续处理”。"
+                : (book.pending_count ?? 0) > 0 ||
+                    (book.navigation_pending_count ?? 0) > 0
+                  ? `需要你处理：${book.pending_count ?? 0} 页正文核对 · ${book.navigation_pending_count ?? 0} 项目录确认`
+                  : book.state === "ready"
+                    ? "资料已入库，可阅读、检索和导出。"
+                    : "系统按页自动处理，已有底稿可在阅读资料中查看。"}
           </p>
           {book.revision_pending && (
             <p role="note">
@@ -151,6 +155,7 @@ export default function BookPage() {
               <NavigationPanel
                 runId={book.run_id}
                 bookId={bookId}
+                bookState={book.state}
                 reviewOnly
                 entryId={params.get("entry") ?? undefined}
               />

@@ -89,7 +89,7 @@ export default function BooksPage() {
         <div role="alert" className="platform-empty">
           <p>{books.error.message}</p>
           <Button variant="outline" onClick={() => void books.refetch()}>
-            重试
+            重新读取书籍
           </Button>
         </div>
       ) : !visible.length ? (
@@ -101,9 +101,22 @@ export default function BooksPage() {
               : "建立你的第一本研究材料"}
           </h2>
           <p>
-            上传 PDF 后，系统会识别正文并核对原页。需要确认的内容会集中列出。
+            {search || filter !== "all"
+              ? "可清空书名或切换到全部书籍。"
+              : "上传 PDF 后自动提取文字并核对原图，需要你确认的疑点会集中列出。"}
           </p>
-          <Button onClick={upload}>导入 PDF</Button>
+          {search || filter !== "all" ? (
+            <Button
+              onClick={() => {
+                setSearch("");
+                setFilter("all");
+              }}
+            >
+              查看全部书籍
+            </Button>
+          ) : (
+            <Button onClick={upload}>导入 PDF</Button>
+          )}
         </section>
       ) : (
         <section className="platform-books" aria-label="书籍列表">

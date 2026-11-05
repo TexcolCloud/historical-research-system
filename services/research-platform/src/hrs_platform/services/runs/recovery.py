@@ -6,6 +6,17 @@ from hrs_platform import models as db
 from hrs_platform.domain.errors import ServiceError
 
 
+def recovery_reason(failure):
+    message = str(failure)
+    if "hash mismatch" in message or "differs from" in message:
+        return "原件或证据与保存记录不一致。请在故障详情中查看受影响文件，恢复原文件后再点击“从断点恢复”。"
+    if isinstance(failure, OSError):
+        return "无法读取恢复所需文件或启动本机服务。请在故障详情中查看路径和原因，修复后再点击“从断点恢复”。"
+    if any("\u4e00" <= char <= "\u9fff" for char in message):
+        return message
+    return "恢复检查未能完成。请展开故障详情查看原因，修复后再点击“从断点恢复”。"
+
+
 def workflow_id(kind, run_id, attempt=0):
     base = f"{'cards' if kind == 'cards' else 'book'}/{run_id}"
     return base + f"/retry/{attempt}" if attempt else base
@@ -156,7 +167,7 @@ def native_report(settings, engine, run_id):
     ):
         report.update(saved)
     if report["state"] == "waiting":
-        report["reason"] = "旧任务仍有有效租约，退出后继续检查，不会启动第二份处理。"
+        report["reason"] = "上一次处理尚未结束，系统会在结束后继续恢复检查。"
     report.setdefault("action", "从断点恢复")
     return report
 
@@ -191,9 +202,7 @@ def resume_native(bridge, event, run):
         status = {"state": "waiting", "retry_at": waiting.retry_at, "reason": str(waiting)}
         state, delivered, error = "queued", False, None
     except (ValueError, OSError, RuntimeError) as failure:
-        message = str(failure)
-        if "hash mismatch" in message or "differs from" in message:
-            message = "检查点证据校验未通过，请恢复原件或工作区文件后重试。"
+        message = recovery_reason(failure)
         status = {"state": "blocked", "reason": message, "action": "修复后从断点恢复"}
         state, delivered, error = "failed", True, {"code": "recovery_preflight", "detail": str(failure)}
         try:

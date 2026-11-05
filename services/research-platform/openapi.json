@@ -3166,6 +3166,18 @@
             "title": "Coverage Complete",
             "default": false
           },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          },
           "approved_pages": {
             "items": {
               "$ref": "#/components/schemas/NavigationPage"

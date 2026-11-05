@@ -103,13 +103,13 @@ test("native per-page review does not mark unfinished OCR complete", async () =>
   await screen.findByText(/Codex 自动处理/);
   expect(
     screen
-      .getByRole("heading", { name: /识别正文/ })
+      .getByRole("heading", { name: /文字提取/ })
       .closest("li")
       ?.getAttribute("data-status"),
   ).toBe("current");
   expect(
     screen
-      .getByRole("heading", { name: /原件视觉核验/ })
+      .getByRole("heading", { name: /原图核对/ })
       .closest("li")
       ?.getAttribute("data-status"),
   ).toBe("current");
