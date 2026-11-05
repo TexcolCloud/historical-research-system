@@ -348,6 +348,8 @@ class CodexBridge:
         return fingerprint(
             {
                 "policy": PROJECTION_POLICY,
+                "coordinator_active": doc.get("run_request", {}).get("state") == "running"
+                and doc.get("run_request", {}).get("lease_expires_at", 0) > time.time(),
                 "state": doc["state"],
                 "revision": doc.get("revision"),
                 "pages": doc["pages"],

@@ -435,3 +435,12 @@ def test_partial_native_projection_writes_only_changed_page_markdown(platform, t
     assert draft == "First[^1]\n\n[^1]: Source note.\n\nSecond page.\n\n"
     evidence = bridge.review.read_json(after["files"]["codex-evidence.json"])
     assert len(evidence["task_files"]) == len(bridge.store.status(doc_id)["tasks"])
+
+
+def test_projection_signature_changes_when_coordinator_lease_expires(monkeypatch):
+    doc = {"state": "processing", "pages": [], "tasks": [],
+           "run_request": {"state": "running", "lease_expires_at": 110}}
+    monkeypatch.setattr("hrs_platform.services.codex_bridge.time.time", lambda: 105)
+    active = CodexBridge.projection_input(doc)
+    monkeypatch.setattr("hrs_platform.services.codex_bridge.time.time", lambda: 115)
+    assert CodexBridge.projection_input(doc) != active
