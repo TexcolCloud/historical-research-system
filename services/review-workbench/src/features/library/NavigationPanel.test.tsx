@@ -165,6 +165,7 @@ test("human task opens the candidate evidence and confirms it without a separate
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
     expect.objectContaining({
       body: {
+        decision_id: expect.any(String),
         expected_sha256: report.sha256,
         target_page: 5,
         target_anchor: "第一章",
@@ -244,6 +245,7 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
     expect.objectContaining({
       body: {
+        decision_id: expect.any(String),
         expected_sha256: report.sha256,
         target_page: 3,
         target_anchor: "1936年",
@@ -294,15 +296,13 @@ test("confirmed directory entries can be reopened without turning a preview into
         }
       : report,
   );
-  const post = vi
-    .spyOn(client, "POST")
-    .mockResolvedValue({
-      data: {
-        ...report,
-        entries: [{ ...entry, status: "unlinked_manual", target: null }],
-      },
-      response: new Response(),
-    });
+  const post = vi.spyOn(client, "POST").mockResolvedValue({
+    data: {
+      ...report,
+      entries: [{ ...entry, status: "unlinked_manual", target: null }],
+    },
+    response: new Response(),
+  });
   render(
     <QueryClientProvider client={new QueryClient()}>
       <NavigationPanel runId="run" bookId="book" />
@@ -323,6 +323,7 @@ test("confirmed directory entries can be reopened without turning a preview into
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
     expect.objectContaining({
       body: {
+        decision_id: expect.any(String),
         expected_sha256: report.sha256,
         target_page: null,
         target_anchor: "",

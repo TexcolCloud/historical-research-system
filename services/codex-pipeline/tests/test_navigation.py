@@ -117,7 +117,14 @@ def test_directory_parses_before_book_complete_and_targets_resolve_later(tmp_pat
         expected_sha256=doc["navigation"]["sha256"],
         target_page=2,
         target_anchor="起源",
+        decision_id="synthetic-decision",
     )
+    replay = store.navigation_decision(doc_id, entry["id"], expected_sha256=doc["navigation"]["sha256"],
+                                       target_page=2, target_anchor="起源", decision_id="synthetic-decision")
+    assert replay["sha256"] == nav["sha256"]
+    with pytest.raises(ValueError, match="different"):
+        store.navigation_decision(doc_id, entry["id"], expected_sha256=doc["navigation"]["sha256"],
+                                  target_page=None, decision_id="synthetic-decision")
     assert nav["entries"][0]["status"] == "matched_manual"
     assert nav["entries"][0]["decision"]["content_approval"] is False
     unlinked = store.navigation_decision(

@@ -54,6 +54,9 @@ export default function NavigationPanel({
   useEffect(() => {
     if (selected) editor.current?.scrollIntoView?.({ block: "start" });
   }, [selected]);
+  const pendingDecision = useRef<{ signature: string; id: string } | null>(
+    null,
+  );
   const decision = useMutation({
     mutationFn: async ({
       choice,
@@ -64,11 +67,15 @@ export default function NavigationPanel({
       sha: string;
       id: string;
     }) => {
+      const signature = JSON.stringify([id, sha, choice]);
+      if (pendingDecision.current?.signature !== signature)
+        pendingDecision.current = { signature, id: crypto.randomUUID() };
       const { data, response } = await client.POST(
         "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
         {
           params: { path: { run_id: runId, entry_id: id } },
           body: {
+            decision_id: pendingDecision.current.id,
             expected_sha256: sha,
             target_page: choice?.page ?? null,
             target_anchor: choice?.anchor ?? "",
@@ -84,6 +91,7 @@ export default function NavigationPanel({
       return data;
     },
     onSuccess: (data, { choice, id }) => {
+      pendingDecision.current = null;
       const title = entries.find((e) => e.id === id)?.title ?? "这条目录";
       setMessage(
         choice
@@ -107,8 +115,7 @@ export default function NavigationPanel({
       query.setQueryData<Book>(["platform", "book", bookId], (book) =>
         book ? { ...book, navigation_pending_count } : book,
       );
-      void query.invalidateQueries({ queryKey: booksKey });
-      void query.invalidateQueries({ queryKey: ["platform", "book", bookId] });
+      // The next bridge event replaces these committed local counters after projection.
     },
   });
   const visible = reviewOnly

@@ -1,5 +1,7 @@
 """Shared native navigation and user execution controls for the existing workbench."""
 
+from copy import deepcopy
+from functools import lru_cache
 from uuid import UUID, uuid5
 
 from hrs_codex.store import Store
@@ -23,61 +25,12 @@ class Navigation:
 
     def status(self, run_id):
         store, doc_id = self.native(run_id)
-        doc = store.status(doc_id)
-        nav = doc.get("navigation") or {
-            "state": "not_detected",
-            "entries": [],
-            "page_labels": [],
-            "version": 0,
-            "sha256": "",
-        }
-        result = {k: nav.get(k) for k in ("state", "entries", "page_labels", "version", "sha256")}
-        result["coverage_complete"] = bool(nav.get("coverage_complete"))
-        result["entries"] = [
-            {
-                **e,
-                "source_image": f"/api/v2/runs/{run_id}/artifacts/{doc['pages'][e['source_page'] - 1]['image']}",
-                "target_url": f"/api/v2/runs/{run_id}/artifacts/original.pdf#page={e['target']['physical_page']}"
-                if e.get("target")
-                else None,
-                "target_image": f"/api/v2/runs/{run_id}/artifacts/{doc['pages'][e['target']['physical_page'] - 1]['image']}"
-                if e.get("target")
-                else None,
-            }
-            for e in result["entries"]
-        ]
-        if doc.get("publication") and doc.get("organization"):
-            from hrs_codex.organization import article_parts
-
-            groups = article_parts(doc["pages"], doc["organization"]["articles"])
-            for entry in result["entries"]:
-                target = entry.get("target")
-                if target:
-                    owner = next(
-                        (
-                            i
-                            for i, parts in enumerate(groups)
-                            if any(
-                                p["page"] == target["physical_page"]
-                                and p["original_start"] <= target["start"] < p["original_end"]
-                                for p in parts
-                            )
-                        ),
-                        None,
-                    )
-                    if owner is not None:
-                        entry["target_chapter_id"] = str(uuid5(UUID(str(run_id)), f"chapter:{owner}"))
-        result["approved_pages"] = [
-            {
-                "page": p["page"],
-                "headings": p.get("observation", {}).get("headings", []),
-                "printed_label": p.get("observation", {}).get("printed_label"),
-                "image": f"/api/v2/runs/{run_id}/artifacts/{p['image']}",
-            }
-            for p in doc["pages"]
-            if p.get("approved")
-        ]
-        return result
+        stat = (store._directory(doc_id) / "document.json").stat()
+        return deepcopy(
+            navigation_snapshot(
+                store.root, doc_id, str(run_id), (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+            )
+        )
 
     def decide(self, run_id, entry_id, request):
         with self.engine.begin() as connection:
@@ -114,3 +67,64 @@ class Navigation:
         if action == "resume":
             ensure_workbench(store)
         return {"document_id": doc_id, "state": result["state"]}
+
+
+@lru_cache(maxsize=8)
+def navigation_snapshot(root, doc_id, run_id, version):
+    """Read-only view, invalidated by every atomic native commit; never grants approval."""
+    store = Store(root)
+    doc = store.status(doc_id)
+    nav = doc.get("navigation") or {
+        "state": "not_detected",
+        "entries": [],
+        "page_labels": [],
+        "version": 0,
+        "sha256": "",
+    }
+    result = {k: nav.get(k) for k in ("state", "entries", "page_labels", "version", "sha256")}
+    result["coverage_complete"] = bool(nav.get("coverage_complete"))
+    result["entries"] = [
+        {
+            **e,
+            "source_image": f"/api/v2/runs/{run_id}/artifacts/{doc['pages'][e['source_page'] - 1]['image']}",
+            "target_url": f"/api/v2/runs/{run_id}/artifacts/original.pdf#page={e['target']['physical_page']}"
+            if e.get("target")
+            else None,
+            "target_image": f"/api/v2/runs/{run_id}/artifacts/{doc['pages'][e['target']['physical_page'] - 1]['image']}"
+            if e.get("target")
+            else None,
+        }
+        for e in result["entries"]
+    ]
+    if doc.get("publication") and doc.get("organization"):
+        from hrs_codex.organization import article_parts
+
+        groups = article_parts(doc["pages"], doc["organization"]["articles"])
+        for entry in result["entries"]:
+            target = entry.get("target")
+            if target:
+                owner = next(
+                    (
+                        i
+                        for i, parts in enumerate(groups)
+                        if any(
+                            p["page"] == target["physical_page"]
+                            and p["original_start"] <= target["start"] < p["original_end"]
+                            for p in parts
+                        )
+                    ),
+                    None,
+                )
+                if owner is not None:
+                    entry["target_chapter_id"] = str(uuid5(UUID(str(run_id)), f"chapter:{owner}"))
+    result["approved_pages"] = [
+        {
+            "page": p["page"],
+            "headings": p.get("observation", {}).get("headings", []),
+            "printed_label": p.get("observation", {}).get("printed_label"),
+            "image": f"/api/v2/runs/{run_id}/artifacts/{p['image']}",
+        }
+        for p in doc["pages"]
+        if p.get("approved")
+    ]
+    return result

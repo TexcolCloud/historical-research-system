@@ -20,7 +20,7 @@ def context(review, run_id):
         raise ValueError("Only an unpublished book awaiting review can be repaired.")
     bundle = review.read_json(run["conversion"])
     files, manifest = bundle["files"], bundle["manifest"]
-    text = review.objects.read_bytes(files[manifest["candidate_markdown"]]).decode("utf-8")
+    text = review.markdown(bundle)
     boundaries = {p["page"]: p for p in review.read_json(files[manifest["page_boundaries"]])["pages"]}
     return run, bundle, text, boundaries
 
@@ -226,8 +226,10 @@ def apply_verified_page(review, issues, page, boundary, evidence):
 
 def refresh_unresolved(review, issues, page, boundary, evidence):
     """Keep current model concerns attached to their actual paragraphs."""
-    initial_checks = [r for r in page['receipts'] if r.get('phase', 'initial') in {'initial', 'repair-review'}]
-    if not initial_checks or initial_checks[-1]['verdict'].get('review_state') != 'completed':
+    initial_checks = [
+        r for r in page["receipts"] if r.get("phase", "initial") in {"initial", "repair-review"}
+    ]
+    if not initial_checks or initial_checks[-1]["verdict"].get("review_state") != "completed":
         return 0
     concerns = [c for c in page["concerns"] if c["kind"] not in {"citation", "normalization"}]
     groups = [(concern_ranges(page["text"], c), c) for c in concerns]
@@ -250,7 +252,9 @@ def refresh_unresolved(review, issues, page, boundary, evidence):
         }
         if updated["reasons"] == body["reasons"]:
             continue
-        ref = review.objects.put_bytes(json.dumps(updated, ensure_ascii=False).encode(), run_id=issue["run_id"])
+        ref = review.objects.put_bytes(
+            json.dumps(updated, ensure_ascii=False).encode(), run_id=issue["run_id"]
+        )
         with review.engine.begin() as connection:
             connection.execute(
                 update(db.review_issues)
@@ -299,11 +303,16 @@ def recheck_pending(review, run_id, settings, output, *, pages=None, progress=pr
         ]
         if not issues:
             continue
-        target = next(p for p in source_pages if p['page'] == number)
-        target['review_scope'] = [{'text': i['text'], 'start':i['start']-boundaries[number]['start'],
-                                  'end':i['end']-boundaries[number]['start'],
-                                  'reasons': review.read_json(i['content']).get('reasons', [])}
-                                  for i in issues]
+        target = next(p for p in source_pages if p["page"] == number)
+        target["review_scope"] = [
+            {
+                "text": i["text"],
+                "start": i["start"] - boundaries[number]["start"],
+                "end": i["end"] - boundaries[number]["start"],
+                "reasons": review.read_json(i["content"]).get("reasons", []),
+            }
+            for i in issues
+        ]
         for p in source_pages:
             if abs(p["page"] - number) <= 1:
                 review.objects.materialize(bundle["files"][p["image"]], p["image_path"])
@@ -312,8 +321,10 @@ def recheck_pending(review, run_id, settings, output, *, pages=None, progress=pr
         )
         page = next(p for p in checked["pages"] if p["page"] == number)
         current = get_run(review.engine, run_id)
-        if current['conversion'] != run['conversion']:
-            raise ValueError('The formal conversion changed during review; retained results were not applied.')
+        if current["conversion"] != run["conversion"]:
+            raise ValueError(
+                "The formal conversion changed during review; retained results were not applied."
+            )
         receipt = {
             "page": number,
             "conversion_sha256": run["conversion"]["sha256"],

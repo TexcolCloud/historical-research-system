@@ -52,6 +52,11 @@ class BookSummary(BaseModel):
     )
 
 
+class WorkspaceSnapshot(BaseModel):
+    cursor: int
+    books: list[BookSummary]
+
+
 class RunProgress(BaseModel):
     stage: Literal["vision"]
     completed: int = Field(ge=0)
@@ -79,6 +84,12 @@ class ActiveTask(BaseModel):
 
 
 class RunExecution(BaseModel):
+    technical_failures: int = 0
+    retry_limit: int = 3
+    retry_at: float | None = None
+    lease_expires_at: float | None = None
+    coordinator_active: bool = False
+    stop_reason: str | dict | None = None
     state: str | None = None
     paused: bool = False
     automatic_work_remaining: bool = False
@@ -183,6 +194,7 @@ class NavigationReport(BaseModel):
 
 
 class NavigationDecision(BaseModel):
+    decision_id: str | None = Field(default=None, min_length=1, max_length=128)
     expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_page: int | None = Field(default=None, ge=1)
     target_anchor: str = ""
@@ -348,6 +360,21 @@ class ExecutionNode(BaseModel):
     state: str
     started_at: datetime
     finished_at: datetime | None
+
+
+class ExecutionStage(BaseModel):
+    label: str
+    state: str
+    count: int
+
+
+class ExecutionWindow(BaseModel):
+    total: int
+    matching: int
+    stages: list[ExecutionStage]
+    records: list[ExecutionNode]
+    offset: int
+    limit: int
 
 
 class CardSummary(BaseModel):

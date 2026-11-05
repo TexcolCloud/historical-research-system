@@ -118,3 +118,18 @@ def test_executor_failure_is_recoverable_runtime_error_not_human_uncertainty(tmp
     assert store.human_queue() == []
     assert store.status(doc_id)["pages"][0]["state"] == "awaiting_ocr"
     assert store.request_run(doc_id, resume=True)["state"] == "pending"
+
+
+def test_lost_document_lease_cancels_only_its_executor(tmp_path, monkeypatch):
+    import pytest
+    store, doc_id = fixture(tmp_path)
+    store.request_run(doc_id)
+    def lost(*args, **kwargs):
+        raise ValueError("Synthetic lease lost")
+    monkeypatch.setattr(store, "renew_run", lost)
+    def execute(s, identity, stop_event):
+        assert stop_event.wait(2), "Lost ownership must stop this coordinator"
+    runner = Runner(store, execute, lease_seconds=1)
+    with pytest.raises(RuntimeError, match="lease lost"):
+        runner.tick(doc_id)
+    assert not runner.stop_event.is_set(), "One lost lease must not stop the workspace dispatcher"

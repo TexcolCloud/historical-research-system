@@ -73,8 +73,8 @@ export default function ReviewPanel({
     setSelected(receipt.next_issue_id);
     setMessage(
       receipt.pending_count
-        ? `决定已保存，剩余 ${receipt.pending_count} 项。`
-        : "当前待办已处理完成。系统继续剩余自动任务，整书核验通过后整理入库。",
+        ? `决定已保存，剩余 ${receipt.pending_count} 项。后台继续同步，可立即核对下一项。`
+        : "决定已保存，当前待办已处理完成。后台正在同步，整书核验通过后继续整理入库。",
     );
   }
   return (

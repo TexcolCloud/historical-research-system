@@ -140,8 +140,27 @@ export default function RunDetails({ book }: { book: Book }) {
             {paused
               ? "恢复后，系统继续其余页面。"
               : run?.execution?.automatic_work_remaining
-                ? "其余页面仍在自动处理，可同时核对。"
+                ? failed
+                  ? "其余页面的自动处理已停止，恢复后继续；可先核对已生成的待办。"
+                  : "其余页面仍在自动处理，可同时核对。"
                 : "自动处理已结束，确认剩余内容后继续整理入库。"}
+          </p>
+        )}
+        {run?.execution && !done && (
+          <p role="status">
+            {run.execution.coordinator_active
+              ? "本书协调器正在执行。"
+              : run.execution.state === "retryable_error"
+                ? run.execution.technical_failures >= run.execution.retry_limit
+                  ? `本书自动处理已停止：连续 ${run.execution.technical_failures} 次技术失败。已完成结果保留，可重试本阶段。`
+                  : `本书遇到技术故障，正在等待重试（${run.execution.technical_failures}/${run.execution.retry_limit}）。`
+                : paused
+                  ? "本书已暂停。"
+                  : "本书当前没有活动协调器。"}
+            {run.execution.retry_at &&
+            run.execution.retry_at > Date.now() / 1000
+              ? `预计 ${new Date(run.execution.retry_at * 1000).toLocaleTimeString()} 后重试。`
+              : ""}
           </p>
         )}
         {run?.execution?.last_progress_at && (

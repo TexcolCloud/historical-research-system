@@ -9,12 +9,12 @@ from uuid import uuid4
 import pytest
 from pypdf import PdfWriter
 from sqlalchemy import insert, select, update
+from test_book_deletion import seed
 
 from hrs_platform import models as db
 from hrs_platform.jobs.conversion import Activities
 from hrs_platform.services.deletion import request_deletion
 from hrs_platform.services.documents.review import Review
-from test_book_deletion import seed
 
 
 def test_initialize_cannot_resurrect_deleting_book(platform, monkeypatch):
@@ -91,7 +91,7 @@ def test_delivery_cursor_keeps_late_commits(platform):
     book, _ = seed(engine)
     with engine.connect() as first:
         transaction = first.begin()
-        early = first.scalar(
+        first.scalar(
             insert(db.events).values(book_id=book, kind="early", payload={}).returning(db.events.c.sequence)
         )
         with engine.begin() as second:
@@ -128,10 +128,12 @@ def test_isolated_stage_does_not_block_heartbeat():
 
 
 def test_unpublished_shared_object_survives_other_book_deletion(platform, tmp_path, monkeypatch):
-    from hrs_platform.services.storage import objects_for
-    from hrs_platform.jobs.deletion import DeletionActivities
-    from hrs_runtime.object_storage import S3Objects
     import hashlib
+
+    from hrs_runtime.object_storage import S3Objects
+
+    from hrs_platform.jobs.deletion import DeletionActivities
+    from hrs_platform.services.storage import objects_for
 
     settings, engine = platform
     settings = settings.model_copy(update={"cache_root": tmp_path})
@@ -173,11 +175,12 @@ def test_unpublished_shared_object_survives_other_book_deletion(platform, tmp_pa
 
 
 def test_index_uses_owned_requests_and_durable_recovery(platform, monkeypatch):
+    from temporalio.exceptions import ApplicationError
+
+    from hrs_platform.domain.errors import Problem
     from hrs_platform.jobs.pipeline import PipelineActivities
     from hrs_platform.services.retrieval.compute import remote_compute
-    from hrs_platform.domain.errors import Problem
     from hrs_platform.services.runs.outputs import Outputs
-    from temporalio.exceptions import ApplicationError
 
     settings, engine = platform
     _, run = seed(engine, stage="indexing")
@@ -212,6 +215,7 @@ def test_index_uses_owned_requests_and_durable_recovery(platform, monkeypatch):
 
 def test_isolated_cancellation_drains_real_operation():
     from threading import Event
+
     from hrs_platform.jobs.pipeline import isolated
 
     started, drained = Event(), Event()
@@ -238,12 +242,14 @@ def test_isolated_cancellation_drains_real_operation():
 
 
 def test_slow_upload_allows_deletion_request_and_other_book_writes(platform, tmp_path, monkeypatch):
+    import hashlib
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
-    import hashlib
+
     from hrs_runtime.object_storage import S3Objects
-    from hrs_platform.services.storage import objects_for
+
     from hrs_platform.jobs.deletion import DeletionActivities
+    from hrs_platform.services.storage import objects_for
 
     settings, engine = platform
     settings = settings.model_copy(update={"cache_root": tmp_path})
@@ -307,8 +313,8 @@ def test_reentered_upload_removes_old_source_cache(tmp_path, monkeypatch):
 
 
 def test_publish_cannot_resurrect_deleting_book(platform, monkeypatch):
-    from hrs_platform.services.documents.library import Library
     from hrs_platform.domain.errors import ServiceError
+    from hrs_platform.services.documents.library import Library
 
     settings, engine = platform
     book, run = seed(engine)
@@ -325,6 +331,7 @@ def test_publish_cannot_resurrect_deleting_book(platform, monkeypatch):
 
 def test_delivery_migration_preserves_issued_cursors(platform):
     from sqlalchemy import text
+
     from hrs_platform.core.db import migrate
     from hrs_platform.services.events import read_events
 
@@ -351,8 +358,10 @@ def test_delivery_migration_preserves_issued_cursors(platform):
 def test_async_activity_lock_wait_keeps_heartbeats_on_worker_loop(platform):
     from dataclasses import replace
     from threading import get_ident
+
     from sqlalchemy import text
     from temporalio.testing import ActivityEnvironment
+
     from hrs_platform.jobs.pipeline import PipelineActivities
     from hrs_platform.services.storage import object_lock
 
@@ -380,3 +389,21 @@ def test_async_activity_lock_wait_keeps_heartbeats_on_worker_loop(platform):
         assert await asyncio.wait_for(task, 3) == "saved"
     asyncio.run(scenario())
     assert heartbeats
+
+
+def test_event_bootstrap_skips_history_without_losing_late_commits(platform):
+    from hrs_platform.services.events import read_events, workspace_snapshot
+    _, engine = platform
+    book, _ = seed(engine)
+    with engine.begin() as connection:
+        connection.execute(insert(db.events), [dict(book_id=book, kind="old", payload={}) for _ in range(1200)])
+    with engine.connect() as connection:
+        tx = connection.begin()
+        connection.execute(insert(db.events).values(book_id=book, kind="late", payload={}))
+        initial = workspace_snapshot(engine)
+        assert initial["cursor"] >= 1200
+        assert str(initial["books"][0]["id"]) == book
+        assert read_events(engine, initial["cursor"]) == []
+        tx.commit()
+    delta = read_events(engine, initial["cursor"])
+    assert [e["kind"] for e in delta] == ["late"]

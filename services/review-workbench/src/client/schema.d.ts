@@ -260,6 +260,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/runs/{run_id}/execution-window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Execution Window */
+        get: operations["execution_window_api_v2_runs__run_id__execution_window_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/executions/{execution_id}/details": {
         parameters: {
             query?: never;
@@ -441,6 +458,23 @@ export interface paths {
         put?: never;
         /** Create Upload */
         post: operations["create_upload_api_v2_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/events/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Snapshot */
+        get: operations["snapshot_api_v2_events_snapshot_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -933,6 +967,30 @@ export interface components {
             /** Finished At */
             finished_at: string | null;
         };
+        /** ExecutionStage */
+        ExecutionStage: {
+            /** Label */
+            label: string;
+            /** State */
+            state: string;
+            /** Count */
+            count: number;
+        };
+        /** ExecutionWindow */
+        ExecutionWindow: {
+            /** Total */
+            total: number;
+            /** Matching */
+            matching: number;
+            /** Stages */
+            stages: components["schemas"]["ExecutionStage"][];
+            /** Records */
+            records: components["schemas"]["ExecutionNode"][];
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+        };
         /** FootnoteDefinition */
         FootnoteDefinition: {
             /** Start */
@@ -991,6 +1049,8 @@ export interface components {
         };
         /** NavigationDecision */
         NavigationDecision: {
+            /** Decision Id */
+            decision_id?: string | null;
             /** Expected Sha256 */
             expected_sha256: string;
             /** Target Page */
@@ -1258,6 +1318,29 @@ export interface components {
         };
         /** RunExecution */
         RunExecution: {
+            /**
+             * Technical Failures
+             * @default 0
+             */
+            technical_failures: number;
+            /**
+             * Retry Limit
+             * @default 3
+             */
+            retry_limit: number;
+            /** Retry At */
+            retry_at?: number | null;
+            /** Lease Expires At */
+            lease_expires_at?: number | null;
+            /**
+             * Coordinator Active
+             * @default false
+             */
+            coordinator_active: boolean;
+            /** Stop Reason */
+            stop_reason?: string | {
+                [key: string]: unknown;
+            } | null;
             /** State */
             state?: string | null;
             /**
@@ -1563,6 +1646,13 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WorkspaceSnapshot */
+        WorkspaceSnapshot: {
+            /** Cursor */
+            cursor: number;
+            /** Books */
+            books: components["schemas"]["BookSummary"][];
         };
     };
     responses: never;
@@ -2077,6 +2167,41 @@ export interface operations {
             };
         };
     };
+    execution_window_api_v2_runs__run_id__execution_window_get: {
+        parameters: {
+            query?: {
+                history?: boolean;
+                label?: string | null;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionWindow"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     execution_details_api_v2_executions__execution_id__details_get: {
         parameters: {
             query?: never;
@@ -2443,6 +2568,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    snapshot_api_v2_events_snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSnapshot"];
                 };
             };
         };

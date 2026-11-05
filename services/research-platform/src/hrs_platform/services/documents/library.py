@@ -161,7 +161,7 @@ class Library:
 
     def _source_spans(self, run_id, bundle):
         files, manifest = bundle["files"], bundle["manifest"]
-        markdown = self.review.objects.read_bytes(files[manifest["candidate_markdown"]]).decode("utf-8")
+        markdown = self.review.markdown(bundle)
         pages = self.review.read_json(files[manifest["page_boundaries"]])["pages"]
         with self.engine.connect() as connection:
             rows = (

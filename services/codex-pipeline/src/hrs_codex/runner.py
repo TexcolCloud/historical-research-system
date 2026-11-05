@@ -21,12 +21,19 @@ class Runner:
         self.owner = "local-runner:" + uuid4().hex
         self.stop_event = threading.Event()
         self.thread = None
+        self.active_stop = None
 
     def tick(self, document_id: str | None = None) -> bool:
+        if self.stop_event.is_set():
+            return False
         request = self.store.claim_run(self.owner, self.lease_seconds, document_id=document_id)
         if request is None:
             return False
         done = threading.Event()
+        run_stop = threading.Event()
+        self.active_stop = run_stop
+        if self.stop_event.is_set():
+            run_stop.set()
         heartbeat_error = []
 
         def heartbeat():
@@ -37,19 +44,20 @@ class Runner:
                     )
                 except (ValueError, OSError) as error:
                     heartbeat_error.append(str(error))
-                    self.stop_event.set()
+                    run_stop.set()
                     break
 
         thread = threading.Thread(target=heartbeat, daemon=True)
         thread.start()
         failure = None
         try:
-            self.execute(self.store, request["document_id"], stop_event=self.stop_event)
+            self.execute(self.store, request["document_id"], stop_event=run_stop)
         except Exception as error:  # noqa: BLE001 - persist failures from the execution adapter
             failure = {"type": type(error).__name__, "message": str(error)}
         finally:
             done.set()
             thread.join(timeout=5)
+            self.active_stop = None
         if heartbeat_error:
             raise RuntimeError("Run lease lost: " + heartbeat_error[-1])
         self.store.finish_run(request["document_id"], request["token"], error=failure)
@@ -78,6 +86,8 @@ class Runner:
 
     def stop(self):
         self.stop_event.set()
+        if self.active_stop:
+            self.active_stop.set()
         if self.thread:
             self.thread.join(timeout=20)
 

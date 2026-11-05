@@ -769,6 +769,87 @@
         }
       }
     },
+    "/api/v2/runs/{run_id}/execution-window": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Execution Window",
+        "operationId": "execution_window_api_v2_runs__run_id__execution_window_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "History"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionWindow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/executions/{execution_id}/details": {
       "get": {
         "tags": [
@@ -1486,6 +1567,27 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/events/snapshot": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Snapshot",
+        "operationId": "snapshot_api_v2_events_snapshot_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSnapshot"
                 }
               }
             }
@@ -2573,6 +2675,73 @@
         ],
         "title": "ExecutionNode"
       },
+      "ExecutionStage": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "state",
+          "count"
+        ],
+        "title": "ExecutionStage"
+      },
+      "ExecutionWindow": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "matching": {
+            "type": "integer",
+            "title": "Matching"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionStage"
+            },
+            "type": "array",
+            "title": "Stages"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionNode"
+            },
+            "type": "array",
+            "title": "Records"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "matching",
+          "stages",
+          "records",
+          "offset",
+          "limit"
+        ],
+        "title": "ExecutionWindow"
+      },
       "FootnoteDefinition": {
         "properties": {
           "start": {
@@ -2721,6 +2890,19 @@
       },
       "NavigationDecision": {
         "properties": {
+          "decision_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
           "expected_sha256": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
@@ -3442,6 +3624,58 @@
       },
       "RunExecution": {
         "properties": {
+          "technical_failures": {
+            "type": "integer",
+            "title": "Technical Failures",
+            "default": 0
+          },
+          "retry_limit": {
+            "type": "integer",
+            "title": "Retry Limit",
+            "default": 3
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "lease_expires_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Expires At"
+          },
+          "coordinator_active": {
+            "type": "boolean",
+            "title": "Coordinator Active",
+            "default": false
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          },
           "state": {
             "anyOf": [
               {
@@ -4144,6 +4378,27 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkspaceSnapshot": {
+        "properties": {
+          "cursor": {
+            "type": "integer",
+            "title": "Cursor"
+          },
+          "books": {
+            "items": {
+              "$ref": "#/components/schemas/BookSummary"
+            },
+            "type": "array",
+            "title": "Books"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cursor",
+          "books"
+        ],
+        "title": "WorkspaceSnapshot"
       }
     }
   }

@@ -42,7 +42,9 @@ test("navigation retains one workspace stream and an active upload until the app
       }
     },
   );
-  respondWith(() => []);
+  respondWith((request) =>
+    request.url.includes("/events/snapshot") ? { books: [], cursor: 42 } : [],
+  );
   const query = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -64,7 +66,7 @@ test("navigation retains one workspace stream and an active upload until the app
   expect(screen.getByTestId("upload-session")).toBeTruthy();
   expect(lifetime.mounts).toBe(1);
   expect(lifetime.stops).toBe(0);
-  expect(streams).toEqual(["/api/v2/events"]);
+  expect(streams).toEqual(["/api/v2/events?after=42"]);
   expect(close).not.toHaveBeenCalled();
   view.unmount();
   expect(lifetime.stops).toBe(1);
