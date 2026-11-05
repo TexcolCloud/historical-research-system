@@ -4,11 +4,12 @@ import time
 
 from filelock import FileLock, Timeout
 
-from hrs_codex.store import digest
+from hrs_codex.hashing import digest
+from hrs_codex.workflow_rules import request_continuation
 
 
 class RecoveryWait(ValueError):
-    def __init__(self, retry_at, message="旧执行实例尚未退出，等待租约结束后继续检查。"):
+    def __init__(self, retry_at, message="上一次处理尚未结束，结束后将自动继续恢复检查。"):
         super().__init__(message)
         self.retry_at = retry_at
 
@@ -48,15 +49,15 @@ def plan(doc):
     )
 
 
-def recover(store, identity, recovery_id, *, automatic=False):
+def recover(context, identity, recovery_id, *, automatic=False):
     if not isinstance(recovery_id, str) or not 1 <= len(recovery_id) <= 128:
         raise ValueError("Recovery identity required")
-    snapshot = store.status(identity)
+    snapshot = context.repository.read(identity)
     if receipt := snapshot.get("recoveries", {}).get(recovery_id):
         return receipt
     try:
-        with FileLock(store._directory(identity) / ".executor.lock", timeout=0):
-            with store._verified(identity) as doc:
+        with FileLock(context.repository.directory(identity) / ".executor.lock", timeout=0):
+            with context.verified(identity) as doc, context.repository.ledger.connect(write=True):
                 if receipt := doc.get("recoveries", {}).get(recovery_id):
                     return receipt
                 request = doc.get("run_request", {})
@@ -81,7 +82,11 @@ def recover(store, identity, recovery_id, *, automatic=False):
                         task.setdefault("recovery_history", []).append(dict(task["claim"]))
                         task["state"] = "ready"
                         reset.append(task["task_id"])
-                request = store._request_run(doc, resume=not automatic)
+                request = request_continuation(doc, resume=not automatic)
+                from hrs_codex.run_workflow import RunWorkflow
+
+                if status["unfinished_tasks"]:
+                    RunWorkflow(context, None).reset_runtime(doc, automatic=automatic)
                 request.update(
                     technical_failures=0,
                     retry_limit=1 if automatic else 3,
@@ -118,8 +123,10 @@ def recover(store, identity, recovery_id, *, automatic=False):
                 request["history"].append(
                     {"event": "checkpoint_recovery", "at": time.time(), **receipt}
                 )
-                (store._directory(identity) / ".pause-requested").unlink(missing_ok=True)
-                store._save(doc)
+                (context.repository.directory(identity) / ".pause-requested").unlink(
+                    missing_ok=True
+                )
+                context.repository.write(doc)
                 return receipt
     except Timeout as error:
         raise RecoveryWait(time.time() + 5) from error

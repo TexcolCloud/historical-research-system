@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hrs_codex import cli
+from hrs_codex import cli, execution
 from hrs_codex.store import Store
 
 
@@ -37,8 +37,8 @@ class ProcessStub:
 @pytest.mark.parametrize("model", [None, "user-selected-model"])
 def test_runner_native_command_paths_model_inheritance_and_receipt(tmp_path, monkeypatch, model):
     store, document_id = prepared_store(tmp_path)
-    monkeypatch.setattr(cli, "PROJECT", tmp_path / "repository with spaces")
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex executable with spaces")
+    monkeypatch.setattr(execution, "PROJECT", tmp_path / "repository with spaces")
+    monkeypatch.setattr(execution.shutil, "which", lambda name: "codex executable with spaces")
     processes = []
 
     def launch(arguments, **options):
@@ -46,14 +46,14 @@ def test_runner_native_command_paths_model_inheritance_and_receipt(tmp_path, mon
         processes.append(process)
         return process
 
-    monkeypatch.setattr(cli.subprocess, "Popen", launch)
-    receipt = cli.run_codex(store, document_id, model=model)
+    monkeypatch.setattr(execution.subprocess, "Popen", launch)
+    receipt = execution.run_codex(store, document_id, model=model)
     process = processes[0]
     assert process.arguments[0] == "codex executable with spaces"
     assert process.arguments[-1] == "-"
-    assert process.arguments[process.arguments.index("--cd") + 1] == str(cli.PROJECT)
+    assert process.arguments[process.arguments.index("--cd") + 1] == str(store.root / "runtime")
     assert process.arguments[process.arguments.index("--add-dir") + 1] == str(store.root)
-    assert process.options["cwd"] == cli.PROJECT
+    assert process.options["cwd"] == store.root / "runtime"
     assert process.options["stdin"] == subprocess.PIPE
     assert "features.shell_tool=false" in process.arguments
     assert "native Codex subagents" in process.prompt
@@ -79,8 +79,8 @@ def test_runtime_loads_project_skill_without_requiring_a_worker_shell(tmp_path, 
     skill = project / ".agents/skills/historical-research/SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("Synthetic skill content for runtime bootstrap", encoding="utf-8")
-    monkeypatch.setattr(cli, "PROJECT", project)
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
+    monkeypatch.setattr(execution, "PROJECT", project)
+    monkeypatch.setattr(execution.shutil, "which", lambda name: "codex")
     launched = []
 
     def launch(args, **options):
@@ -88,20 +88,26 @@ def test_runtime_loads_project_skill_without_requiring_a_worker_shell(tmp_path, 
         launched.append(process)
         return process
 
-    monkeypatch.setattr(cli.subprocess, "Popen", launch)
-    cli.run_codex(store, document_id)
-    assert skill.read_text("utf-8") in launched[0].prompt
-    assert "do not import or enqueue yourself again" in launched[0].prompt
+    monkeypatch.setattr(execution.subprocess, "Popen", launch)
+    execution.run_codex(store, document_id)
+    # Runtime now gets narrow stage packets; importing a development skill is retired.
+    assert skill.read_text("utf-8") not in launched[0].prompt
+    assert "do not import or enqueue yourself again" in launched[0].prompt.lower()
+    assert "--ignore-user-config" in launched[0].arguments
+    assert "dispatch_work" in launched[0].prompt
+    assert len(launched[0].prompt) < 4000
 
 
 def test_runner_nonzero_exit_keeps_request_events_and_failure_receipt(tmp_path, monkeypatch):
     store, document_id = prepared_store(tmp_path)
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
+    monkeypatch.setattr(execution.shutil, "which", lambda name: "codex")
     monkeypatch.setattr(
-        cli.subprocess, "Popen", lambda args, **options: ProcessStub(args, returncode=7, **options)
+        execution.subprocess,
+        "Popen",
+        lambda args, **options: ProcessStub(args, returncode=7, **options),
     )
     with pytest.raises(RuntimeError, match="Codex exited 7"):
-        cli.run_codex(store, document_id)
+        execution.run_codex(store, document_id)
     logs = next((store.root / "runs" / document_id).iterdir())
     receipt = json.loads((logs / "receipt.json").read_text(encoding="utf-8"))
     assert receipt["returncode"] == 7
@@ -112,14 +118,14 @@ def test_runner_nonzero_exit_keeps_request_events_and_failure_receipt(tmp_path, 
 
 def test_runner_launch_failure_still_has_receipt(tmp_path, monkeypatch):
     store, document_id = prepared_store(tmp_path)
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
+    monkeypatch.setattr(execution.shutil, "which", lambda name: "codex")
 
     def fail(*args, **kwargs):
         raise OSError("launch failed")
 
-    monkeypatch.setattr(cli.subprocess, "Popen", fail)
+    monkeypatch.setattr(execution.subprocess, "Popen", fail)
     with pytest.raises(OSError, match="launch failed"):
-        cli.run_codex(store, document_id)
+        execution.run_codex(store, document_id)
     logs = next((store.root / "runs" / document_id).iterdir())
     receipt = json.loads((logs / "receipt.json").read_text(encoding="utf-8"))
     assert receipt["returncode"] is None
@@ -128,16 +134,18 @@ def test_runner_launch_failure_still_has_receipt(tmp_path, monkeypatch):
 
 def test_runner_interrupt_cleans_owned_process_and_keeps_receipt(tmp_path, monkeypatch):
     store, document_id = prepared_store(tmp_path)
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex")
+    monkeypatch.setattr(execution.shutil, "which", lambda name: "codex")
     monkeypatch.setattr(
-        cli.subprocess,
+        execution.subprocess,
         "Popen",
         lambda args, **options: ProcessStub(args, error=KeyboardInterrupt(), **options),
     )
     stopped = []
-    monkeypatch.setattr(cli, "stop_owned_process", lambda process: stopped.append(process.pid))
+    monkeypatch.setattr(
+        execution, "stop_owned_process", lambda process: stopped.append(process.pid)
+    )
     with pytest.raises(KeyboardInterrupt):
-        cli.run_codex(store, document_id)
+        execution.run_codex(store, document_id)
     assert stopped == [12345]
     logs = next((store.root / "runs" / document_id).iterdir())
     assert (
@@ -189,9 +197,9 @@ def test_review_cli_opens_selected_workspace_without_starting_codex(tmp_path, mo
 @pytest.mark.parametrize("available", [True, False])
 def test_doctor_reports_missing_auth_or_cli(tmp_path, monkeypatch, capsys, available):
     monkeypatch.setattr(sys, "argv", ["hrs-codex", "--root", str(tmp_path), "doctor"])
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "codex" if available else None)
+    monkeypatch.setattr(execution.shutil, "which", lambda name: "codex" if available else None)
     monkeypatch.setattr(
-        cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1)
+        execution.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1)
     )
     with pytest.raises(SystemExit) as error:
         cli.main()
@@ -225,15 +233,17 @@ def test_interruption_cleanup_is_bounded_and_targets_only_owned_tree(monkeypatch
     process = SimpleNamespace(
         pid=12345, poll=lambda: None, wait=wait, kill=lambda: calls.append("kill")
     )
-    monkeypatch.setattr(cli.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs)))
     monkeypatch.setattr(
-        cli.os, "killpg", lambda pid, signum: calls.append((pid, signum)), raising=False
+        execution.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs))
     )
-    cli.stop_owned_process(process)
+    monkeypatch.setattr(
+        execution.os, "killpg", lambda pid, signum: calls.append((pid, signum)), raising=False
+    )
+    execution.stop_owned_process(process)
     assert all(0 < timeout <= 10 for timeout in waits)
-    if cli.os.name == "nt":
+    if execution.os.name == "nt":
         assert calls[0][0] == ["taskkill", "/PID", "12345", "/T", "/F"]
         assert calls[0][1]["timeout"] == 15
         assert "kill" in calls
     else:
-        assert calls[:2] == [(12345, cli.signal.SIGTERM), (12345, cli.signal.SIGKILL)]
+        assert calls[:2] == [(12345, execution.signal.SIGTERM), (12345, execution.signal.SIGKILL)]

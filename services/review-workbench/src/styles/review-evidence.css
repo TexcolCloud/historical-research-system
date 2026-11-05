@@ -1,0 +1,112 @@
+/* Display annotations never enter source Markdown or source image pixels. */
+.review-mark {
+  background: #fff0a8;
+  color: inherit;
+  border-radius: 2px;
+}
+.review-mark-active {
+  background: #ffe17b;
+  outline: 2px solid #9c6200;
+  outline-offset: 2px;
+}
+.review-focus {
+  padding: 16px;
+  border: 1px solid #d7c68e;
+  border-radius: 8px;
+  background: #fffcf0;
+  margin: 16px 0;
+}
+.review-sticky-controls {
+  position: sticky;
+  top: 8px;
+  z-index: 3;
+  background: white;
+  max-height: 46vh;
+  overflow: auto;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 8px;
+}
+.review-focus-index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.review-source-focus {
+  position: sticky;
+  top: 12px;
+}
+.review-source-focus figcaption {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.review-source-sheet {
+  position: relative;
+  touch-action: none;
+  cursor: crosshair;
+}
+.review-source-sheet img {
+  display: block;
+  width: 100%;
+  user-select: none;
+}
+.review-source-sheet > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.review-source-sheet rect {
+  pointer-events: auto;
+  cursor: pointer;
+  fill: #ffc92833;
+  stroke: #b26900;
+  stroke-width: 0.003;
+}
+.review-source-sheet rect[data-active="true"] {
+  stroke: #8b4300;
+  stroke-width: 0.005;
+  fill: #ffc92855;
+}
+.review-crop-scroll {
+  overflow: auto;
+  margin: 12px 0;
+  border: 1px solid #d7c68e;
+  background: white;
+}
+.review-crop-scroll svg {
+  display: block;
+  height: auto;
+  max-width: none;
+}
+.review-source-focus input[type="range"] {
+  width: 140px;
+  vertical-align: middle;
+}
+.review-crop-region {
+  fill: #ffc92833;
+  stroke: #8b4300;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.review-source-positions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+}
+.review-source-positions button {
+  padding: 5px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: white;
+}
+.review-source-positions button:disabled {
+  opacity: 0.45;
+}
+.review-source-text pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -10,6 +10,27 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+test("an incomplete directory does not claim processing is running for a paused book", async () => {
+  respondWith(() => ({
+    state: "not_detected",
+    version: 1,
+    sha256: "",
+    entries: [],
+    approved_pages: [],
+    coverage_complete: false,
+  }));
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NavigationPanel runId="run" bookId="book" bookState="paused" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText(
+    "自动处理已暂停。请在处理进展中继续处理，新的目录项目将在核对后列出。",
+  );
+  expect(
+    screen.queryByText("其他页面仍在自动核验，新发现的问题会继续出现在这里。"),
+  ).toBeNull();
+});
 
 test("a changed evidence version reports beside the action and reloads before retrying", async () => {
   const target = {
@@ -231,12 +252,12 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
       <NavigationPanel runId="run" bookId="book" />
     </QueryClientProvider>,
   );
-  await screen.findByText(/需要核对正文/);
+  await screen.findByText(/需要确认目录跳转/);
   expect(screen.queryByText("阅读正文 →")).toBeNull();
   expect(
     screen.getByRole("link", { name: /目录原图/ }).getAttribute("href"),
   ).toBe("/original-toc.png");
-  await userEvent.click(screen.getByRole("button", { name: "核对对应正文" }));
+  await userEvent.click(screen.getByRole("button", { name: "确认目录跳转" }));
   await screen.findByText("正文开头。");
   await userEvent.click(
     screen.getByRole("button", { name: "就是这篇，确认跳转" }),

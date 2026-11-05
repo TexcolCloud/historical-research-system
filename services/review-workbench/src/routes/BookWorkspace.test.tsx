@@ -13,6 +13,28 @@ vi.mock("@/features/library/NavigationPanel.tsx", () => ({
   default: () => <p>目录确认工作区</p>,
 }));
 afterEach(cleanup);
+test("stopped books never claim automatic processing is still running", async () => {
+  respondWith(() => ({
+    id: "book",
+    title: "材料",
+    state: "failed",
+    run_id: "run",
+    revision: 1,
+  }));
+  render(
+    <MemoryRouter initialEntries={["/books/book?tab=review"]}>
+      <QueryClientProvider client={new QueryClient()}>
+        <Routes>
+          <Route path="/books/:bookId" element={<BookPage />} />
+        </Routes>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByText("自动处理已停止，请在处理进展中从断点恢复。");
+  expect(
+    screen.queryByText("系统按页自动处理，已有底稿可在阅读资料中查看。"),
+  ).toBeNull();
+});
 test("three workspaces expose both human task types without making users navigate process stages", async () => {
   respondWith(() => ({
     id: "book",

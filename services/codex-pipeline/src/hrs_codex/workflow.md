@@ -1,5 +1,51 @@
 # Historical research: native Codex subagent workflow
 
+## Default transactional execution
+
+The local execution engine uses `ledger.sqlite3` (SQLite/WAL) as its sole task
+write authority. Pages, tasks and document fields have independent record versions;
+results, follow-up tasks, native session updates and the durable event sequence
+commit together. JSON is an import/export or sealed historical snapshot.
+Existing JSON workspaces remain read-only until all executors are stopped and
+`hrs_codex.cli --root <workspace> migrate-ledger` validates and seals them.
+
+The coordinator calls `dispatch_work(document_id)`. The returned assignments already
+reserve concrete task leases and workspace capacity, including starting/prewarmed
+agents. Spawn each exact native `agent_type` with its session token. A worker calls
+`open_task_packet(session_token, worker_id)` to receive its stage-specific rules,
+processing policy, claim and original pixels in one response. Review/verify packets
+withhold candidates until `freeze_observations` freezes independent original reading;
+the response includes the first bounded candidate range. Read all remaining ranges
+through `candidate_text`. `submit_packet` commits the result and a minimal receipt;
+identical replays return the saved receipt. Reuse a worker only up to the returned
+session_max_tasks (legacy two; configured warm sessions up to eight), also bounded
+by 48,000 processed characters. Never reuse an OCR agent as its reviewer.
+Prewarmed reviewers wait on `wait_for_changes` without consuming a model turn per poll.
+Only native Codex subagents perform inference; Python threads supervise CLI processes.
+
+After the last organization result passes, submit_packet immediately runs the
+existing full-book evidence/publication gate and returns its publication receipt.
+It does not wait for coordinator cleanup. Already-published documents need no
+second publish call; explicit pause/cancel still wins. Pending pages never publish.
+
+Opt-in overlap_reading allows review sessions to inspect original pixels while OCR
+runs. Source-only preflight packets contain no candidate or candidate hash. Freeze
+observations with freeze_observations, then open_task_packet waits for OCR and binds
+the immutable source-only evidence to the concrete review lease. A frozen preflight
+cannot be changed, reused for another page/worker, or used as approval by itself.
+Unresolved observations still block approval; verification remains a separate agent.
+Organization receives complete approved-page batches with hashes; follow
+approved_pages.next_after_page using approved_pages_text until null. Do not refetch
+already supplied page text. The whole book must pass before organization/publication.
+
+The coordinator replenishes assignments after each worker completes. It does not
+choose allocations, read source text or perform content approval itself. The CLI
+uses a small execution directory, fixed native roles and the configured account
+route, with unrelated skills/apps/plugins excluded. Login and global settings are
+unchanged. Independent original-first review, human protection and full publication
+checks below remain mandatory. The lower-level tools below remain compatible for
+direct/native interactive clients; default runtime sessions use the packets above.
+
 The MCP server stores evidence and validates state. Codex supplies all OCR, image
 review, correction verification and article organization. The coordinator MUST
 spawn native Codex subagents for these stages and wait for their results. Use
@@ -14,11 +60,28 @@ an independent original-first full-page verify. An explicitly disputed pending r
 gets one fresh verify of unchanged text, not adoption of the reviewer's reading.
 Verify may approve or remain pending, never repair or start another round. Unreadable
 originals use pending disposition=unreadable and go straight to humans.
-Every issue includes anchor={exact,prefix,suffix} copied from candidate Markdown,
-focus (substring), explanation, source_quote, candidate_quote and optional suggestion.
+Review and verify share issue contract version 1 (`issue_contract_version:1`).
+Every located issue includes anchor={exact,prefix,suffix} copied from candidate
+Markdown, focus (a literal substring, never a category such as "Personal name"),
+explanation, source_quote, candidate_quote and optional suggestion. Missing text
+uses insertion_offset within anchor.exact in Unicode codepoints instead of focus.
+If a trustworthy text anchor is unavailable, provide unlocated_reason rather than
+inventing a position. For several text positions, supply explicit occurrences
+with their own literal anchors; several image boxes alone do not imply several
+known text spans. Metadata validation errors require corrected metadata, never
+content approval. The definition and submission validation live in review_contract.py.
 Supply boxes=[[left,top,right,bottom]] normalized to the full retained page,
 image_precision=line|region, using inspected originals/crops. No guessed glyph boxes.
 Missing/ambiguous positions remain unlocated. Annotations do not change Markdown.
+Read-side normalization preserves raw issues and stable issue IDs. Invalid legacy
+focus falls back to a reliable unique anchor or single supported textual difference;
+invalid image boxes degrade image positioning without discarding the text issue.
+The API exposes source hashes, Unicode-codepoint offsets, precision and diagnostics.
+The human workbench shows current text highlights and the current image region by
+default, with separate controls for explicitly supplied image positions. When a
+Markdown source range cannot map safely to rendered text, show its source fragment.
+Draft locations are stored against the draft text hash; preserve original IDs and
+image evidence. User view-box adjustments are viewing state, not review evidence.
 For dense names/tables/dates or unreadable placeholders, OCR uses bounded crops.
 When retained review_failure is human, any non-approval goes directly to the human queue,
 with located issues and optional suggested_markdown. Do not automatically repair,
@@ -48,9 +111,11 @@ The project `historical-research` skill calls `workspace_status`, then
 library. Its durable executor starts native Codex coordinators and automatically
 resumes when the human form approves the last pending page. A browser/chat can
 close without losing submitted checkpoints. A queued run is not a completed run.
-Technical failures use persisted backoff and stop after three failures until an
-explicit resume; do not turn a network/service error into an unreadable-source
-verdict. An executing coordinator uses the lower-level tools below, not a second
+Technical failures use durable account/model admission and persisted backoff. A
+coordinator has three execution attempts and, when enabled, one additional validated
+checkpoint recovery. A task stops receiving automatic claims after three technical
+failures; explicit recovery grants a bounded new budget without changing content.
+Do not turn a network/service error into an unreadable-source verdict. An executing coordinator uses the lower-level tools below, not a second
 `process_document`/`resume_document` call for its own active run.
 
 ## PDF page routes
@@ -180,9 +245,9 @@ when justified. Corrections still require another worker's full original-first
 verify. Submissions without this reading receipt are rejected. Existing completed
 decisions and already-active legacy contracts remain historical evidence.
 
-Runtime coordinators use MCP tools only; the local bridge supplies the project
-skill verbatim and disables shell tools for that run and its workers. Coding-chat
-tools are unaffected. Rendering, evidence files and state writes belong to MCP.
+Runtime coordinators use MCP tools only; the local bridge supplies small stage
+packets and disables shell tools for that run and its workers. Coding-chat tools
+are unaffected. Rendering, evidence files and state writes belong to MCP.
 
 Call `submit_task(document_id, task_id, lease_token, result)`. Every result MUST
 include the claim's exact `input_sha256`. Examples below omit that repeated field:
@@ -222,8 +287,29 @@ is preserved separately; this workflow does not generate historical research car
 ## Bounded scheduling and source directory navigation
 
 The coordinator calls `scheduling_plan` before allocating and after each completed
-batch. At most seven workers (plus the coordinator) run concurrently. Each worker
-claims at most two tasks, then exits; retire completed agents before replacement.
+batch. Legacy workspaces default to seven shared worker slots and two tasks per
+session. Explicit configure-execution settings select shared capacity (2–64) and
+warm batches (1–8), never a guarantee of account/provider throughput. Honor the
+returned capacity, batch_size and session_max_tasks; retire exited native agents
+before replacement. Original reading, prewarming and cooldown all occupy slots.
+Structured native runtime diagnostics and MCP reports enter one transactional failure
+path. Rate limits/service capacity errors reduce new admissions within the affected
+model or account. Cooldown uses explicit retry information when available, otherwise
+30/60/120/240/300-second backoff with stable jitter. Concurrent failures in one cooldown
+round reduce capacity only once. Original text and ordinary agent messages are never
+searched for outage keywords. Unexposed worker failures use lease timeout rather than
+an invented capacity diagnosis.
+
+Cooldown expiry permits one real, dependency-ready task probe. Prewarming cannot own
+that probe. Probe success is counted only after the actual result commits; pre-outage
+tasks, startup success and duplicate submissions cannot restore capacity. Recovery
+starts at one slot and increases by one after at least two successful results and
+30 seconds. Account and model limits both apply across books. Half-open coordinators
+restart serially without consuming the worker probe. Six failed rounds or 1800 seconds
+of unsuccessful cooldown/probing blocks that scope; healthy recovery is not subject to
+the waiting deadline. Quota exhaustion and authentication errors wait for explicit
+technical recovery. Models never change automatically. Active pages and original-first
+preflight reading finish; expired reading sessions count as technical timeouts.
 Actual per-stage receipt durations, review backlog and available work determine
 the next allocation. Do not interrupt an active page to rebalance. A pending human
 page never stops other work. Existing nonempty lanes hold their allocation for

@@ -12,6 +12,66 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("a pending draft save cannot claim that page judgments are already complete", async () => {
+  const issue = {
+    id: "saving",
+    run_id: "run",
+    page: 1,
+    pages: [1],
+    images: [],
+    state: "pending",
+    revision: 1,
+    text_sha256: "a".repeat(64),
+    kind: "page",
+    text: "甲字乙",
+    reasons: [],
+    resolutions: [],
+    locations: [
+      {
+        id: "one",
+        page: 1,
+        anchor: { exact: "甲字乙", prefix: "", suffix: "" },
+        focus: "字",
+        boxes: [],
+        image_precision: "page",
+        message: "核对",
+        source_reading: "",
+        candidate: "",
+        suggestion: "",
+      },
+    ],
+  };
+  respondWith((request) =>
+    new URL(request.url).pathname === "/api/v2/reviews" ? [issue] : issue,
+  );
+  let acknowledge!: () => void;
+  const saved = new Promise<void>((resolve) => {
+    acknowledge = resolve;
+  });
+  vi.spyOn(client, "PUT").mockImplementation(async () => {
+    await saved;
+    return {
+      data: {
+        revision: 2,
+        draft_text: issue.text,
+        resolutions: [{ id: "one", action: "keep" }],
+      },
+      response: new Response(),
+    };
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ReviewPanel runId="run" />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "识别正确，保留" }),
+  );
+  expect(screen.queryByRole("region", { name: "本页提交" })).toBeNull();
+  acknowledge();
+  await screen.findByRole("region", { name: "本页提交" });
+});
+
 test("terminal human review separates judgment, editing and final page submission", async () => {
   const issue = {
     id: "guided",
@@ -62,7 +122,7 @@ test("terminal human review separates judgment, editing and final page submissio
   );
   await screen.findByRole("button", { name: "识别正确，保留" });
   expect(screen.queryByRole("button", { name: /暂不确定/ })).toBeNull();
-  expect(screen.queryByRole("button", { name: "提交本页审核结果" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "提交本页并继续" })).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "需要修改" }));
   const input = screen.getByRole("textbox", {
     name: "本处最终文字",
@@ -89,7 +149,7 @@ test("terminal human review separates judgment, editing and final page submissio
     ).value,
   ).toBe("对");
   await userEvent.click(screen.getByRole("button", { name: "保存修改并继续" }));
-  await screen.findByRole("button", { name: "提交本页审核结果" });
+  await screen.findByRole("button", { name: "提交本页并继续" });
   await waitFor(() => expect(put).toHaveBeenCalled());
   expect(put.mock.calls.at(-1)?.[1]?.body.text).toBe("甲对乙");
   expect(post).not.toHaveBeenCalled();
@@ -161,7 +221,7 @@ test("successive edits keep prior decisions and save both final readings", async
       screen.getByRole("button", { name: "保存修改并继续" }),
     );
   }
-  await screen.findByRole("button", { name: "提交本页审核结果" });
+  await screen.findByRole("button", { name: "提交本页并继续" });
   expect(put.mock.calls.at(-1)?.[1]?.body.text).toBe("😀甲对乙，丙对丁。");
   expect(put.mock.calls.at(-1)?.[1]?.body.resolutions).toEqual([
     { id: "a", action: "edit" },

@@ -85,7 +85,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
             if (id) void chapter.refetch();
           }}
         >
-          重试
+          重新读取章节
         </Button>
       </p>
     );
@@ -240,7 +240,7 @@ function OriginalPage({ runId, page }: { runId: string; page: number }) {
       ) : original.isError ? (
         <p role="alert">
           {original.error.message}
-          <Button onClick={() => void original.refetch()}>重试</Button>
+          <Button onClick={() => void original.refetch()}>重新读取原图</Button>
         </p>
       ) : (
         <a href={original.data} target="_blank" rel="noreferrer">

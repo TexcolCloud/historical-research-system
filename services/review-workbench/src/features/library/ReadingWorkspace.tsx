@@ -55,7 +55,11 @@ export default function ReadingWorkspace({ book }: { book: Book }) {
       )}
       {section === "directory" ? (
         book.run_id ? (
-          <NavigationPanel runId={book.run_id} bookId={book.id} />
+          <NavigationPanel
+            runId={book.run_id}
+            bookId={book.id}
+            bookState={book.state}
+          />
         ) : (
           <p>接收文件后会开始发现目录。</p>
         )

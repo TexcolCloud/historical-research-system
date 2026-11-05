@@ -17,7 +17,7 @@ from hrs_codex.store import Store
 def test_each_evidence_file_is_hashed_once_per_pass_and_tampering_still_fails(
     tmp_path, monkeypatch
 ):
-    from hrs_codex import store as module
+    from hrs_codex import evidence as module
 
     source = tmp_path / "source.png"
     Image.new("RGB", (80, 120), "white").save(source)
@@ -41,13 +41,13 @@ def test_each_evidence_file_is_hashed_once_per_pass_and_tampering_still_fails(
 
     monkeypatch.setattr(module, "file_digest", counted)
     doc = store.status(doc_id)
-    store._verify_evidence(doc)
+    store.verify_evidence(doc)
     assert max(calls.values()) == 1, (
         "Repeated compact receipts must not reread the metadata directory"
     )
-    store._path(doc, details[0]["image"]).write_bytes(b"changed original detail")
+    store.artifact_path(doc, details[0]["image"]).write_bytes(b"changed original detail")
     with pytest.raises(ValueError, match="hash mismatch"):
-        store._verify_evidence(doc)
+        store.verify_evidence(doc)
 
 
 def test_background_validation_does_not_block_status_or_overwrite_a_newer_snapshot(
@@ -55,16 +55,16 @@ def test_background_validation_does_not_block_status_or_overwrite_a_newer_snapsh
 ):
     store, doc_id = document(tmp_path)
     entered, release = Event(), Event()
-    verify = store._verify_evidence
+    verify = store.context.evidence.verify
     passes = []
 
-    def delayed(doc):
+    def delayed(doc, pages=None):
         passes.append(doc["title"])
         entered.set()
         assert release.wait(3)
-        verify(doc)
+        verify(doc, pages)
 
-    monkeypatch.setattr(store, "_verify_evidence", delayed)
+    monkeypatch.setattr(store.context.evidence, "verify", delayed)
     other = Store(store.root)
     with ThreadPoolExecutor(max_workers=2) as pool:
         claim = pool.submit(store.claim_task, doc_id, "ocr", "worker")
@@ -75,7 +75,8 @@ def test_background_validation_does_not_block_status_or_overwrite_a_newer_snapsh
                 status.pop("directory", None)
                 status.pop("counts", None)
                 status["title"] = "Concurrent edit retained"
-                other._save(status)
+                status["pages"][0]["page_kind"] = "text"
+                other.checkpoints.write(status)
         finally:
             release.set()
         assert claim.result(timeout=3)["stage"] == "ocr"
@@ -92,8 +93,41 @@ def test_status_reads_last_atomic_commit_without_waiting_for_a_writer(tmp_path):
             assert read.result(timeout=0.3)["id"] == doc_id
 
 
+def test_a_new_status_reader_does_not_wait_for_the_command_mutex(tmp_path):
+    store, doc_id = document(tmp_path)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with store.lock:
+            read = pool.submit(lambda: Store(store.root).status(doc_id))
+            assert read.result(timeout=0.3)["id"] == doc_id
+
+
+def test_dispatch_evidence_validation_does_not_block_pause(tmp_path, monkeypatch):
+    store, doc_id = document(tmp_path, count=2)
+    other = Store(store.root)
+    entered, release = Event(), Event()
+    verify = store.context.evidence.verify
+
+    def delayed(doc, pages=None):
+        entered.set()
+        assert release.wait(3)
+        verify(doc, pages)
+
+    monkeypatch.setattr(store.context.evidence, "verify", delayed)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        dispatch = pool.submit(store.dispatch.reserve, doc_id)
+        try:
+            assert entered.wait(2)
+            assert (
+                pool.submit(other.pause_document, doc_id).result(timeout=0.3)["state"] == "paused"
+            )
+        finally:
+            release.set()
+        with pytest.raises(ValueError, match="paused"):
+            dispatch.result(timeout=3)
+
+
 def test_opening_original_pixels_does_not_block_mutation(tmp_path, monkeypatch):
-    import hrs_codex.store as module
+    import hrs_codex.task_inspection as module
 
     store, doc_id = document(tmp_path)
     other = Store(store.root)

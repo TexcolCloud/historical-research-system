@@ -7,28 +7,24 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, insert
-from hrs_platform.domain.errors import TaskError
 from test_card_pipeline import StubEvidence, chapter, record, verdict
 
-from hrs_platform.services.cards import service, generation, synthesis, topics
-from hrs_platform.domain import card_rules as module
 from hrs_platform import models as db
+from hrs_platform.domain import card_rules as module
+from hrs_platform.domain.card_rules import CardPlan, ResearchPlan
+from hrs_platform.domain.errors import TaskError
+from hrs_platform.domain.generation_contracts import CardDraft, CardRepair, ReadingRecord
 from hrs_platform.services.books import get_run
-from hrs_platform.domain.card_rules import CardPlan
-from hrs_platform.services.cards import Cards
-from hrs_platform.domain.card_rules import ResearchPlan
-from hrs_platform.domain.generation_contracts import CardDraft
-from hrs_platform.domain.generation_contracts import CardRepair
-from hrs_platform.domain.generation_contracts import ReadingRecord
-from hrs_platform.services.runs.outputs import fingerprint
+from hrs_platform.services.cards import Cards, generation, synthesis, topics
 from hrs_platform.services.cards.reading import reading_units
-from hrs_platform.services.runs.recovery import retry_run
 from hrs_platform.services.models.vision import result_key
+from hrs_platform.services.runs.outputs import fingerprint
+from hrs_platform.services.runs.recovery import retry_run
 
 
 @pytest.fixture
 def harness(platform, monkeypatch, request):
-    monkeypatch.setattr(service, "CardEvidence", StubEvidence)
+    monkeypatch.setattr("hrs_platform.services.cards.evidence.CardEvidence", StubEvidence)
     settings, engine = platform
     book, run = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
@@ -93,7 +89,9 @@ def harness(platform, monkeypatch, request):
         elif output_type in {CardDraft, CardRepair}:
             if scenario.get("fail_topic") == payload.get("objective"):
                 raise TaskError(
-                    "synthetic exhausted output", type=scenario.get("draft_error", "model_output_invalid"), non_retryable=True
+                    "synthetic exhausted output",
+                    type=scenario.get("draft_error", "model_output_invalid"),
+                    non_retryable=True,
                 )
             value = CardDraft(
                 title=payload["objective"],
@@ -118,8 +116,9 @@ def harness(platform, monkeypatch, request):
                 ],
             )
             if output_type is CardRepair:
-                value = CardRepair(items=value.items, remove_item_ids=[],
-                                   metadata=value.model_dump(exclude={"items"}))
+                value = CardRepair(
+                    items=value.items, remove_item_ids=[], metadata=value.model_dump(exclude={"items"})
+                )
         else:
             if (
                 scenario.get("final_failure")
@@ -127,7 +126,9 @@ def harness(platform, monkeypatch, request):
                 and payload["candidate"]["title"] == scenario.get("final_topic", "topic-1")
             ):
                 raise TaskError(
-                    "synthetic final invalid", type=scenario.get("final_error", "model_output_invalid"), non_retryable=True
+                    "synthetic final invalid",
+                    type=scenario.get("final_error", "model_output_invalid"),
+                    non_retryable=True,
                 )
             ids = payload.get("required_object_ids") or [
                 item["item_id"] for item in payload["candidate"]["items"]
@@ -147,18 +148,30 @@ def harness(platform, monkeypatch, request):
         if scenario.get("original_missing"):
             raise TaskError("Missing source", type="original_missing", non_retryable=True)
         if scenario.get("visual_failure") and card["candidate"]["title"] == "topic-1":
-            raise TaskError(
-                "synthetic visual invalid", type="visual_output_invalid", non_retryable=True
-            )
+            raise TaskError("synthetic visual invalid", type="visual_output_invalid", non_retryable=True)
         return cards.outputs.put(
             run,
             result_key(card["id"], group["key"], card.get("visual_revision")),
-            {"items": [dict(item_id=item["item_id"], result=(scenario.get("visual_result", "verified")
-                if scenario.get("visual_topic", card["candidate"]["title"]) == card["candidate"]["title"] else "verified")) for item in group["items"]]},
+            {
+                "items": [
+                    dict(
+                        item_id=item["item_id"],
+                        result=(
+                            scenario.get("visual_result", "verified")
+                            if scenario.get("visual_topic", card["candidate"]["title"])
+                            == card["candidate"]["title"]
+                            else "verified"
+                        ),
+                    )
+                    for item in group["items"]
+                ]
+            },
             {},
         )
 
-    monkeypatch.setattr("hrs_platform.services.models.vision.VisualReview.check", lambda self, *args: vision(*args))
+    monkeypatch.setattr(
+        "hrs_platform.services.models.vision.VisualReview.check", lambda self, *args: vision(*args)
+    )
     monkeypatch.setattr(
         "hrs_platform.services.models.vision.VisualReview.prepare",
         lambda self, run, bundle, numbers: {"pages": [], "issues": []},
@@ -382,11 +395,21 @@ def test_exhausted_finalization_is_local_and_later_batches_still_deliver(harness
 
 @pytest.mark.parametrize("harness", [80], indirect=True)
 @pytest.mark.parametrize("legacy_migration", [False, True])
-def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(harness, monkeypatch, legacy_migration):
+def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(
+    harness, monkeypatch, legacy_migration
+):
     cards, run, units, _, calls = harness
     cards.settings.model_max_calls = 40  # Packed-plan estimate must not turn into legacy pairs on resume.
+
     async def plan(*args):
-        return CardPlan(rationale="synthetic", topics=[dict(name=f"topic-{i}", objective=f"topic-{i}", unit_ids=[u["unit_id"]]) for i, u in enumerate(units)])
+        return CardPlan(
+            rationale="synthetic",
+            topics=[
+                dict(name=f"topic-{i}", objective=f"topic-{i}", unit_ids=[u["unit_id"]])
+                for i, u in enumerate(units)
+            ],
+        )
+
     monkeypatch.setattr(generation, "plan_topics", plan)
     first = asyncio.run(cards.generate(run, incremental=True))
     assert first == {"run_id": run, "more": True, "stage": "reading"}
@@ -395,8 +418,11 @@ def test_reading_yields_and_resumes_committed_batches_without_duplicate_models(h
     if legacy_migration:
         # Previous versions persisted packed batches without the policy receipt.
         with cards.engine.begin() as connection:
-            connection.execute(delete(db.stage_outputs).where(db.stage_outputs.c.run_id == run,
-                                                             db.stage_outputs.c.step == "card-reading-policy"))
+            connection.execute(
+                delete(db.stage_outputs).where(
+                    db.stage_outputs.c.run_id == run, db.stage_outputs.c.step == "card-reading-policy"
+                )
+            )
         cards.outputs.reserve_request(run, "synthetic:http-request:1:1", {}, 40)
     calls.clear()
     second = asyncio.run(cards.generate(run, incremental=True))
@@ -445,12 +471,14 @@ def test_budget_limit_splits_only_failed_topic_and_reuses_children_on_restart(ha
         cards.models.run = bounded
     else:
         research = cards.evidence.research
+
         async def bounded_evidence(*args, **kwargs):
             size = len(args[4].unit_ids)
             if size > 1:
                 failed_sizes.append(size)
                 raise TaskError("evidence too large", type="card_input_budget", non_retryable=True)
             return await research(*args, **kwargs)
+
         cards.evidence.research = bounded_evidence
     result = finish(cards, run)
     assert result["state"] == "completed" and result["adopted"] == 3

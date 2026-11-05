@@ -1,6 +1,5 @@
 """Retain originals and render physical pages; recognition belongs to Codex."""
 
-import hashlib
 import json
 import os
 import shutil
@@ -11,6 +10,7 @@ import pypdfium2 as pdfium
 from PIL import Image, ImageOps, ImageSequence
 from pypdf import PdfReader
 
+from hrs_codex.hashing import file_digest as digest
 from hrs_codex.routing import image_plan, probe_page
 
 MEDIA_TYPES = {
@@ -21,11 +21,6 @@ MEDIA_TYPES = {
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
 }
-
-
-def digest(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def _atomic_bytes(path: Path, content: bytes) -> None:

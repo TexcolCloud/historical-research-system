@@ -2597,6 +2597,31 @@
             },
             "type": "array",
             "title": "Resolutions"
+          },
+          "locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewLocation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locations"
+          },
+          "locations_text_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locations Text Sha256"
           }
         },
         "type": "object",
@@ -3166,6 +3191,18 @@
             "title": "Coverage Complete",
             "default": false
           },
+          "page_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Count"
+          },
           "approved_pages": {
             "items": {
               "$ref": "#/components/schemas/NavigationPage"
@@ -3391,6 +3428,16 @@
             "type": "boolean",
             "title": "Evidence Checked",
             "default": false
+          },
+          "runtime_control": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeControlReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3413,6 +3460,29 @@
           "request_id"
         ],
         "title": "RecoveryRequest"
+      },
+      "ReviewAnchor": {
+        "properties": {
+          "exact": {
+            "type": "string",
+            "title": "Exact"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix",
+            "default": ""
+          },
+          "suffix": {
+            "type": "string",
+            "title": "Suffix",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "exact"
+        ],
+        "title": "ReviewAnchor"
       },
       "ReviewDecision": {
         "properties": {
@@ -3496,6 +3566,20 @@
             },
             "type": "array",
             "title": "Resolutions"
+          },
+          "locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewLocation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locations"
           }
         },
         "additionalProperties": false,
@@ -3602,8 +3686,7 @@
           },
           "locations": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ReviewLocation"
             },
             "type": "array",
             "title": "Locations"
@@ -3614,6 +3697,31 @@
             },
             "type": "array",
             "title": "Resolutions"
+          },
+          "draft_locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewLocation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Locations"
+          },
+          "draft_locations_text_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Locations Text Sha256"
           }
         },
         "type": "object",
@@ -3671,6 +3779,168 @@
           "text_sha256"
         ],
         "title": "ReviewIssueSummary"
+      },
+      "ReviewLocation": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "anchor": {
+            "$ref": "#/components/schemas/ReviewAnchor"
+          },
+          "focus": {
+            "type": "string",
+            "title": "Focus"
+          },
+          "boxes": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Boxes"
+          },
+          "image_precision": {
+            "type": "string",
+            "enum": [
+              "line",
+              "region",
+              "page"
+            ],
+            "title": "Image Precision"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "source_reading": {
+            "type": "string",
+            "title": "Source Reading"
+          },
+          "candidate": {
+            "type": "string",
+            "title": "Candidate"
+          },
+          "suggestion": {
+            "type": "string",
+            "title": "Suggestion"
+          },
+          "text_sha256": {
+            "type": "string",
+            "title": "Text Sha256",
+            "default": ""
+          },
+          "image_sha256": {
+            "type": "string",
+            "title": "Image Sha256",
+            "default": ""
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "text_status": {
+            "type": "string",
+            "enum": [
+              "located",
+              "missing",
+              "ambiguous"
+            ],
+            "title": "Text Status",
+            "default": "missing"
+          },
+          "text_precision": {
+            "type": "string",
+            "enum": [
+              "character",
+              "phrase",
+              "insertion",
+              "page"
+            ],
+            "title": "Text Precision",
+            "default": "page"
+          },
+          "offset_unit": {
+            "type": "string",
+            "const": "unicode_codepoint",
+            "title": "Offset Unit",
+            "default": "unicode_codepoint"
+          },
+          "location_diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Location Diagnostics"
+          },
+          "text_spans": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewTextSpan"
+            },
+            "type": "array",
+            "title": "Text Spans"
+          },
+          "location": {
+            "type": "string",
+            "title": "Location",
+            "default": ""
+          },
+          "insertion_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insertion Offset"
+          },
+          "unlocated_reason": {
+            "type": "string",
+            "title": "Unlocated Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "page",
+          "anchor",
+          "focus",
+          "boxes",
+          "image_precision",
+          "message",
+          "source_reading",
+          "candidate",
+          "suggestion"
+        ],
+        "title": "ReviewLocation"
       },
       "ReviewReceipt": {
         "properties": {
@@ -3749,6 +4019,95 @@
           "action"
         ],
         "title": "ReviewResolution"
+      },
+      "ReviewTextSpan": {
+        "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/ReviewAnchor"
+          },
+          "focus": {
+            "type": "string",
+            "title": "Focus"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "text_status": {
+            "type": "string",
+            "enum": [
+              "located",
+              "missing",
+              "ambiguous"
+            ],
+            "title": "Text Status",
+            "default": "missing"
+          },
+          "text_precision": {
+            "type": "string",
+            "enum": [
+              "character",
+              "phrase",
+              "insertion",
+              "page"
+            ],
+            "title": "Text Precision",
+            "default": "page"
+          },
+          "offset_unit": {
+            "type": "string",
+            "const": "unicode_codepoint",
+            "title": "Offset Unit",
+            "default": "unicode_codepoint"
+          },
+          "location_diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Location Diagnostics"
+          },
+          "insertion_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insertion Offset"
+          },
+          "unlocated_reason": {
+            "type": "string",
+            "title": "Unlocated Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "anchor",
+          "focus"
+        ],
+        "title": "ReviewTextSpan"
       },
       "RunControlReceipt": {
         "properties": {
@@ -4026,6 +4385,133 @@
         ],
         "title": "RunSummary"
       },
+      "RuntimeControlReport": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "cooldown",
+              "probing",
+              "recovering",
+              "blocked"
+            ],
+            "title": "State",
+            "default": "normal"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeControlScope"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Retry At"
+          }
+        },
+        "type": "object",
+        "title": "RuntimeControlReport"
+      },
+      "RuntimeControlScope": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "account",
+              "model"
+            ],
+            "title": "Scope"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "cooldown",
+              "probing",
+              "recovering",
+              "blocked"
+            ],
+            "title": "State"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Limit"
+          },
+          "configured_limit": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Configured Limit"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "failures": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failures",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "state",
+          "limit",
+          "configured_limit"
+        ],
+        "title": "RuntimeControlScope"
+      },
       "RuntimeStatus": {
         "properties": {
           "backend": {
@@ -4104,6 +4590,28 @@
             "type": "number",
             "title": "Cooldown Until",
             "default": 0
+          },
+          "runtime_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Runtime Counts"
+          },
+          "workspace_occupied": {
+            "type": "integer",
+            "title": "Workspace Occupied",
+            "default": 0
+          },
+          "runtime_control": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeControlReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4338,6 +4846,18 @@
           "samples": {
             "type": "integer",
             "title": "Samples"
+          },
+          "sample_window_seconds": {
+            "type": "number",
+            "title": "Sample Window Seconds",
+            "default": 0
+          },
+          "phase_medians": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Phase Medians"
           }
         },
         "type": "object",

@@ -1,6 +1,5 @@
 """Source-bound local decisions; a click never rebuilds the book."""
 
-import hashlib
 import json
 from uuid import UUID, uuid5
 
@@ -8,12 +7,9 @@ from sqlalchemy import func, insert, select, update
 
 from hrs_platform import models as db
 from hrs_platform.domain.errors import ServiceError
+from hrs_platform.domain.records import text_digest as digest
 from hrs_platform.services.documents.footnotes import resolve_footnotes
 from hrs_platform.services.storage import objects_for
-
-
-def digest(value):
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 class Review:
@@ -266,13 +262,20 @@ class Review:
             page=row["page"],
             image_sha256=previous_locations[0].get("image_sha256", "") if previous_locations else "",
         )
+        draft_text = self.objects.read_bytes(row["draft"]).decode("utf-8") if row["draft"] else None
+        draft_locations = (row["draft"] or {}).get("review_locations")
+        draft_locations_hash = (row["draft"] or {}).get("review_locations_text_sha256")
+        if draft_text is None or draft_locations_hash != digest(draft_text):
+            draft_locations, draft_locations_hash = None, None
         return {
             **row,
             **body,
             "footnotes": resolve_footnotes(
                 body["text"], [{"text": body["text"], "source": {"pages": body["pages"]}}]
             ),
-            "draft_text": self.objects.read_bytes(row["draft"]).decode("utf-8") if row["draft"] else None,
+            "draft_text": draft_text,
+            "draft_locations": draft_locations,
+            "draft_locations_text_sha256": draft_locations_hash,
             "resolutions": (row["draft"] or {}).get("review_resolutions", []),
             "images": [f"/api/v2/runs/{row['run_id']}/artifacts/{name}" for name in body["images"]],
         }
@@ -287,11 +290,21 @@ class Review:
         return run_id
 
     def save_draft(self, issue_id, request):
+        from hrs_platform.services.documents.draft_locations import normalize_draft_locations
+
+        locations = None
+        if request.locations is not None:
+            issue = self.get(issue_id)
+            locations = normalize_draft_locations(request.text, request.locations, issue["locations"])
         reference = self.objects.put_bytes(
             request.text.encode("utf-8"), "text/markdown; charset=utf-8", run_id=self.issue_run(issue_id)
         )
         resolutions = [r.model_dump() for r in request.resolutions]
         reference = {**reference, "review_resolutions": resolutions}
+        if locations is not None:
+            reference.update(review_locations=locations, review_locations_text_sha256=digest(request.text))
+        receipt = {"draft_text": request.text, "resolutions": resolutions,
+                   "locations": locations, "locations_text_sha256": digest(request.text) if locations is not None else None}
         with self.engine.begin() as connection:
             from hrs_platform.services.deletion import require_run_active
 
@@ -308,7 +321,7 @@ class Review:
             if row["state"] != "pending":
                 raise ServiceError(409, "本项已审核，不能再保存草稿。")
             if row["revision"] == request.expected_revision + 1 and row["draft"] == reference:
-                return {"revision": row["revision"], "draft_text": request.text, "resolutions": resolutions}
+                return {"revision": row["revision"], **receipt}
             if row["revision"] != request.expected_revision:
                 raise ServiceError(409, "草稿版本发生变化，请重新读取当前问题。")
             revision = row["revision"] + 1
@@ -317,7 +330,7 @@ class Review:
                 .where(db.review_issues.c.id == str(issue_id))
                 .values(draft=reference, revision=revision)
             )
-        return {"revision": revision, "draft_text": request.text, "resolutions": resolutions}
+        return {"revision": revision, **receipt}
 
     def decide(self, issue_id, request):
         return self._decide(issue_id, request)

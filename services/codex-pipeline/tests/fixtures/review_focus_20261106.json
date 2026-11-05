@@ -1,0 +1,217 @@
+[
+  {
+    "page": 17,
+    "text": "重庆，专作向导工作，结果调来刘德明（当时叫刘荣章）。南方局经林蒙手交给",
+    "issues": [
+      {
+        "anchor": {
+          "exact": "刘德明",
+          "prefix": "结果调来",
+          "suffix": "（当时叫刘荣章）"
+        },
+        "boxes": [
+          [
+            0.61,
+            0.477,
+            0.71,
+            0.507
+          ]
+        ],
+        "candidate_quote": "刘德明（当时叫刘荣章）",
+        "explanation": "The printed second character of this personal name is heavily inked and does not allow confident confirmation of candidate 德. Full original and enlarged bounded detail inspected; name remains unresolved and requires human review.",
+        "focus": "Personal name, second character",
+        "image_precision": "region",
+        "source_quote": "刘〔第二字待辨〕明（当时叫刘荣章）"
+      }
+    ],
+    "expected_ids": [
+      "176334d09dd38719ef1b"
+    ]
+  },
+  {
+    "page": 75,
+    "text": "军事上也做了些布置。我让田一平和罗髦渔组成工作小组，进行地方部队的军运",
+    "issues": [
+      {
+        "anchor": {
+          "exact": "罗髦渔",
+          "prefix": "我让田一平和",
+          "suffix": "组成工作小组"
+        },
+        "boxes": [
+          [
+            0.183,
+            0.779,
+            0.275,
+            0.807
+          ]
+        ],
+        "candidate_quote": "罗髦渔",
+        "explanation": "The source's middle character has 吉 below 髟 (髻), not 毛 (髦); candidate changes the personal name.",
+        "focus": "Personal name transcription",
+        "image_precision": "line",
+        "source_quote": "罗髻渔"
+      }
+    ],
+    "expected_ids": [
+      "ae64e9b41af9789690f4"
+    ]
+  },
+  {
+    "page": 85,
+    "text": "他讲得好象不知疲倦，我们听得也只憾天亮太早了。\n\n·79·",
+    "issues": [
+      {
+        "anchor": {
+          "exact": "天亮太早了",
+          "prefix": "我们听得也只憾",
+          "suffix": "。"
+        },
+        "boxes": [
+          [
+            0.59,
+            0.846,
+            0.807,
+            0.875
+          ]
+        ],
+        "candidate_quote": "天亮太早了",
+        "explanation": "Candidate omits 得 after 天亮; crop confirms source 天亮得太早了.",
+        "focus": "Omitted character",
+        "image_precision": "line",
+        "source_quote": "天亮得太早了"
+      }
+    ],
+    "expected_ids": [
+      "8ddd58291269c3bbb73e"
+    ]
+  },
+  {
+    "page": 90,
+    "text": "。我于是经过在上海的一个同路人邹志道，在文庙前街租了房子，住下了。当",
+    "issues": [
+      {
+        "anchor": {
+          "exact": "邹志道",
+          "prefix": "一个同路人",
+          "suffix": "，在文庙前街"
+        },
+        "boxes": [
+          [
+            0.742,
+            0.773,
+            0.819,
+            0.794
+          ]
+        ],
+        "candidate_quote": "邹志道",
+        "explanation": "Source reads 郭志道; first surname character has 享 left and 阝 right, not 邹. Close crop confirms.",
+        "focus": "Personal name",
+        "image_precision": "line",
+        "source_quote": "郭志道"
+      }
+    ],
+    "expected_ids": [
+      "bc7d62876dc9e5bedbe6"
+    ]
+  },
+  {
+    "page": 92,
+    "text": "家属接去延安。之后，搞人力车工会的周文祺又被捕了。空军机械士支部中也",
+    "issues": [
+      {
+        "anchor": {
+          "exact": "周文祺",
+          "prefix": "搞人力车工会的",
+          "suffix": "又被捕了"
+        },
+        "boxes": [
+          [
+            0.137,
+            0.442,
+            0.193,
+            0.465
+          ]
+        ],
+        "candidate_quote": "周文祺",
+        "explanation": "The final character of this name cannot be confidently confirmed as candidate 祺 from the source, even after a line-region and tight detail crop. The printed right component is unclear; source-only initial reading was 祀 but is not sufficiently certain to propose a correction. Requires further source review.",
+        "focus": "Unresolved name glyph",
+        "image_precision": "line",
+        "source_quote": "周文〔末字不确定〕"
+      }
+    ],
+    "expected_ids": [
+      "e54e4db2f1ec2a0012d6"
+    ]
+  },
+  {
+    "page": 93,
+    "text": "已取得他们信赖的人，如郭乘毅（党员、刘湘的高等顾问）、",
+    "issues": [
+      {
+        "anchor": {
+          "exact": "郭乘毅",
+          "prefix": "如",
+          "suffix": "（党员"
+        },
+        "boxes": [
+          [
+            0.336,
+            0.675,
+            0.408,
+            0.7
+          ]
+        ],
+        "candidate_quote": "郭乘毅",
+        "explanation": "Original character reads 秉 rather than candidate 乘; the source name is 郭秉毅. Preserve the source character.",
+        "focus": "Personal name middle character",
+        "image_precision": "region",
+        "source_quote": "郭秉毅"
+      }
+    ],
+    "expected_ids": [
+      "41411f3905036edb358e"
+    ]
+  },
+  {
+    "page": 141,
+    "text": "现了[字迹不清]社的一些内幕。这个社的几个负责人",
+    "issues": [
+      {
+        "anchor": {
+          "exact": "现了[字迹不清]社",
+          "prefix": "",
+          "suffix": "的一些内幕"
+        },
+        "boxes": [
+          [
+            0.195,
+            0.14,
+            0.272,
+            0.166
+          ],
+          [
+            0.76,
+            0.174,
+            0.836,
+            0.2
+          ],
+          [
+            0.706,
+            0.342,
+            0.786,
+            0.367
+          ]
+        ],
+        "candidate_quote": "现了[字迹不清]社",
+        "explanation": "Candidate leaves three organization-name characters as [字迹不清]. The dense original glyph remains uncertain after bounded detail inspection; my preliminary 翥 reading cannot be confirmed. Explicit source uncertainty prevents approval. No replacement is asserted.",
+        "focus": "Unresolved organization name (three occurrences)",
+        "image_precision": "region",
+        "source_quote": "〔社名前字未能确定〕社"
+      }
+    ],
+    "expected_ids": [
+      "8f709bf2132a5a773ac3"
+    ]
+  }
+]

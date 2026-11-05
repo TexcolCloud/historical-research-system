@@ -1,19 +1,24 @@
+import { queryKeys } from "@/client/query-keys.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, LoaderCircle, Circle } from "lucide-react";
 import { client, type Book } from "@/client/api.ts";
 import RecoveryPanel from "@/features/runs/RecoveryPanel.tsx";
 import RetryRunButton from "@/features/runs/RetryRunButton.tsx";
+import RuntimeControlNotice, {
+  runtimeControlTitles,
+} from "./RuntimeControlNotice";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { bookWorkspaceHref } from "@/features/books/workspace.ts";
 
-const phases = [
-  { title: "接收原件", description: "文件上传与完整性校验" },
-  { title: "识别正文", description: "OCR 识别正文，保存原件和可恢复结果" },
-  { title: "原件视觉核验", description: "对照原书逐页核验已识别的内容" },
-  { title: "人工核对", description: "处理机器发现的错误与不确定项" },
-  { title: "整理与入库", description: "组装整书章节、建立出处与检索索引" },
-];
+import { phases, stageLabels } from "./phase-display.ts";
+const timingLabels: Record<string, string> = {
+  queue_seconds: "队列等待",
+  startup_seconds: "代理启动",
+  original_reading_seconds: "原页阅读",
+  candidate_comparison_seconds: "候选核对",
+  submission_seconds: "提交保存",
+};
 export default function RunDetails({ book }: { book: Book }) {
   const query = useQueryClient();
   const control = useMutation({
@@ -29,12 +34,12 @@ export default function RunDetails({ book }: { book: Book }) {
       return data;
     },
     onSuccess: () => {
-      void query.invalidateQueries({ queryKey: ["platform", "runs", book.id] });
-      void query.invalidateQueries({ queryKey: ["platform", "book", book.id] });
+      void query.invalidateQueries({ queryKey: queryKeys.runs(book.id) });
+      void query.invalidateQueries({ queryKey: queryKeys.book(book.id) });
     },
   });
   const runs = useQuery({
-    queryKey: ["platform", "runs", book.id],
+    queryKey: queryKeys.runs(book.id),
     enabled: Boolean(book.run_id),
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/books/{book_id}/runs", {
@@ -53,6 +58,25 @@ export default function RunDetails({ book }: { book: Book }) {
   const pageProgress = run?.page_progress;
   const recoveryBusy = ["checking", "waiting"].includes(
     run?.recovery?.state ?? "",
+  );
+  const runtimeControl =
+    !done && !paused && run?.execution?.automatic_work_remaining !== false
+      ? run?.scheduling?.runtime_control
+      : undefined;
+  const runtimeWaiting = ["cooldown", "probing", "blocked"].includes(
+    runtimeControl?.state ?? "",
+  );
+  const runtimeTitle =
+    runtimeControl && runtimeControl.state !== "normal"
+      ? runtimeControlTitles[runtimeControl.state]
+      : undefined;
+  const showRecovery = Boolean(
+    run?.codex_document_id &&
+    !done &&
+    (failed ||
+      queued ||
+      runtimeControl?.state === "blocked" ||
+      ["checking", "waiting", "blocked"].includes(run.recovery?.state ?? "")),
   );
   const active = ["organization", "indexing", "ingestion", "complete"].includes(
     book.stage ?? "",
@@ -94,32 +118,36 @@ export default function RunDetails({ book }: { book: Book }) {
         <h2>
           {paused
             ? "自动处理已暂停"
-            : run?.state === "queued"
-              ? "已排队，等待处理"
-              : done
-                ? "本书处理完成"
-                : failed
-                  ? "处理需要恢复"
-                  : book.state === "awaiting_review"
-                    ? "有内容需要你核对"
-                    : (book.pending_count ?? 0) > 0 ||
-                        (book.navigation_pending_count ?? 0) > 0
-                      ? "有内容需要你确认"
-                      : "书籍正在处理中"}
+            : runtimeTitle
+              ? runtimeTitle
+              : run?.state === "queued"
+                ? "已排队，等待处理"
+                : done
+                  ? "本书处理完成"
+                  : failed
+                    ? "处理需要恢复"
+                    : book.state === "awaiting_review"
+                      ? "有内容需要你核对"
+                      : (book.pending_count ?? 0) > 0 ||
+                          (book.navigation_pending_count ?? 0) > 0
+                        ? "有内容需要你确认"
+                        : "书籍正在处理中"}
         </h2>
         <p>已完成结果会保留，关闭页面不影响后台处理。</p>
-        {run?.codex_document_id &&
-          !done &&
-          (failed ||
-            queued ||
-            ["checking", "waiting", "blocked"].includes(
-              run.recovery?.state ?? "",
-            )) && <RecoveryPanel run={run} />}
+        {showRecovery && run && <RecoveryPanel run={run} />}
+        {!showRecovery && <RuntimeControlNotice control={runtimeControl} />}
         {run?.codex_document_id && (
-          <p>Codex 自动处理 · Terra 识别 → Sol 原图审核 → 文章组织与入库</p>
+          <details>
+            <summary>查看自动处理方式</summary>
+            <p>
+              Codex 自动处理 · Terra 提取文字 → Sol 原图核对 → 文章整理与入库
+            </p>
+          </details>
         )}
         {pageProgress && (
-          <p>识别与核验按页并行进行，各自完成全部页面后才显示“已完成”。</p>
+          <p>
+            文字提取与原图核对按页并行进行，各自完成全部页面后才显示“已完成”。
+          </p>
         )}
         {run?.content_acceptance === "workflow_test" && (
           <p role="note">本材料用于流程测试；授权放行不代表内容准确率验收。</p>
@@ -151,6 +179,7 @@ export default function RunDetails({ book }: { book: Book }) {
                   !failed &&
                   !paused &&
                   !queued &&
+                  !runtimeWaiting &&
                   book.state !== "awaiting_review" &&
                   !needsHuman ? (
                   <LoaderCircle size={20} className="platform-spin" />
@@ -199,8 +228,8 @@ export default function RunDetails({ book }: { book: Book }) {
                     </p>
                     {index === 2 && (
                       <p>
-                        其中已通过 {pageProgress.approved} 页，待人工处理{" "}
-                        {pageProgress.pending} 页。
+                        机器或人工最终通过 {pageProgress.approved}{" "}
+                        页，待人工处理 {pageProgress.pending} 页。
                       </p>
                     )}
                   </div>
@@ -269,29 +298,36 @@ export default function RunDetails({ book }: { book: Book }) {
           {pageProgress.pending} 页待你核对。
           {paused
             ? "恢复后，系统继续其余页面。"
-            : run?.execution?.automatic_work_remaining
-              ? failed
-                ? "其余页面的自动处理已停止，恢复后继续；可先核对已生成的待办。"
-                : "其余页面仍在自动处理，可同时核对。"
-              : "自动处理已结束，确认剩余内容后继续整理入库。"}
+            : runtimeWaiting
+              ? "服务恢复状态见上方提示，可先核对已生成的待办。"
+              : run?.execution?.automatic_work_remaining
+                ? failed
+                  ? "其余页面的自动处理已停止，恢复后继续；可先核对已生成的待办。"
+                  : "其余页面仍在自动处理，可同时核对。"
+                : "自动处理已结束，确认剩余内容后继续整理入库。"}
         </p>
       )}
-      {run?.execution && !done && !recoveryBusy && (
-        <p role="status">
-          {run.execution.coordinator_active
-            ? "本书协调器正在执行。"
-            : run.execution.state === "retryable_error"
-              ? run.execution.technical_failures >= run.execution.retry_limit
-                ? `本书自动处理已停止：连续 ${run.execution.technical_failures} 次技术失败。已完成结果保留，可从断点恢复。`
-                : `本书遇到技术故障，正在等待重试（${run.execution.technical_failures}/${run.execution.retry_limit}）。`
-              : paused
-                ? "本书已暂停。"
-                : "本书当前没有活动协调器。"}
-          {run.execution.retry_at && run.execution.retry_at > Date.now() / 1000
-            ? `预计 ${new Date(run.execution.retry_at * 1000).toLocaleTimeString()} 后重试。`
-            : ""}
-        </p>
-      )}
+      {run?.execution &&
+        !done &&
+        !recoveryBusy &&
+        (!runtimeControl || runtimeControl.state === "normal") &&
+        !(failed && run.codex_document_id) && (
+          <p role="status">
+            {run.execution.coordinator_active
+              ? "本书正在自动处理。"
+              : run.execution.state === "retryable_error"
+                ? run.execution.technical_failures >= run.execution.retry_limit
+                  ? `本书自动处理已停止：连续 ${run.execution.technical_failures} 次技术失败。已完成结果保留，可从断点恢复。`
+                  : `本书遇到技术故障，正在等待重试（${run.execution.technical_failures}/${run.execution.retry_limit}）。`
+                : paused
+                  ? "本书已暂停。"
+                  : "本书当前没有正在执行的自动任务。"}
+            {run.execution.retry_at &&
+            run.execution.retry_at > Date.now() / 1000
+              ? `预计 ${new Date(run.execution.retry_at * 1000).toLocaleTimeString()} 后重试。`
+              : ""}
+          </p>
+        )}
       {run?.execution?.last_progress_at && (
         <p>
           最近完成：
@@ -305,9 +341,18 @@ export default function RunDetails({ book }: { book: Book }) {
             最多 {run.scheduling.capacity} 个工作代理，每批最多{" "}
             {run.scheduling.batch_size} 页；完成当前页后再调整分配。
           </p>
-          {run.scheduling.cooldown_until > Date.now() / 1000 && (
-            <p>服务限流，正在冷却。已完成结果保留。</p>
+          {run.scheduling.runtime_counts && (
+            <p>
+              正在启动 {run.scheduling.runtime_counts.starting ?? 0}， 正在处理{" "}
+              {run.scheduling.runtime_counts.busy ?? 0}， 等待任务{" "}
+              {run.scheduling.runtime_counts.idle ?? 0}； 工作区已占用{" "}
+              {run.scheduling.workspace_occupied ?? 0} 个名额（含启动中）。
+            </p>
           )}
+          {!runtimeControl &&
+            run.scheduling.cooldown_until > Date.now() / 1000 && (
+              <p>服务暂时限制请求，系统稍后自动重试。</p>
+            )}
           <table>
             <thead>
               <tr>
@@ -315,23 +360,14 @@ export default function RunDetails({ book }: { book: Book }) {
                 <th>运行 / 建议</th>
                 <th>排队</th>
                 <th>单页中位耗时</th>
-                <th>近 5 分钟速度</th>
+                <th>分段中位耗时</th>
+                <th>实际采样速度</th>
               </tr>
             </thead>
             <tbody>
               {Object.entries(run.scheduling.metrics).map(([stage, m]) => (
                 <tr key={stage}>
-                  <td>
-                    {(
-                      {
-                        ocr: "识别",
-                        review: "核验",
-                        verify: "修正复核",
-                        navigation: "目录关联",
-                        organization: "文章整理",
-                      } as Record<string, string>
-                    )[stage] ?? stage}
-                  </td>
+                  <td>{stageLabels[stage] ?? stage}</td>
                   <td>
                     {m.active} / {run.scheduling?.workers[stage]}
                   </td>
@@ -341,14 +377,31 @@ export default function RunDetails({ book }: { book: Book }) {
                       ? "采样中"
                       : `${m.median_seconds} 秒`}
                   </td>
-                  <td>{m.pages_per_minute} 项/分</td>
+                  <td>
+                    {Object.entries(m.phase_medians ?? {}).length
+                      ? Object.entries(m.phase_medians ?? {}).map(
+                          ([phase, seconds]) => (
+                            <div key={phase}>
+                              {timingLabels[phase] ?? phase}：{seconds} 秒
+                            </div>
+                          ),
+                        )
+                      : "暂无分段样本"}
+                  </td>
+                  <td>
+                    {m.samples ? `${m.pages_per_minute} 项/分` : "采样中"}
+                    {!!m.sample_window_seconds && (
+                      <small>（{m.sample_window_seconds} 秒窗口）</small>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
           {run.execution?.active_tasks?.map((t, i) => (
             <p key={i}>
-              {t.stage} · {t.page ? `原件第 ${t.page} 页` : "整书任务"}
+              {stageLabels[t.stage] ?? "其他处理"} ·{" "}
+              {t.page ? `原件第 ${t.page} 页` : "整书任务"}
               {t.started_at
                 ? ` · 开始于 ${new Date(t.started_at * 1000).toLocaleTimeString()}`
                 : ""}

@@ -8,34 +8,32 @@ from types import MappingProxyType, SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from hrs_platform.domain.errors import TaskError
 
-from hrs_platform.services.cards import assignments, generation, planning, service, topics
 from hrs_platform.domain import card_rules
-from hrs_platform.domain.card_rules import CardPlan
-from hrs_platform.services.cards import Cards
-from hrs_platform.domain.card_rules import ResearchPlan
-from hrs_platform.services.cards.reading import neighbor_context
-from hrs_platform.domain.card_rules import validate_topics
-from hrs_platform.domain.generation_contracts import CardDraft
-from hrs_platform.domain.generation_contracts import CardRepair
-from hrs_platform.domain.generation_contracts import ReadingRecord
-from hrs_platform.services.runs.outputs import StageInputMismatch
-from hrs_platform.services.runs.outputs import fingerprint
-from hrs_platform.services.cards.reading import card_model
-from hrs_platform.services.cards.reading import check_candidate_coverage
-from hrs_platform.services.cards.reading import read_batch
-from hrs_platform.services.cards.reading import reading_units
-from hrs_platform.services.cards.reading import scoped_check
-from hrs_platform.services.cards.reading import synthesis_readings
+from hrs_platform.domain.card_rules import CardPlan, ResearchPlan, validate_topics
+from hrs_platform.domain.errors import TaskError
+from hrs_platform.domain.generation_contracts import CardDraft, CardRepair, ReadingRecord
+from hrs_platform.services.cards import Cards, assignments, generation, planning, topics
+from hrs_platform.services.cards.reading import (
+    card_model,
+    check_candidate_coverage,
+    neighbor_context,
+    read_batch,
+    reading_units,
+    scoped_check,
+    synthesis_readings,
+)
+from hrs_platform.services.runs.outputs import StageInputMismatch, fingerprint
 
 
 @pytest.fixture(autouse=True)
 def no_original_io(monkeypatch):
-    monkeypatch.setattr(service, "CardEvidence", StubEvidence)
+    monkeypatch.setattr("hrs_platform.services.cards.evidence.CardEvidence", StubEvidence)
     monkeypatch.setattr("hrs_platform.services.models.vision.VisualReview.__init__", lambda self, *args: None)
-    monkeypatch.setattr("hrs_platform.services.models.vision.VisualReview.prepare",
-                        lambda self, run, bundle, numbers: {"pages": [], "issues": []})
+    monkeypatch.setattr(
+        "hrs_platform.services.models.vision.VisualReview.prepare",
+        lambda self, run, bundle, numbers: {"pages": [], "issues": []},
+    )
 
 
 class StubEvidence:
@@ -49,9 +47,17 @@ class StubEvidence:
 
     async def research(self, models, run_id, key, corpus, topic, clues, all_units, parent, previous=None):
         units = [u for u in all_units if u["unit_id"] in topic.unit_ids]
-        return {"assessment": {"sufficient": True, "source_unit_ids": topic.unit_ids,
-                               "findings": "synthetic", "unresolved_questions": []},
-                "units": units, "corpus": corpus, "searches": []}
+        return {
+            "assessment": {
+                "sufficient": True,
+                "source_unit_ids": topic.unit_ids,
+                "findings": "synthetic",
+                "unresolved_questions": [],
+            },
+            "units": units,
+            "corpus": corpus,
+            "searches": [],
+        }
 
 
 def chapter(text):
@@ -238,8 +244,15 @@ def test_digest_four_round_limit_routes_to_topic_recovery(monkeypatch, shrinks_o
 
     async def run(run_id, key, instructions, payload, output_type, **kwargs):
         calls.append(key)
-        value = output_type(covered_record_indexes=[0], themes=[], structure=[], facts=[],
-                            quotation_candidates=[], questions=[], boundary_observations=[])
+        value = output_type(
+            covered_record_indexes=[0],
+            themes=[],
+            structure=[],
+            facts=[],
+            quotation_candidates=[],
+            questions=[],
+            boundary_observations=[],
+        )
         kwargs["validate"](value)
         return value
 
@@ -261,8 +274,16 @@ def test_topic_fallback_is_bounded_durable_and_validates_source_identity(monkeyp
     cards.outputs, cards.settings = MemoryOutputs(), SimpleNamespace(reasoning_model="mock")
     cards.models = SimpleNamespace(run=lambda *a, **k: pytest.fail("Unexpected model call"))
     chapters = [{"id": str(i), "title": f"第{i}章"} for i in range(270)]
-    units = [{"unit_id": f"u{i}", "chapter_id": str(i), "text": f"正文{i}①",
-              "section_path": [], "kind": "paragraph"} for i in range(270)]
+    units = [
+        {
+            "unit_id": f"u{i}",
+            "chapter_id": str(i),
+            "text": f"正文{i}①",
+            "section_path": [],
+            "kind": "paragraph",
+        }
+        for i in range(270)
+    ]
     readings = [{"readings": [record(unit) for unit in units]}]
 
     async def digest(*args, **kwargs):
@@ -275,6 +296,7 @@ def test_topic_fallback_is_bounded_durable_and_validates_source_identity(monkeyp
 
     monkeypatch.setattr(planning, "synthesis_readings", digest)
     monkeypatch.setattr(planning, "card_model", fail)
+
     # Simulate a crash after the immutable plan commit but before its UI event.
     def unavailable_event(*args, **kwargs):
         raise OSError("event unavailable")
@@ -283,7 +305,9 @@ def test_topic_fallback_is_bounded_durable_and_validates_source_identity(monkeyp
     with pytest.raises(OSError, match="event unavailable"):
         asyncio.run(planning.plan_topics(cards, "run", readings, units, chapters, "parent"))
     cards.outputs.node = lambda *a, **k: "node"
-    monkeypatch.setattr(planning, "synthesis_readings", lambda *a, **k: pytest.fail("Saved plan reran digest"))
+    monkeypatch.setattr(
+        planning, "synthesis_readings", lambda *a, **k: pytest.fail("Saved plan reran digest")
+    )
     monkeypatch.setattr(planning, "card_model", lambda *a, **k: pytest.fail("Saved plan reran model"))
     plan = asyncio.run(planning.plan_topics(cards, "run", readings, units, chapters, "parent"))
     assert len(plan.topics) <= 64 < card_rules.MAX_CARD_TOPICS
@@ -293,19 +317,31 @@ def test_topic_fallback_is_bounded_durable_and_validates_source_identity(monkeyp
     assert receipt["machine_approval"] is False
     assert readings[0]["readings"][0]["candidate_quotes"] == ["正文0①"]
     with pytest.raises(StageInputMismatch):
-        asyncio.run(planning.plan_topics(cards, "run", readings, [*units, {**units[0], "unit_id": "new"}], chapters, "parent"))
+        asyncio.run(
+            planning.plan_topics(
+                cards, "run", readings, [*units, {**units[0], "unit_id": "new"}], chapters, "parent"
+            )
+        )
 
 
 @pytest.mark.parametrize("stage", ["digest", "topic"])
-@pytest.mark.parametrize("error", [
-    TaskError("budget", type="model_request_budget", non_retryable=True),
-    TaskError("unknown response", type="model_request_exhausted", non_retryable=True),
-    TaskError("credentials", non_retryable=True),
-    OSError("S3 unavailable"), asyncio.CancelledError(),
-])
+@pytest.mark.parametrize(
+    "error",
+    [
+        TaskError("budget", type="model_request_budget", non_retryable=True),
+        TaskError("unknown response", type="model_request_exhausted", non_retryable=True),
+        TaskError("credentials", non_retryable=True),
+        OSError("S3 unavailable"),
+        asyncio.CancelledError(),
+    ],
+)
 def test_topic_planning_does_not_hide_operational_failures(monkeypatch, stage, error):
     cards = object.__new__(Cards)
-    cards.outputs, cards.settings, cards.models = MemoryOutputs(), SimpleNamespace(reasoning_model="mock"), None
+    cards.outputs, cards.settings, cards.models = (
+        MemoryOutputs(),
+        SimpleNamespace(reasoning_model="mock"),
+        None,
+    )
 
     async def digest(*args, **kwargs):
         if stage == "digest":
@@ -515,22 +551,27 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
     )
     transitions = []
     monkeypatch.setattr(
-        generation, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: transitions.append(args))
+        generation,
+        "RunLifecycle",
+        lambda *_: SimpleNamespace(transition=lambda *args: transitions.append(args)),
     )
     monkeypatch.setattr(
         topics, "RunLifecycle", lambda *_: SimpleNamespace(transition=lambda *args: transitions.append(args))
     )
     monkeypatch.setattr("agents.Runner.run", lambda *a, **k: pytest.fail("Real model API called"))
     monkeypatch.setattr(
-        "hrs_platform.services.models.vision.VisualReview.check", lambda *a, **k: pytest.fail("Vision API called")
+        "hrs_platform.services.models.vision.VisualReview.check",
+        lambda *a, **k: pytest.fail("Vision API called"),
     )
     calls, cache, active, maximum, fail_topic = [], {}, 0, 0, True
     first_reads_ready = asyncio.Event()
     if planning_failure == "digest":
+
         async def digest(*args, **kwargs):
             if args[2] == "全书主题:v2":
                 raise TaskError("digest exhausted", type="card_input_budget", non_retryable=True)
             return await synthesis_readings(*args, **kwargs)
+
         monkeypatch.setattr(planning, "synthesis_readings", digest)
 
     async def run(identity, key, instructions, payload, output_type, **kwargs):
@@ -599,8 +640,11 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
                 )
             elif output_type is CardRepair:
                 previous = payload["previous_candidate"]
-                value = output_type(items=[{**previous["items"][0], "attribution": "已修正归属"}],
-                                    remove_item_ids=[], metadata=None)
+                value = output_type(
+                    items=[{**previous["items"][0], "attribution": "已修正归属"}],
+                    remove_item_ids=[],
+                    metadata=None,
+                )
             elif output_type is CardDraft:
                 value = output_type(
                     title=payload["objective"],
@@ -630,9 +674,13 @@ def test_generate_reads_all_sources_then_builds_cross_assignment_topics_and_resu
                 ]
                 value = output_type.model_validate(
                     verdict(
-                        ids, failed=(fallback and "reading_record" in payload and units[0]["unit_id"] in ids)
-                        or (repair and "candidate" in payload
-                            and payload["candidate"]["items"][0]["attribution"] != "已修正归属")
+                        ids,
+                        failed=(fallback and "reading_record" in payload and units[0]["unit_id"] in ids)
+                        or (
+                            repair
+                            and "candidate" in payload
+                            and payload["candidate"]["items"][0]["attribution"] != "已修正归属"
+                        ),
                     )
                 )
             cache[key] = (value.model_dump(mode="json"), dependency)

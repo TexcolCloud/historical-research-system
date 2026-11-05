@@ -5,9 +5,10 @@ WORKDIR /app/services/research-platform
 COPY packages/runtime-support /app/packages/runtime-support
 COPY services/codex-pipeline /app/services/codex-pipeline
 COPY services/research-platform/pyproject.toml services/research-platform/uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --python /usr/local/bin/python --no-dev --extra retrieval --no-install-project
+# This image serves the explicit legacy application profile; Codex runs on the host.
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --python /usr/local/bin/python --no-dev --extra retrieval --extra legacy --no-install-project
 COPY services/research-platform/src ./src
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --python /usr/local/bin/python --no-dev --extra retrieval
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --python /usr/local/bin/python --no-dev --extra retrieval --extra legacy
 ENV PATH="/app/services/research-platform/.venv/bin:$PATH" HRS_PROJECT_ROOT=/app PLATFORM_CACHE_ROOT=/tmp/hrs-compute PYTHONUNBUFFERED=1 PYTHONUTF8=1 OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 RUN groupadd --gid 10001 hrs && useradd --uid 10001 --gid hrs --no-create-home hrs
 USER 10001:10001

@@ -65,14 +65,14 @@ export default function ReviewFocus({
       <div className="review-reading-pair">
         <div>
           <small>
-            {range ? "当前待核文字" : "原识别片段 · 需在本页重新定位"}
+            {range ? "当前待核文字" : "原识别片段 · 请结合整页核对"}
           </small>
           <mark>
             {range
               ? range.start === range.end
                 ? "▏（此处缺字）"
                 : text.slice(range.start, range.end)
-              : issue.focus || issue.candidate || "请查看整页"}
+              : issue.candidate || issue.anchor.exact || "请查看整页"}
           </mark>
         </div>
         {issue.source_reading && (
@@ -87,7 +87,17 @@ export default function ReviewFocus({
         <p>{issue.message || "请核对这处文字与原图是否一致。"}</p>
       </details>
       {!range && (
-        <p role="status">本处无法可靠自动选字，请对照原图编辑整页 Markdown。</p>
+        <p role="status">
+          {issue.boxes.length
+            ? "原图区域已定位，正文暂未可靠定位。"
+            : "正文与原图暂未可靠定位。"}
+          请结合原识别片段核对整页；需要修改时可编辑整页 Markdown。
+        </p>
+      )}
+      {range && !issue.boxes.length && (
+        <p className="platform-inline-status">
+          正文已定位，原图需结合整页核对。
+        </p>
       )}
       {!editing && (
         <div className="review-judgment-actions">

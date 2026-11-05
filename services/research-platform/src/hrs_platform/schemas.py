@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
+from hrs_codex.review_contract import ReviewLocation
 from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, Field
 
 from hrs_platform.domain.generation_contracts import CardDraft
@@ -104,6 +105,26 @@ class StageMetrics(BaseModel):
     median_seconds: float | None = None
     pages_per_minute: float
     samples: int
+    sample_window_seconds: float = 0
+    phase_medians: dict[str, float] = Field(default_factory=dict)
+
+
+class RuntimeControlScope(BaseModel):
+    scope: Literal["account", "model"]
+    model: str | None = None
+    state: Literal["normal", "cooldown", "probing", "recovering", "blocked"]
+    code: str | None = None
+    limit: int = Field(ge=0)
+    configured_limit: int = Field(ge=0)
+    retry_at: float | None = None
+    reason: str | None = None
+    failures: int = Field(default=0, ge=0)
+
+
+class RuntimeControlReport(BaseModel):
+    state: Literal["normal", "cooldown", "probing", "recovering", "blocked"] = "normal"
+    scopes: list[RuntimeControlScope] = Field(default_factory=list)
+    next_retry_at: float | None = None
 
 
 class SchedulingReport(BaseModel):
@@ -113,6 +134,9 @@ class SchedulingReport(BaseModel):
     metrics: dict[str, StageMetrics]
     batch_size: int
     cooldown_until: float = 0
+    runtime_counts: dict[str, int] = Field(default_factory=dict)
+    workspace_occupied: int = 0
+    runtime_control: RuntimeControlReport | None = None
 
 
 class RecoveryReport(BaseModel):
@@ -129,6 +153,7 @@ class RecoveryReport(BaseModel):
     automatic_checkpoint_used: bool = False
     retry_limit: int = 3
     evidence_checked: bool = False
+    runtime_control: RuntimeControlReport | None = None
 
 
 class RunSummary(BaseModel):
@@ -209,6 +234,7 @@ class NavigationReport(BaseModel):
     version: int
     sha256: str
     coverage_complete: bool = False
+    page_count: int | None = Field(default=None, ge=0)
     approved_pages: list[NavigationPage] = Field(default_factory=list)
 
 
@@ -264,12 +290,15 @@ class ReviewDraft(BaseModel):
     expected_revision: int = Field(ge=1)
     text: str = Field(min_length=1, max_length=200000)
     resolutions: list[ReviewResolution] = Field(default_factory=list)
+    locations: list[ReviewLocation] | None = None
 
 
 class DraftReceipt(BaseModel):
     revision: int
     draft_text: str
     resolutions: list[ReviewResolution] = Field(default_factory=list)
+    locations: list[ReviewLocation] | None = None
+    locations_text_sha256: str | None = None
 
 
 class ReviewReceipt(BaseModel):
@@ -300,8 +329,10 @@ class ReviewIssue(ReviewIssueSummary):
     pages: list[int]
     images: list[str]
     footnotes: list["FootnoteLink"] = Field(default_factory=list)
-    locations: list[dict] = Field(default_factory=list)
+    locations: list[ReviewLocation] = Field(default_factory=list)
     resolutions: list[ReviewResolution] = Field(default_factory=list)
+    draft_locations: list[ReviewLocation] | None = None
+    draft_locations_text_sha256: str | None = None
 
 
 class FootnoteSpan(BaseModel):

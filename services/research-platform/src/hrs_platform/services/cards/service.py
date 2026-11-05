@@ -11,9 +11,7 @@ from hrs_platform import models as db
 from hrs_platform.domain.card_rules import card_stage, quote_pages, quote_range, visual_groups
 from hrs_platform.domain.errors import ServiceError
 from hrs_platform.services.books import get_run
-from hrs_platform.services.cards.evidence import CardEvidence
 from hrs_platform.services.cards.finalization import check_images, finalize
-from hrs_platform.services.cards.generation import generate
 from hrs_platform.services.documents.library import Library
 from hrs_platform.services.documents.review import Review
 from hrs_platform.services.runs.lifecycle import RunLifecycle
@@ -122,6 +120,8 @@ class Cards:
 
     @cached_property
     def evidence(self):
+        from hrs_platform.services.cards.evidence import CardEvidence
+
         return CardEvidence(self.settings, self.engine, self.outputs, self.library)
 
     def adopt(self, run_id, batch_key=None):
@@ -398,6 +398,8 @@ class Cards:
         return {**detail, "quote_locations": locations}
 
     async def generate(self, run_id, *, incremental=False):
+        from hrs_platform.services.cards.generation import generate
+
         return await generate(self, run_id, incremental=incremental)
 
     def check_images(self, run_id, batch_key=None):

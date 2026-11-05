@@ -2,16 +2,14 @@
 
 import asyncio
 import json
+import shutil
+import subprocess
 from datetime import UTC, datetime
 from urllib.request import urlopen
 
 from sqlalchemy import text
-from temporalio.api.enums.v1 import TaskQueueType
-from temporalio.api.taskqueue.v1 import TaskQueue
-from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 
 from hrs_platform.core.db import engine_for
-from hrs_platform.jobs.worker import connect
 from hrs_platform.services.retrieval.compute import search_client
 from hrs_platform.services.storage import objects_for
 
@@ -47,6 +45,12 @@ async def inspect(settings, *, gpu=True):
         return {"status": health["status"]}
 
     async def queue(name):
+        from temporalio.api.enums.v1 import TaskQueueType
+        from temporalio.api.taskqueue.v1 import TaskQueue
+        from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+
+        from hrs_platform.jobs.worker import connect
+
         client = await connect(settings)
         response = await client.workflow_service.describe_task_queue(
             DescribeTaskQueueRequest(
@@ -83,13 +87,28 @@ async def inspect(settings, *, gpu=True):
             result = json.load(response)
         return {key: result[key] for key in ("model", "resident", "free_gib")}
 
+    def native():
+        from hrs_codex.workspace import resolve_workspace
+
+        executable = shutil.which("codex")
+        if not executable:
+            raise RuntimeError("Codex executable unavailable")
+        result = subprocess.run([executable, "login", "status"], capture_output=True, timeout=10, check=False)
+        if result.returncode:
+            raise RuntimeError("Codex login unavailable")
+        root = resolve_workspace(settings.codex_root)
+        return {"logged_in": True, "workspace_exists": root.is_dir(), "runtime": "native-subagents"}
+
     checks = [
         check("PostgreSQL", lambda: asyncio.to_thread(database)),
         check("S3", lambda: asyncio.to_thread(storage)),
         check("OpenSearch", lambda: asyncio.to_thread(index)),
-        check("CPU worker", lambda: queue(settings.task_queue)),
     ]
-    if gpu:
+    if settings.processing_backend == "codex":
+        checks.append(check("Codex executor", lambda: asyncio.to_thread(native)))
+    else:
+        checks.append(check("CPU worker", lambda: queue(settings.task_queue)))
+    if gpu and settings.processing_backend == "legacy":
         checks += [
             check("GPU worker", lambda: queue(settings.gpu_queue)),
             check("GPU broker", lambda: asyncio.to_thread(broker)),

@@ -122,14 +122,70 @@ def test_executor_failure_is_recoverable_runtime_error_not_human_uncertainty(tmp
 
 def test_lost_document_lease_cancels_only_its_executor(tmp_path, monkeypatch):
     import pytest
+
     store, doc_id = fixture(tmp_path)
     store.request_run(doc_id)
+
     def lost(*args, **kwargs):
         raise ValueError("Synthetic lease lost")
+
     monkeypatch.setattr(store, "renew_run", lost)
+
     def execute(s, identity, stop_event):
         assert stop_event.wait(2), "Lost ownership must stop this coordinator"
+
     runner = Runner(store, execute, lease_seconds=1)
     with pytest.raises(RuntimeError, match="lease lost"):
         runner.tick(doc_id)
     assert not runner.stop_event.is_set(), "One lost lease must not stop the workspace dispatcher"
+
+
+def test_waiting_for_valid_workers_is_not_a_technical_failure(tmp_path):
+    store, doc_id = fixture(tmp_path)
+    store.request_run(doc_id)
+    request = store.claim_run("coordinator")
+    task = store.claim_task(doc_id, "ocr", "still-running-worker")
+    finished = store.finish_run(doc_id, request["token"])
+    assert finished["state"] == "waiting_workers"
+    assert finished["error"] is None and finished.get("technical_failures", 0) == 0
+    store.submit_task(
+        doc_id,
+        task["task_id"],
+        task["lease_token"],
+        {"input_sha256": task["input_sha256"], "markdown": "正文"},
+    )
+    assert store.claim_run("next-coordinator")["state"] == "running"
+
+
+def test_a_book_waiting_on_its_coordinator_does_not_serialize_the_next_book(tmp_path):
+    store, first_id = fixture(tmp_path)
+    second = tmp_path / "second.png"
+    Image.new("RGB", (50, 60), "black").save(second)
+    second_id = prepare(store, str(second))["id"]
+    for identity in (first_id, second_id):
+        store.request_run(identity)
+    started, release = threading.Event(), threading.Event()
+    active, lock = set(), threading.Lock()
+
+    def execute(s, identity, **options):
+        with lock:
+            active.add(identity)
+            if len(active) == 2:
+                started.set()
+        assert release.wait(5)
+
+    with Runner(store, execute, poll_seconds=0.02):
+        try:
+            assert started.wait(2), "The second book must start while the first is still active"
+        finally:
+            release.set()
+
+
+def test_explicit_resume_clears_the_current_error_but_preserves_failure_history(tmp_path):
+    store, doc_id = fixture(tmp_path)
+    store.request_run(doc_id)
+    run = store.claim_run("failed-coordinator")
+    store.finish_run(doc_id, run["token"], error={"type": "transport"})
+    resumed = store.request_run(doc_id, resume=True)
+    assert resumed["error"] is None
+    assert any(entry.get("error") == {"type": "transport"} for entry in resumed["history"])

@@ -10,7 +10,7 @@ def test_checkpoint_recovery_fences_expired_work_and_preserves_committed_content
     complete(store, identity, "review", "independent", {"verdict": "approved"})
     stale = store.claim_task(identity, "ocr", "interrupted")
     with store.lock:
-        doc = store._load(identity)
+        doc = store.checkpoints.read(identity)
         next(t for t in doc["tasks"] if t["task_id"] == stale["task_id"])["claim"]["expires_at"] = 0
         doc["run_request"] = {
             "state": "retryable_error",
@@ -19,7 +19,7 @@ def test_checkpoint_recovery_fences_expired_work_and_preserves_committed_content
             "not_before": 0,
             "history": [],
         }
-        store._save(doc)
+        store.checkpoints.write(doc)
     before = store.status(identity)["pages"][0]
     receipt = store.recover_run(identity, "manual-1")
     assert receipt["state"] == "pending" and receipt["reset_tasks"] == [stale["task_id"]]
@@ -90,13 +90,13 @@ def test_manual_recovery_preserves_human_drafts_waits_for_leases_and_rejects_dam
         store.recover_run(identity, "wait-for-owner")
     assert digest(store.status(identity)["pages"]) == digest(snapshot["pages"])
     with store.lock:
-        doc = store._load(identity)
+        doc = store.checkpoints.read(identity)
         next(t for t in doc["tasks"] if t["task_id"] == task["task_id"])["claim"]["expires_at"] = 0
-        store._save(doc)
+        store.checkpoints.write(doc)
     store.recover_run(identity, "ready-owner")
     assert store.status(identity)["pages"][0] == snapshot["pages"][0]
     before = store.status(identity)
-    store._path(before, before["source"]["path"]).write_bytes(b"damaged original")
+    store.artifact_path(before, before["source"]["path"]).write_bytes(b"damaged original")
     with pytest.raises(ValueError, match="hash mismatch"):
         store.recover_run(identity, "damaged-checkpoint")
     assert store.status(identity) == before

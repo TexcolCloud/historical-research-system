@@ -26,7 +26,7 @@ export default function ConversionReader({ runId }: { runId: string }) {
       <StructurePanel runId={runId} onLocate={setPage} />
       <p className="platform-inline-status">
         {data?.machine_status === "awaiting-ocr"
-          ? "本页尚未识别，原图已保留。系统会继续处理；当前空白不表示原件没有文字。"
+          ? "本页尚未提取文字，可先查看原图。请在处理进展中查看运行状态。"
           : data?.machine_status === "release-accepted" &&
               data.acceptance_basis === "workflow_test"
             ? "本页按流程测试授权放行，未证明内容准确率。原件与底稿均已保留。"
@@ -35,7 +35,7 @@ export default function ConversionReader({ runId }: { runId: string }) {
               ? "本页已通过机器或人工核对。整书通过后生成最终阅读版；修改与确认记录均保留。"
               : data?.machine_status === "release-accepted" &&
                   data.acceptance_basis === "native-pass"
-                ? "本页由 PDF 文字层直接提取，已通过文字完整性与版面规则检查，未调用视觉模型。仍需整书审核完成后才能入库。"
+                ? "历史记录：本页直接提取 PDF 文字并通过规则检查，此记录未包含原图模型核对。请以本书处理进展和最终入库状态为准。"
                 : data?.machine_status === "unreviewed-source"
                   ? "此处为已保存的提取底稿，尚未完成核验，仅供阅读。核验完成后，需人工确认的问题会出现在问题清单。"
                   : "此处为转换时的识别底稿，包含未核对内容。人工修改与放行请返回问题清单；完成核对后生成最终阅读版。"}
@@ -43,7 +43,7 @@ export default function ConversionReader({ runId }: { runId: string }) {
       {result.isError && (
         <p role="alert">
           {result.error.message}
-          <Button onClick={() => void result.refetch()}>重试</Button>
+          <Button onClick={() => void result.refetch()}>重新读取底稿</Button>
         </p>
       )}
       {!data ? (

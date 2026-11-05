@@ -3,7 +3,7 @@ import { test, expect } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
 import {
-  resolveLocation,
+  sourceRanges,
   suggestionEdit,
   type ReviewLocation,
 } from "./review-highlights.ts";
@@ -74,7 +74,7 @@ test("highlights the contextual occurrence across formatted text without changin
 });
 
 test("missing character uses a caret with Unicode-safe editing position", () => {
-  const issue = {
+  const issue: ReviewLocation = {
     id: "insert",
     page: 1,
     anchor: { exact: "石渡口", prefix: "", suffix: "" },
@@ -87,7 +87,7 @@ test("missing character uses a caret with Unicode-safe editing position", () => 
     candidate: "石渡口",
     suggestion: "岔",
   };
-  expect(resolveLocation("😀石渡口", issue)).toEqual({ start: 3, end: 3 });
+  expect(sourceRanges("😀石渡口", issue)[0]).toEqual({ start: 3, end: 3 });
   const { container } = render(
     <RenderedMarkdown
       markdown="😀石渡口"
@@ -104,7 +104,7 @@ test("missing character uses a caret with Unicode-safe editing position", () => 
 test("footnote definition highlight keeps its source anchor and backlink", () => {
   const markdown = "甲[^1]。\n\n[^1]: 原注待辨。";
   const at = markdown.indexOf("[^1]:");
-  const issue = {
+  const issue: ReviewLocation = {
     id: "note",
     page: 1,
     anchor: { exact: "[^1]: 原注待辨。", prefix: "", suffix: "" },

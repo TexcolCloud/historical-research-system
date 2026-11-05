@@ -15,11 +15,67 @@ from hrs_platform.services.documents.library import Library
 from hrs_platform.services.exports import Exports
 
 
+def test_platform_bridge_owns_executor_lifetime_instead_of_a_child_dashboard(platform, tmp_path, monkeypatch):
+    from hrs_platform.services import codex_bridge as module
+
+    settings, engine = platform
+    events = []
+
+    class Executor:
+        def __init__(self, store):
+            assert store.root == (tmp_path / "native").resolve()
+
+        def start(self):
+            events.append("start")
+
+        def stop(self):
+            events.append("stop")
+
+    monkeypatch.setattr(module, "Runner", Executor, raising=False)
+    monkeypatch.setattr(module, "ensure_workbench", lambda store: None, raising=False)
+    bridge = CodexBridge(settings.model_copy(update={"codex_root": tmp_path / "native"}), engine)
+    monkeypatch.setattr(bridge, "loop", lambda: None)
+    bridge.start()
+    bridge.stop()
+    assert events == ["start", "stop"]
+
+
 def finish(store, doc_id, stage, result):
     task = store.claim_task(doc_id, stage, "synthetic-" + stage)
     store.submit_task(
         doc_id, task["task_id"], task["lease_token"], {"input_sha256": task["input_sha256"], **result}
     )
+
+
+def test_bridge_consumes_native_changes_instead_of_rescanning_every_book(platform, tmp_path, monkeypatch):
+    settings, engine = platform
+    bridge = CodexBridge(settings.model_copy(update={"codex_root": tmp_path / "event-native"}), engine)
+    source = tmp_path / "event-source.png"
+    Image.new("RGB", (30, 40), "white").save(source)
+    identity = prepare(bridge.store, str(source))["id"]
+    book_id, run_id = str(uuid4()), str(uuid4())
+    with engine.begin() as connection:
+        connection.execute(insert(db.books).values(id=book_id, title="Event projection", state="processing"))
+        connection.execute(
+            insert(db.runs).values(
+                id=run_id,
+                book_id=book_id,
+                state="running",
+                stage="ocr",
+                source=bridge.objects.put_file(source),
+                result={"codex_document_id": identity, "processing_backend": "codex"},
+            )
+        )
+    calls = []
+    monkeypatch.setattr(bridge, "sync", lambda run: calls.append(str(run["id"])))
+    bridge.tick()
+    assert calls == [run_id]
+    calls.clear()
+    bridge.tick()
+    assert calls == []
+    bridge.store.claim_task(identity, "ocr", "event-worker")
+    bridge.tick()
+    assert calls == [run_id]
 
 
 def test_native_pending_review_old_ui_confirmation_reader_and_export(platform, tmp_path, monkeypatch):
@@ -243,7 +299,7 @@ def test_native_deletion_keeps_shared_workspace_until_last_owner_stops(platform,
     assert receipt(engine, owners[0][0])["state"] == "completed"
     assert not (bridge.store.root / "platform-intake" / owners[0][1]).exists()
     assert (bridge.store.root / "platform-intake" / owners[1][1]).exists()
-    assert bridge.store._directory(doc_id).exists()
+    assert bridge.store.document_directory(doc_id).exists()
     assert not bridge.store.status(doc_id)["run_request"].get("cancel_requested")
     request_deletion(engine, owners[1][0])
     bridge.delete_pending()
@@ -254,7 +310,7 @@ def test_native_deletion_keeps_shared_workspace_until_last_owner_stops(platform,
     bridge.store.finish_run(doc_id, running["token"], error="Synthetic cancellation")
     bridge.delete_pending()
     assert receipt(engine, owners[1][0])["state"] == "completed"
-    assert not bridge.store._directory(doc_id).exists() and source.exists()
+    assert not bridge.store.document_directory(doc_id).exists() and source.exists()
     assert not (bridge.store.root / "platform-intake" / owners[1][1]).exists()
 
 
@@ -330,12 +386,21 @@ def test_unchanged_bridge_tick_avoids_revalidation_and_projection(platform, tmp_
     book_id, run_id = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
         connection.execute(insert(db.books).values(id=book_id, title="Perf", state="running"))
-        connection.execute(insert(db.runs).values(id=run_id, book_id=book_id, state="running", stage="ocr",
-            result={"codex_document_id": doc_id, "processing_backend": "codex"}))
+        connection.execute(
+            insert(db.runs).values(
+                id=run_id,
+                book_id=book_id,
+                state="running",
+                stage="ocr",
+                result={"codex_document_id": doc_id, "processing_backend": "codex"},
+            )
+        )
     bridge.sync(get_run(engine, run_id))
     revision = get_run(engine, run_id)["revision"]
+
     def unexpected(*a, **kw):
         raise AssertionError("Unchanged tick must use its last verified projection")
+
     monkeypatch.setattr(bridge.store, "refresh_navigation", unexpected)
     monkeypatch.setattr(bridge.objects, "put_bytes", unexpected)
     for _ in range(3):
@@ -357,14 +422,22 @@ def test_confirmation_receipt_commits_while_projection_prepares_objects(platform
     settings = settings.model_copy(update={"codex_root": tmp_path / "native"})
     bridge = CodexBridge(settings, engine)
     source = tmp_path / "synthetic.pdf"
-    Image.new("RGB", (60, 80), "white").save(source, save_all=True,
-        append_images=[Image.new("RGB", (60, 80), "white")])
+    Image.new("RGB", (60, 80), "white").save(
+        source, save_all=True, append_images=[Image.new("RGB", (60, 80), "white")]
+    )
     doc_id = prepare(bridge.store, str(source))["id"]
     book_id, run_id = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
         connection.execute(insert(db.books).values(id=book_id, title="Concurrent fixture", state="running"))
-        connection.execute(insert(db.runs).values(id=run_id, book_id=book_id, state="running", stage="ocr",
-            result={"codex_document_id": doc_id, "processing_backend": "codex"}))
+        connection.execute(
+            insert(db.runs).values(
+                id=run_id,
+                book_id=book_id,
+                state="running",
+                stage="ocr",
+                result={"codex_document_id": doc_id, "processing_backend": "codex"},
+            )
+        )
     finish(bridge.store, doc_id, "ocr", {"markdown": "Synthetic retained page"})
     issues = [{"location": "body", "issue": "Synthetic dispute"}]
     finish(bridge.store, doc_id, "review", {"verdict": "pending", "issues": issues})
@@ -373,20 +446,28 @@ def test_confirmation_receipt_commits_while_projection_prepares_objects(platform
     finish(bridge.store, doc_id, "ocr", {"markdown": "Another synthetic page"})
     entered, release = Event(), Event()
     put = bridge.objects.put_bytes
+
     def slow(*args, **kwargs):
         entered.set()
         assert release.wait(5)
         return put(*args, **kwargs)
+
     monkeypatch.setattr(bridge.objects, "put_bytes", slow)
-    body = ReviewDecision(decision_id=uuid4(), expected_revision=issue["revision"],
-        expected_text_sha256=issue["text_sha256"], action="confirm").model_dump(mode="json")
+    body = ReviewDecision(
+        decision_id=uuid4(),
+        expected_revision=issue["revision"],
+        expected_text_sha256=issue["text_sha256"],
+        action="confirm",
+    ).model_dump(mode="json")
     with ThreadPoolExecutor(max_workers=2) as pool, TestClient(create_app(settings, engine)) as client:
         projecting = pool.submit(bridge.sync, get_run(engine, run_id))
         try:
             assert entered.wait(3)
             started = time.perf_counter()
-            response = pool.submit(client.post, f"/api/v2/reviews/{issue['id']}/decisions", json=body).result(timeout=1)
-            receipt_ms = (time.perf_counter()-started)*1000
+            response = pool.submit(client.post, f"/api/v2/reviews/{issue['id']}/decisions", json=body).result(
+                timeout=1
+            )
+            receipt_ms = (time.perf_counter() - started) * 1000
             assert response.status_code == 200, response.text
             repeated = client.post(f"/api/v2/reviews/{issue['id']}/decisions", json=body)
             assert repeated.json() == response.json()
@@ -396,8 +477,17 @@ def test_confirmation_receipt_commits_while_projection_prepares_objects(platform
     assert bridge.review.list(run_id) == []
     bridge.sync(get_run(engine, run_id))
     assert bridge.store.status(doc_id)["pages"][0]["state"] == "approved"
-    print("PERFORMANCE_RECEIPT " + json.dumps({"durable_http_receipt_ms": round(receipt_ms,1),
-        "projection_object_io_blocked": True, "idempotent_retry": True, "decision_preserved": True}))
+    print(
+        "PERFORMANCE_RECEIPT "
+        + json.dumps(
+            {
+                "durable_http_receipt_ms": round(receipt_ms, 1),
+                "projection_object_io_blocked": True,
+                "idempotent_retry": True,
+                "decision_preserved": True,
+            }
+        )
+    )
 
 
 def test_partial_native_projection_writes_only_changed_page_markdown(platform, tmp_path, monkeypatch):
@@ -405,23 +495,35 @@ def test_partial_native_projection_writes_only_changed_page_markdown(platform, t
     settings = settings.model_copy(update={"codex_root": tmp_path / "native"})
     bridge = CodexBridge(settings, engine)
     source = tmp_path / "two.pdf"
-    Image.new("RGB", (40, 50), "white").save(source, save_all=True,
-        append_images=[Image.new("RGB", (40, 50), "white")])
+    Image.new("RGB", (40, 50), "white").save(
+        source, save_all=True, append_images=[Image.new("RGB", (40, 50), "white")]
+    )
     doc_id = prepare(bridge.store, str(source))["id"]
     book_id, run_id = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
         connection.execute(insert(db.books).values(id=book_id, title="Fragments", state="running"))
-        connection.execute(insert(db.runs).values(id=run_id, book_id=book_id, state="running", stage="ocr",
-            result={"codex_document_id": doc_id, "processing_backend": "codex"}))
+        connection.execute(
+            insert(db.runs).values(
+                id=run_id,
+                book_id=book_id,
+                state="running",
+                stage="ocr",
+                result={"codex_document_id": doc_id, "processing_backend": "codex"},
+            )
+        )
     finish(bridge.store, doc_id, "ocr", {"markdown": "First[^1]\n\n[^1]: Source note."})
     bridge.sync(get_run(engine, run_id))
     before = bridge.review.read_json(get_run(engine, run_id)["conversion"])
-    assert "document.md" not in before["files"], "Incomplete books use page fragments; full Markdown is assembled on demand"
+    assert "document.md" not in before["files"], (
+        "Incomplete books use page fragments; full Markdown is assembled on demand"
+    )
     puts = []
     put = bridge.objects.put_bytes
+
     def tracked(data, *a, **kw):
         puts.append(data)
         return put(data, *a, **kw)
+
     monkeypatch.setattr(bridge.objects, "put_bytes", tracked)
     finish(bridge.store, doc_id, "ocr", {"markdown": "Second page."})
     bridge.sync(get_run(engine, run_id))
@@ -430,7 +532,7 @@ def test_partial_native_projection_writes_only_changed_page_markdown(platform, t
     assert not any(b"First[^1]" in data for data in puts), "An unchanged first page must not be written again"
     page = bridge.review.page(run_id, 1)
     note = page["footnotes"][0]["note"]
-    assert page["text"][note["marker_end"]:note["end"]].strip() == "Source note."
+    assert page["text"][note["marker_end"] : note["end"]].strip() == "Source note."
     draft = bridge.review.objects.read_bytes(bridge.review.artifact(run_id, "document.md")).decode()
     assert draft == "First[^1]\n\n[^1]: Source note.\n\nSecond page.\n\n"
     evidence = bridge.review.read_json(after["files"]["codex-evidence.json"])
@@ -438,8 +540,12 @@ def test_partial_native_projection_writes_only_changed_page_markdown(platform, t
 
 
 def test_projection_signature_changes_when_coordinator_lease_expires(monkeypatch):
-    doc = {"state": "processing", "pages": [], "tasks": [],
-           "run_request": {"state": "running", "lease_expires_at": 110}}
+    doc = {
+        "state": "processing",
+        "pages": [],
+        "tasks": [],
+        "run_request": {"state": "running", "lease_expires_at": 110},
+    }
     monkeypatch.setattr("hrs_platform.services.codex_bridge.time.time", lambda: 105)
     active = CodexBridge.projection_input(doc)
     monkeypatch.setattr("hrs_platform.services.codex_bridge.time.time", lambda: 115)

@@ -71,7 +71,8 @@ export default function UploadPanel({
         <DialogHeader>
           <DialogTitle>导入书籍</DialogTitle>
           <DialogDescription>
-            选择 PDF，上传后自动识别与核验。关闭此窗口不影响当前上传。
+            选择
+            PDF，上传完成后自动开始处理。可以收起上传窗口；上传完成前请保持应用打开。
           </DialogDescription>
         </DialogHeader>
         <Dashboard

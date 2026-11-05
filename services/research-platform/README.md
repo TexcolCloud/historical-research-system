@@ -1,6 +1,10 @@
 # Research Platform
 
-当前默认：原 React 上传/核对/阅读/检索界面通过 `services/codex_bridge.py` 接入原生 Codex 队列。运行 `uv run --project services/research-platform python scripts/hrs_v2.py up --build`；识别 Terra、独立审核及组织 Sol，失败直接进入单用户人工队列。默认不启动 Temporal。本文下面的旧 OCR、文本模型、工作流运维说明仅适用于显式 `--legacy`；既有 SQL/S3 数据与只读卡片保留。
+当前默认：原 React 上传/核对/阅读/检索界面通过 `services/codex_bridge.py` 接入原生 Codex 队列。运行 `uv run --project services/research-platform python scripts/hrs_v2.py up --build`；识别 Terra、独立审核及组织 Sol，新文档执行有限独立复核，无法确认或复核失败进入单用户人工终审。默认不启动 Temporal。本文下面的旧 OCR、文本模型、工作流运维说明仅适用于显式 `--legacy`；既有 SQL/S3 数据与只读卡片保留。
+
+平台直接管理原生 Runner 的启动和停止，上传、继续、恢复无需启动另一份工作台。默认安装不要求旧 SDK；包含旧链路的开发测试使用 `uv sync --project services/research-platform --locked --group dev --extra legacy`。BGE 检索依赖和权重继续保留。
+
+Codex 模式的协调备份保存业务 SQL 与原生原件、队列、审核和发布检查点。先停止应用、上传和原生执行器，再运行 `python -m hrs_platform.cli backup`。恢复使用 `python -m hrs_platform.cli restore --manifest-reference <清单JSON> --restore-suffix <新库后缀> --restore-native-root <不存在的新目录>`；不会覆盖既有数据库或工作区。S3 业务对象仍须独立备份。旧三库备份清单继续可读。
 
 [本轮功能映射与20页流程验收](../codex-pipeline/INTEGRATION-20261104.md)给出脚注、表格、插图、检索、导出、删除、勘误及异常恢复的对应路径。完整网页入口使用共享存储与 BGE 检索模型；独立 MCP 工作台仍可单独运行。
 
@@ -51,6 +55,8 @@ docker compose -f deploy/infrastructure/compose.search.yml up -d --wait
 | 输出与调用预算                                    | 阅读首轮 16000、推理首轮 32000、输出封顶 64000 tokens；文本与视觉调用预算默认分别为 4096，实际以配置和回执为准                                                               |
 
 要统一使用 Flash，在根 `.env` 设置两项 `CARDS_REASONING_MODEL=deepseek-flash`、`CARDS_READING_MODEL=deepseek-flash`；同时核对是否有更高优先级的 `PLATFORM_REASONING_MODEL` 或 `PLATFORM_READING_MODEL`。此说明不代表对用户现有配置作了修改。
+
+当前 Codex 主链与兼容模块的实际边界见[重构说明](../../REFACTOR-20261105.md)。以下旧 Temporal/制卡分层说明保留用于历史兼容，不代表默认装配。
 
 ## 分层与职责
 

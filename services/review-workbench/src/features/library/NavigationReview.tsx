@@ -162,7 +162,7 @@ export default function NavigationReview({
         <>
           {!report.coverage_complete && onReload && (
             <p className="navigation-refresh">
-              正文仍在核验。需要查看刚完成的页面时，可
+              可选正文仅包含已通过原图核对的页面。若有页面刚完成核对，可
               <Button
                 variant="outline"
                 disabled={busy || reloading}
@@ -182,6 +182,7 @@ export default function NavigationReview({
           <NavigationSearch
             title={entry.title}
             pages={report.approved_pages ?? []}
+            pageCount={report.page_count}
             runId={runId}
             busy={busy}
             onChoose={(choice) => {

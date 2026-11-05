@@ -103,13 +103,13 @@ test("native per-page review does not mark unfinished OCR complete", async () =>
   await screen.findByText(/Codex 自动处理/);
   expect(
     screen
-      .getByRole("heading", { name: /识别正文/ })
+      .getByRole("heading", { name: /文字提取/ })
       .closest("li")
       ?.getAttribute("data-status"),
   ).toBe("current");
   expect(
     screen
-      .getByRole("heading", { name: /原件视觉核验/ })
+      .getByRole("heading", { name: /原图核对/ })
       .closest("li")
       ?.getAttribute("data-status"),
   ).toBe("current");
@@ -328,3 +328,73 @@ test("switching execution windows preserves totals while the next batch loads", 
     query.clear();
   }
 });
+
+test.each([false, true])(
+  "capacity notice respects completed book state (%s)",
+  async (completed) => {
+    respondWith((request) =>
+      request.url.includes("/structure")
+        ? { available: false, items: [], policy: "test" }
+        : [
+            {
+              id: "run",
+              state: completed ? "completed" : "running",
+              stage: "vision",
+              execution: {
+                coordinator_active: true,
+                automatic_work_remaining: !completed,
+              },
+              scheduling: {
+                capacity: 14,
+                batch_size: 8,
+                active: {},
+                workers: {},
+                metrics: {},
+                cooldown_until: 0,
+                runtime_control: {
+                  state: "cooldown",
+                  scopes: [
+                    {
+                      scope: "model",
+                      model: "gpt-6.1-terra",
+                      state: "cooldown",
+                      code: "capacity",
+                      limit: 3,
+                      configured_limit: 7,
+                      retry_at: 1794000000,
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+    );
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RunDetails
+          book={{
+            id: "book",
+            run_id: "run",
+            title: "史料",
+            state: completed ? "ready" : "running",
+            stage: "vision",
+            revision: 1,
+            created_at: "2026-11-06",
+            revision_pending: false,
+            pending_count: 0,
+            navigation_pending_count: 0,
+          }}
+        />
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("heading", {
+      name: completed ? "本书处理完成" : "等待服务恢复",
+    });
+    const notice = screen.queryByRole("status", { name: "自动恢复状态" });
+    expect(Boolean(notice)).toBe(!completed);
+    if (!completed) {
+      expect(notice?.textContent).toContain("Terra：服务暂时容量不足");
+      expect(screen.queryByText("本书正在自动处理。")).toBeNull();
+    }
+  },
+);

@@ -32,7 +32,7 @@ export default function ReviewsPage() {
       {books.isError ? (
         <div role="alert">
           <p>{books.error.message}</p>
-          <Button onClick={() => void books.refetch()}>重试</Button>
+          <Button onClick={() => void books.refetch()}>重新读取待办</Button>
         </div>
       ) : books.isPending ? (
         <p role="status">正在读取待办…</p>

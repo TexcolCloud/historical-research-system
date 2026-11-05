@@ -45,7 +45,7 @@ export default function StructurePanel({
         <span>结构整理结果</span>
         {rows && (
           <small>
-            {ready} 项来源一致 · {rows.length - ready} 项保留原结构
+            {ready} 项可用于连续阅读 · {rows.length - ready} 项暂按原页显示
           </small>
         )}
       </summary>
@@ -58,7 +58,7 @@ export default function StructurePanel({
             <p role="alert">
               {query.error.message}
               <Button variant="outline" onClick={() => void query.refetch()}>
-                重试
+                重新读取整理结果
               </Button>
             </p>
           )}
@@ -71,7 +71,9 @@ export default function StructurePanel({
                   <div className="platform-structure-item-heading">
                     <strong>{row.title}</strong>
                     <span data-ready={row.status === "ready"}>
-                      {row.status === "ready" ? "来源一致" : "保留原结构"}
+                      {row.status === "ready"
+                        ? "可用于连续阅读"
+                        : "暂按原页显示"}
                     </span>
                   </div>
                   <p>{row.reason}</p>

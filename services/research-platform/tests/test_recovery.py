@@ -8,6 +8,15 @@ from hrs_platform.main import create_app
 from hrs_platform.services.runs.recovery import workflow_id
 
 
+def test_recovery_errors_explain_the_action_without_showing_internal_english():
+    from hrs_platform.services.runs.recovery import recovery_reason
+
+    assert "原件或证据" in recovery_reason(ValueError("hash mismatch at pages/0155.png"))
+    assert "故障详情" in recovery_reason(FileNotFoundError("pages/0155.png"))
+    assert "故障详情" in recovery_reason(RuntimeError("executor exited unexpectedly"))
+    assert recovery_reason(ValueError("Codex 登录已失效，请重新登录后恢复。")) == "Codex 登录已失效，请重新登录后恢复。"
+
+
 def test_repeated_retry_only_starts_one_new_attempt_and_preserves_published_book(platform):
     settings, engine = platform
     book, run = str(uuid4()), str(uuid4())

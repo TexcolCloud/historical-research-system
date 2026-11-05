@@ -2,11 +2,13 @@
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 from filelock import FileLock
 
-from hrs_codex.store import Store, atomic_json
+from hrs_codex.checkpoints import atomic_json
+from hrs_codex.store import Store
 
 
 class Runner:
@@ -15,7 +17,7 @@ class Runner:
     ):
         self.store = store
         if execute is None:
-            from hrs_codex.cli import run_codex
+            from hrs_codex.execution import run_codex
 
             execute = run_codex
         self.execute = execute
@@ -23,15 +25,18 @@ class Runner:
         self.owner = "local-runner:" + uuid4().hex
         self.stop_event = threading.Event()
         self.thread = None
-        self.active_stop = None
+        self.active_stops = {}
+        self.active_lock = threading.Lock()
 
     def tick(self, document_id: str | None = None) -> bool:
-        if self.stop_event.is_set():
+        if self.stop_event.is_set() or self.store.checkpoints.ledger is None:
             return False
         request = self.store.claim_run(self.owner, self.lease_seconds, document_id=document_id)
         if request is None:
             return self.recover_exhausted(document_id)
-        with FileLock(self.store._directory(request["document_id"]) / ".executor.lock", timeout=10):
+        with FileLock(
+            self.store.document_directory(request["document_id"]) / ".executor.lock", timeout=10
+        ):
             return self.execute_request(request)
 
     def recover_exhausted(self, document_id=None):
@@ -64,21 +69,14 @@ class Runner:
             except RecoveryWait:
                 continue
             except (ValueError, OSError) as error:
-                with self.store.lock:
-                    current = self.store._load(doc["id"])
-                    if current.get("run_request") != request:
-                        continue
-                    current["run_request"].update(
-                        automatic_checkpoint_used=True,
-                        recovery_error={"code": "checkpoint_invalid", "detail": str(error)},
-                    )
-                    self.store._save(current)
+                self.store.record_recovery_failure(doc["id"], request, str(error))
         return False
 
     def execute_request(self, request):
         done = threading.Event()
         run_stop = threading.Event()
-        self.active_stop = run_stop
+        with self.active_lock:
+            self.active_stops[request["document_id"]] = run_stop
         if self.stop_event.is_set():
             run_stop.set()
         heartbeat_error = []
@@ -100,30 +98,49 @@ class Runner:
         try:
             self.execute(self.store, request["document_id"], stop_event=run_stop)
         except Exception as error:  # noqa: BLE001 - persist failures from the execution adapter
-            failure = {"type": type(error).__name__, "message": str(error)}
+            failure = getattr(error, "failure", None) or {
+                "type": type(error).__name__,
+                "message": str(error),
+            }
         finally:
             done.set()
             thread.join(timeout=5)
-            self.active_stop = None
+            with self.active_lock:
+                self.active_stops.pop(request["document_id"], None)
         if heartbeat_error:
             raise RuntimeError("Run lease lost: " + heartbeat_error[-1])
         self.store.finish_run(request["document_id"], request["token"], error=failure)
         return True
 
     def _loop(self):
-        while not self.stop_event.is_set():
-            try:
-                self.tick()
-            except Exception as error:  # noqa: BLE001 - isolate a document failure from the durable dispatcher
-                atomic_json(
-                    self.store.root / "runner-error.json",
-                    {
-                        "at": time.time(),
-                        "type": type(error).__name__,
-                        "message": str(error),
-                    },
-                )
-            self.stop_event.wait(self.poll_seconds)
+        # Threads supervise two CLI coordinators, never perform model inference.
+        # Every native worker still passes the workspace-wide durable admission gate.
+        futures, sequence, sweep_at = set(), -1, 0
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="codex-coordinator") as pool:
+            while not self.stop_event.is_set():
+                completed = False
+                for future in list(futures):
+                    if not future.done():
+                        continue
+                    futures.remove(future)
+                    try:
+                        completed = future.result() or completed
+                    except Exception as error:  # noqa: BLE001 - isolate each owned coordinator failure
+                        atomic_json(
+                            self.store.root / "runner-error.json",
+                            {
+                                "at": time.time(),
+                                "type": type(error).__name__,
+                                "message": str(error),
+                            },
+                        )
+                ledger = self.store.checkpoints.ledger
+                current = ledger.sequence() if ledger else 0
+                if completed or current != sequence or time.monotonic() >= sweep_at:
+                    sequence, sweep_at = current, time.monotonic() + 30
+                    for _ in range(2 - len(futures)):
+                        futures.add(pool.submit(self.tick))
+                self.stop_event.wait(self.poll_seconds)
 
     def start(self):
         if self.thread and self.thread.is_alive():
@@ -133,8 +150,9 @@ class Runner:
 
     def stop(self):
         self.stop_event.set()
-        if self.active_stop:
-            self.active_stop.set()
+        with self.active_lock:
+            for active in self.active_stops.values():
+                active.set()
         if self.thread:
             self.thread.join(timeout=20)
 

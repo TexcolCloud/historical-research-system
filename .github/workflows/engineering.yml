@@ -38,7 +38,7 @@ jobs:
         with:
           version: '0.12.6'
           enable-cache: true
-      - run: uv sync --project services/research-platform --locked --group dev
+      - run: uv sync --project services/research-platform --locked --group dev --extra legacy
       - run: npm --prefix services/review-workbench ci
       - run: npm --prefix services/review-workbench/tooling/openapi ci
       - run: docker compose -f deploy/platform/compose.test.yml up -d --wait

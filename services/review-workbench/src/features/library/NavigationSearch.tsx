@@ -40,12 +40,14 @@ export function Opening({ text }: { text: string }) {
 export default function NavigationSearch({
   title,
   pages,
+  pageCount,
   runId,
   busy,
   onChoose,
 }: {
   title: string;
   pages: Page[];
+  pageCount?: number | null;
   runId: string;
   busy: boolean;
   onChoose: (choice: NavigationChoice) => void;
@@ -116,6 +118,7 @@ export default function NavigationSearch({
         <summary>按 PDF 页序定位</summary>
         <PagePicker
           pages={pages}
+          pageCount={pageCount}
           runId={runId}
           busy={busy}
           onChoose={onChoose}
@@ -126,11 +129,13 @@ export default function NavigationSearch({
 }
 function PagePicker({
   pages,
+  pageCount,
   runId,
   busy,
   onChoose,
 }: {
   pages: Page[];
+  pageCount?: number | null;
   runId: string;
   busy: boolean;
   onChoose: (choice: NavigationChoice) => void;
@@ -179,7 +184,15 @@ function PagePicker({
         查看这一页
       </Button>
       {input && !approved && (
-        <p role="status">该页不存在或尚未完成核验，请换页或等待系统核验。</p>
+        <p role="status">
+          {!Number.isInteger(Number(input)) || Number(input) < 1
+            ? "请输入从 1 开始的整数页序。"
+            : pageCount != null && Number(input) > pageCount
+              ? `页序超出范围，本 PDF 共 ${pageCount} 页。`
+              : pageCount == null
+                ? "当前已通过页面中没有该页。请先查看处理进展，确认 PDF 页数和核对状态。"
+                : "该页尚未通过原图核对，暂不能设置跳转。可先查看阅读底稿或处理待核对内容。"}
+        </p>
       )}
       {viewed > 0 && (
         <section aria-label={`PDF 第 ${viewed} 页正文起点`}>

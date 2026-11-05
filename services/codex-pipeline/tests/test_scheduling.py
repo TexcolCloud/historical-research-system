@@ -78,3 +78,41 @@ def test_worker_batch_limit_does_not_block_fresh_worker(tmp_path):
         )
     assert store.claim_task(doc_id, "ocr", "batch-worker", scheduled=True) is None
     assert store.claim_task(doc_id, "ocr", "fresh-worker", scheduled=True)
+
+
+def test_speed_uses_observed_window_instead_of_a_fixed_five_minute_denominator():
+    doc = {
+        "pages": [],
+        "tasks": [
+            {
+                "stage": "review",
+                "state": "completed",
+                "claim": {"started_at": 900},
+                "receipt": {"created_at": 950, "duration_seconds": 50},
+            }
+            for _ in range(6)
+        ],
+    }
+    metric = scheduling_plan(doc, now=960)["metrics"]["review"]
+    assert metric["pages_per_minute"] == 7.2
+    assert metric["sample_window_seconds"] == 50
+    later = scheduling_plan(doc, now=2000)["metrics"]["review"]
+    assert later["pages_per_minute"] == metric["pages_per_minute"]
+    assert later["sample_window_seconds"] == metric["sample_window_seconds"]
+
+
+def test_independent_verification_uses_spare_capacity_instead_of_serializing_pages():
+    doc = {"pages": [], "tasks": [{"stage": "verify", "state": "ready"} for _ in range(20)]}
+    plan = scheduling_plan(doc, now=1000)
+    assert plan["workers"]["verify"] == 7
+    assert sum(plan["workers"].values()) == 7
+
+
+def test_ready_verification_takes_a_virtual_review_lane_at_small_capacity():
+    doc = {
+        "pages": [{"page": 1, "state": "awaiting_ocr"}],
+        "tasks": [{"stage": "ocr", "state": "ready"}, {"stage": "verify", "state": "ready"}],
+    }
+    plan = scheduling_plan(doc, now=1000, capacity=2, overlap_reading=True)
+    assert plan["workers"]["verify"] == plan["workers"]["ocr"] == 1
+    assert plan["workers"]["review"] == 0

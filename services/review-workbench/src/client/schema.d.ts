@@ -937,6 +937,10 @@ export interface components {
             draft_text: string;
             /** Resolutions */
             resolutions?: components["schemas"]["ReviewResolution"][];
+            /** Locations */
+            locations?: components["schemas"]["ReviewLocation"][] | null;
+            /** Locations Text Sha256 */
+            locations_text_sha256?: string | null;
         };
         /** DraftRelation */
         DraftRelation: {
@@ -1138,6 +1142,8 @@ export interface components {
              * @default false
              */
             coverage_complete: boolean;
+            /** Page Count */
+            page_count?: number | null;
             /** Approved Pages */
             approved_pages?: components["schemas"]["NavigationPage"][];
         };
@@ -1235,6 +1241,7 @@ export interface components {
              * @default false
              */
             evidence_checked: boolean;
+            runtime_control?: components["schemas"]["RuntimeControlReport"] | null;
         };
         /** RecoveryRequest */
         RecoveryRequest: {
@@ -1243,6 +1250,21 @@ export interface components {
              * Format: uuid
              */
             request_id: string;
+        };
+        /** ReviewAnchor */
+        ReviewAnchor: {
+            /** Exact */
+            exact: string;
+            /**
+             * Prefix
+             * @default
+             */
+            prefix: string;
+            /**
+             * Suffix
+             * @default
+             */
+            suffix: string;
         };
         /** ReviewDecision */
         ReviewDecision: {
@@ -1273,6 +1295,8 @@ export interface components {
             text: string;
             /** Resolutions */
             resolutions?: components["schemas"]["ReviewResolution"][];
+            /** Locations */
+            locations?: components["schemas"]["ReviewLocation"][] | null;
         };
         /** ReviewIssue */
         ReviewIssue: {
@@ -1313,11 +1337,13 @@ export interface components {
             /** Footnotes */
             footnotes?: components["schemas"]["FootnoteLink"][];
             /** Locations */
-            locations?: {
-                [key: string]: unknown;
-            }[];
+            locations?: components["schemas"]["ReviewLocation"][];
             /** Resolutions */
             resolutions?: components["schemas"]["ReviewResolution"][];
+            /** Draft Locations */
+            draft_locations?: components["schemas"]["ReviewLocation"][] | null;
+            /** Draft Locations Text Sha256 */
+            draft_locations_text_sha256?: string | null;
         };
         /** ReviewIssueSummary */
         ReviewIssueSummary: {
@@ -1339,6 +1365,79 @@ export interface components {
             state: string;
             /** Text Sha256 */
             text_sha256: string;
+        };
+        /** ReviewLocation */
+        ReviewLocation: {
+            /** Id */
+            id: string;
+            /** Page */
+            page: number;
+            anchor: components["schemas"]["ReviewAnchor"];
+            /** Focus */
+            focus: string;
+            /** Boxes */
+            boxes: number[][];
+            /**
+             * Image Precision
+             * @enum {string}
+             */
+            image_precision: "line" | "region" | "page";
+            /** Message */
+            message: string;
+            /** Source Reading */
+            source_reading: string;
+            /** Candidate */
+            candidate: string;
+            /** Suggestion */
+            suggestion: string;
+            /**
+             * Text Sha256
+             * @default
+             */
+            text_sha256: string;
+            /**
+             * Image Sha256
+             * @default
+             */
+            image_sha256: string;
+            /** Start */
+            start?: number | null;
+            /** End */
+            end?: number | null;
+            /**
+             * Text Status
+             * @default missing
+             * @enum {string}
+             */
+            text_status: "located" | "missing" | "ambiguous";
+            /**
+             * Text Precision
+             * @default page
+             * @enum {string}
+             */
+            text_precision: "character" | "phrase" | "insertion" | "page";
+            /**
+             * Offset Unit
+             * @default unicode_codepoint
+             * @constant
+             */
+            offset_unit: "unicode_codepoint";
+            /** Location Diagnostics */
+            location_diagnostics?: string[];
+            /** Text Spans */
+            text_spans?: components["schemas"]["ReviewTextSpan"][];
+            /**
+             * Location
+             * @default
+             */
+            location: string;
+            /** Insertion Offset */
+            insertion_offset?: number | null;
+            /**
+             * Unlocated Reason
+             * @default
+             */
+            unlocated_reason: string;
         };
         /** ReviewReceipt */
         ReviewReceipt: {
@@ -1375,6 +1474,43 @@ export interface components {
              * @enum {string}
              */
             action: "keep" | "adopt" | "edit" | "defer";
+        };
+        /** ReviewTextSpan */
+        ReviewTextSpan: {
+            anchor: components["schemas"]["ReviewAnchor"];
+            /** Focus */
+            focus: string;
+            /** Start */
+            start?: number | null;
+            /** End */
+            end?: number | null;
+            /**
+             * Text Status
+             * @default missing
+             * @enum {string}
+             */
+            text_status: "located" | "missing" | "ambiguous";
+            /**
+             * Text Precision
+             * @default page
+             * @enum {string}
+             */
+            text_precision: "character" | "phrase" | "insertion" | "page";
+            /**
+             * Offset Unit
+             * @default unicode_codepoint
+             * @constant
+             */
+            offset_unit: "unicode_codepoint";
+            /** Location Diagnostics */
+            location_diagnostics?: string[];
+            /** Insertion Offset */
+            insertion_offset?: number | null;
+            /**
+             * Unlocated Reason
+             * @default
+             */
+            unlocated_reason: string;
         };
         /** RunControlReceipt */
         RunControlReceipt: {
@@ -1484,6 +1620,49 @@ export interface components {
             execution?: components["schemas"]["RunExecution"] | null;
             scheduling?: components["schemas"]["SchedulingReport"] | null;
         };
+        /** RuntimeControlReport */
+        RuntimeControlReport: {
+            /**
+             * State
+             * @default normal
+             * @enum {string}
+             */
+            state: "normal" | "cooldown" | "probing" | "recovering" | "blocked";
+            /** Scopes */
+            scopes?: components["schemas"]["RuntimeControlScope"][];
+            /** Next Retry At */
+            next_retry_at?: number | null;
+        };
+        /** RuntimeControlScope */
+        RuntimeControlScope: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "account" | "model";
+            /** Model */
+            model?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "normal" | "cooldown" | "probing" | "recovering" | "blocked";
+            /** Code */
+            code?: string | null;
+            /** Limit */
+            limit: number;
+            /** Configured Limit */
+            configured_limit: number;
+            /** Retry At */
+            retry_at?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Failures
+             * @default 0
+             */
+            failures: number;
+        };
         /** RuntimeStatus */
         RuntimeStatus: {
             /** Backend */
@@ -1524,6 +1703,16 @@ export interface components {
              * @default 0
              */
             cooldown_until: number;
+            /** Runtime Counts */
+            runtime_counts?: {
+                [key: string]: number;
+            };
+            /**
+             * Workspace Occupied
+             * @default 0
+             */
+            workspace_occupied: number;
+            runtime_control?: components["schemas"]["RuntimeControlReport"] | null;
         };
         /** SearchContext */
         SearchContext: {
@@ -1636,6 +1825,15 @@ export interface components {
             pages_per_minute: number;
             /** Samples */
             samples: number;
+            /**
+             * Sample Window Seconds
+             * @default 0
+             */
+            sample_window_seconds: number;
+            /** Phase Medians */
+            phase_medians?: {
+                [key: string]: number;
+            };
         };
         /** StructureItem */
         StructureItem: {

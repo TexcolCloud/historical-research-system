@@ -1,18 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button.tsx";
-import { client } from "@/client/api.ts";
 import type { components } from "@/client/schema.d.ts";
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import { MarkdownEditor } from "@/editor/LazyMarkdownEditor.tsx";
-import {
-  decisionRange,
-  readLocations,
-  suggestionEdit,
-  moveReviewLocations,
-} from "@/editor/review-highlights.ts";
-import ReviewFocus, { type Resolution } from "./ReviewFocus.tsx";
+import { useReviewSession } from "./useReviewSession.ts";
+import ReviewFocus from "./ReviewFocus.tsx";
 import SourceFocus from "./SourceFocus.tsx";
+import { useState } from "react";
 
 type Issue = components["schemas"]["ReviewIssue"];
 export default function IssueEditor({
@@ -24,267 +17,36 @@ export default function IssueEditor({
   workflowTest: boolean;
   onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void;
 }) {
-  const query = useQueryClient(),
-    draftKey = ["platform", "review-edit", issue.id];
-  const [text, setText] = useState(
-    query.getQueryData<string>(draftKey) ?? issue.draft_text ?? issue.text,
-  );
-  const [resolutions, setResolutions] = useState<Resolution[]>(
-    issue.resolutions ?? [],
-  );
-  const baseLocations = useMemo(
-    () => readLocations(issue.locations ?? []),
-    [issue.locations],
-  );
-  const [textLocations, setTextLocations] = useState(() =>
-    moveReviewLocations(issue.text, text, baseLocations),
-  );
-  const [active, setActive] = useState(
-    () =>
-      baseLocations.find(
-        (l) =>
-          !issue.resolutions?.some(
-            (r) => r.id === l.id && r.action !== "defer",
-          ),
-      )?.id ??
-      baseLocations[0]?.id ??
-      "",
-  );
-  const [boxes, setBoxes] = useState<Record<string, number[]>>({});
-  const locations = useMemo(
-    () =>
-      textLocations.map((l) =>
-        boxes[l.id]
-          ? { ...l, boxes: [boxes[l.id]], image_precision: "region" }
-          : l,
-      ),
-    [textLocations, boxes],
-  );
-  const current = locations.find((l) => l.id === active) ?? locations[0];
-  const [editing, setEditing] = useState(false),
-    [wholePage, setWholePage] = useState(false),
-    [pageReviewed, setPageReviewed] = useState(false);
-  const [editRange, setEditRange] = useState<{
-    start: number;
-    end: number;
-  } | null>(null);
-  const [finishing, setFinishing] = useState(false);
-  const [sourceMode, setSourceMode] = useState(false);
-  const snapshot = useRef({ text, resolutions, locations: textLocations });
-  const latestText = useRef(text),
-    latestResolutions = useRef(resolutions);
-  const savedText = useRef(issue.draft_text ?? issue.text),
-    savedResolutions = useRef(JSON.stringify(issue.resolutions ?? []));
-  const revision = useRef(issue.revision),
-    queue = useRef<Promise<unknown>>(Promise.resolve());
-  latestText.current = text;
-  latestResolutions.current = resolutions;
-  const draft = useMutation({
-    mutationKey: ["platform", "review-write", issue.run_id],
-    mutationFn: async ({
-      value,
-      decisions,
-    }: {
-      value: string;
-      decisions: Resolution[];
-    }) => {
-      if (
-        value === savedText.current &&
-        JSON.stringify(decisions) === savedResolutions.current
-      )
-        return {
-          revision: revision.current,
-          draft_text: value,
-          resolutions: decisions,
-        };
-      const { data, response } = await client.PUT(
-        "/api/v2/reviews/{issue_id}/draft",
-        {
-          params: { path: { issue_id: issue.id } },
-          body: {
-            text: value,
-            expected_revision: revision.current,
-            resolutions: decisions,
-          },
-        },
-      );
-      if (!data)
-        throw new Error(
-          response.status === 409
-            ? "草稿版本已变化，请重新读取；当前文字已保留。"
-            : "草稿未保存，请重试。",
-        );
-      revision.current = data.revision;
-      savedText.current = data.draft_text;
-      savedResolutions.current = JSON.stringify(decisions);
-      return data;
-    },
-    onSuccess: (data) =>
-      query.setQueryData(["platform", "issue", issue.id], {
-        ...issue,
-        revision: data.revision,
-        draft_text: data.draft_text,
-        resolutions: data.resolutions,
-      }),
-  });
-  function saveDraft(value: string, decisions = latestResolutions.current) {
-    const next = queue.current
-      .catch(() => undefined)
-      .then(() => draft.mutateAsync({ value, decisions }));
-    queue.current = next;
-    return next;
-  }
-  const saveRef = useRef(saveDraft);
-  saveRef.current = saveDraft;
-  useEffect(() => {
-    if (
-      (text === savedText.current &&
-        JSON.stringify(resolutions) === savedResolutions.current) ||
-      draft.isError
-    )
-      return;
-    const timer = setTimeout(() => {
-      void saveRef.current(text).catch(() => undefined);
-    }, 800);
-    return () => clearTimeout(timer);
-  }, [text, resolutions, draft.isError]);
-  useEffect(
-    () => () => {
-      if (
-        latestText.current !== savedText.current ||
-        JSON.stringify(latestResolutions.current) !== savedResolutions.current
-      )
-        void saveRef.current(latestText.current).catch(() => undefined);
-    },
-    [],
-  );
-
-  function changeText(value: string) {
-    const nextLocations = moveReviewLocations(text, value, textLocations);
-    const retained = resolutions.filter((r) => {
-      const location = locations.find((l) => l.id === r.id);
-      if (!location) return false;
-      const before = decisionRange(text, location),
-        after = decisionRange(
-          value,
-          nextLocations.find((l) => l.id === r.id) ?? location,
-        );
-      return (
-        before &&
-        after &&
-        text.slice(before.start, before.end) ===
-          value.slice(after.start, after.end)
-      );
-    });
-    setText(value);
-    latestText.current = value;
-    setResolutions(retained);
-    latestResolutions.current = retained;
-    setTextLocations(nextLocations);
-    setPageReviewed(false);
-    query.setQueryData(draftKey, value);
-    draft.reset();
-  }
-  function beginEdit() {
-    snapshot.current = { text, resolutions, locations: textLocations };
-    const range = current ? decisionRange(text, current) : null;
-    setEditRange(range);
-    setWholePage(!range);
-    setSourceMode(false);
-    setEditing(true);
-  }
-  function changeFocus(value: string) {
-    if (!editRange) return;
-    changeText(
-      text.slice(0, editRange.start) + value + text.slice(editRange.end),
-    );
-    setEditRange({ ...editRange, end: editRange.start + value.length });
-  }
-  function cancelEdit() {
-    const previous = snapshot.current;
-    setText(previous.text);
-    latestText.current = previous.text;
-    query.setQueryData(draftKey, previous.text);
-    setResolutions(previous.resolutions);
-    latestResolutions.current = previous.resolutions;
-    setTextLocations(previous.locations);
-    setEditing(false);
-    setEditRange(null);
-    void saveDraft(previous.text, previous.resolutions).catch(() => undefined);
-  }
-  async function finish(action: Resolution["action"]) {
-    if (finishing) return;
-    setFinishing(true);
-    const decisions = current
-      ? [
-          ...resolutions.filter((r) => r.id !== current.id),
-          { id: current.id, action },
-        ]
-      : resolutions;
-    setResolutions(decisions);
-    latestResolutions.current = decisions;
-    try {
-      await saveDraft(text, decisions);
-      setEditing(false);
-      setEditRange(null);
-      setPageReviewed(true);
-      const next = locations.find(
-        (l) => !decisions.some((r) => r.id === l.id && r.action !== "defer"),
-      );
-      if (next) setActive(next.id);
-    } finally {
-      setFinishing(false);
-    }
-  }
-  const ready = locations.length
-    ? locations.every((l) =>
-        resolutions.some((r) => r.id === l.id && r.action !== "defer"),
-      )
-    : pageReviewed;
-  const originalLocation = baseLocations.find((l) => l.id === current?.id);
-  const proposal = originalLocation
-    ? suggestionEdit(issue.text, originalLocation)
-    : null;
-  const request = useRef<components["schemas"]["ReviewDecision"] | null>(null);
-  const changed = text !== issue.text;
-  const submission = useMutation({
-    mutationKey: ["platform", "review-write", issue.run_id],
-    mutationFn: async () => {
-      await saveDraft(text);
-      const action = changed ? "correct" : "confirm";
-      if (
-        !request.current ||
-        request.current.expected_revision !== revision.current ||
-        request.current.text !== (changed ? text : undefined) ||
-        JSON.stringify(request.current.resolutions ?? []) !==
-          JSON.stringify(resolutions)
-      )
-        request.current = {
-          decision_id: crypto.randomUUID(),
-          expected_revision: revision.current,
-          expected_text_sha256: issue.text_sha256,
-          action,
-          ...(changed ? { text } : {}),
-          ...(locations.length ? { resolutions } : {}),
-        };
-      const { data, response } = await client.POST(
-        "/api/v2/reviews/{issue_id}/decisions",
-        { params: { path: { issue_id: issue.id } }, body: request.current },
-      );
-      if (!data)
-        throw new Error(
-          response.status === 409
-            ? "内容或版本已变化，请重新读取；当前草稿已保留。"
-            : "提交未确认，请重试；草稿已保留。",
-        );
-      return data;
-    },
-    onSuccess: onSaved,
-  });
-  const busy = finishing || submission.isPending;
-  const completed = resolutions.filter(
-    (r) => r.action !== "defer" && locations.some((l) => l.id === r.id),
-  ).length;
+  const [unmapped, setUnmapped] = useState<string[]>([]);
+  const {
+    text,
+    resolutions,
+    locations,
+    current,
+    editing,
+    wholePage,
+    editRange,
+    finishing,
+    sourceMode,
+    draft,
+    ready,
+    proposal,
+    changed,
+    submission,
+    busy,
+    completed,
+    recheckPage,
+    setActive,
+    finish,
+    beginEdit,
+    changeFocus,
+    editWholePage,
+    toggleSourceMode,
+    changeText,
+    cancelEdit,
+    saveDraft,
+    setBoxes,
+  } = useReviewSession(issue, onSaved);
   return (
     <div className="platform-review-content guided-review">
       <article>
@@ -306,11 +68,11 @@ export default function IssueEditor({
         )}
         {ready && !editing ? (
           <section className="review-page-complete" aria-label="本页提交">
-            <h3>本页核对已完成</h3>
+            <h3>本页疑点已处理，等待提交</h3>
             <p>
               {changed
-                ? "修改已保存，请检查最终文字后提交本页。"
-                : "你已确认保留当前识别文字。"}
+                ? "草稿已保存。请检查最终文字，提交后本页才计入已通过。"
+                : "已记录保留当前文字的判断，提交后本页才计入已通过。"}
             </p>
             <Button
               disabled={
@@ -325,21 +87,9 @@ export default function IssueEditor({
                 ? "正在提交…"
                 : workflowTest
                   ? "按授权提交流程测试结果"
-                  : "提交本页审核结果"}
+                  : "提交本页并继续"}
             </Button>
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                setPageReviewed(false);
-                if (current) {
-                  setResolutions(
-                    resolutions.filter((r) => r.id !== current.id),
-                  );
-                  setActive(current.id);
-                }
-              }}
-            >
+            <Button variant="outline" disabled={busy} onClick={recheckPage}>
               重新检查当前页
             </Button>
           </section>
@@ -359,7 +109,7 @@ export default function IssueEditor({
           />
         ) : (
           <section className="review-focus">
-            <h3>对照右侧原图核对整页</h3>
+            <h3>对照原图核对整页</h3>
             <p>本页没有可靠的局部定位，请检查正文与原图。</p>
             {!editing && (
               <div className="review-judgment-actions">
@@ -405,21 +155,14 @@ export default function IssueEditor({
                 <button
                   className="review-text-link"
                   disabled={busy}
-                  onClick={() => {
-                    setWholePage(true);
-                    setEditRange(null);
-                    setSourceMode(true);
-                  }}
+                  onClick={editWholePage}
                 >
                   编辑整页 Markdown
                 </button>
               </>
             ) : (
               <div>
-                <Button
-                  variant="outline"
-                  onClick={() => setSourceMode(!sourceMode)}
-                >
+                <Button variant="outline" onClick={toggleSourceMode}>
                   {sourceMode ? "切换可视化编辑" : "切换 Markdown 源码"}
                 </Button>
                 {sourceMode ? (
@@ -466,25 +209,28 @@ export default function IssueEditor({
               variant="outline"
               disabled={busy}
               onClick={() => {
-                void saveDraft(text).catch(() => undefined);
+                if (draft.isError) void saveDraft(text).catch(() => undefined);
+                else submission.mutate();
               }}
             >
-              重试保存草稿
+              {draft.isError ? "重试保存草稿" : "重试提交本页"}
             </Button>
           </p>
         )}
-        {draft.isSuccess && (
+        {(draft.isPending || finishing) && (
+          <p role="status" className="review-save-status">
+            正在保存草稿，请等待保存完成。
+          </p>
+        )}
+        {draft.isSuccess && !draft.isPending && !finishing && (
           <p role="status" className="review-save-status">
             草稿已自动保存 · 尚未提交本页
           </p>
         )}
         <details
+          key={`${current?.id ?? "page"}:${ready ? "complete" : "review"}`}
           className="review-page-preview"
-          open={
-            !locations.length ||
-            ready ||
-            Boolean(current && !decisionRange(text, current))
-          }
+          open
         >
           <summary>
             {ready ? "检查本页最终文字" : "查看整页文字与上下文"}
@@ -499,8 +245,24 @@ export default function IssueEditor({
               activeHighlight={current?.id}
               onHighlight={editing ? undefined : setActive}
               footnotes={text === issue.text ? issue.footnotes : []}
+              onLocationFailure={setUnmapped}
               assetBaseUrl={`/api/v2/runs/${issue.run_id}/artifacts`}
             />
+            {current && unmapped.includes(current.id) && (
+              <section
+                className="review-source-text"
+                aria-label="当前疑点的原文定位"
+              >
+                <p>阅读视图暂不能标记本处，请对照以下 Markdown 原文片段。</p>
+                <pre>
+                  <mark>
+                    {current.anchor.exact ||
+                      current.candidate ||
+                      "请查看整页 Markdown"}
+                  </mark>
+                </pre>
+              </section>
+            )}
           </div>
         </details>
         <details className="review-machine-report">
@@ -554,7 +316,7 @@ function reasonText(reason: Issue["reasons"][number]) {
         .join("；") || "请对照原件核对。"
     );
   return reason
-    .replaceAll("deepseek-review-incomplete", "本地视觉核验未完成")
+    .replaceAll("deepseek-review-incomplete", "原图核对未完成")
     .replaceAll(
       "independent-source-reading-failed",
       "原图独立初读未获得有效结果",

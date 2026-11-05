@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs_platform import models as db
 from hrs_platform.domain.errors import ServiceError, TaskError
-from hrs_platform.services.documents.review import digest
+from hrs_platform.domain.records import text_digest as digest
 from hrs_platform.services.storage import objects_for
 
 execution_parent = ContextVar("execution_parent", default=None)

@@ -1,154 +1,97 @@
-"""Durable local work queue and evidence library for Codex subagents."""
+"""Public workflow facade. Storage, evidence and business commands have explicit owners."""
 
-from __future__ import annotations
-
-import hashlib
-import json
-import os
-import re
-import shutil
-import time
-from contextlib import contextmanager
 from pathlib import Path
-from uuid import uuid4
 
-from filelock import FileLock, Timeout
+from filelock import FileLock
 
-STAGES = {"ocr", "review", "verify", "navigation", "organization"}
-
-
-def digest(value: bytes | str | dict | list) -> str:
-    if not isinstance(value, bytes):
-        if not isinstance(value, str):
-            value = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        value = value.encode("utf-8")
-    return hashlib.sha256(value).hexdigest()
-
-
-def file_digest(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def atomic_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        # Windows readers may briefly hold a sharing handle to the old snapshot.
-        for attempt in range(50):
-            try:
-                temporary.replace(path)
-                break
-            except PermissionError:
-                if attempt == 49:
-                    raise
-                time.sleep(0.01)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-class _EvidenceFiles:
-    """Per-pass receipts index: cache work, never trust a previous validation pass."""
-
-    def __init__(self, directory):
-        self.directory = directory
-        self.hashes, self.metadata = {}, {}
-        self.index = None
-
-    def sha(self, path):
-        if path not in self.hashes:
-            self.hashes[path] = file_digest(path)
-        return self.hashes[path]
-
-    def json(self, path):
-        if path not in self.metadata:
-            self.metadata[path] = json.loads(path.read_text(encoding="utf-8"))
-        return self.metadata[path]
-
-    def matching(self, sha):
-        if self.index is None:
-            self.index = {}
-            for path in (self.directory / "evidence/details").glob("*.json"):
-                self.index.setdefault(self.sha(path), []).append(path)
-        return self.index.get(sha, [])
+from hrs_codex.checkpoints import atomic_json as atomic_json
+from hrs_codex.dispatch import Dispatch
+from hrs_codex.hashing import digest as digest
+from hrs_codex.hashing import file_digest as file_digest
+from hrs_codex.human_review_workflow import HumanReviewWorkflow
+from hrs_codex.navigation_workflow import NavigationWorkflow
+from hrs_codex.publication_workflow import PublicationWorkflow
+from hrs_codex.run_workflow import RunWorkflow
+from hrs_codex.source_import import SourceImport
+from hrs_codex.task_inspection import TaskInspection
+from hrs_codex.task_workflow import TaskWorkflow
+from hrs_codex.workflow_context import WorkflowContext
 
 
 class Store:
     def __init__(self, root: Path):
-        self.root = Path(root).resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
-        # ponytail: one process lock serializes local document mutations; split by
-        # document only if measured local queue contention warrants it.
-        self.lock = FileLock(self.root / ".store.lock", timeout=30)
+        self.context = WorkflowContext(root)
+        self.checkpoints = self.context.repository
+        self.root, self.lock = self.checkpoints.root, self.checkpoints.lock
+        if self.checkpoints.created:
+            from hrs_codex.execution_policy import configure_execution
 
-    def _directory(self, document_id: str) -> Path:
-        if len(document_id) != 24 or any(c not in "0123456789abcdef" for c in document_id):
-            raise ValueError("Invalid document ID")
-        return self.root / "documents" / document_id
-
-    def _load(self, document_id: str) -> dict:
-        return json.loads(
-            (self._directory(document_id) / "document.json").read_text(encoding="utf-8")
-        )
-
-    def _save(self, doc: dict) -> None:
-        atomic_json(self._directory(doc["id"]) / "document.json", doc)
-
-    @contextmanager
-    def _verified(self, document_id, validate=None):
-        """Validate an immutable snapshot without blocking readers or lease heartbeats."""
-        path = self._directory(document_id) / "document.json"
-        for _ in range(8):
-            snapshot = path.read_bytes()
-            doc = json.loads(snapshot)
-            (validate or self._verify_evidence)(doc)
             with self.lock:
-                if path.read_bytes() != snapshot:
-                    continue
-                yield doc
-                return
-        raise ValueError(
-            "Document changed during evidence validation; retry with the current snapshot"
+                if not (self.root / "execution-policy.json").exists():
+                    configure_execution(self.root, capacity=14)
+        self.navigation = NavigationWorkflow(self.context)
+        self.runs = RunWorkflow(self.context, self.navigation)
+        self.publications = PublicationWorkflow(self.context, self.runs)
+        self.human = HumanReviewWorkflow(
+            self.context, self.navigation, self.publications, self.runs
         )
+        self.source_import = SourceImport(self.context)
+        self.task_inspection = TaskInspection(self.context)
+        self.tasks = TaskWorkflow(self.context, self.navigation)
+        self.dispatch = Dispatch(self)
 
-    @staticmethod
-    def _require_active(doc: dict, *, allow_paused: bool = False) -> None:
-        if doc.get("run_request", {}).get("cancel_requested"):
-            raise ValueError("Document cancellation requested; no further processing is allowed")
-        if not allow_paused and doc.get("run_request", {}).get("pause_requested"):
-            raise ValueError("Document is paused; explicitly resume before processing")
+    @property
+    def runtime_control(self):
+        from hrs_codex.runtime_control import RuntimeControl
 
-    def _path(self, doc: dict, relative: str) -> Path:
-        directory = self._directory(doc["id"]).resolve()
-        path = (directory / relative).resolve()
-        if not path.is_relative_to(directory):
-            raise ValueError("Evidence path escapes document directory")
-        return path
+        return RuntimeControl(self.root, self.checkpoints.ledger)
 
-    @staticmethod
-    def _new_task(stage: str, page: int | None = None) -> dict:
-        return {
-            "task_id": uuid4().hex,
-            "stage": stage,
-            "page": page,
-            "state": "ready",
-            "created_at": time.time(),
+    def document_directory(self, document_id):
+        return self.checkpoints.directory(document_id)
+
+    def artifact_path(self, snapshot, relative):
+        return self.checkpoints.evidence_path(snapshot, relative)
+
+    def verify_evidence(self, snapshot, pages=None):
+        return self.context.evidence.verify(snapshot, pages)
+
+    def review_packet(self, snapshot, page):
+        """Build read-only review material from an already validated snapshot."""
+        return self.human.packet(snapshot, page)
+
+    def execution_lock(self, document_id, timeout=0):
+        return FileLock(self.document_directory(document_id) / ".executor.lock", timeout=timeout)
+
+    def freeze_policy(self, document_id, policy):
+        with self.lock:
+            document = self.checkpoints.read(document_id)
+            if not document.get("processing_policy") and document["state"] != "published":
+                document["processing_policy"] = policy
+                self.checkpoints.write(document)
+
+    def recover_run(self, document_id, recovery_id, *, automatic=False):
+        from hrs_codex.recovery import recover
+
+        return recover(self.context, document_id, recovery_id, automatic=automatic)
+
+    def status(self, document_id: str) -> dict:
+        doc = self.context.repository.read(document_id)
+        doc["directory"] = str(self.context.repository.directory(document_id))
+        doc["counts"] = {
+            state: sum(t["state"] == state for t in doc["tasks"])
+            for state in ("ready", "leased", "completed", "pending", "superseded")
         }
+        return doc
 
-    def register_manifest(self, manifest: dict, title: str = "") -> dict:
-        return self.register(
-            Path(manifest["source"]["path"]),
-            manifest["pages"],
-            title=title,
-            expected_source_sha256=manifest["source"]["sha256"],
-            original_name=manifest["source"].get("original_name"),
-            media_type=manifest["source"].get("media_type"),
-        )
+    def list_documents(self) -> list[dict]:
+        documents = []
+        for document_id in self.checkpoints.ids():
+            doc = self.checkpoints.read(document_id)
+            documents.append({key: doc[key] for key in ("id", "title", "state", "created_at")})
+        return documents
+
+    def register_manifest(self, manifest: dict, title: str = ""):
+        return self.source_import.register_manifest(manifest, title)
 
     def register(
         self,
@@ -159,212 +102,15 @@ class Store:
         expected_source_sha256: str | None = None,
         original_name: str | None = None,
         media_type: str | None = None,
-    ) -> dict:
-        source = Path(source).resolve()
-        source_hash = file_digest(source)
-        if expected_source_sha256 is not None and source_hash != expected_source_sha256:
-            raise ValueError("Source hash mismatch")
-        document_id = source_hash[:24]
-        if not pages or [p["page"] for p in pages] != list(range(1, len(pages) + 1)):
-            raise ValueError("Pages must be a nonempty consecutive physical page sequence")
-        with FileLock(self.root / f".register-{document_id}.lock", timeout=30):
-            directory = self._directory(document_id)
-            if (directory / "document.json").exists():
-                with self._verified(document_id) as existing:
-                    return existing
-            directory.mkdir(parents=True, exist_ok=True)
-            retained_source = directory / ("source" + source.suffix.lower())
-            if source != retained_source.resolve():
-                shutil.copyfile(source, retained_source)
-            retained_pages = []
-            for page in pages:
-                image = Path(page["image"]).resolve()
-                image_hash = file_digest(image)
-                if page.get("image_sha256", page.get("sha256", image_hash)) != image_hash:
-                    raise ValueError("Page image hash mismatch")
-                target = directory / "pages" / f"{page['page']:05d}{image.suffix.lower()}"
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if image != target.resolve():
-                    shutil.copyfile(image, target)
-                retained_pages.append(
-                    {
-                        "page": page["page"],
-                        "image": target.relative_to(directory).as_posix(),
-                        "image_sha256": image_hash,
-                        "state": "awaiting_ocr",
-                    }
-                )
-                plan = page.get("extraction_plan")
-                if plan is not None:
-                    if plan.get("route") not in {"native", "mixed", "ocr", "blank_candidate"}:
-                        raise ValueError("Unknown PDF extraction route")
-                    native = plan.get("native_markdown", "")
-                    if not isinstance(native, str) or plan.get(
-                        "native_sha256", digest(native)
-                    ) != digest(native):
-                        raise ValueError("Native extraction text hash mismatch")
-                    retained_pages[-1].update(extraction_plan=plan, route=plan["route"])
-            doc = {
-                "schema_version": 1,
-                "id": document_id,
-                "document_id": document_id,
-                "title": title or Path(original_name or source.name).stem,
-                "created_at": time.time(),
-                "state": "processing",
-                "source": {
-                    "path": retained_source.name,
-                    "sha256": source_hash,
-                    "original_name": original_name or source.name,
-                    "media_type": media_type,
-                },
-                "pages": retained_pages,
-                "tasks": [self._new_task("ocr", p["page"]) for p in retained_pages],
-                "organization": None,
-                "publication": None,
-            }
-            for page in doc["pages"]:
-                plan = page.get("extraction_plan", {})
-                if plan.get("route") != "native" or not plan.get("native_markdown", "").strip():
-                    continue
-                task = next(t for t in doc["tasks"] if t["page"] == page["page"])
-                task["stage"] = "extraction"
-                inputs = self._inputs(doc, task)
-                result = {"markdown": plan["native_markdown"], "input_sha256": digest(inputs)}
-                receipt = {
-                    "task_id": task["task_id"],
-                    "worker_id": "local:pdfium",
-                    "input_sha256": digest(inputs),
-                    "approval_type": "extraction",
-                    "human_approval": False,
-                    "created_at": time.time(),
-                }
-                task.update(
-                    state="completed",
-                    inputs=inputs,
-                    claim={"input_sha256": digest(inputs)},
-                    result=result,
-                    receipt={**receipt, "result_sha256": digest(result)},
-                )
-                page["ocr"] = {
-                    **receipt,
-                    "markdown": result["markdown"],
-                    "sha256": digest(result["markdown"]),
-                }
-                page["state"] = "awaiting_review"
-                doc["tasks"].append(self._new_task("review", page["page"]))
-            self._save(doc)
-            return doc
-
-    def _verify_evidence(self, doc: dict) -> None:
-        files = _EvidenceFiles(self._directory(doc["id"]))
-        tasks = {t["task_id"]: t for t in doc["tasks"]}
-        if files.sha(self._path(doc, doc["source"]["path"])) != doc["source"]["sha256"]:
-            raise ValueError("Retained original source hash mismatch")
-        for page in doc["pages"]:
-            if files.sha(self._path(doc, page["image"])) != page["image_sha256"]:
-                raise ValueError(f"Original page {page['page']} image hash mismatch")
-            for field in ("ocr", "candidate", "approved"):
-                text = page.get(field)
-                if text and digest(text["markdown"]) != text["sha256"]:
-                    raise ValueError(f"Page {page['page']} {field} text hash mismatch")
-                if text:
-                    task = tasks[text["task_id"]]
-                    retained = (
-                        task["inputs"]["markdown"]
-                        if field == "approved" and task["stage"] != "human_review"
-                        else task["result"]["markdown"]
-                    )
-                    if text["markdown"] != retained:
-                        raise ValueError(
-                            f"Page {page['page']} {field} differs from its retained machine result"
-                        )
-        for task in doc["tasks"]:
-            readings = task.get("source_reading_history", []) + (
-                [task["source_reading"]] if task.get("source_reading") else []
-            )
-            for reading in readings:
-                if digest({k: v for k, v in reading.items() if k != "sha256"}) != reading["sha256"]:
-                    raise ValueError("Original reading evidence hash mismatch")
-                if (
-                    reading["reading"]["image_sha256"]
-                    != doc["pages"][task["page"] - 1]["image_sha256"]
-                ):
-                    raise ValueError("Original reading page hash mismatch")
-                self._verify_details(doc, task, reading["reading"], files)
-            if task.get("source_first_required") and task.get("result") is not None:
-                if (
-                    not task.get("source_reading")
-                    or task["receipt"].get("source_reading_sha256")
-                    != task["source_reading"]["sha256"]
-                ):
-                    raise ValueError("Machine decision lacks its original-first reading")
-            if task.get("inputs") and digest(task["inputs"]) != task["claim"]["input_sha256"]:
-                raise ValueError("Retained task input hash mismatch")
-            if (
-                task.get("result") is not None
-                and digest(task["result"]) != task["receipt"]["result_sha256"]
-            ):
-                raise ValueError("Retained task result hash mismatch")
-            if task.get("result") is not None:
-                self._verify_details(doc, task, task["result"], files)
-        organization = doc.get("organization")
-        if organization:
-            task = next(t for t in doc["tasks"] if t["task_id"] == organization["task_id"])
-            if organization["articles"] != task["result"]["articles"]:
-                raise ValueError("Organization differs from its retained machine result")
-
-    def _verify_details(self, doc: dict, task: dict, result: dict, files=None) -> None:
-        files = files or _EvidenceFiles(self._directory(doc["id"]))
-        evidence = result.get("original_details", [])
-        if not isinstance(evidence, list):
-            raise ValueError("Detail evidence must be a list")
-        for detail in evidence:
-            if isinstance(detail, dict) and set(detail) == {"image_sha256", "metadata_sha256"}:
-                matches = files.matching(detail["metadata_sha256"])
-                if len(matches) != 1:
-                    raise ValueError(
-                        "Unknown compact detail receipt; use hashes returned by original_detail"
-                    )
-                detail = {
-                    **files.json(matches[0]),
-                    **detail,
-                    "metadata": matches[0].relative_to(self._directory(doc["id"])).as_posix(),
-                }
-            if (
-                not isinstance(detail, dict)
-                or detail.get("document_id") != doc["id"]
-                or detail.get("source_sha256") != doc["source"]["sha256"]
-                or detail.get("page") not in [p["page"] for p in doc["pages"]]
-                or (task["page"] is not None and detail.get("page") != task["page"])
-            ):
-                raise ValueError("Detail evidence source/page mismatch")
-            for field in ("image", "metadata"):
-                path = detail.get(field)
-                if not isinstance(path, str) or files.sha(self._path(doc, path)) != detail.get(
-                    field + "_sha256"
-                ):
-                    raise ValueError("Detail evidence file hash mismatch")
-            retained = files.json(self._path(doc, detail["metadata"]))
-            if {
-                k: v for k, v in detail.items() if k not in {"metadata", "metadata_sha256"}
-            } != retained:
-                raise ValueError("Detail evidence metadata mismatch")
-
-    def status(self, document_id: str) -> dict:
-        doc = self._load(document_id)
-        doc["directory"] = str(self._directory(document_id))
-        doc["counts"] = {
-            state: sum(t["state"] == state for t in doc["tasks"])
-            for state in ("ready", "leased", "completed", "pending", "superseded")
-        }
-        return doc
-
-    def list_documents(self) -> list[dict]:
-        documents = []
-        for path in sorted((self.root / "documents").glob("*/document.json")):
-            doc = json.loads(path.read_text(encoding="utf-8"))
-            documents.append({key: doc[key] for key in ("id", "title", "state", "created_at")})
-        return documents
+    ):
+        return self.source_import.register(
+            source,
+            pages,
+            title,
+            expected_source_sha256=expected_source_sha256,
+            original_name=original_name,
+            media_type=media_type,
+        )
 
     def original_page(
         self,
@@ -373,348 +119,43 @@ class Store:
         *,
         task_id: str | None = None,
         lease_token: str | None = None,
-    ) -> tuple[dict, bytes]:
-        """Read original pixels for pending, approved or published content alike."""
-        pixels = {}
-
-        def validate(doc):
-            if type(page) is not int or not 1 <= page <= len(doc["pages"]):
-                raise ValueError("Unknown physical page")
-            if file_digest(self._path(doc, doc["source"]["path"])) != doc["source"]["sha256"]:
-                raise ValueError("Retained original source hash mismatch")
-            row = doc["pages"][page - 1]
-            data = self._path(doc, row["image"]).read_bytes()
-            if digest(data) != row["image_sha256"]:
-                raise ValueError("Original page image hash mismatch")
-            pixels["data"] = data
-
-        with self._verified(document_id, validate) as doc:
-            row, data = doc["pages"][page - 1], pixels["data"]
-            metadata = {
-                "document_id": document_id,
-                "page": page,
-                "image_sha256": row["image_sha256"],
-                "source_sha256": doc["source"]["sha256"],
-            }
-            if task_id is not None or lease_token is not None:
-                navigation_task = next(
-                    (
-                        t
-                        for t in doc["tasks"]
-                        if t["task_id"] == task_id and t["stage"] in {"navigation", "ocr"}
-                    ),
-                    None,
-                )
-                if navigation_task:
-                    if (
-                        navigation_task["state"] != "leased"
-                        or navigation_task["claim"]["lease_token"] != lease_token
-                        or navigation_task["claim"]["expires_at"] <= time.time()
-                    ):
-                        raise ValueError("Source image requires an active lease")
-                    allowed = (
-                        [navigation_task["page"]]
-                        if navigation_task["stage"] == "ocr"
-                        else [p["page"] for p in navigation_task["inputs"]["pages"]]
-                    )
-                    if page not in allowed:
-                        raise ValueError("Source image outside its claimed snapshot")
-                    access = navigation_task.setdefault("image_accesses", {}).setdefault(
-                        str(page),
-                        {
-                            **metadata,
-                            "receipt": uuid4().hex,
-                            "opened_at": time.time(),
-                            "worker_id": navigation_task["claim"]["worker_id"],
-                        },
-                    )
-                    self._save(doc)
-                    return {**metadata, "image_receipt": access["receipt"]}, data
-                task = self._active_review(doc, task_id, lease_token)
-                if task["page"] != page:
-                    raise ValueError("Original image does not belong to the leased page")
-                access = task.get("image_access")
-                if not access:
-                    access = {
-                        **metadata,
-                        "task_id": task_id,
-                        "worker_id": task["claim"]["worker_id"],
-                        "receipt": uuid4().hex,
-                        "opened_at": time.time(),
-                    }
-                    task["image_access"] = access
-                    self._save(doc)
-                metadata["image_receipt"] = access["receipt"]
-            return metadata, data
-
-    @staticmethod
-    def _active_review(doc: dict, task_id: str, lease_token: str) -> dict:
-        task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
-        if (
-            task["stage"] not in {"review", "verify"}
-            or task["state"] != "leased"
-            or task["claim"]["lease_token"] != lease_token
-        ):
-            raise ValueError("Original reading requires this active review lease")
-        if task["claim"]["expires_at"] <= time.time():
-            raise ValueError("Task lease expired; reclaim before reading")
-        return task
+    ):
+        return self.task_inspection.original_page(
+            document_id, page, task_id=task_id, lease_token=lease_token
+        )
 
     def review_candidate(
         self, document_id: str, task_id: str, lease_token: str, original_reading: dict
-    ) -> dict:
-        """Freeze source observations before exposing the candidate to a reviewer."""
-        with self._verified(document_id) as doc:
-            task = self._active_review(doc, task_id, lease_token)
-            access = task.get("image_access")
-            if (
-                not access
-                or not isinstance(original_reading, dict)
-                or original_reading.get("image_receipt") != access["receipt"]
-                or original_reading.get("image_sha256") != access["image_sha256"]
-            ):
-                raise ValueError(
-                    "Open original_image with this task and lease before recording observations"
-                )
-            observations = original_reading.get("observations")
-            unresolved = original_reading.get("unresolved", [])
-            if (
-                not isinstance(observations, list)
-                or not observations
-                or any(not isinstance(s, str) or not s.strip() for s in observations)
-            ):
-                raise ValueError("Original reading requires nonempty source observations")
-            if not isinstance(unresolved, list) or any(
-                not isinstance(s, str) or not s.strip() for s in unresolved
-            ):
-                raise ValueError("Unresolved original observations must be a list of issues")
-            self._verify_details(doc, task, original_reading)
-            if task.get("source_reading"):
-                if task["source_reading"]["reading"] != original_reading:
-                    raise ValueError(
-                        "Original reading cannot change after candidate exposure; retain uncertainty and retry independently"
-                    )
-            else:
-                reading = {
-                    "reading": original_reading,
-                    "image_access": access,
-                    "worker_id": task["claim"]["worker_id"],
-                    "input_sha256": task["claim"]["input_sha256"],
-                    "approval_type": "source_observation",
-                    "human_approval": False,
-                    "created_at": time.time(),
-                }
-                reading["sha256"] = digest(reading)
-                task["source_reading"] = reading
-                self._save(doc)
-            return {**task, **task["claim"]}
+    ):
+        return self.task_inspection.review_candidate(
+            document_id, task_id, lease_token, original_reading
+        )
 
     def candidate_text(
         self, document_id: str, task_id: str, lease_token: str, *, start: int = 0, limit: int = 2000
-    ) -> dict:
-        with self._verified(document_id) as doc:
-            task = self._active_review(doc, task_id, lease_token)
-            if not task.get("source_reading"):
-                raise ValueError("Freeze original-image observations before reading candidate text")
-            text = task["inputs"]["markdown"]
-            if (
-                type(start) is not int
-                or type(limit) is not int
-                or not 0 <= start <= len(text)
-                or not 1 <= limit <= 4000
-            ):
-                raise ValueError(
-                    "Candidate range needs start within text and limit between 1 and 4000"
-                )
-            end = min(start + limit, len(text))
-            task.setdefault("candidate_accesses", []).append(
-                {
-                    "start": start,
-                    "end": end,
-                    "lease_token": lease_token,
-                    "markdown_sha256": digest(text),
-                }
-            )
-            self._save(doc)
-            return {
-                "task_id": task_id,
-                "markdown_sha256": digest(text),
-                "start": start,
-                "end": end,
-                "total_codepoints": len(text),
-                "markdown": text[start:end],
-            }
+    ):
+        return self.task_inspection.candidate_text(
+            document_id, task_id, lease_token, start=start, limit=limit
+        )
 
-    def _inputs(self, doc: dict, task: dict) -> dict:
-        if task["stage"] == "navigation" and task.get("inputs"):
-            return task["inputs"]
-        inputs = {
-            "document_id": doc["id"],
-            "source_sha256": doc["source"]["sha256"],
-            "stage": task["stage"],
-        }
-        if doc.get("revision") and ("inputs" not in task or "revision" in task["inputs"]):
-            inputs["revision"] = doc["revision"]
-            inputs["revision_reason"] = doc["revision_history"][-1]["reason"]
-        if task["page"] is not None:
-            page = doc["pages"][task["page"] - 1]
-            if "extraction_plan" in page:
-                plan = page["extraction_plan"]
-                # Keep already-claimed input contracts stable across an upgrade.
-                compact = "inputs" not in task or "extraction_plan_sha256" in task["inputs"]
-                inputs["extraction_plan"] = (
-                    {k: v for k, v in plan.items() if k != "probe_evidence"} if compact else plan
-                )
-                if compact:
-                    inputs["extraction_plan_sha256"] = digest(plan)
-            inputs.update(
-                page=page["page"],
-                image=str(self._path(doc, page["image"])),
-                image_sha256=page["image_sha256"],
-            )
-            if task["stage"] in {"review", "verify"}:
-                text = page["candidate" if task["stage"] == "verify" else "ocr"]
-                inputs.update(
-                    markdown=text["markdown"],
-                    markdown_sha256=text["sha256"],
-                    prior_worker_id=text["worker_id"],
-                )
-                if task["stage"] == "verify":
-                    inputs["original_markdown"] = page["ocr"]["markdown"]
-                    inputs["corrections"] = page["candidate"]["corrections"]
-        elif task["stage"] == "navigation":
-            from hrs_codex.navigation import fingerprint, toc_evidence
+    def get_task(self, document_id: str, task_id: str):
+        return self.task_inspection.get_task(document_id, task_id)
 
-            inputs["toc_sha256"] = fingerprint(toc_evidence(doc))
-            inputs["pages"] = [
-                {
-                    "page": p["page"],
-                    "image_sha256": p["image_sha256"],
-                    "markdown_sha256": p["approved"]["sha256"],
-                    "observation": p.get("observation"),
-                    "kind": p.get("observation", {}).get("kind", p.get("page_kind", "unknown")),
-                }
-                for p in doc["pages"]
-                if p.get("approved")
-            ]
-            inputs["previous_entries"] = (doc.get("navigation") or {}).get("source_entries", [])
-        else:
-            inputs["pages"] = [
-                {
-                    "page": p["page"],
-                    "image": str(self._path(doc, p["image"])),
-                    "image_sha256": p["image_sha256"],
-                    "markdown": p["approved"]["markdown"],
-                    "markdown_sha256": p["approved"]["sha256"],
-                }
-                for p in doc["pages"]
-            ]
-        return inputs
+    def approved_page_text(self, document_id: str, page: int):
+        return self.task_inspection.approved_page_text(document_id, page)
 
-    def get_task(self, document_id: str, task_id: str) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
-            task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
-            inputs = task["inputs"] if "inputs" in task else self._inputs(doc, task)
-            return {**task, "inputs": inputs}
+    def scheduling_plan(self, document_id: str):
+        return self.tasks.scheduling_plan(document_id)
 
-    def scheduling_plan(self, document_id: str) -> dict:
-        from hrs_codex.scheduling import scheduling_plan
-
-        with self.lock:
-            doc = self._load(document_id)
-            plan = scheduling_plan(doc)
-            scheduler = doc.setdefault("scheduler", {})
-            if (
-                scheduler.get("allocation") != plan["workers"]
-                or time.time() - scheduler.get("rebalanced_at", 0) >= 30
-            ):
-                scheduler.update(allocation=plan["workers"], rebalanced_at=time.time())
-                self._save(doc)
-            return plan
-
-    def pause_document(self, document_id: str) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
-            request = doc.setdefault("run_request", {"state": "paused", "history": []})
-            request["pause_requested"] = True
-            if request.get("state") != "running":
-                request["state"] = "paused"
-                doc["state"] = "paused"
-                for task in doc["tasks"]:
-                    if task["state"] == "leased":
-                        task["state"] = "ready"
-            request.setdefault("history", []).append({"event": "user_paused", "at": time.time()})
-            (self._directory(document_id) / ".pause-requested").touch()
-            self._save(doc)
-            return request
-
-    def upgrade_review_policy(self, document_id: str, protected_pages=()) -> dict:
-        """Explicit resume migration; retain earlier decisions and all human-owned work."""
-        with self.lock:
-            doc = self._load(document_id)
-            if doc.get("processing_policy", {}).get("review_failure") == "bounded":
-                return {"reopened_pages": []}
-            if any(t["state"] == "leased" for t in doc["tasks"]):
-                raise ValueError("Pause active execution before changing review policy")
-            previous = dict(doc.get("processing_policy", {}))
-            doc.setdefault("processing_policy", {}).update(review_failure="bounded")
-            reopened = []
-            for page in doc["pages"]:
-                if page["state"] != "pending" or page["page"] in protected_pages:
-                    continue
-                history = [t for t in doc["tasks"] if t["page"] == page["page"]]
-                if any(t["stage"] == "human_review" for t in history) or page.get(
-                    "automatic_review_attempts"
-                ):
-                    continue
-                for task in history:
-                    if task["state"] == "pending":
-                        task["state"] = "superseded"
-                page["state"] = "awaiting_review"
-                doc["tasks"].append(self._new_task("review", page["page"]))
-                reopened.append(page["page"])
-            doc.setdefault("policy_history", []).append(
-                {
-                    "previous": previous,
-                    "at": time.time(),
-                    "reopened_pages": reopened,
-                    "protected_pages": list(protected_pages),
-                    "reason": "explicit_resume_bounded_review",
-                }
-            )
-            self._save(doc)
-            return {"reopened_pages": reopened}
+    def upgrade_review_policy(self, document_id: str, protected_pages=()):
+        return self.tasks.upgrade_review_policy(document_id, protected_pages)
 
     def report_task_failure(
-        self, document_id: str, task_id: str, lease_token: str, code: str
-    ) -> dict:
-        if code not in {
-            "rate_limit",
-            "429",
-            "service_unavailable",
-            "transport",
-            "timeout",
-            "tool_error",
-        }:
-            raise ValueError("Use a supported technical failure code")
-        with self.lock:
-            doc = self._load(document_id)
-            task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
-            if task["state"] != "leased" or task["claim"]["lease_token"] != lease_token:
-                raise ValueError("Task does not have this active lease")
-            failures = task.setdefault("technical_failures", [])
-            failures.append({"code": code, "at": time.time(), "claim": dict(task["claim"])})
-            task["state"] = "ready"
-            task["retry_after"] = time.time() + min(300, 30 * 2 ** (len(failures) - 1))
-            if code in {"rate_limit", "429", "service_unavailable"}:
-                doc.setdefault("scheduler", {})["cooldown_until"] = task["retry_after"]
-            self._save(doc)
-            return {
-                "state": task["state"],
-                "retry_after": task["retry_after"],
-                "attempts": len(failures),
-            }
+        self, document_id: str, task_id: str, lease_token: str, code: str, *, details=None
+    ):
+        return self.tasks.report_task_failure(
+            document_id, task_id, lease_token, code, details=details
+        )
 
     def claim_task(
         self,
@@ -725,436 +166,29 @@ class Store:
         *,
         source_first: bool = False,
         scheduled: bool = False,
-    ) -> dict | None:
-        if stage not in STAGES or not isinstance(worker_id, str) or not worker_id.strip():
-            raise ValueError("A valid stage and nonempty worker ID are required")
-        if not 1 <= lease_seconds <= 86400:
-            raise ValueError("Lease must be between 1 and 86400 seconds")
-        with self._verified(document_id) as doc:
-            self._require_active(doc)
-            if scheduled:
-                from hrs_codex.scheduling import scheduling_plan
+    ):
+        return self.tasks.claim_task(
+            document_id,
+            stage,
+            worker_id,
+            lease_seconds,
+            source_first=source_first,
+            scheduled=scheduled,
+        )
 
-                plan = scheduling_plan(doc)
-                if plan["cooldown_until"] > time.time():
-                    return None
-                active = {
-                    t["claim"]["worker_id"]
-                    for t in doc["tasks"]
-                    if t["stage"] == stage
-                    and t["state"] == "leased"
-                    and t["claim"]["expires_at"] > time.time()
-                }
-                all_active = {
-                    t["claim"]["worker_id"]
-                    for t in doc["tasks"]
-                    if t["state"] == "leased" and t["claim"]["expires_at"] > time.time()
-                }
-                if worker_id in all_active or len(all_active) >= plan["capacity"]:
-                    return None
-                finished = sum(
-                    t.get("receipt", {}).get("worker_id") == worker_id for t in doc["tasks"]
-                )
-                if finished >= plan["batch_size"] or (
-                    worker_id not in active and len(active) >= plan["workers"][stage]
-                ):
-                    return None
-            from hrs_codex.scheduling import task_priority
+    def submit_task(self, document_id: str, task_id: str, lease_token: str, result: dict):
+        return self.tasks.submit_task(document_id, task_id, lease_token, result)
 
-            for task in sorted(doc["tasks"], key=lambda t: task_priority(doc, t)):
-                if task["stage"] != stage or task["state"] not in {"ready", "leased"}:
-                    continue
-                if task.get("retry_after", 0) > time.time():
-                    continue
-                if task["state"] == "leased" and task["claim"]["expires_at"] > time.time():
-                    continue
-                inputs = self._inputs(doc, task)
-                if inputs.get("prior_worker_id") == worker_id:
-                    raise ValueError(
-                        "Review and correction verification require a separate subagent"
-                    )
-                claim = {
-                    "worker_id": worker_id,
-                    "lease_token": uuid4().hex,
-                    "expires_at": time.time() + lease_seconds,
-                    "started_at": time.time(),
-                    "input_sha256": digest(inputs),
-                }
-                if task.get("source_reading"):
-                    task.setdefault("source_reading_history", []).append(task.pop("source_reading"))
-                task.pop("image_access", None)
-                task.pop("candidate_accesses", None)
-                task["bounded_candidate_required"] = (
-                    scheduled
-                    and source_first
-                    and stage in {"review", "verify"}
-                    and len(inputs.get("markdown", "")) > 2000
-                )
-                if source_first and stage in {"review", "verify"}:
-                    task["source_first_required"] = True
-                task.update(state="leased", claim=claim, inputs=inputs)
-                self._save(doc)
-                return {**task, **claim}
-            return None
+    def retry_task(self, document_id: str, task_id: str):
+        return self.tasks.retry_task(document_id, task_id)
 
-    @staticmethod
-    def _review_result(result: dict) -> str:
-        verdict = result.get("verdict")
-        if verdict not in {"approved", "pending", "corrections"}:
-            raise ValueError("Review verdict must be approved, pending or corrections")
-        if not isinstance(result.get("issues", []), list):
-            raise ValueError("Review issues must be a list")
-        if not isinstance(result.get("normalizations", []), list):
-            raise ValueError("Review normalizations must be a list")
-        if verdict == "approved" and result.get("issues"):
-            raise ValueError("Unresolved issues cannot be approved")
-        if verdict == "pending" and not result.get("issues"):
-            raise ValueError("Pending review requires an issue explaining the unresolved content")
-        return verdict
+    def fallback_page(
+        self, document_id: str, page: int, reason: str, *, new_evidence: str | None = None
+    ):
+        return self.tasks.fallback_page(document_id, page, reason, new_evidence=new_evidence)
 
-    def submit_task(self, document_id: str, task_id: str, lease_token: str, result: dict) -> dict:
-        with self._verified(document_id) as doc:
-            self._require_active(doc)
-            task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
-            claim = task.get("claim", {})
-            if task["state"] != "leased" or claim.get("lease_token") != lease_token:
-                raise ValueError("Task does not have this active lease")
-            if claim["expires_at"] <= time.time():
-                raise ValueError("Task lease expired; reclaim before submitting")
-            if (
-                result.get("input_sha256") != claim["input_sha256"]
-                or digest(self._inputs(doc, task)) != claim["input_sha256"]
-            ):
-                raise ValueError("Task input hash mismatch")
-            self._verify_details(doc, task, result)
-            stage = task["stage"]
-            automatic_verification = False
-            if (
-                stage == "review"
-                and doc.get("processing_policy", {}).get("review_failure") == "human"
-                and result.get("verdict") == "corrections"
-            ):
-                result = {
-                    **result,
-                    "verdict": "pending",
-                    "issues": result.get("issues") or ["审核建议修改，请人工核对后确认。"],
-                    "suggested_markdown": result.get("markdown"),
-                }
-            if task.get("source_first_required") and not task.get("source_reading"):
-                raise ValueError(
-                    "Record original-first observations through review_candidate before judging the candidate"
-                )
-            if task.get("bounded_candidate_required") and result.get("verdict") != "pending":
-                covered = 0
-                for access in sorted(task.get("candidate_accesses", []), key=lambda a: a["start"]):
-                    if access["lease_token"] == lease_token and access["start"] <= covered:
-                        covered = max(covered, access["end"])
-                if covered < len(task["inputs"]["markdown"]):
-                    raise ValueError(
-                        "Read the complete candidate with candidate_text before submitting a verdict"
-                    )
-            page = doc["pages"][task["page"] - 1] if task["page"] is not None else None
-            receipt = {
-                "task_id": task_id,
-                "worker_id": claim["worker_id"],
-                "input_sha256": claim["input_sha256"],
-                "approval_type": "machine",
-                "human_approval": False,
-                "created_at": time.time(),
-            }
-            if claim.get("started_at"):
-                receipt.update(
-                    duration_seconds=max(0, time.time() - claim["started_at"]),
-                    queue_seconds=max(
-                        0, claim["started_at"] - task.get("created_at", claim["started_at"])
-                    ),
-                )
-            policy = doc.get("processing_policy", {})
-            if policy:
-                receipt["configured_model"] = policy.get(
-                    "ocr_model"
-                    if stage == "ocr"
-                    else "organization_model"
-                    if stage in {"organization", "navigation"}
-                    else "review_model"
-                )
-            if task.get("source_reading"):
-                receipt["source_reading_sha256"] = task["source_reading"]["sha256"]
-            if stage == "ocr":
-                markdown = result.get("markdown")
-                if not isinstance(markdown, str):
-                    raise ValueError(
-                        "OCR result requires markdown (empty is valid for a blank page)"
-                    )
-                page["ocr"] = {**receipt, "markdown": markdown, "sha256": digest(markdown)}
-                if result.get("page_kind") in {
-                    "toc",
-                    "text",
-                    "frontmatter",
-                    "table",
-                    "figure",
-                    "unknown",
-                }:
-                    page["page_kind"] = result["page_kind"]
-                page["state"] = "awaiting_review"
-                doc["tasks"].append(self._new_task("review", page["page"]))
-            elif stage in {"review", "verify"}:
-                verdict = self._review_result(result)
-                if verdict == "approved" and task.get("source_reading", {}).get("reading", {}).get(
-                    "unresolved"
-                ):
-                    raise ValueError("Unresolved original observations cannot be approved")
-                if stage == "verify" and verdict == "corrections":
-                    raise ValueError("Failed correction verification must remain pending")
-                text = page["candidate" if stage == "verify" else "ocr"]
-                if verdict == "approved":
-                    if result.get("markdown", text["markdown"]) != text["markdown"]:
-                        raise ValueError(
-                            "Changed text requires corrections and separate verification"
-                        )
-                    page["approved"] = {**text, **receipt}
-                    page["state"] = "approved"
-                elif verdict == "pending":
-                    page["state"] = "pending"
-                    if (
-                        stage == "review"
-                        and doc.get("processing_policy", {}).get("review_failure") == "bounded"
-                        and result.get("disposition") == "disputed"
-                        and not page.get("automatic_review_attempts")
-                    ):
-                        page["candidate"] = {**text, **receipt, "corrections": []}
-                        result = {**result, "markdown": text["markdown"], "recheck_unchanged": True}
-                        page["automatic_review_attempts"] = 1
-                        page["state"] = "awaiting_verification"
-                        doc["tasks"].append(self._new_task("verify", page["page"]))
-                        automatic_verification = True
-                else:
-                    if (
-                        stage == "review"
-                        and doc.get("processing_policy", {}).get("review_failure") == "bounded"
-                        and task.get("source_reading", {}).get("reading", {}).get("unresolved")
-                    ):
-                        raise ValueError(
-                            "Unclear originals require pending, not automatic corrections"
-                        )
-                    if (
-                        stage == "review"
-                        and doc.get("processing_policy", {}).get("review_failure") == "bounded"
-                        and page.get("automatic_review_attempts")
-                    ):
-                        raise ValueError("Automatic review is limited to one attempt")
-                    markdown, corrections = result.get("markdown"), result.get("corrections")
-                    if not isinstance(markdown, str) or markdown == text["markdown"]:
-                        raise ValueError("Corrections require changed markdown")
-                    if not isinstance(corrections, list) or not corrections:
-                        raise ValueError("Corrections require uniquely located change records")
-                    spans = []
-                    for correction in corrections:
-                        if (
-                            not isinstance(correction, dict)
-                            or not all(
-                                isinstance(correction.get(k), str) and correction[k]
-                                for k in ("before", "reason")
-                            )
-                            or not isinstance(correction.get("after"), str)
-                        ):
-                            raise ValueError("Each correction requires before, after and reason")
-                        start = text["markdown"].find(correction["before"])
-                        if start < 0 or text["markdown"].find(correction["before"], start + 1) >= 0:
-                            raise ValueError("Correction is not uniquely located in original OCR")
-                        spans.append(
-                            (start, start + len(correction["before"]), correction["after"])
-                        )
-                    spans.sort()
-                    if any(left[1] > right[0] for left, right in zip(spans, spans[1:])):
-                        raise ValueError("Correction spans overlap in original OCR")
-                    patched = text["markdown"]
-                    for start, end, replacement in reversed(spans):
-                        patched = patched[:start] + replacement + patched[end:]
-                    if patched != markdown:
-                        raise ValueError(
-                            "Change records must explain the entire corrected markdown"
-                        )
-                    page["candidate"] = {
-                        **receipt,
-                        "markdown": markdown,
-                        "sha256": digest(markdown),
-                        "corrections": corrections,
-                    }
-                    page["state"] = "awaiting_verification"
-                    page["automatic_review_attempts"] = 1
-                    doc["tasks"].append(self._new_task("verify", page["page"]))
-                page["review"] = {
-                    **receipt,
-                    "verdict": verdict,
-                    "issues": result.get("issues", []),
-                    "normalizations": result.get("normalizations", []),
-                }
-            elif stage == "navigation":
-                from hrs_codex.navigation import observation, validate_proposal
-
-                for row in task["inputs"]["pages"]:
-                    current = doc["pages"][row["page"] - 1]
-                    if current.get("approved", {}).get("sha256") != row["markdown_sha256"]:
-                        raise ValueError("Navigation source changed during processing")
-                allowed = {p["page"] for p in task["inputs"]["pages"]}
-                for row in result.get("page_observations", []):
-                    if row.get("page") not in allowed:
-                        raise ValueError("Navigation observation outside its approved snapshot")
-                    p = doc["pages"][row["page"] - 1]
-                    if str(row["page"]) not in task.get("image_accesses", {}):
-                        raise ValueError("Navigation observations require original-image access")
-                    p["observation"] = observation(p, row)
-                entries = validate_proposal(doc, result.get("entries"))
-                if any(e["source_page"] not in allowed for e in entries):
-                    raise ValueError("Directory source outside the claimed snapshot")
-                if any(
-                    str(e["source_page"]) not in task.get("image_accesses", {}) for e in entries
-                ):
-                    raise ValueError("Navigation worker must inspect directory original images")
-                nav = doc.get("navigation") or {}
-                nav.update(
-                    source_entries=entries,
-                    parsed_toc_sha256=task["inputs"]["toc_sha256"],
-                    task_id=task_id,
-                    receipt=receipt,
-                )
-                doc["navigation"] = nav
-            else:
-                if result.get("verdict") == "pending":
-                    self._review_result(result)
-                    doc["state"] = "pending"
-                else:
-                    if result.get("verdict", "approved") != "approved" or result.get("issues"):
-                        raise ValueError("Organization with unresolved issues must remain pending")
-                    articles = result.get("articles")
-                    if not isinstance(articles, list) or not articles:
-                        raise ValueError("Organization requires nonempty articles")
-                    covered = set()
-                    for article in articles:
-                        if (
-                            not isinstance(article.get("title"), str)
-                            or not article["title"].strip()
-                        ):
-                            raise ValueError("Article title is required")
-                        numbers = article.get("pages")
-                        if (
-                            not isinstance(numbers, list)
-                            or not numbers
-                            or any(
-                                type(p) is not int or not 1 <= p <= len(doc["pages"])
-                                for p in numbers
-                            )
-                        ):
-                            raise ValueError("Article page mapping is invalid")
-                        covered.update(numbers)
-                        article["bibliography"] = {
-                            **article.get("bibliography", {}),
-                            "status": "unclaimed",
-                        }
-                    if covered != set(range(1, len(doc["pages"]) + 1)):
-                        raise ValueError("Organization must account for every physical page")
-                    if doc.get("processing_policy"):
-                        from hrs_codex.organization import article_parts
-
-                        article_parts(doc["pages"], articles)
-                    doc["organization"] = {
-                        **receipt,
-                        "articles": articles,
-                        **(
-                            {"reading_structure": result["reading_structure"]}
-                            if "reading_structure" in result
-                            else {}
-                        ),
-                    }
-            task.update(
-                state="pending"
-                if result.get("verdict") == "pending" and not automatic_verification
-                else "completed",
-                result=result,
-                receipt={**receipt, "result_sha256": digest(result)},
-            )
-            if (
-                stage in {"review", "verify"}
-                and page.get("approved")
-                and result.get("page_observation")
-            ):
-                from hrs_codex.navigation import observation
-
-                page["observation"] = observation(page, result["page_observation"])
-                page["page_kind"] = page["observation"]["kind"]
-            self._refresh_navigation(doc)
-            if all(p["state"] == "approved" for p in doc["pages"]):
-                if not any(
-                    t["stage"] == "organization" and t["state"] != "superseded"
-                    for t in doc["tasks"]
-                ) and not any(
-                    t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
-                    for t in doc["tasks"]
-                ):
-                    doc["tasks"].append(self._new_task("organization"))
-                doc["state"] = (
-                    "ready"
-                    if doc["organization"]
-                    else ("pending" if task["state"] == "pending" else "processing")
-                )
-            else:
-                doc["state"] = (
-                    "pending"
-                    if any(p["state"] == "pending" for p in doc["pages"])
-                    else "processing"
-                )
-            self._save(doc)
-            return {
-                "document_id": doc["id"],
-                "task_id": task_id,
-                "task_state": task["state"],
-                "state": doc["state"],
-            }
-
-    def _refresh_navigation(self, doc: dict) -> None:
-        from hrs_codex.navigation import fingerprint, observation, resolve_navigation, toc_evidence
-
-        for p in doc["pages"]:
-            if (
-                p.get("approved")
-                and not p.get("observation")
-                and re.search(
-                    r"(?mi)^\s*(?:#{1,6}\s*)?(?:目[ \t]*录|table of contents|contents)\s*$",
-                    p["approved"]["markdown"],
-                )
-            ):
-                p["page_kind"] = "toc"
-                p["kind_basis"] = "title-candidate-requires-navigation-original-review"
-            if (
-                p.get("approved")
-                and p.get("observation")
-                and p["observation"].get("markdown_sha256") != p["approved"]["sha256"]
-            ):
-                try:
-                    p["observation"] = observation(p, p["observation"])
-                except ValueError:
-                    p.pop("observation", None)
-        toc = toc_evidence(doc)
-        if (
-            toc
-            and fingerprint(toc) != (doc.get("navigation") or {}).get("parsed_toc_sha256")
-            and not any(
-                t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
-                for t in doc["tasks"]
-            )
-        ):
-            doc["tasks"].append(self._new_task("navigation"))
-        doc["navigation"] = resolve_navigation(doc)
-
-    def refresh_navigation(self, document_id: str) -> dict:
-        """Refresh source-bound derived metadata; never run recognition or grant content approval."""
-        with self._verified(document_id) as doc:
-            before = (doc.get("navigation", {}).get("sha256"), len(doc["tasks"]))
-            self._refresh_navigation(doc)
-            if before != (doc["navigation"]["sha256"], len(doc["tasks"])):
-                self._save(doc)
-            return doc
+    def refresh_navigation(self, document_id: str):
+        return self.navigation.refresh_navigation(document_id)
 
     def navigation_decision(
         self,
@@ -1165,647 +199,66 @@ class Store:
         target_page: int | None,
         target_anchor: str = "",
         decision_id: str | None = None,
-    ) -> dict:
-        request_sha = digest([entry_id, expected_sha256, target_page, target_anchor])
-        with self.lock:
-            doc = self._load(document_id)
-            nav = doc.get("navigation") or {}
-            if decision_id:
-                if not isinstance(decision_id, str) or len(decision_id) > 128:
-                    raise ValueError("Invalid decision identity")
-                receipt = doc.get("navigation_receipts", {}).get(decision_id)
-                if receipt:
-                    if receipt["request_sha256"] != request_sha:
-                        raise ValueError("Decision identity belongs to a different request")
-                    return nav
-            if nav.get("sha256") != expected_sha256:
-                raise ValueError("Navigation changed; reload before confirming")
-            entry = next(e for e in nav["entries"] if e["id"] == entry_id)
-            target = None
-            if target_page is not None:
-                if type(target_page) is not int or not 1 <= target_page <= len(doc["pages"]):
-                    raise ValueError("Unknown target physical page")
-                p = doc["pages"][target_page - 1]
-                if (
-                    not p.get("approved")
-                    or not target_anchor
-                    or p["approved"]["markdown"].count(target_anchor) != 1
-                ):
-                    raise ValueError(
-                        "Navigation confirmation needs an approved unique target anchor"
-                    )
-                from hrs_codex.navigation import target_evidence
+    ):
+        return self.navigation.navigation_decision(
+            document_id,
+            entry_id,
+            expected_sha256=expected_sha256,
+            target_page=target_page,
+            target_anchor=target_anchor,
+            decision_id=decision_id,
+        )
 
-                target = target_evidence(p, target_anchor)
-            decisions = nav.setdefault("decisions", {})
-            if entry_id in decisions:
-                nav.setdefault("decision_history", []).append(
-                    {"entry_id": entry_id, **decisions[entry_id]}
-                )
-            decisions[entry_id] = {
-                "source_sha256": entry["source_sha256"],
-                "target": target,
-                "at": time.time(),
-                "approval_type": "human_navigation",
-                "content_approval": False,
-                "final": True,
-            }
-            if decision_id:
-                doc.setdefault("navigation_receipts", {})[decision_id] = {
-                    "request_sha256": request_sha,
-                    "entry_id": entry_id,
-                    "at": time.time(),
-                }
-            self._refresh_navigation(doc)
-            self._save(doc)
-            return doc["navigation"]
+    def pause_document(self, document_id: str):
+        return self.runs.pause_document(document_id)
 
-    def retry_task(self, document_id: str, task_id: str) -> dict:
-        with self.lock:
-            doc = self._load(document_id)
-            task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
-            if task["state"] != "pending":
-                raise ValueError(
-                    "Only pending tasks can be retried; active leases expire automatically"
-                )
-            if task["stage"] == "human_review":
-                raise ValueError("A human draft must be resolved in the human review workspace")
-            if task["stage"] == "machine_handoff":
-                raise ValueError(
-                    "An explicit source dispute awaits human review; machine retry cannot reopen it"
-                )
-            task["state"] = "superseded"
-            # A rejected correction needs a new proposal against retained OCR,
-            # followed by another independent verification of that proposal.
-            stage = "review" if task["stage"] == "verify" else task["stage"]
-            replacement = self._new_task(stage, task["page"])
-            replacement["retry_of"] = task_id
-            doc["tasks"].append(replacement)
-            if task["page"] is not None:
-                doc["pages"][task["page"] - 1]["state"] = "awaiting_" + stage
-            doc["state"] = "processing"
-            self._save(doc)
-            return replacement
+    def request_run(self, document_id: str, *, resume: bool = False):
+        return self.runs.request_run(document_id, resume=resume)
 
-    def fallback_page(
-        self, document_id: str, page: int, reason: str, *, new_evidence: str | None = None
-    ) -> dict:
-        """Recover content through bounded full-page OCR; never reinterpret runtime failures."""
-        if not isinstance(reason, str) or not reason.strip():
-            raise ValueError("Fallback requires a content reason")
-        with self._verified(document_id) as doc:
-            if doc.get("publication") or doc["state"] == "published":
-                raise ValueError("Published evidence requires a separate revision workspace")
-            if type(page) is not int or not 1 <= page <= len(doc["pages"]):
-                raise ValueError("Unknown physical page")
-            target = doc["pages"][page - 1]
-            history = [t for t in doc["tasks"] if t["page"] == page]
-            if target["state"] == "approved" or any(
-                t["stage"] in {"human_review", "machine_handoff"} for t in history
-            ):
-                raise ValueError(
-                    "Approved content and human decisions or drafts cannot be replaced"
-                )
-            if any(
-                t["state"] == "leased" and t["claim"]["expires_at"] > time.time()
-                for t in doc["tasks"]
-            ):
-                raise ValueError("Wait for active task leases before changing extraction route")
-            route = target.get("route", target.get("extraction_plan", {}).get("route", "ocr"))
-            if target["state"] != "pending" and not (
-                route in {"native", "mixed"} and target.get("ocr")
-            ):
-                raise ValueError(
-                    "Fallback requires a pending content review; retry technical errors as runs"
-                )
-            budget = target.get("fallback_budget", {"fullpage_switches": 0, "fullpage_retries": 0})
-            if route in {"native", "mixed"}:
-                if budget["fullpage_switches"] >= 1:
-                    raise ValueError("Full-page fallback budget exhausted; human review required")
-                budget["fullpage_switches"] += 1
-            else:
-                if budget["fullpage_retries"] >= 1:
-                    raise ValueError("Full-page retry budget exhausted; human review required")
-                if not isinstance(new_evidence, str) or not new_evidence.strip():
-                    raise ValueError("Full-page OCR retry requires explicit new evidence")
-                budget["fullpage_retries"] += 1
-            record = {
-                "created_at": time.time(),
-                "from_route": route,
-                "to_route": "ocr",
-                "reason": reason.strip(),
-                "new_evidence": new_evidence,
-                "previous_extraction_plan": target.get("extraction_plan"),
-                "previous_candidates": {
-                    k: target[k] for k in ("ocr", "candidate", "approved", "review") if k in target
-                },
-                "superseded_tasks": [t["task_id"] for t in history],
-            }
-            for task in history:
-                task["state"] = "superseded"
-            for key in ("ocr", "candidate", "approved", "review"):
-                target.pop(key, None)
-            target.update(
-                state="awaiting_ocr",
-                route="ocr",
-                fallback_budget=budget,
-                extraction_plan={
-                    "policy": "codex-pdf-routing-v1",
-                    "route": "ocr",
-                    "native_markdown": "",
-                    "native_sha256": digest(""),
-                    "regions": [],
-                    "reason_codes": ["fullpage_fallback"],
-                },
-            )
-            target.setdefault("fallback_history", []).append(record)
-            doc["tasks"].append(self._new_task("ocr", page))
-            doc["state"] = (
-                "pending" if any(p["state"] == "pending" for p in doc["pages"]) else "processing"
-            )
-            self._save(doc)
-            return {
-                "document_id": document_id,
-                "page": page,
-                "route": "ocr",
-                "fallback_budget": budget,
-                "state": doc["state"],
-                "fallback": record,
-            }
+    def claim_run(self, owner: str, lease_seconds: int = 900, *, document_id: str | None = None):
+        return self.runs.claim_run(owner, lease_seconds, document_id=document_id)
 
-    @staticmethod
-    def _request_run(doc: dict, *, resume: bool = False, followup: bool = False) -> dict:
-        request = doc.get("run_request")
-        if request is None:
-            request = {
-                "document_id": doc["id"],
-                "state": "pending",
-                "attempts": 0,
-                "technical_failures": 0,
-                "checkpoint_recovery_enabled": True,
-                "retry_limit": 3,
-                "not_before": 0,
-                "ready_after": 0,
-                "history": [],
-            }
-            doc["run_request"] = request
-        if doc["state"] == "published":
-            request["state"] = "succeeded"
-            return request
-        if request.get("pause_requested"):
-            if not resume:
-                return request
-            request.pop("pause_requested", None)
-            if doc["state"] == "paused":
-                doc["state"] = (
-                    "pending"
-                    if any(p["state"] == "pending" for p in doc["pages"])
-                    else "processing"
-                )
-        if request["state"] == "running":
-            if resume and request["lease_expires_at"] <= time.time():
-                request["history"].append(
-                    {"event": "lease_expired", "at": time.time(), "owner": request["owner"]}
-                )
-                request["state"] = "retryable_error"
-            else:
-                if followup:
-                    request["continuation_requested"] = True
-                return request
-        if request.get("technical_failures", 0) >= request.get("retry_limit", 3) and not resume:
-            return request
-        if resume:
-            request["history"].append({"event": "explicit_resume", "at": time.time()})
-            request["technical_failures"] = 0
-            request.update(
-                retry_limit=3, automatic_checkpoint_used=False, checkpoint_recovery_enabled=True
-            )
-        if request["state"] not in {"pending", "retryable_error"} or resume:
-            request.update(state="pending", not_before=0)
-        request["ready_after"] = request["not_before"]
-        return request
+    def renew_run(self, document_id: str, token: str, lease_seconds: int = 900):
+        return self.runs.renew_run(document_id, token, lease_seconds)
 
-    def recover_run(self, document_id, recovery_id, *, automatic=False):
-        from hrs_codex.recovery import recover
+    def finish_run(self, document_id: str, token: str, error: str | dict | None = None):
+        return self.runs.finish_run(document_id, token, error)
 
-        return recover(self, document_id, recovery_id, automatic=automatic)
+    def cancel_document(self, document_id: str):
+        return self.runs.cancel_document(document_id)
 
-    def request_run(self, document_id: str, *, resume: bool = False) -> dict:
-        with self._verified(document_id) as doc:
-            if doc.get("run_request", {}).get("cancel_requested"):
-                raise ValueError("This document is stopping for explicit deletion")
-            request = self._request_run(doc, resume=resume)
-            if resume:
-                (self._directory(document_id) / ".pause-requested").unlink(missing_ok=True)
-                self._refresh_navigation(doc)
-            self._save(doc)
-            return request
+    def forget_document(self, document_id: str):
+        return self.runs.forget_document(document_id)
 
-    def claim_run(
-        self, owner: str, lease_seconds: int = 900, *, document_id: str | None = None
-    ) -> dict | None:
-        if not isinstance(owner, str) or not owner.strip() or not 1 <= lease_seconds <= 86400:
-            raise ValueError("Run owner and lease between 1 and 86400 seconds required")
-        with self.lock:
-            now = time.time()
-            paths = (
-                [self._directory(document_id) / "document.json"]
-                if document_id is not None
-                else sorted((self.root / "documents").glob("*/document.json"))
-            )
-            for path in paths:
-                if not path.exists():
-                    continue
-                doc = json.loads(path.read_text(encoding="utf-8"))
-                request = doc.get("run_request")
-                if request and request.get("pause_requested"):
-                    continue
-                if not request or request["state"] not in {"pending", "retryable_error", "running"}:
-                    continue
-                if (
-                    request.get("technical_failures", 0) >= request.get("retry_limit", 3)
-                    or request.get("not_before", 0) > now
-                ):
-                    continue
-                if request["state"] == "running" and request["lease_expires_at"] > now:
-                    continue
-                # Model task leases outlive a crashed coordinator. Do not race its workers.
-                if any(
-                    t["state"] == "leased" and t["claim"]["expires_at"] > now for t in doc["tasks"]
-                ):
-                    continue
-                try:
-                    with FileLock(path.parent / ".executor.lock", timeout=0):
-                        pass
-                except Timeout:
-                    continue
-                if request["state"] == "running":
-                    request["history"].append(
-                        {"event": "lease_expired", "at": now, "owner": request["owner"]}
-                    )
-                    request["technical_failures"] = request.get("technical_failures", 0) + 1
-                    request.update(
-                        state="retryable_error",
-                        error="Run lease expired",
-                        not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
-                    )
-                    request["ready_after"] = request["not_before"]
-                    self._save(doc)
-                    continue
-                request.update(
-                    state="running",
-                    owner=owner,
-                    token=uuid4().hex,
-                    lease_expires_at=now + lease_seconds,
-                    attempts=request["attempts"] + 1,
-                )
-                request["ready_after"] = request["not_before"]
-                request["history"].append(
-                    {"event": "claimed", "at": now, "owner": owner, "attempt": request["attempts"]}
-                )
-                self._save(doc)
-                return request
-            return None
+    def begin_revision(
+        self,
+        document_id: str,
+        reason: str,
+        pages: list[int] | None = None,
+        *,
+        user_errata: bool = False,
+    ):
+        return self.publications.begin_revision(document_id, reason, pages, user_errata=user_errata)
 
-    def renew_run(self, document_id: str, token: str, lease_seconds: int = 900) -> dict:
-        if not 1 <= lease_seconds <= 86400:
-            raise ValueError("Run lease must be between 1 and 86400 seconds")
-        with self.lock:
-            doc = self._load(document_id)
-            request = doc.get("run_request", {})
-            if (
-                request.get("state") != "running"
-                or request.get("token") != token
-                or request["lease_expires_at"] <= time.time()
-            ):
-                raise ValueError("Run does not have this active lease")
-            request["lease_expires_at"] = time.time() + lease_seconds
-            self._save(doc)
-            return request
+    def propose_revision(self, document_id: str, changes: list[dict]):
+        return self.publications.propose_revision(document_id, changes)
 
-    def finish_run(self, document_id: str, token: str, error: str | dict | None = None) -> dict:
-        def validate(doc):
-            request = doc.get("run_request", {})
-            if (
-                doc["state"] == "published"
-                and error is None
-                and not request.get("cancel_requested")
-                and not request.get("pause_requested")
-            ):
-                self._verify_evidence(doc)
+    def publish(self, document_id: str):
+        return self.publications.publish(document_id)
 
-        with self._verified(document_id, validate) as doc:
-            request = doc.get("run_request", {})
-            if request.get("state") != "running" or request.get("token") != token:
-                raise ValueError("Run does not have this active lease")
-            now = time.time()
-            if request.get("cancel_requested"):
-                request.update(state="cancelled", error=None, not_before=0)
-                doc["state"] = "cancelled"
-                self._save(doc)
-                return request
-            if request.get("pause_requested"):
-                for task in doc["tasks"]:
-                    if task["state"] == "leased":
-                        task["state"] = "ready"
-                request.update(state="paused", error=None, not_before=0)
-                doc["state"] = "paused"
-                self._save(doc)
-                return request
-            if request["lease_expires_at"] <= now:
-                raise ValueError("Run lease expired; reclaim before finishing")
-            active = [
-                t["claim"]["expires_at"]
-                for t in doc["tasks"]
-                if t["state"] == "leased" and t["claim"]["expires_at"] > now
-            ]
-            continuation = request.pop("continuation_requested", False)
-            if active:
-                request.update(
-                    state="retryable_error",
-                    not_before=max(active),
-                    error=error or "Waiting for active task leases",
-                )
-                if error is not None:
-                    request["technical_failures"] = request.get("technical_failures", 0) + 1
-                    request["not_before"] = max(
-                        request["not_before"], now + 30 * (2 ** (request["technical_failures"] - 1))
-                    )
-            elif error is not None:
-                request["technical_failures"] = request.get("technical_failures", 0) + 1
-                request.update(
-                    state="retryable_error",
-                    error=error,
-                    not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
-                )
-            elif doc["state"] == "published":
-                request.update(state="succeeded", error=None, not_before=0)
-            elif continuation and all(p["state"] == "approved" for p in doc["pages"]):
-                request.update(state="pending", error=None, not_before=0)
-            elif any(t["state"] == "ready" for t in doc["tasks"]) and any(
-                p["state"] == "pending" for p in doc["pages"]
-            ):
-                request.update(state="pending", error=None, not_before=0)
-            elif any(t["state"] == "pending" for t in doc["tasks"]):
-                request.update(state="waiting_human", error=None, not_before=0)
-            else:
-                request["technical_failures"] = request.get("technical_failures", 0) + 1
-                request.update(
-                    state="retryable_error",
-                    error="Coordinator exited before publication or content review decision",
-                    not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
-                )
-            request["ready_after"] = request["not_before"]
-            request["history"].append(
-                {
-                    "event": "finished",
-                    "at": now,
-                    "state": request["state"],
-                    "error": request.get("error"),
-                }
-            )
-            self._save(doc)
-            return request
+    def search(self, query: str, limit: int = 20):
+        return self.publications.search(query, limit)
 
-    def human_queue(self) -> list[dict]:
-        """All unresolved page reviews are available to people, including repeated failures."""
-        with self.lock:
-            rows = []
-            for path in sorted((self.root / "documents").glob("*/document.json")):
-                doc = json.loads(path.read_text(encoding="utf-8"))
-                for page in doc["pages"]:
-                    if page["state"] != "pending":
-                        continue
-                    attempts = [
-                        t
-                        for t in doc["tasks"]
-                        if t["page"] == page["page"]
-                        and t.get("result", {}).get("verdict") == "pending"
-                    ]
-                    rows.append(
-                        {
-                            "document_id": doc["id"],
-                            "title": doc["title"],
-                            "page": page["page"],
-                            "unresolved_attempts": len(attempts),
-                            "issues": attempts[-1]["result"]["issues"],
-                        }
-                    )
-            return rows
-
-    def cancel_document(self, document_id: str) -> dict:
-        """Stop this document's owned coordinator before an explicit local deletion."""
-        with self.lock:
-            doc = self._load(document_id)
-            (self._directory(document_id) / ".cancel-requested").touch()
-            request = doc.get("run_request") or self._request_run(doc)
-            request["cancel_requested"] = True
-            if request["state"] != "running":
-                request["state"] = "cancelled"
-            self._save(doc)
-            return {"document_id": document_id, "state": request["state"]}
-
-    def forget_document(self, document_id: str) -> None:
-        """Erase only this stopped document's verified workspace directories."""
-        with self.lock:
-            doc = self._load(document_id)
-            if doc.get("run_request", {}).get("state") == "running":
-                raise ValueError("Wait for the owned coordinator to stop before deletion")
-            targets = [self._directory(document_id), self.root / "runs" / document_id]
-            for target in targets:
-                resolved = target.resolve()
-                if resolved != target.absolute() or not resolved.is_relative_to(self.root):
-                    raise ValueError("Document deletion escapes its workspace")
-            for target in targets:
-                if target.exists():
-                    shutil.rmtree(target)
+    def human_queue(self):
+        return self.human.human_queue()
 
     def request_human_review(
         self, document_id: str, page: int, issue: str, evidence: dict, worker_id: str
-    ) -> dict:
-        """Retain an explicit Codex audit dispute without impersonating a human."""
-        if (
-            not isinstance(issue, str)
-            or not issue.strip()
-            or not isinstance(worker_id, str)
-            or not worker_id.strip()
-            or worker_id.strip().startswith("human:")
-        ):
-            raise ValueError(
-                "A machine auditor identity and an unresolved source issue are required"
-            )
-        with self._verified(document_id) as doc:
-            if type(page) is not int or not 1 <= page <= len(doc["pages"]):
-                raise ValueError("Unknown physical page")
-            target = doc["pages"][page - 1]
-            history = [t for t in doc["tasks"] if t["page"] == page]
-            if any(t["stage"] == "human_review" for t in history):
-                raise ValueError("Human approvals and drafts cannot be replaced by a machine audit")
-            text = target.get("approved") or target.get("candidate") or target.get("ocr")
-            if (
-                not text
-                or not isinstance(evidence, dict)
-                or evidence.get("source_sha256") != doc["source"]["sha256"]
-                or evidence.get("image_sha256") != target["image_sha256"]
-                or evidence.get("markdown_sha256") != text["sha256"]
-            ):
-                raise ValueError("Audit evidence does not match the current source, page and text")
-            observations = evidence.get("observations")
-            if (
-                not evidence.get("original_details")
-                or not isinstance(observations, list)
-                or not observations
-                or any(not isinstance(s, str) or not s.strip() for s in observations)
-            ):
-                raise ValueError(
-                    "Human handoff requires retained original-detail evidence and observations"
-                )
-            self._verify_details(doc, {"page": page}, evidence)
-            prior = next(
-                (
-                    t
-                    for t in reversed(history)
-                    if t["stage"] == "machine_handoff" and t["state"] == "pending"
-                ),
-                None,
-            )
-            if (
-                prior
-                and prior["inputs"]["audit_evidence"] == evidence
-                and prior["result"]["issues"] == [issue.strip()]
-                and prior["receipt"]["worker_id"] == worker_id.strip()
-            ):
-                return {
-                    "document_id": document_id,
-                    "page": page,
-                    "state": "pending",
-                    "receipt": prior["receipt"],
-                }
-            if doc.get("run_request", {}).get("state") == "running" or any(
-                t["state"] == "leased" and t["claim"]["expires_at"] > time.time()
-                for t in doc["tasks"]
-            ):
-                raise ValueError(
-                    "Wait for the active coordinator and workers before an audit handoff"
-                )
-            if doc["state"] == "published":
-                self.begin_revision(document_id, issue, pages=[page])
-                doc = self._load(document_id)
-                target = doc["pages"][page - 1]
-            for task in doc["tasks"]:
-                if task["stage"] == "organization" or (
-                    task["page"] == page and task["state"] in {"ready", "leased", "pending"}
-                ):
-                    task["state"] = "superseded"
-            task = self._new_task("machine_handoff", page)
-            inputs = {
-                "document_id": document_id,
-                "source_sha256": doc["source"]["sha256"],
-                "page": page,
-                "image_sha256": target["image_sha256"],
-                "markdown": text["markdown"],
-                "markdown_sha256": text["sha256"],
-                "audit_evidence": evidence,
-            }
-            result = {
-                "verdict": "pending",
-                "issues": [issue.strip()],
-                "observations": evidence["observations"],
-                "original_details": evidence["original_details"],
-            }
-            receipt = {
-                "task_id": task["task_id"],
-                "worker_id": worker_id.strip(),
-                "input_sha256": digest(inputs),
-                "result_sha256": digest(result),
-                "approval_type": "machine",
-                "human_approval": False,
-                "sealed_gold_approval": False,
-                "origin": "codex_original_audit_handoff",
-                "created_at": time.time(),
-            }
-            task.update(
-                state="pending",
-                inputs=inputs,
-                claim={"input_sha256": digest(inputs)},
-                result=result,
-                receipt=receipt,
-            )
-            doc["tasks"].append(task)
-            target.pop("approved", None)
-            target.update(
-                state="pending",
-                review={**receipt, "verdict": "pending", "issues": result["issues"]},
-            )
-            doc.update(state="pending", organization=None, publication=None)
-            request = self._request_run(doc)
-            request.update(state="waiting_human", error=None, not_before=0, ready_after=0)
-            request["history"].append(
-                {
-                    "event": "audit_handoff",
-                    "at": time.time(),
-                    "page": page,
-                    "evidence_sha256": digest(evidence),
-                }
-            )
-            self._save(doc)
-            return {
-                "document_id": document_id,
-                "page": page,
-                "state": "pending",
-                "receipt": receipt,
-            }
+    ):
+        return self.human.request_human_review(document_id, page, issue, evidence, worker_id)
 
-    def _human_packet(self, doc: dict, number: int) -> dict:
-        if type(number) is not int or not 1 <= number <= len(doc["pages"]):
-            raise ValueError("Unknown physical page")
-        page = doc["pages"][number - 1]
-        if page["state"] != "pending" or doc["publication"]:
-            raise ValueError("Only unpublished pending pages can receive human review")
-        history = [t for t in doc["tasks"] if t["page"] == number]
-        pending = next(t for t in reversed(history) if t["state"] == "pending")
-        text = (
-            pending["result"]["markdown"]
-            if pending["stage"] == "human_review"
-            else pending["inputs"]["markdown"]
-        )
-        return {
-            "document_id": doc["id"],
-            "title": doc["title"],
-            "page": number,
-            "source_sha256": doc["source"]["sha256"],
-            "image_sha256": page["image_sha256"],
-            "pending_task_id": pending["task_id"],
-            "markdown": text,
-            **(
-                {
-                    "suggested_markdown": pending["result"].get("suggested_markdown")
-                    or pending["result"].get("markdown")
-                }
-                if pending["stage"] != "human_review"
-                and (
-                    pending["result"].get("suggested_markdown") or pending["result"].get("markdown")
-                )
-                else {}
-            ),
-            "ocr_markdown": page["ocr"]["markdown"],
-            "history": [
-                {
-                    "task_id": t["task_id"],
-                    "stage": t["stage"],
-                    "state": t["state"],
-                    "result": t.get("result"),
-                    "receipt": t.get("receipt"),
-                    **({"source_reading": t["source_reading"]} if t.get("source_reading") else {}),
-                }
-                for t in history
-            ],
-        }
-
-    def human_packet(self, document_id: str, page: int) -> dict:
-        with self._verified(document_id) as doc:
-            packet = self._human_packet(doc, page)
-            return {**packet, "input_sha256": digest(packet)}
+    def human_packet(self, document_id: str, page: int):
+        return self.human.human_packet(document_id, page)
 
     def record_human_review(
         self,
@@ -1818,444 +271,17 @@ class Store:
         note: str = "本地确认",
         verdict: str,
         decision_scope: str = "content",
-    ) -> dict:
-        """Record an explicit local form submission. Deliberately not exposed through MCP."""
-        if verdict not in {"approved", "pending"} or not reviewer.strip() or not note.strip():
-            raise ValueError(
-                "Human review requires a reviewer, reason and approved/pending decision"
-            )
-        if not isinstance(markdown, str):
-            raise ValueError("Human review requires full page Markdown")
-        if decision_scope not in {"content", "workflow_test"}:
-            raise ValueError("Unknown decision scope")
-        if decision_scope == "workflow_test":
-            authorization = self.root / ".workflow-test-authorization.json"
-            if not authorization.exists() or not json.loads(authorization.read_text("utf-8")).get(
-                "enabled"
-            ):
-                raise ValueError("Workflow-test release requires explicit workspace authorization")
-        with self._verified(document_id) as doc:
-            self._require_active(doc, allow_paused=True)
-            packet = self._human_packet(doc, page)
-            if digest(packet) != input_sha256:
-                raise ValueError("Review input changed; reload before deciding")
-            task = self._new_task("human_review", page)
-            receipt = {
-                "task_id": task["task_id"],
-                "worker_id": "human:" + reviewer.strip(),
-                "reviewer": reviewer.strip(),
-                "input_sha256": input_sha256,
-                "approval_type": "human",
-                "human_approval": verdict == "approved",
-                "sealed_gold_approval": False,
-                "origin": "local_human_review_form",
-                "created_at": time.time(),
-            }
-            if decision_scope == "workflow_test":
-                receipt.update(
-                    approval_type="workflow_test",
-                    human_approval=False,
-                    origin="user_authorized_workflow_test",
-                    content_verified=False,
-                )
-            result = {
-                "input_sha256": input_sha256,
-                "markdown": markdown,
-                "verdict": verdict,
-                "note": note.strip(),
-                "issues": [note.strip()] if verdict == "pending" else [],
-            }
-            task.update(
-                state="completed" if verdict == "approved" else "pending",
-                inputs=packet,
-                claim={"input_sha256": input_sha256},
-                result=result,
-                receipt={**receipt, "result_sha256": digest(result)},
-            )
-            previous = next(t for t in doc["tasks"] if t["task_id"] == packet["pending_task_id"])
-            previous["state"] = "superseded"
-            task["review_of"] = previous["task_id"]
-            doc["tasks"].append(task)
-            target = doc["pages"][page - 1]
-            target["review"] = {**receipt, "verdict": verdict, "issues": result["issues"]}
-            target["state"] = "approved" if verdict == "approved" else "pending"
-            if verdict == "approved":
-                target["approved"] = {**receipt, "markdown": markdown, "sha256": digest(markdown)}
-            self._refresh_navigation(doc)
-            if all(p["state"] == "approved" for p in doc["pages"]):
-                if not any(
-                    t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
-                    for t in doc["tasks"]
-                ) and not any(
-                    t["stage"] == "organization" and t["state"] != "superseded"
-                    for t in doc["tasks"]
-                ):
-                    doc["tasks"].append(self._new_task("organization"))
-                doc["state"] = "processing"
-                self._request_run(doc, followup=True)
-            else:
-                doc["state"] = "pending"
-                if verdict == "approved" and any(t["state"] == "ready" for t in doc["tasks"]):
-                    self._request_run(doc, followup=True)
-            self._save(doc)
-            return {
-                "document_id": document_id,
-                "page": page,
-                "state": doc["state"],
-                "page_state": target["state"],
-                "receipt": task["receipt"],
-            }
-
-    def _snapshot_publication(self, doc: dict) -> dict:
-        publication = doc["publication"]
-        version = doc.get("revision", 1)
-        directory = self._directory(doc["id"])
-        if file_digest(directory / "document.md") != publication["markdown_sha256"]:
-            raise ValueError("Published markdown hash mismatch")
-        if json.loads((directory / "publication.json").read_text(encoding="utf-8")) != publication:
-            raise ValueError("Published metadata mismatch")
-        archive = directory / "revisions" / f"{version:04d}-{digest(publication)[:12]}"
-        archive.mkdir(parents=True, exist_ok=True)
-        files = {}
-        for name in ("document.md", "publication.json"):
-            source, target = directory / name, archive / name
-            if target.exists():
-                if file_digest(target) != file_digest(source):
-                    raise ValueError("Archived publication cannot be overwritten")
-            else:
-                shutil.copyfile(source, target)
-            files[name] = {
-                "path": target.relative_to(directory).as_posix(),
-                "sha256": file_digest(target),
-            }
-        snapshot = archive / "document.json"
-        if not snapshot.exists():
-            atomic_json(snapshot, doc)
-        files["document.json"] = {
-            "path": snapshot.relative_to(directory).as_posix(),
-            "sha256": file_digest(snapshot),
-        }
-        return {"revision": version, "publication": publication, "files": files}
-
-    def _published_snapshot(self, doc: dict, record: dict) -> dict:
-        for reference in record["files"].values():
-            if file_digest(self._path(doc, reference["path"])) != reference["sha256"]:
-                raise ValueError("Archived publication evidence hash mismatch")
-        snapshot = json.loads(
-            self._path(doc, record["files"]["document.json"]["path"]).read_text(encoding="utf-8")
+    ):
+        return self.human.record_human_review(
+            document_id,
+            page,
+            input_sha256=input_sha256,
+            reviewer=reviewer,
+            markdown=markdown,
+            note=note,
+            verdict=verdict,
+            decision_scope=decision_scope,
         )
-        if snapshot["publication"] != record["publication"]:
-            raise ValueError("Archived publication metadata mismatch")
-        if record["files"]["document.md"]["sha256"] != record["publication"]["markdown_sha256"]:
-            raise ValueError("Archived markdown hash mismatch")
-        if (
-            json.loads(
-                self._path(doc, record["files"]["publication.json"]["path"]).read_text(
-                    encoding="utf-8"
-                )
-            )
-            != record["publication"]
-        ):
-            raise ValueError("Archived publication receipt mismatch")
-        self._verify_evidence(snapshot)
-        if digest(snapshot["organization"]) != record["publication"]["organization_sha256"]:
-            raise ValueError("Archived organization hash mismatch")
-        return snapshot
 
-    def begin_revision(
-        self,
-        document_id: str,
-        reason: str,
-        pages: list[int] | None = None,
-        *,
-        user_errata: bool = False,
-    ) -> dict:
-        """Reopen machine-reviewed pages while the last published version remains readable."""
-        if not isinstance(reason, str) or not reason.strip():
-            raise ValueError("Revision requires a reason")
-        with self._verified(document_id) as doc:
-            if doc["state"] != "published" or not doc.get("publication"):
-                raise ValueError("Only a published document can begin a new revision")
-            if doc.get("run_request", {}).get("state") == "running":
-                raise ValueError("Wait for the active coordinator before starting a revision")
-            selected = (
-                pages
-                if pages is not None
-                else [
-                    p["page"] for p in doc["pages"] if p["approved"].get("approval_type") != "human"
-                ]
-            )
-            if (
-                not selected
-                or len(set(selected)) != len(selected)
-                or any(type(n) is not int or not 1 <= n <= len(doc["pages"]) for n in selected)
-            ):
-                raise ValueError("Revision requires valid distinct physical pages")
-            for number in selected:
-                if not user_errata and any(
-                    t["page"] == number
-                    and t["stage"] == "human_review"
-                    and t.get("receipt", {}).get("approval_type") != "workflow_test"
-                    for t in doc["tasks"]
-                ):
-                    raise ValueError("Human approvals and drafts are preserved across revisions")
-            active = doc.get("active_publication") or self._snapshot_publication(doc)
-            self._published_snapshot(doc, active)
-            doc["active_publication"] = active
-            doc.setdefault("published_versions", [])
-            if not any(r["revision"] == active["revision"] for r in doc["published_versions"]):
-                doc["published_versions"].append(active)
-            doc["revision"] = doc.get("revision", 1) + 1
-            doc.setdefault("revision_history", []).append(
-                {
-                    "revision": doc["revision"],
-                    "reason": reason.strip(),
-                    "pages": selected,
-                    "created_at": time.time(),
-                }
-            )
-            for task in doc["tasks"]:
-                if task["stage"] == "organization" or (
-                    task["page"] in selected and task["stage"] in {"review", "verify"}
-                ):
-                    task["state"] = "superseded"
-            for number in selected:
-                page = doc["pages"][number - 1]
-                approved = page.pop("approved")
-                task = self._new_task("extraction", number)
-                inputs = {
-                    "document_id": document_id,
-                    "revision": doc["revision"],
-                    "previous_approval": approved,
-                }
-                result = {"markdown": approved["markdown"]}
-                receipt = {
-                    "task_id": task["task_id"],
-                    "worker_id": "local:revision",
-                    "approval_type": "extraction",
-                    "human_approval": False,
-                    "input_sha256": digest(inputs),
-                    "created_at": time.time(),
-                }
-                task.update(
-                    state="completed",
-                    inputs=inputs,
-                    claim={"input_sha256": digest(inputs)},
-                    result=result,
-                    receipt={**receipt, "result_sha256": digest(result)},
-                )
-                page.update(
-                    ocr={**receipt, "markdown": approved["markdown"], "sha256": approved["sha256"]},
-                    state="awaiting_review",
-                )
-                page.pop("candidate", None)
-                page.pop("review", None)
-                page.pop("automatic_review_attempts", None)
-                doc["tasks"].extend([task, self._new_task("review", number)])
-            doc.update(state="processing", publication=None, organization=None)
-            self._save(doc)
-            return {
-                "document_id": document_id,
-                "revision": doc["revision"],
-                "pages": selected,
-                "state": doc["state"],
-                "active_publication": active,
-            }
-
-    def propose_revision(self, document_id: str, changes: list[dict]) -> dict:
-        """Retain explicitly located errata as candidates for independent Sol review."""
-        with self._verified(document_id) as doc:
-            if doc["state"] != "published" or not changes:
-                raise ValueError("Errata require a published source and explicit changes")
-            by_page = {}
-            for change in changes:
-                number, start, before, after = (
-                    change.get(k) for k in ("page", "start", "before", "after")
-                )
-                if (
-                    type(number) is not int
-                    or not 1 <= number <= len(doc["pages"])
-                    or type(start) is not int
-                ):
-                    raise ValueError("Errata require an exact physical page and character offset")
-                text = doc["pages"][number - 1]["approved"]["markdown"]
-                if (
-                    not isinstance(before, str)
-                    or not before
-                    or not isinstance(after, str)
-                    or start < 0
-                    or text[start : start + len(before)] != before
-                ):
-                    raise ValueError("Erratum does not match current approved source")
-                by_page.setdefault(number, []).append(change)
-            replacements = {}
-            for number, edits in by_page.items():
-                edits.sort(key=lambda e: e["start"])
-                if any(
-                    a["start"] + len(a["before"]) > b["start"] for a, b in zip(edits, edits[1:])
-                ):
-                    raise ValueError("Errata overlap")
-                value = doc["pages"][number - 1]["approved"]["markdown"]
-                for edit in reversed(edits):
-                    value = (
-                        value[: edit["start"]]
-                        + edit["after"]
-                        + value[edit["start"] + len(edit["before"]) :]
-                    )
-                replacements[number] = value
-            self.begin_revision(
-                document_id,
-                "用户提交定位勘误，需重新对照原图审核",
-                pages=sorted(by_page),
-                user_errata=True,
-            )
-            doc = self._load(document_id)
-            for number, value in replacements.items():
-                page = doc["pages"][number - 1]
-                task = self._new_task("extraction", number)
-                inputs = {
-                    "document_id": document_id,
-                    "revision": doc["revision"],
-                    "source_sha256": doc["source"]["sha256"],
-                    "image_sha256": page["image_sha256"],
-                    "previous_candidate": page["ocr"],
-                    "changes": by_page[number],
-                }
-                result = {"markdown": value}
-                receipt = {
-                    "task_id": task["task_id"],
-                    "worker_id": "local:errata-proposal",
-                    "input_sha256": digest(inputs),
-                    "result_sha256": digest(result),
-                    "approval_type": "extraction",
-                    "human_approval": False,
-                    "origin": "explicit_local_errata_proposal",
-                    "created_at": time.time(),
-                }
-                task.update(
-                    state="completed",
-                    inputs=inputs,
-                    claim={"input_sha256": digest(inputs)},
-                    result=result,
-                    receipt=receipt,
-                )
-                doc["tasks"].append(task)
-                page["ocr"] = {**receipt, "markdown": value, "sha256": digest(value)}
-            self._save(doc)
-            self.request_run(document_id, resume=True)
-            return {
-                "document_id": document_id,
-                "revision": doc["revision"],
-                "pages": sorted(by_page),
-                "state": "queued_for_independent_review",
-                "content_approved": False,
-            }
-
-    def publish(self, document_id: str) -> dict:
-        with self._verified(document_id) as doc:
-            self._require_active(doc)
-            if not all(p["state"] == "approved" for p in doc["pages"]) or not doc["organization"]:
-                raise ValueError(
-                    "Whole document must have approved pages and completed organization"
-                )
-            if any(
-                t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
-                for t in doc["tasks"]
-            ):
-                raise ValueError(
-                    "Complete directory parsing before publication; mapping conflicts may remain"
-                )
-            if doc["state"] == "published":
-                if doc.get("active_publication"):
-                    self._published_snapshot(doc, doc["active_publication"])
-                publication = doc["publication"]
-                directory = self._directory(document_id)
-                if file_digest(directory / "document.md") != publication["markdown_sha256"]:
-                    raise ValueError("Published markdown hash mismatch")
-                retained = json.loads((directory / "publication.json").read_text(encoding="utf-8"))
-                if (
-                    retained != publication
-                    or digest(doc["organization"]) != publication["organization_sha256"]
-                ):
-                    raise ValueError("Publication evidence hash mismatch")
-                return doc["publication"]
-            content = "\n\n".join(
-                f"<!-- physical-page: {p['page']} image-sha256: {p['image_sha256']} -->\n\n{p['approved']['markdown']}"
-                for p in doc["pages"]
-            )
-            directory = self._directory(document_id)
-            markdown_path = directory / "document.md"
-            temporary = directory / f".document.{uuid4().hex}.tmp"
-            temporary.write_text(content, encoding="utf-8", newline="\n")
-            temporary.replace(markdown_path)
-            publication = {
-                "document_id": document_id,
-                "markdown_path": str(markdown_path),
-                "markdown_sha256": digest(content),
-                "source_sha256": doc["source"]["sha256"],
-                "organization_sha256": digest(doc["organization"]),
-                "approval_type": "mixed"
-                if any(p["approved"]["approval_type"] == "human" for p in doc["pages"])
-                else "machine",
-                "human_approval": False,
-                "human_reviewed_pages": [
-                    p["page"] for p in doc["pages"] if p["approved"]["approval_type"] == "human"
-                ],
-                "published_at": time.time(),
-            }
-            test_pages = [
-                p["page"] for p in doc["pages"] if p["approved"]["approval_type"] == "workflow_test"
-            ]
-            if test_pages:
-                publication.update(
-                    approval_type="workflow_test",
-                    content_verified=False,
-                    workflow_test_pages=test_pages,
-                )
-            if (self.root / ".workflow-test-authorization.json").exists():
-                publication.update(validation_scope="workflow_only", content_verified=False)
-            atomic_json(directory / "publication.json", publication)
-            doc.update(state="published", publication=publication)
-            if "revision" in doc:
-                active = self._snapshot_publication(doc)
-                doc["active_publication"] = active
-                doc.setdefault("published_versions", []).append(active)
-            self._save(doc)
-            return publication
-
-    def search(self, query: str, limit: int = 20) -> list[dict]:
-        if not query.strip() or not 1 <= limit <= 100:
-            raise ValueError("Nonempty query and limit between 1 and 100 are required")
-        results = []
-        for path in sorted((self.root / "documents").glob("*/document.json")):
-            doc = json.loads(path.read_text(encoding="utf-8"))
-            revision_pending = bool(doc.get("active_publication") and doc["state"] != "published")
-            revision_reason = (
-                doc.get("revision_history", [{}])[-1].get("reason") if revision_pending else None
-            )
-            if doc.get("active_publication"):
-                doc = self._published_snapshot(doc, doc["active_publication"])
-            elif doc["state"] != "published":
-                continue
-            self._verify_evidence(doc)
-            for page in doc["pages"]:
-                markdown = page["approved"]["markdown"]
-                at = markdown.casefold().find(query.casefold())
-                if at < 0:
-                    continue
-                results.append(
-                    {
-                        "document_id": doc["id"],
-                        "title": doc["title"],
-                        "page": page["page"],
-                        "excerpt": markdown[max(0, at - 80) : at + len(query) + 160],
-                        "image": str(self._path(doc, page["image"])),
-                        "image_sha256": page["image_sha256"],
-                        "markdown_sha256": page["approved"]["sha256"],
-                        "revision_pending": revision_pending,
-                        "revision_reason": revision_reason,
-                    }
-                )
-                if len(results) >= limit:
-                    return results
-        return results
+    def record_recovery_failure(self, document_id, expected_request, detail):
+        return self.runs.record_recovery_failure(document_id, expected_request, detail)

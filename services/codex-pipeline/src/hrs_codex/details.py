@@ -9,11 +9,15 @@ from importlib.metadata import version
 import pypdfium2 as pdfium
 from PIL import Image, ImageOps
 
+from hrs_codex.checkpoints import atomic_json
+from hrs_codex.hashing import file_digest
 from hrs_codex.render import _atomic_bytes
-from hrs_codex.store import Store, atomic_json, file_digest
+from hrs_codex.store import Store
 
 
-def original_detail(store: Store, document_id: str, page: int, box: list[float]) -> tuple[dict, bytes]:
+def original_detail(
+    store: Store, document_id: str, page: int, box: list[float]
+) -> tuple[dict, bytes]:
     """Render a retained PDF at 432 dpi, or use a raster frame's native pixels."""
     if (
         len(box) != 4
@@ -24,7 +28,7 @@ def original_detail(store: Store, document_id: str, page: int, box: list[float])
     document = store.status(document_id)
     if not any(row["page"] == page for row in document["pages"]):
         raise ValueError("Unknown physical page")
-    source = store._path(document, document["source"]["path"])
+    source = store.artifact_path(document, document["source"]["path"])
     expected = document["source"]["sha256"]
     if file_digest(source) != expected:
         raise ValueError("Retained original source hash mismatch")
@@ -44,12 +48,15 @@ def original_detail(store: Store, document_id: str, page: int, box: list[float])
     key = sha256(json.dumps(request, sort_keys=True).encode("utf-8")).hexdigest()[:24]
     relative = f"evidence/details/{key}.png"
     metadata_relative = f"evidence/details/{key}.json"
-    image_path = store._path(document, relative)
+    image_path = store.artifact_path(document, relative)
     metadata_path = image_path.with_suffix(".json")
     if image_path.exists() and metadata_path.exists():
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         data = image_path.read_bytes()
-        if any(metadata.get(name) != value for name, value in request.items()) or metadata.get("image") != relative:
+        if (
+            any(metadata.get(name) != value for name, value in request.items())
+            or metadata.get("image") != relative
+        ):
             raise ValueError("Retained original detail metadata mismatch")
         if sha256(data).hexdigest() != metadata["image_sha256"]:
             raise ValueError("Retained original detail hash mismatch")

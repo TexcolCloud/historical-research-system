@@ -1,3 +1,4 @@
+import { queryKeys } from "@/client/query-keys.ts";
 import { useEffect, useState } from "react";
 import IssueEditor from "./IssueEditor.tsx";
 import { useOutletContext } from "react-router-dom";
@@ -19,7 +20,7 @@ import ConversionReader from "@/features/review/ConversionReader.tsx";
 
 const issueOptions = (id: string) =>
   queryOptions({
-    queryKey: ["platform", "issue", id],
+    queryKey: queryKeys.issue(id),
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/reviews/{issue_id}", {
         params: { path: { issue_id: id } },
@@ -73,8 +74,8 @@ export default function ReviewPanel({
     setSelected(receipt.next_issue_id);
     setMessage(
       receipt.pending_count
-        ? `决定已保存，剩余 ${receipt.pending_count} 项。后台继续同步，可立即核对下一项。`
-        : "决定已保存，当前待办已处理完成。后台正在同步，整书核验通过后继续整理入库。",
+        ? `本页已提交，剩余 ${receipt.pending_count} 项待核对。可继续处理下一项。`
+        : "本页已提交，当前核对清单已处理完。整书核对通过后，系统会继续整理入库。",
     );
   }
   return (
@@ -107,7 +108,9 @@ export default function ReviewPanel({
       ) : issues.isError ? (
         <p role="alert">
           {issues.error.message}
-          <Button onClick={() => void issues.refetch()}>重试</Button>
+          <Button onClick={() => void issues.refetch()}>
+            重新读取核对清单
+          </Button>
         </p>
       ) : issues.isPending ? (
         <p role="status">正在读取核对清单…</p>
@@ -117,14 +120,18 @@ export default function ReviewPanel({
             {preparing
               ? state === "failed"
                 ? "识别或核验尚未完成"
-                : "识别与原件核验进行中"
+                : state === "paused"
+                  ? "自动处理已暂停"
+                  : "文字提取与原图核对进行中"
               : "当前没有待核对内容"}
           </h2>
           <p>
             {preparing
               ? state === "failed"
-                ? "请在处理进展中恢复本阶段。尚未形成完整核对清单，不代表内容已经通过。"
-                : "核验完成后，需要你确认的问题会列在这里。当前清单为空不代表内容已经通过，可在处理进展中查看核验页数。"
+                ? "请前往处理进展，点击“从断点恢复”。尚未生成的核对项目将在处理后列出。"
+                : state === "paused"
+                  ? "请前往处理进展，点击“继续处理”。恢复后发现的疑点会列在这里。"
+                  : "暂未发现需要你处理的疑点。新疑点会自动列出，可先阅读已有底稿。"
               : "已完成核对的书籍会自动继续整理章节并入库。"}
           </p>
           {bookId && (
@@ -151,7 +158,9 @@ export default function ReviewPanel({
           {current.isError ? (
             <p role="alert">
               {current.error.message}
-              <Button onClick={() => void current.refetch()}>重试</Button>
+              <Button onClick={() => void current.refetch()}>
+                重新读取本页
+              </Button>
             </p>
           ) : current.data ? (
             <IssueEditor
