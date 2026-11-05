@@ -49,19 +49,29 @@ class WorkflowContext:
     def _scoped(self, document_id, page_for):
         def select(doc):
             page = page_for(doc)
+            selected = {
+                "page": page,
+                "fields": {
+                    key: doc.get(key)
+                    for key in (
+                        "source",
+                        "processing_policy",
+                        "state",
+                        "revision",
+                        "revision_history",
+                    )
+                },
+                # Progress, scheduler metrics and lease renewals do not change evidence.
+                "run_control": {
+                    key: doc.get("run_request", {}).get(key)
+                    for key in ("state", "token", "owner", "pause_requested", "cancel_requested")
+                },
+                "pages": [row for row in doc["pages"] if page is None or row["page"] == page],
+                "tasks": [task for task in doc["tasks"] if page is None or task["page"] == page],
+            }
             if page is None:
-                return digest(doc)
-            return digest(
-                {
-                    "page": page,
-                    "fields": {
-                        key: doc.get(key)
-                        for key in ("source", "processing_policy", "state", "run_request")
-                    },
-                    "pages": [row for row in doc["pages"] if row["page"] == page],
-                    "tasks": [task for task in doc["tasks"] if task["page"] == page],
-                }
-            )
+                selected["organization"] = doc.get("organization")
+            return digest(selected)
 
         def validate(doc):
             page = page_for(doc)

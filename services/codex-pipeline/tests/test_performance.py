@@ -84,6 +84,34 @@ def test_background_validation_does_not_block_status_or_overwrite_a_newer_snapsh
     assert len(passes) == 2
 
 
+@pytest.mark.parametrize("stage", ["ocr", "organization"])
+def test_progress_and_lease_heartbeats_do_not_invalidate_evidence(tmp_path, monkeypatch, stage):
+    store, identity = document(tmp_path)
+    if stage == "organization":
+        complete(store, identity, "ocr", "transcriber", {"markdown": "Retained source"})
+        complete(store, identity, "review", "reviewer", {"verdict": "approved", "issues": []})
+    store.request_run(identity)
+    other = Store(store.root)
+    verify = store.context.evidence.verify
+    passes = []
+
+    def concurrent_heartbeat(snapshot, pages=None):
+        verify(snapshot, pages)
+        passes.append(pages)
+        with other.lock:
+            current = other.checkpoints.read(identity)
+            current["run_request"]["last_progress_at"] = len(passes)
+            current["run_request"]["lease_expires_at"] = 100000 + len(passes)
+            current.setdefault("scheduler", {})["rebalanced_at"] = len(passes)
+            other.checkpoints.write(current)
+
+    monkeypatch.setattr(store.context.evidence, "verify", concurrent_heartbeat)
+    task = store.claim_task(identity, stage, "worker")
+    assert task["stage"] == stage
+    assert len(passes) == 1, "Telemetry does not change retained source or decision evidence"
+    assert other.status(identity)["run_request"]["last_progress_at"] == 1
+
+
 def test_status_reads_last_atomic_commit_without_waiting_for_a_writer(tmp_path):
     store, doc_id = document(tmp_path)
     other = Store(store.root)
