@@ -32,6 +32,7 @@ def test_domain_rules_do_not_depend_on_persistence_or_entrypoints():
         "navigation",
         "organization",
         "review_locations",
+        "review_contract",
     }
     for name in ("hashing", "contracts", "errors", "workflow_rules", "task_results", "progress"):
         for node in ast.walk(ast.parse((root / f"{name}.py").read_text(encoding="utf-8"))):

@@ -1,8 +1,13 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useId, useMemo, useRef, useEffect } from "react";
-import { highlightDom, type ReviewLocation } from "./review-highlights.ts";
+import {
+  highlightDom,
+  type ReviewLocation,
+  type ReviewRenderer,
+} from "./review-highlights.ts";
 import { withFootnotes, type FootnoteLink } from "@/editor/footnotes.ts";
+const noFootnotes: FootnoteLink[] = [];
 
 function safeHtml(markdown: string) {
   return DOMPurify.sanitize(marked.parse(markdown, { async: false }), {
@@ -14,11 +19,12 @@ function safeHtml(markdown: string) {
 }
 export function RenderedMarkdown({
   markdown,
-  footnotes = [],
+  footnotes = noFootnotes,
   assetBaseUrl,
   highlights,
   activeHighlight,
   onHighlight,
+  onLocationFailure,
 }: {
   markdown: string;
   footnotes?: FootnoteLink[];
@@ -26,28 +32,76 @@ export function RenderedMarkdown({
   highlights?: ReviewLocation[];
   activeHighlight?: string;
   onHighlight?: (id: string) => void;
+  onLocationFailure?: (ids: string[]) => void;
 }) {
   const prefix = `footnotes-${useId()}`;
   const root = useRef<HTMLDivElement>(null);
-  const html = useMemo(() => {
-    let reading = withFootnotes(markdown, footnotes, prefix);
-    if (assetBaseUrl)
-      reading = reading.replace(
-        /!\[([^\]]*)\]\([^\n]*?docling-assets[\\/]([\w.-]+)\)/g,
-        (_, alt: string, name: string) =>
-          `![${alt}](${assetBaseUrl}/docling-assets/${encodeURIComponent(name)})`,
-      );
-    if (assetBaseUrl)
-      reading = reading.replace(
-        /!\[([^\]]*)\]\((pages\/\d+\.png|evidence\/details\/[\w.-]+\.png)\)/g,
-        (_, alt: string, path: string) => `![${alt}](${assetBaseUrl}/${path})`,
-      );
-    return safeHtml(reading);
-  }, [markdown, footnotes, prefix, assetBaseUrl]);
+  const failureCallback = useRef(onLocationFailure);
+  const reportedFailures = useRef<string | undefined>(undefined);
+  failureCallback.current = onLocationFailure;
+  const renderSource = useMemo<ReviewRenderer>(
+    () => (source, insertions) => {
+      const edits = insertions.map((edit) => ({
+        ...edit,
+        at: Array.from(markdown.slice(0, edit.at)).length,
+      }));
+      const point = (at: number, right: boolean) =>
+        at +
+        edits.reduce(
+          (sum, edit) =>
+            sum +
+            (edit.at < at || (right && edit.at === at) ? edit.text.length : 0),
+          0,
+        );
+      const links = footnotes.map((link) => ({
+        ...link,
+        note: {
+          start: point(link.note.start, true),
+          end: point(link.note.end, false),
+          marker_end: point(link.note.marker_end, false),
+        },
+        references: link.references.map((ref) => ({
+          start: point(ref.start, true),
+          end: point(ref.end, false),
+        })),
+      }));
+      let reading = withFootnotes(source, links, prefix);
+      if (assetBaseUrl)
+        reading = reading.replace(
+          /!\[([^\]]*)\]\([^\n]*?docling-assets[\\/]([\w.-]+)\)/g,
+          (_, alt: string, name: string) =>
+            `![${alt}](${assetBaseUrl}/docling-assets/${encodeURIComponent(name)})`,
+        );
+      if (assetBaseUrl)
+        reading = reading.replace(
+          /!\[([^\]]*)\]\((pages\/\d+\.png|evidence\/details\/[\w.-]+\.png)\)/g,
+          (_, alt: string, path: string) =>
+            `![${alt}](${assetBaseUrl}/${path})`,
+        );
+      return safeHtml(reading);
+    },
+    [markdown, footnotes, prefix, assetBaseUrl],
+  );
+  const html = useMemo(
+    () => renderSource(markdown, []),
+    [markdown, renderSource],
+  );
   useEffect(() => {
-    if (root.current)
-      highlightDom(root.current, markdown, highlights ?? [], activeHighlight);
-  }, [html, markdown, highlights, activeHighlight]);
+    if (root.current) {
+      const failures = highlightDom(
+        root.current,
+        markdown,
+        highlights ?? [],
+        activeHighlight,
+        renderSource,
+      );
+      const signature = JSON.stringify(failures);
+      if (reportedFailures.current !== signature) {
+        reportedFailures.current = signature;
+        failureCallback.current?.(failures);
+      }
+    }
+  }, [html, markdown, highlights, activeHighlight, renderSource]);
   return (
     <div
       className="prose"

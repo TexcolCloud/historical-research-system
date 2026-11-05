@@ -106,3 +106,13 @@ def test_independent_verification_uses_spare_capacity_instead_of_serializing_pag
     plan = scheduling_plan(doc, now=1000)
     assert plan["workers"]["verify"] == 7
     assert sum(plan["workers"].values()) == 7
+
+
+def test_ready_verification_takes_a_virtual_review_lane_at_small_capacity():
+    doc = {
+        "pages": [{"page": 1, "state": "awaiting_ocr"}],
+        "tasks": [{"stage": "ocr", "state": "ready"}, {"stage": "verify", "state": "ready"}],
+    }
+    plan = scheduling_plan(doc, now=1000, capacity=2, overlap_reading=True)
+    assert plan["workers"]["verify"] == plan["workers"]["ocr"] == 1
+    assert plan["workers"]["review"] == 0

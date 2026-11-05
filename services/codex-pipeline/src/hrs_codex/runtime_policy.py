@@ -1,5 +1,7 @@
 """Small stage-specific runtime contracts; development skills never enter worker prompts."""
 
+from hrs_codex.review_contract import ISSUE_INSTRUCTIONS
+
 COMMON = """You are a native Codex worker, not the coordinator. Use only historical_research MCP.
 The supplied session_token owns a bounded stage session. Call open_task_packet(session_token, unique worker_id).
 Source-only preflight packets provide original pixels before OCR exists; freeze observations, then
@@ -41,16 +43,13 @@ Under bounded policy, clear uniquely located repairs with NO unresolved original
 after:correct text,reason:original evidence}],issues:[]}. Applying nonoverlapping patches must reproduce
 the full corrected Markdown; a distinct full-page verify follows. Disputed readings use
 {verdict:'pending',disposition:'disputed',issues:[...]}; unreadable originals use disposition:'unreadable'.
-Each issue includes anchor={exact,prefix,suffix} from candidate,focus,explanation in Chinese,
-source_quote,candidate_quote,optional suggestion,boxes:[[left,top,right,bottom]] normalized to FULL
-original and image_precision:'line|region'. Use actual inspected regions; never invent coordinates.
-Preserve unlocated uncertainty explicitly. Include original_details receipts when used.""",
+Use the shared issue contract below for every issue. Use actual inspected regions; never invent
+coordinates. Preserve unlocated uncertainty explicitly. Include original_details receipts when used.""",
     "verify": """Independently recheck the ENTIRE original and candidate, including unchanged text.
 Use the same original-first freeze_observations and complete candidate_text coverage as review.
 Submit only verdict='approved' with issues=[] or verdict='pending' with precise issues. Never repair
 or retry. Unresolved observations block approval. Include source-bound page_observation and actual
-crop receipts. An issue has anchor={exact,prefix,suffix},focus,explanation,source_quote,candidate_quote,
-optional boxes normalized to the FULL page and image_precision=line|region. Never invent evidence.""",
+crop receipts. Use the shared issue contract below for every issue. Never invent evidence.""",
     "organization": """The packet's approved_pages contains FULL frozen page texts and source hashes.
 Read ALL supplied pages; if next_after_page is not null use approved_pages_text(document_id,
 task_id,lease_token,after_page=next_after_page) until it is null. The bounded batches never omit
@@ -73,7 +72,12 @@ Use only literal source anchors and titles; retain conflicts for humans.""",
 def worker_instructions(stage):
     if stage not in STAGE:
         raise ValueError("Unknown native worker stage")
-    return COMMON + "\n" + STAGE[stage]
+    return (
+        COMMON
+        + "\n"
+        + STAGE[stage]
+        + ("\n" + ISSUE_INSTRUCTIONS if stage in {"review", "verify"} else "")
+    )
 
 
 def coordinator_instructions(document_id, *, batch_pages=2):

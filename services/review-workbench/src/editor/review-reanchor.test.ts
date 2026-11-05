@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import {
   moveReviewLocations,
-  resolveLocation,
+  sourceRanges,
   type ReviewLocation,
 } from "./review-highlights.ts";
 test("editing one doubt keeps the neighboring doubt located even when its original context changes", () => {
@@ -27,8 +27,8 @@ test("editing one doubt keeps the neighboring doubt located even when its origin
     "😀甲修订乙，丙错丁。",
     [first, second],
   );
-  const a = resolveLocation("😀甲修订乙，丙错丁。", updated[0]);
-  const b = resolveLocation("😀甲修订乙，丙错丁。", updated[1]);
+  const a = sourceRanges("😀甲修订乙，丙错丁。", updated[0])[0];
+  const b = sourceRanges("😀甲修订乙，丙错丁。", updated[1])[0];
   expect(a && "😀甲修订乙，丙错丁。".slice(a.start, a.end)).toBe("修订");
   expect(b && "😀甲修订乙，丙错丁。".slice(b.start, b.end)).toBe("错");
 });

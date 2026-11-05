@@ -350,6 +350,10 @@ class TaskWorkflow:
                 raise ValueError("Task input hash mismatch")
             self.context.evidence.verify_details(doc, task, result)
             stage = task["stage"]
+            if stage in {"review", "verify"} and task.get("source_first_required"):
+                from hrs_codex.review_contract import validate_issues
+
+                validate_issues(result.get("issues", []), strict=True)
             automatic_verification = False
             if (
                 stage == "review"

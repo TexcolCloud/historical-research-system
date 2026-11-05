@@ -72,7 +72,7 @@ export default function ReviewFocus({
               ? range.start === range.end
                 ? "▏（此处缺字）"
                 : text.slice(range.start, range.end)
-              : issue.focus || issue.candidate || "请查看整页"}
+              : issue.candidate || issue.anchor.exact || "请查看整页"}
           </mark>
         </div>
         {issue.source_reading && (
@@ -88,7 +88,15 @@ export default function ReviewFocus({
       </details>
       {!range && (
         <p role="status">
-          本处无法自动选中文字，请对照原图核对整页。文字有误时，点击“需要修改”编辑整页。
+          {issue.boxes.length
+            ? "原图区域已定位，正文暂未可靠定位。"
+            : "正文与原图暂未可靠定位。"}
+          请结合原识别片段核对整页；需要修改时可编辑整页 Markdown。
+        </p>
+      )}
+      {range && !issue.boxes.length && (
+        <p className="platform-inline-status">
+          正文已定位，原图需结合整页核对。
         </p>
       )}
       {!editing && (

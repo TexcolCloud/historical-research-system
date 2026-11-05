@@ -7,6 +7,21 @@ from collections import Counter
 STAGES = ("ocr", "review", "verify", "navigation", "organization")
 
 
+def ready_tasks(doc, *, now=None):
+    """Concrete work which can be leased now, excluding cooldown and blocked tasks."""
+    now = time.time() if now is None else now
+    return [
+        task
+        for task in doc["tasks"]
+        if (
+            task["state"] == "ready"
+            or (task["state"] == "leased" and task.get("claim", {}).get("expires_at", 0) <= now)
+        )
+        and task.get("retry_after", 0) <= now
+        and not task.get("technical_blocked")
+    ]
+
+
 def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading=False):
     now = time.time() if now is None else now
     capacity = max(1, min(64, capacity))
@@ -79,16 +94,7 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
             "samples": len(durations),
         }
     workers = dict.fromkeys(STAGES, 0)
-    eligible = Counter(
-        t["stage"]
-        for t in tasks
-        if (
-            t["state"] == "ready"
-            or (t["state"] == "leased" and t.get("claim", {}).get("expires_at", 0) <= now)
-        )
-        and t.get("retry_after", 0) <= now
-        and not t.get("technical_blocked")
-    )
+    eligible = Counter(task["stage"] for task in ready_tasks(doc, now=now))
     work = {s: eligible[s] + len(active[s]) for s in STAGES}
     if overlap_reading and work["ocr"]:
         # Blind original reading can run before the candidate exists.
@@ -113,8 +119,12 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
             continue
         if sum(workers.values()) >= capacity:
             donor = max(
-                (s for s in ("ocr", "review") if workers[s] > 1),
-                key=lambda s: workers[s],
+                (
+                    s
+                    for s in ("ocr", "review")
+                    if workers[s] > 1 or workers[s] > eligible[s] + len(active[s])
+                ),
+                key=lambda s: (workers[s] > eligible[s] + len(active[s]), workers[s]),
                 default=None,
             )
             if donor:

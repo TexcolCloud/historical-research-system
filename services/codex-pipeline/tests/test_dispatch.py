@@ -113,3 +113,76 @@ def test_submission_timing_is_reported_without_rewriting_the_machine_receipt(tmp
     metric = store.scheduling_plan(identity)["metrics"]["ocr"]
     assert metric["phase_medians"]["submission_seconds"] >= 0
     store.verify_evidence(store.status(identity))
+
+
+def second_document(store, tmp_path, count=10):
+    source = tmp_path / "second.pdf"
+    source.write_bytes(b"different retained source")
+    original = store.list_documents()[0]
+    pages = [
+        {**page, "image": str(tmp_path / f"page-{page['page']}.png")}
+        for page in store.status(original["id"])["pages"]
+    ]
+    return store.register(source, pages[:count], title="Second source")["id"]
+
+
+def test_concrete_work_uses_last_shared_slot_before_another_books_prewarm(tmp_path):
+    from hrs_codex.execution_policy import configure_execution
+
+    store, first = document(tmp_path, count=10)
+    configure_execution(store.root, capacity=7, overlap_reading=True)
+    assignments = store.dispatch.reserve(first)["assignments"]
+    ocr = next(a for a in assignments if a["stage"] == "ocr")
+    store.dispatch.close(ocr["session_token"], "unstarted")
+    second = second_document(store, tmp_path)
+    result = store.dispatch.reserve(second)
+    assert [a["stage"] for a in result["assignments"]] == ["ocr"]
+    assert store.checkpoints.ledger.capacity_used() == 7
+
+
+def test_idle_prewarm_from_another_book_yields_capacity_to_ready_work(tmp_path):
+    from hrs_codex.execution_policy import configure_execution
+
+    store, first = document(tmp_path, count=10)
+    configure_execution(store.root, capacity=14, overlap_reading=True)
+    assignments = store.dispatch.reserve(first)["assignments"]
+    for assignment in assignments:
+        token = assignment["session_token"]
+        if assignment["stage"] == "ocr":
+            store.dispatch.close(token, "unstarted")
+        else:
+            packet, meta, _ = store.dispatch.open(token, "reader-" + token)
+            if packet["state"] == "preflight":
+                store.dispatch.freeze(
+                    token,
+                    "reader-" + token,
+                    {
+                        "image_receipt": meta["image_receipt"],
+                        "image_sha256": meta["image_sha256"],
+                        "observations": ["independent source-only observation"],
+                        "unresolved": [],
+                    },
+                )
+    second = second_document(store, tmp_path)
+    configure_execution(store.root, capacity=2, overlap_reading=True)
+    result = store.dispatch.reserve(second)
+    assert any(a["stage"] == "ocr" for a in result["assignments"])
+    assert store.checkpoints.ledger.capacity_used() <= 2
+    ended = [
+        s for s in store.dispatch.sessions() if s.get("exit_reason") == "capacity_for_ready_work"
+    ]
+    assert ended and all(s.get("preflight", {}).get("reading") for s in ended)
+
+
+def test_reclaim_does_not_interrupt_an_unfrozen_original_read_or_reserved_task(tmp_path):
+    from hrs_codex.execution_policy import configure_execution
+
+    store, first = document(tmp_path, count=10)
+    configure_execution(store.root, capacity=2, overlap_reading=True)
+    assignments = store.dispatch.reserve(first)["assignments"]
+    reviewer = next(a["session_token"] for a in assignments if a["stage"] == "review")
+    assert store.dispatch.open(reviewer, "reading-original")[0]["state"] == "preflight"
+    second = second_document(store, tmp_path)
+    assert not store.dispatch.reserve(second)["assignments"]
+    assert store.dispatch.open(reviewer, "reading-original")[0]["state"] == "wait"
+    assert store.checkpoints.ledger.capacity_used() == 2

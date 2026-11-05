@@ -9,6 +9,10 @@ import {
   readLocations,
   suggestionEdit,
   moveReviewLocations,
+  recoverReviewLocations,
+  serializeReviewLocations,
+  sourceRanges,
+  type ReviewLocation,
 } from "@/editor/review-highlights.ts";
 import type { Resolution } from "./ReviewFocus.tsx";
 
@@ -24,19 +28,36 @@ export function useReviewSession(
 ) {
   const query = useQueryClient(),
     draftKey = ["platform", "review-edit", issue.id];
+  const cached = query.getQueryData<
+    string | { text: string; locations: ReviewLocation[] }
+  >(draftKey);
   const [text, setText] = useState(
-    query.getQueryData<string>(draftKey) ?? issue.draft_text ?? issue.text,
+    (typeof cached === "string" ? cached : cached?.text) ??
+      issue.draft_text ??
+      issue.text,
   );
   const [resolutions, setResolutions] = useState<Resolution[]>(
     issue.resolutions ?? [],
   );
   const baseLocations = useMemo(
-    () => readLocations(issue.locations ?? []),
-    [issue.locations],
+    () => readLocations(issue.locations ?? [], issue.text, issue.text_sha256),
+    [issue.locations, issue.text, issue.text_sha256],
   );
-  const [textLocations, setTextLocations] = useState(() =>
-    moveReviewLocations(issue.text, text, baseLocations),
-  );
+  const [textLocations, setTextLocations] = useState(() => {
+    if (cached && typeof cached !== "string") return cached.locations;
+    const restored =
+      text === issue.draft_text && issue.draft_locations_text_sha256
+        ? readLocations(
+            issue.draft_locations ?? [],
+            text,
+            issue.draft_locations_text_sha256,
+          )
+        : [];
+    return recoverReviewLocations(issue.text, text, baseLocations).map(
+      (location) =>
+        restored.find((saved) => saved.id === location.id) ?? location,
+    );
+  });
   const [active, setActive] = useState(
     () =>
       baseLocations.find(
@@ -51,7 +72,7 @@ export function useReviewSession(
   const [boxes, setBoxes] = useState<Record<string, number[]>>({});
   const locations = useMemo(
     () =>
-      textLocations.map((l) =>
+      textLocations.map<ReviewLocation>((l) =>
         boxes[l.id]
           ? { ...l, boxes: [boxes[l.id]], image_precision: "region" }
           : l,
@@ -68,21 +89,26 @@ export function useReviewSession(
   const [finishing, setFinishing] = useState(false);
   const snapshot = useRef({ text, resolutions, locations: textLocations });
   const latestText = useRef(text),
-    latestResolutions = useRef(resolutions);
+    latestResolutions = useRef(resolutions),
+    latestLocations = useRef(textLocations);
   const savedText = useRef(issue.draft_text ?? issue.text),
-    savedResolutions = useRef(JSON.stringify(issue.resolutions ?? []));
+    savedResolutions = useRef(JSON.stringify(issue.resolutions ?? [])),
+    savedLocationsSha = useRef(issue.draft_locations_text_sha256);
   const revision = useRef(issue.revision),
     queue = useRef<Promise<unknown>>(Promise.resolve());
   latestText.current = text;
   latestResolutions.current = resolutions;
+  latestLocations.current = textLocations;
   const draft = useMutation({
     mutationKey: ["platform", "review-write", issue.run_id],
     mutationFn: async ({
       value,
       decisions,
+      positionSnapshot,
     }: {
       value: string;
       decisions: Resolution[];
+      positionSnapshot: ReviewLocation[];
     }) => {
       if (
         value === savedText.current &&
@@ -92,6 +118,8 @@ export function useReviewSession(
           revision: revision.current,
           draft_text: value,
           resolutions: decisions,
+          locations: positionSnapshot,
+          locations_text_sha256: savedLocationsSha.current,
         };
       const { data, response } = await client.PUT(
         "/api/v2/reviews/{issue_id}/draft",
@@ -101,6 +129,7 @@ export function useReviewSession(
             text: value,
             expected_revision: revision.current,
             resolutions: decisions,
+            locations: serializeReviewLocations(positionSnapshot),
           },
         },
       );
@@ -113,6 +142,7 @@ export function useReviewSession(
       revision.current = data.revision;
       savedText.current = data.draft_text;
       savedResolutions.current = JSON.stringify(decisions);
+      savedLocationsSha.current = data.locations_text_sha256;
       return data;
     },
     onSuccess: (data) =>
@@ -121,12 +151,18 @@ export function useReviewSession(
         revision: data.revision,
         draft_text: data.draft_text,
         resolutions: data.resolutions,
+        draft_locations: data.locations,
+        draft_locations_text_sha256: data.locations_text_sha256,
       }),
   });
-  function saveDraft(value: string, decisions = latestResolutions.current) {
+  function saveDraft(
+    value: string,
+    decisions = latestResolutions.current,
+    positionSnapshot = latestLocations.current,
+  ) {
     const next = queue.current
       .catch(() => undefined)
-      .then(() => draft.mutateAsync({ value, decisions }));
+      .then(() => draft.mutateAsync({ value, decisions, positionSnapshot }));
     queue.current = next;
     return next;
   }
@@ -140,10 +176,12 @@ export function useReviewSession(
     )
       return;
     const timer = setTimeout(() => {
-      void saveRef.current(text).catch(() => undefined);
+      void saveRef
+        .current(text, resolutions, textLocations)
+        .catch(() => undefined);
     }, 800);
     return () => clearTimeout(timer);
-  }, [text, resolutions, draft.isError]);
+  }, [text, resolutions, textLocations, draft.isError]);
   useEffect(
     () => () => {
       if (
@@ -158,18 +196,26 @@ export function useReviewSession(
   function changeText(value: string) {
     const nextLocations = moveReviewLocations(text, value, textLocations);
     const retained = resolutions.filter((r) => {
-      const location = locations.find((l) => l.id === r.id);
-      if (!location) return false;
-      const before = decisionRange(text, location),
-        after = decisionRange(
-          value,
-          nextLocations.find((l) => l.id === r.id) ?? location,
-        );
+      const location = textLocations.find((l) => l.id === r.id),
+        nextLocation = nextLocations.find((l) => l.id === r.id);
+      if (!location || !nextLocation) return false;
+      const before = location.text_spans?.length
+          ? sourceRanges(text, location)
+          : [decisionRange(text, location)],
+        after = nextLocation.text_spans?.length
+          ? sourceRanges(value, nextLocation)
+          : [decisionRange(value, nextLocation)];
       return (
-        before &&
-        after &&
-        text.slice(before.start, before.end) ===
-          value.slice(after.start, after.end)
+        before.length === after.length &&
+        before.every((range, index) => {
+          const nextRange = after[index];
+          return Boolean(
+            range &&
+            nextRange &&
+            text.slice(range.start, range.end) ===
+              value.slice(nextRange.start, nextRange.end),
+          );
+        })
       );
     });
     setText(value);
@@ -177,8 +223,9 @@ export function useReviewSession(
     setResolutions(retained);
     latestResolutions.current = retained;
     setTextLocations(nextLocations);
+    latestLocations.current = nextLocations;
     setPageReviewed(false);
-    query.setQueryData(draftKey, value);
+    query.setQueryData(draftKey, { text: value, locations: nextLocations });
     draft.reset();
   }
   function beginEdit() {
@@ -202,12 +249,20 @@ export function useReviewSession(
     const previous = snapshot.current;
     setText(previous.text);
     latestText.current = previous.text;
-    query.setQueryData(draftKey, previous.text);
+    query.setQueryData(draftKey, {
+      text: previous.text,
+      locations: previous.locations,
+    });
     setResolutions(previous.resolutions);
     latestResolutions.current = previous.resolutions;
     setTextLocations(previous.locations);
+    latestLocations.current = previous.locations;
     setEditorMode({ kind: "read" });
-    void saveDraft(previous.text, previous.resolutions).catch(() => undefined);
+    void saveDraft(
+      previous.text,
+      previous.resolutions,
+      previous.locations,
+    ).catch(() => undefined);
   }
   async function finish(action: Resolution["action"]) {
     if (finishing) return;

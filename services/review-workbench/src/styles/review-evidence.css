@@ -83,3 +83,30 @@
   width: 140px;
   vertical-align: middle;
 }
+.review-crop-region {
+  fill: #ffc92833;
+  stroke: #8b4300;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.review-source-positions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+}
+.review-source-positions button {
+  padding: 5px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: white;
+}
+.review-source-positions button:disabled {
+  opacity: 0.45;
+}
+.review-source-text pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -11,7 +11,7 @@ import {
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import DOMPurify from "dompurify";
 import { splitMarkdown } from "@/editor/markdown.ts";
-import { resolveLocation, type ReviewLocation } from "./review-highlights.ts";
+import { sourceRanges, type ReviewLocation } from "./review-highlights.ts";
 import { ReviewDecoration, decorateEditor } from "./review-decoration.ts";
 
 /** Reject structures the visual editor cannot preserve. Source mode remains available. */
@@ -277,37 +277,48 @@ export function MarkdownEditor({
         const offset = blocks
           .slice(0, index)
           .reduce((n, b) => n + b.raw.length, 0);
-        const localHighlights = highlights.flatMap((l) => {
-          const range = resolveLocation(value, l);
-          if (
-            !range ||
-            range.start < offset ||
-            range.end > offset + block.raw.length
-          )
-            return [];
-          const start = range.start - offset,
-            end = range.end - offset;
-          if (start === end)
+        const localHighlights = highlights.flatMap((l) =>
+          sourceRanges(value, l).flatMap((range): ReviewLocation[] => {
+            if (
+              !range ||
+              range.start < offset ||
+              range.end > offset + block.raw.length
+            )
+              return [];
+            const start = range.start - offset,
+              end = range.end - offset;
+            if (start === end)
+              return [
+                {
+                  ...l,
+                  start: null,
+                  end: null,
+                  text_sha256: undefined,
+                  text_spans: undefined,
+                  anchor: { exact: block.raw, prefix: "", suffix: "" },
+                  focus: "",
+                  insertion_offset: Array.from(block.raw.slice(0, start))
+                    .length,
+                },
+              ];
             return [
               {
                 ...l,
-                anchor: { exact: block.raw, prefix: "", suffix: "" },
-                focus: "",
-                insertion_offset: Array.from(block.raw.slice(0, start)).length,
+                start: null,
+                end: null,
+                text_sha256: undefined,
+                text_spans: undefined,
+                insertion_offset: null,
+                anchor: {
+                  exact: block.raw.slice(start, end),
+                  prefix: block.raw.slice(0, start),
+                  suffix: block.raw.slice(end),
+                },
+                focus: block.raw.slice(start, end),
               },
             ];
-          return [
-            {
-              ...l,
-              anchor: {
-                exact: block.raw.slice(start, end),
-                prefix: block.raw.slice(0, start),
-                suffix: block.raw.slice(end),
-              },
-              focus: block.raw.slice(start, end),
-            },
-          ];
-        });
+          }),
+        );
         const table =
           block.type === "html" && /^\s*<table[\s>]/i.test(block.raw);
         const unsupported =

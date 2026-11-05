@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from hrs_codex.contracts import TaskRecord, TaskStage
 from hrs_codex.errors import LeaseConflict, WorkflowStopped
+from hrs_codex.review_contract import validate_issues
 
 STAGES = {"ocr", "review", "verify", "navigation", "organization"}
 
@@ -43,8 +44,9 @@ def review_verdict(result: dict) -> str:
     verdict = result.get("verdict")
     if verdict not in {"approved", "pending", "corrections"}:
         raise ValueError("Review verdict must be approved, pending or corrections")
-    if not isinstance(result.get("issues", []), list):
-        raise ValueError("Review issues must be a list")
+    validate_issues(result.get("issues", []), strict=result.get("issue_contract_version") == 1)
+    if "disposition" in result and result["disposition"] not in {"disputed", "unreadable"}:
+        raise ValueError("Pending review disposition must be disputed or unreadable")
     if not isinstance(result.get("normalizations", []), list):
         raise ValueError("Review normalizations must be a list")
     if verdict == "approved" and result.get("issues"):

@@ -2,10 +2,10 @@ import { Button } from "@/components/ui/button.tsx";
 import type { components } from "@/client/schema.d.ts";
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import { MarkdownEditor } from "@/editor/LazyMarkdownEditor.tsx";
-import { decisionRange } from "@/editor/review-highlights.ts";
 import { useReviewSession } from "./useReviewSession.ts";
 import ReviewFocus from "./ReviewFocus.tsx";
 import SourceFocus from "./SourceFocus.tsx";
+import { useState } from "react";
 
 type Issue = components["schemas"]["ReviewIssue"];
 export default function IssueEditor({
@@ -17,6 +17,7 @@ export default function IssueEditor({
   workflowTest: boolean;
   onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void;
 }) {
+  const [unmapped, setUnmapped] = useState<string[]>([]);
   const {
     text,
     resolutions,
@@ -227,12 +228,9 @@ export default function IssueEditor({
           </p>
         )}
         <details
+          key={`${current?.id ?? "page"}:${ready ? "complete" : "review"}`}
           className="review-page-preview"
-          open={
-            !locations.length ||
-            ready ||
-            Boolean(current && !decisionRange(text, current))
-          }
+          open
         >
           <summary>
             {ready ? "检查本页最终文字" : "查看整页文字与上下文"}
@@ -247,8 +245,24 @@ export default function IssueEditor({
               activeHighlight={current?.id}
               onHighlight={editing ? undefined : setActive}
               footnotes={text === issue.text ? issue.footnotes : []}
+              onLocationFailure={setUnmapped}
               assetBaseUrl={`/api/v2/runs/${issue.run_id}/artifacts`}
             />
+            {current && unmapped.includes(current.id) && (
+              <section
+                className="review-source-text"
+                aria-label="当前疑点的原文定位"
+              >
+                <p>阅读视图暂不能标记本处，请对照以下 Markdown 原文片段。</p>
+                <pre>
+                  <mark>
+                    {current.anchor.exact ||
+                      current.candidate ||
+                      "请查看整页 Markdown"}
+                  </mark>
+                </pre>
+              </section>
+            )}
           </div>
         </details>
         <details className="review-machine-report">

@@ -68,7 +68,15 @@ def test_located_correction_preserves_notes_and_requires_distinct_original_first
         task,
         {
             "verdict": "corrections",
-            "issues": [{"candidate_quote": "绥", "source_quote": "警"}],
+            "issues": [
+                {
+                    "candidate_quote": "绥",
+                    "source_quote": "警",
+                    "explanation": "原图清楚印为警。",
+                    "anchor": {"exact": "绥", "prefix": "到"},
+                    "focus": "绥",
+                }
+            ],
             "markdown": original.replace("绥", "警"),
             "corrections": [{"before": "绥", "after": "警", "reason": "原图清楚"}],
         },

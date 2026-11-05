@@ -33,93 +33,100 @@ class Dispatch:
         return self.ledger.sessions()
 
     def reserve(self, document_id):
-        """Reserve concrete task leases before asking the coordinator to spawn anything."""
+        """Lease concrete work before allocating shared capacity to speculative warmup."""
         from hrs_codex.execution_policy import execution_policy
+        from hrs_codex.scheduling import ready_tasks
 
         policy = execution_policy(self.store.root)
         with self.store.lock:
             self.expire()
             plan = self.store.scheduling_plan(document_id)
-            occupied = self.ledger.capacity_used()
-            assignments = []
+            concrete = ready_tasks(self.store.checkpoints.read(document_id))
             live = [
                 s
                 for s in self.sessions()
                 if s["document_id"] == document_id and s["state"] != "exited"
             ]
-            if (
-                policy["overlap_reading"]
-                and not plan["paused"]
-                and plan["cooldown_until"] <= time.time()
-            ):
-                # OCR and blind reading reserve one shared budget. A warmed organization
-                # worker waits for full approval; it receives no partial organization input.
-                for stage in ("review", "organization"):
-                    missing = plan["workers"][stage] - sum(s["stage"] == stage for s in live)
-                    for _ in range(max(0, missing)):
-                        if occupied >= plan["capacity"]:
-                            break
-                        warm = self.new_session(document_id, stage, plan, prewarm=True)
-                        if warm is None:
-                            break
-                        warm.update(task_id=None, prewarmed=True, overlap_reading=True)
-                        self.ledger.save_session(warm)
-                        live.append(warm)
-                        assignments.append(self.assignment(warm))
-                        occupied += 1
-            if not plan["paused"] and plan["cooldown_until"] <= time.time():
-                if (
-                    not policy["overlap_reading"]
-                    and plan["workers"]["ocr"] >= 2
-                    and not plan["metrics"]["review"]["queued"]
-                    and occupied < plan["capacity"]
-                    and not any(
-                        session["stage"] == "review"
-                        and session["document_id"] == document_id
-                        and session["state"] != "exited"
-                        for session in self.sessions()
-                    )
-                ):
-                    warm = self.new_session(document_id, "review", plan, prewarm=True)
-                    if warm is None:
-                        pass
-                    else:
-                        warm.update(task_id=None, prewarmed=True)
-                        self.ledger.save_session(warm)
-                        assignments.append(self.assignment(warm))
-                        occupied += 1
+            legacy_warm = (
+                not policy["overlap_reading"]
+                and plan["workers"]["ocr"] >= 2
+                and not plan["metrics"]["review"]["queued"]
+                and self.ledger.capacity_used() < plan["capacity"] - 1
+                and not any(s["stage"] == "review" for s in live)
+            )
+        assignments = []
         if not plan["paused"] and plan["cooldown_until"] <= time.time():
             for stage in ("verify", "review", "ocr", "navigation", "organization"):
-                if (
-                    policy["overlap_reading"]
-                    and stage in {"review", "organization"}
-                    and any(
-                        s["stage"] == stage and s["state"] != "exited"
-                        for s in self.sessions()
-                        if s["document_id"] == document_id
-                    )
-                ):
+                if not any(task["stage"] == stage for task in concrete):
                     continue
-                for _ in range(max(0, plan["workers"][stage] - plan["active"][stage])):
-                    if occupied >= plan["capacity"]:
-                        break
-                    session = self.new_session(document_id, stage, plan)
-                    if session is None:
-                        break
+                with self.store.lock:
+                    live = [
+                        s
+                        for s in self.sessions()
+                        if s["document_id"] == document_id and s["state"] != "exited"
+                    ]
+                    if (
+                        policy["overlap_reading"]
+                        and stage in {"review", "organization"}
+                        and any(s["stage"] == stage for s in live)
+                    ):
+                        continue
+                missing = plan["workers"][stage] - plan["active"][stage]
+                if stage == "ocr" and legacy_warm:
+                    missing -= 1
+                for _ in range(max(0, missing)):
+                    with self.store.lock:
+                        self.make_room(stage, plan)
+                        if self.ledger.capacity_used() >= plan["capacity"]:
+                            break
+                        session = self.new_session(document_id, stage, plan)
+                        if session is None:
+                            break
                     token = session["session_token"]
-                    task = self.store.tasks.claim_task(
-                        document_id,
-                        stage,
-                        "reserved:" + token,
-                        source_first=True,
-                        scheduled=True,
-                        session=session,
-                    )
+                    # Evidence hashing remains outside the command mutex, so pause stays responsive.
+                    try:
+                        task = self.store.tasks.claim_task(
+                            document_id,
+                            stage,
+                            "reserved:" + token,
+                            source_first=True,
+                            scheduled=True,
+                            session=session,
+                        )
+                    except BaseException:
+                        self.store.runtime_control.release(token)
+                        raise
                     if task is None:
                         self.store.runtime_control.release(token)
                         break
                     assignments.append(self.assignment(session))
-                    occupied += 1
+            with self.store.lock:
+                live = [
+                    s
+                    for s in self.sessions()
+                    if s["document_id"] == document_id and s["state"] != "exited"
+                ]
+                # Warmup uses only the shared slots remaining after executable work.
+                warm_stages = (
+                    ("review", "organization")
+                    if policy["overlap_reading"]
+                    else (("review",) if legacy_warm else ())
+                )
+                for stage in warm_stages:
+                    target = plan["workers"][stage] if policy["overlap_reading"] else 1
+                    missing = target - sum(s["stage"] == stage for s in live)
+                    for _ in range(max(0, missing)):
+                        if self.ledger.capacity_used() >= plan["capacity"]:
+                            break
+                        warm = self.new_session(document_id, stage, plan, prewarm=True)
+                        if warm is None:
+                            break
+                        warm.update(
+                            task_id=None, prewarmed=True, overlap_reading=policy["overlap_reading"]
+                        )
+                        self.ledger.save_session(warm)
+                        live.append(warm)
+                        assignments.append(self.assignment(warm))
         return {
             "assignments": assignments,
             "plan": plan,
@@ -133,6 +140,47 @@ class Dispatch:
                 if session["state"] != "exited"
             ],
         }
+
+    def make_room(self, stage, plan):
+        """Waiting warm agents yield globally; active original reads and task leases do not."""
+        from hrs_codex.runtime_control import model_for_stage
+        from hrs_codex.scheduling import ready_tasks
+
+        model = model_for_stage(stage)
+        gate = self.store.runtime_control.gate(model)
+        if not gate["allowed"]:
+            return
+        while True:
+            full = self.ledger.capacity_used() >= plan["capacity"]
+            model_full = self.ledger.model_capacity_used(model) >= gate["limit"]
+            if not full and not model_full:
+                return
+            waiting = []
+            for session in self.sessions():
+                if (
+                    session["state"] != "idle"
+                    or not session.get("prewarmed")
+                    or self.inflight(session)
+                ):
+                    continue
+                if model_full and not full and model_for_stage(session["stage"]) != model:
+                    continue
+                doc = self.store.checkpoints.read(session["document_id"])
+                if any(
+                    task["stage"] == session["stage"]
+                    and (
+                        not session.get("preflight_page")
+                        or task["page"] == session["preflight_page"]
+                    )
+                    for task in ready_tasks(doc)
+                ):
+                    continue
+                waiting.append(session)
+            if not waiting:
+                return
+            # Keep expensive frozen observations when a plain waiting agent can yield first.
+            retained = min(waiting, key=lambda s: bool(s.get("preflight")))
+            self.end_session(retained, "capacity_for_ready_work")
 
     def new_session(self, document_id, stage, plan, *, prewarm=False):
         from hrs_codex.runtime_control import model_for_stage

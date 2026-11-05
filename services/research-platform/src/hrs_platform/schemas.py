@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
+from hrs_codex.review_contract import ReviewLocation
 from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, Field
 
 from hrs_platform.domain.generation_contracts import CardDraft
@@ -289,12 +290,15 @@ class ReviewDraft(BaseModel):
     expected_revision: int = Field(ge=1)
     text: str = Field(min_length=1, max_length=200000)
     resolutions: list[ReviewResolution] = Field(default_factory=list)
+    locations: list[ReviewLocation] | None = None
 
 
 class DraftReceipt(BaseModel):
     revision: int
     draft_text: str
     resolutions: list[ReviewResolution] = Field(default_factory=list)
+    locations: list[ReviewLocation] | None = None
+    locations_text_sha256: str | None = None
 
 
 class ReviewReceipt(BaseModel):
@@ -325,8 +329,10 @@ class ReviewIssue(ReviewIssueSummary):
     pages: list[int]
     images: list[str]
     footnotes: list["FootnoteLink"] = Field(default_factory=list)
-    locations: list[dict] = Field(default_factory=list)
+    locations: list[ReviewLocation] = Field(default_factory=list)
     resolutions: list[ReviewResolution] = Field(default_factory=list)
+    draft_locations: list[ReviewLocation] | None = None
+    draft_locations_text_sha256: str | None = None
 
 
 class FootnoteSpan(BaseModel):

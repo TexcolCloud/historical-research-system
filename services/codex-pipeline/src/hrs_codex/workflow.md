@@ -60,11 +60,28 @@ an independent original-first full-page verify. An explicitly disputed pending r
 gets one fresh verify of unchanged text, not adoption of the reviewer's reading.
 Verify may approve or remain pending, never repair or start another round. Unreadable
 originals use pending disposition=unreadable and go straight to humans.
-Every issue includes anchor={exact,prefix,suffix} copied from candidate Markdown,
-focus (substring), explanation, source_quote, candidate_quote and optional suggestion.
+Review and verify share issue contract version 1 (`issue_contract_version:1`).
+Every located issue includes anchor={exact,prefix,suffix} copied from candidate
+Markdown, focus (a literal substring, never a category such as "Personal name"),
+explanation, source_quote, candidate_quote and optional suggestion. Missing text
+uses insertion_offset within anchor.exact in Unicode codepoints instead of focus.
+If a trustworthy text anchor is unavailable, provide unlocated_reason rather than
+inventing a position. For several text positions, supply explicit occurrences
+with their own literal anchors; several image boxes alone do not imply several
+known text spans. Metadata validation errors require corrected metadata, never
+content approval. The definition and submission validation live in review_contract.py.
 Supply boxes=[[left,top,right,bottom]] normalized to the full retained page,
 image_precision=line|region, using inspected originals/crops. No guessed glyph boxes.
 Missing/ambiguous positions remain unlocated. Annotations do not change Markdown.
+Read-side normalization preserves raw issues and stable issue IDs. Invalid legacy
+focus falls back to a reliable unique anchor or single supported textual difference;
+invalid image boxes degrade image positioning without discarding the text issue.
+The API exposes source hashes, Unicode-codepoint offsets, precision and diagnostics.
+The human workbench shows current text highlights and the current image region by
+default, with separate controls for explicitly supplied image positions. When a
+Markdown source range cannot map safely to rendered text, show its source fragment.
+Draft locations are stored against the draft text hash; preserve original IDs and
+image evidence. User view-box adjustments are viewing state, not review evidence.
 For dense names/tables/dates or unreadable placeholders, OCR uses bounded crops.
 When retained review_failure is human, any non-approval goes directly to the human queue,
 with located issues and optional suggested_markdown. Do not automatically repair,

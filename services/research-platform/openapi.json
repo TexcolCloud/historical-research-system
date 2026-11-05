@@ -2597,6 +2597,31 @@
             },
             "type": "array",
             "title": "Resolutions"
+          },
+          "locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewLocation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locations"
+          },
+          "locations_text_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locations Text Sha256"
           }
         },
         "type": "object",
@@ -3436,6 +3461,29 @@
         ],
         "title": "RecoveryRequest"
       },
+      "ReviewAnchor": {
+        "properties": {
+          "exact": {
+            "type": "string",
+            "title": "Exact"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix",
+            "default": ""
+          },
+          "suffix": {
+            "type": "string",
+            "title": "Suffix",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "exact"
+        ],
+        "title": "ReviewAnchor"
+      },
       "ReviewDecision": {
         "properties": {
           "decision_id": {
@@ -3518,6 +3566,20 @@
             },
             "type": "array",
             "title": "Resolutions"
+          },
+          "locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewLocation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locations"
           }
         },
         "additionalProperties": false,
@@ -3624,8 +3686,7 @@
           },
           "locations": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ReviewLocation"
             },
             "type": "array",
             "title": "Locations"
@@ -3636,6 +3697,31 @@
             },
             "type": "array",
             "title": "Resolutions"
+          },
+          "draft_locations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReviewLocation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Locations"
+          },
+          "draft_locations_text_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Locations Text Sha256"
           }
         },
         "type": "object",
@@ -3693,6 +3779,168 @@
           "text_sha256"
         ],
         "title": "ReviewIssueSummary"
+      },
+      "ReviewLocation": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "anchor": {
+            "$ref": "#/components/schemas/ReviewAnchor"
+          },
+          "focus": {
+            "type": "string",
+            "title": "Focus"
+          },
+          "boxes": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Boxes"
+          },
+          "image_precision": {
+            "type": "string",
+            "enum": [
+              "line",
+              "region",
+              "page"
+            ],
+            "title": "Image Precision"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "source_reading": {
+            "type": "string",
+            "title": "Source Reading"
+          },
+          "candidate": {
+            "type": "string",
+            "title": "Candidate"
+          },
+          "suggestion": {
+            "type": "string",
+            "title": "Suggestion"
+          },
+          "text_sha256": {
+            "type": "string",
+            "title": "Text Sha256",
+            "default": ""
+          },
+          "image_sha256": {
+            "type": "string",
+            "title": "Image Sha256",
+            "default": ""
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "text_status": {
+            "type": "string",
+            "enum": [
+              "located",
+              "missing",
+              "ambiguous"
+            ],
+            "title": "Text Status",
+            "default": "missing"
+          },
+          "text_precision": {
+            "type": "string",
+            "enum": [
+              "character",
+              "phrase",
+              "insertion",
+              "page"
+            ],
+            "title": "Text Precision",
+            "default": "page"
+          },
+          "offset_unit": {
+            "type": "string",
+            "const": "unicode_codepoint",
+            "title": "Offset Unit",
+            "default": "unicode_codepoint"
+          },
+          "location_diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Location Diagnostics"
+          },
+          "text_spans": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewTextSpan"
+            },
+            "type": "array",
+            "title": "Text Spans"
+          },
+          "location": {
+            "type": "string",
+            "title": "Location",
+            "default": ""
+          },
+          "insertion_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insertion Offset"
+          },
+          "unlocated_reason": {
+            "type": "string",
+            "title": "Unlocated Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "page",
+          "anchor",
+          "focus",
+          "boxes",
+          "image_precision",
+          "message",
+          "source_reading",
+          "candidate",
+          "suggestion"
+        ],
+        "title": "ReviewLocation"
       },
       "ReviewReceipt": {
         "properties": {
@@ -3771,6 +4019,95 @@
           "action"
         ],
         "title": "ReviewResolution"
+      },
+      "ReviewTextSpan": {
+        "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/ReviewAnchor"
+          },
+          "focus": {
+            "type": "string",
+            "title": "Focus"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "text_status": {
+            "type": "string",
+            "enum": [
+              "located",
+              "missing",
+              "ambiguous"
+            ],
+            "title": "Text Status",
+            "default": "missing"
+          },
+          "text_precision": {
+            "type": "string",
+            "enum": [
+              "character",
+              "phrase",
+              "insertion",
+              "page"
+            ],
+            "title": "Text Precision",
+            "default": "page"
+          },
+          "offset_unit": {
+            "type": "string",
+            "const": "unicode_codepoint",
+            "title": "Offset Unit",
+            "default": "unicode_codepoint"
+          },
+          "location_diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Location Diagnostics"
+          },
+          "insertion_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insertion Offset"
+          },
+          "unlocated_reason": {
+            "type": "string",
+            "title": "Unlocated Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "anchor",
+          "focus"
+        ],
+        "title": "ReviewTextSpan"
       },
       "RunControlReceipt": {
         "properties": {
