@@ -28,6 +28,9 @@ through `candidate_text`. `submit_packet` commits the result and a minimal recei
 identical replays return the saved receipt. Reuse a worker only up to the returned
 session_max_tasks (legacy two; configured warm sessions up to eight), also bounded
 by 48,000 processed characters. Never reuse an OCR agent as its reviewer.
+Session page budgets count only that session's completions, never historical receipts
+with a reused display name. Coordinators derive worker IDs from stage + session token
+so names remain unique across restarts; earlier receipts remain unchanged.
 Prewarmed reviewers wait on `wait_for_changes` without consuming a model turn per poll.
 Only native Codex subagents perform inference; Python threads supervise CLI processes.
 

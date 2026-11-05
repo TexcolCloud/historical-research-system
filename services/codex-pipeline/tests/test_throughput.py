@@ -165,6 +165,43 @@ def test_worker_reuses_warm_session_beyond_two_pages_with_bounded_context(tmp_pa
     assert store.dispatch.open(token, "warm-ocr")[0]["state"] == "exited"
 
 
+def test_restarted_session_budget_does_not_include_an_old_worker_name(tmp_path):
+    from test_store import complete
+
+    store, identity = document(tmp_path, 4)
+    configure_execution(store.root, capacity=2, batch_pages=2, overlap_reading=False)
+    assignments = store.dispatch.reserve(identity)["assignments"]
+    first = next(a["session_token"] for a in assignments if a["stage"] == "ocr")
+    for assignment in assignments:
+        if assignment["session_token"] != first:
+            store.dispatch.close(assignment["session_token"], "unstarted")
+    for _ in range(2):
+        task, _, _ = store.dispatch.open(first, "reused-short-name")
+        store.dispatch.submit(
+            first,
+            "reused-short-name",
+            {"input_sha256": task["input_sha256"], "markdown": "Retained"},
+        )
+    for page in range(2):
+        complete(
+            store, identity, "review", f"independent-{page}", {"verdict": "approved", "issues": []}
+        )
+    previous = store.status(identity)["pages"][:2]
+    second = store.dispatch.reserve(identity)["assignments"][0]["session_token"]
+    assert second != first
+    task, _, _ = store.dispatch.open(second, "reused-short-name")
+    assert store.dispatch.session(second)["completed"] == 0
+    store.dispatch.submit(
+        second,
+        "reused-short-name",
+        {"input_sha256": task["input_sha256"], "markdown": "New context"},
+    )
+    next_task, _, _ = store.dispatch.open(second, "reused-short-name")
+    assert next_task.get("stage") == "ocr", "An old native context must not exhaust a new session"
+    assert store.dispatch.session(second)["completed"] == 1
+    assert store.status(identity)["pages"][:2] == previous
+
+
 def test_organization_batch_keeps_complete_text_and_frozen_page_hashes(tmp_path):
     from test_store import complete
 

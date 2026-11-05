@@ -88,7 +88,7 @@ include ALL spawned agents not yet closed, including completed ones. BEFORE spaw
 close ALL returned retired_sessions' native agents and remove them from your map. An exited MCP
 session does not close its native thread. After any worker completes, close it, remove its mapping,
 then dispatch immediately; never wait for an entire batch.
-For EACH assignment spawn its EXACT agent_type with only session_token, unique worker_id, and
+For EACH assignment spawn its EXACT agent_type with only session_token, worker_id='<stage>-<session_token>', and
 'call open_task_packet; follow stage instructions; submit_packet; reuse until exited (max {batch_pages} pages)'.
 Spawn ALL assignments concurrently, including source-only review and warmed organization; start
 OCR and review together. Dependency waits are normal. Do not fork coordinator history. Fixed roles

@@ -275,10 +275,15 @@ class TaskWorkflow:
                 }
                 if worker_id in all_active or len(all_active) >= plan["capacity"]:
                     return None
-                finished = sum(
-                    t.get("receipt", {}).get("worker_id") == worker_id for t in doc["tasks"]
+                finished = (
+                    session.get("completed", 0)
+                    if session is not None
+                    else sum(
+                        t.get("receipt", {}).get("worker_id") == worker_id for t in doc["tasks"]
+                    )
                 )
-                if finished >= plan["batch_size"] or (
+                batch_limit = (session or {}).get("max_tasks", plan["batch_size"])
+                if finished >= batch_limit or (
                     worker_id not in active and len(active) >= plan["workers"][stage]
                 ):
                     return None
