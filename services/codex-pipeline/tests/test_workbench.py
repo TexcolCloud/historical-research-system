@@ -59,7 +59,7 @@ def test_workbench_exposes_technical_failure_and_explicit_retry_without_approvin
         assert doc["publication"] is None
         # Old bookmarks still lead directly to the original comparison and genuine human form.
         status, _, body = request(server, path=view(server, document=doc_id, page=1))
-        assert status == 200 and "确认整页通过".encode() in body
+        assert status == 200 and "提交本页并确认通过".encode() in body
         assert "查看原始 OCR".encode() in body
         connection = HTTPConnection("127.0.0.1", server.server_port)
         connection.request("GET", view(server, view="tasks"), headers={"Host": "evil.example"})

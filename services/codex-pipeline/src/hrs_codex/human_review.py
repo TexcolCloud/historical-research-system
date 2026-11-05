@@ -425,7 +425,7 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                     )
                     return
                 if action == "/import":
-                    from hrs_codex.server import prepare
+                    from hrs_codex.application import prepare
 
                     doc = prepare(store, form["source"].strip(), form.get("title", "").strip())
                     store.request_run(doc["id"], resume=False)
@@ -445,7 +445,8 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                     input_sha256=form["input_sha256"],
                     reviewer=form.get("reviewer") or "本地使用者",
                     markdown=form["markdown"],
-                    note=form.get("note") or ("确认通过" if form["verdict"] == "approved" else "保存待定"),
+                    note=form.get("note")
+                    or ("确认通过" if form["verdict"] == "approved" else "保存待定"),
                     verdict=form["verdict"],
                 )
                 message = "草稿已保存，尚未提交本页审核结果。"
@@ -476,8 +477,8 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
 def serve(store: Store, port: int) -> None:
     import os
 
+    from hrs_codex.checkpoints import atomic_json
     from hrs_codex.runner import Runner
-    from hrs_codex.store import atomic_json
     from hrs_codex.workspace import identity
 
     with create_review_server(store, port) as server, Runner(store) as executor:

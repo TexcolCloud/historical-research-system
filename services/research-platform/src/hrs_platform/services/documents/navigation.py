@@ -5,7 +5,7 @@ from functools import lru_cache
 from uuid import UUID, uuid5
 
 from hrs_codex.store import Store
-from hrs_codex.workspace import ensure_workbench, resolve_workspace
+from hrs_codex.workspace import resolve_workspace
 
 from hrs_platform.domain.errors import ServiceError
 from hrs_platform.services.books import get_run
@@ -25,7 +25,7 @@ class Navigation:
 
     def status(self, run_id):
         store, doc_id = self.native(run_id)
-        stat = (store._directory(doc_id) / "document.json").stat()
+        stat = (store.document_directory(doc_id) / "document.json").stat()
         return deepcopy(
             navigation_snapshot(
                 store.root, doc_id, str(run_id), (stat.st_ino, stat.st_mtime_ns, stat.st_size)
@@ -64,8 +64,6 @@ class Navigation:
                 )
             store.upgrade_review_policy(doc_id, protected_pages=protected)
         result = store.pause_document(doc_id) if action == "pause" else store.request_run(doc_id, resume=True)
-        if action == "resume":
-            ensure_workbench(store)
         return {"document_id": doc_id, "state": result["state"]}
 
 

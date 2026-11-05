@@ -2,7 +2,9 @@ import type { QueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import type { Book } from "@/client/api.ts";
 
-export const booksKey = ["platform", "books"] as const;
+import { queryKeys } from "@/client/query-keys.ts";
+import { updateBooks } from "@/features/books/book-cache.ts";
+export const booksKey = queryKeys.books;
 export function patchBookDeletion(
   query: QueryClient,
   bookId: string,
@@ -17,7 +19,7 @@ export function patchBookDeletion(
           : [{ ...book, state }],
     ),
   );
-  query.setQueryData<Book>(["platform", "book", bookId], (book) =>
+  query.setQueryData<Book>(queryKeys.book(bookId), (book) =>
     book ? { ...book, state } : book,
   );
   if (state === "deleted") {
@@ -71,25 +73,13 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
     return event.sequence;
   if (event.kind === "run.progress") {
     void query.invalidateQueries({
-      queryKey: ["platform", "runs", event.book_id],
+      queryKey: queryKeys.runs(event.book_id),
     });
     return event.sequence;
   }
-  const currentBook =
-    books?.find(
-      (book) => book.id === event.book_id && book.run_id === event.run_id,
-    ) ?? query.getQueryData<Book>(["platform", "book", event.book_id]);
-  if (
-    event.kind === "run.changed" &&
-    currentBook?.run_id === event.run_id &&
-    event.payload.revision !== undefined &&
-    currentBook?.revision !== undefined &&
-    event.payload.revision <= currentBook.revision
-  )
-    return event.sequence;
   if (event.kind === "run.created" || event.kind === "run.changed")
     void query.invalidateQueries({
-      queryKey: ["platform", "runs", event.book_id],
+      queryKey: queryKeys.runs(event.book_id),
     });
   if (event.payload.run_kind === "cards") {
     void query.invalidateQueries({
@@ -104,14 +94,14 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
       });
     if (event.kind === "run.changed") {
       void query.invalidateQueries({
-        queryKey: ["platform", "navigation", event.run_id],
+        queryKey: queryKeys.navigation(event.run_id),
       });
       void query.invalidateQueries({
-        queryKey: ["platform", "recovery", event.run_id],
+        queryKey: queryKeys.recovery(event.run_id),
       });
     }
     void query.invalidateQueries({
-      queryKey: ["platform", "run", event.run_id],
+      queryKey: queryKeys.run(event.run_id),
     });
     if (event.kind === "execution.changed" || event.kind === "run.changed")
       void query.invalidateQueries({
@@ -119,7 +109,7 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
       });
     if (event.payload.pending_count !== undefined)
       void query.invalidateQueries({
-        queryKey: ["platform", "issues", event.run_id],
+        queryKey: queryKeys.issues(event.run_id),
       });
   }
   if (event.kind === "book.published" || event.kind === "library.revised") {
@@ -136,69 +126,46 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
   )
     return event.sequence;
   if (event.kind === "run.changed") {
-    query.setQueryData<Book>(["platform", "book", event.book_id], (current) =>
-      current
-        ? {
-            ...current,
-            ...(event.payload.pending_count !== undefined
-              ? { pending_count: event.payload.pending_count }
-              : {}),
-            ...(event.payload.navigation_pending_count !== undefined
-              ? {
-                  navigation_pending_count:
-                    event.payload.navigation_pending_count,
-                }
-              : {}),
-            ...(event.payload.revision_pending !== undefined
-              ? { revision_pending: Boolean(event.payload.revision_pending) }
-              : {}),
-            ...(event.payload.state
-              ? { state: event.payload.book_state ?? event.payload.state }
-              : {}),
-            ...(event.payload.stage ? { stage: event.payload.stage } : {}),
-            ...(event.payload.revision !== undefined
-              ? { revision: event.payload.revision }
-              : {}),
-            run_id: event.run_id,
-          }
-        : current,
+    const patch: Partial<Book> = {
+      ...(event.payload.pending_count !== undefined
+        ? { pending_count: event.payload.pending_count }
+        : {}),
+      ...(event.payload.navigation_pending_count !== undefined
+        ? { navigation_pending_count: event.payload.navigation_pending_count }
+        : {}),
+      ...(event.payload.revision_pending !== undefined
+        ? { revision_pending: event.payload.revision_pending }
+        : {}),
+      ...(event.payload.state
+        ? { state: event.payload.book_state ?? event.payload.state }
+        : {}),
+      ...(event.payload.stage ? { stage: event.payload.stage } : {}),
+      ...(event.payload.revision !== undefined
+        ? { revision: event.payload.revision }
+        : {}),
+      run_id: event.run_id,
+    };
+    updateBooks(
+      query,
+      (book) => book.id === event.book_id,
+      (book) => {
+        if (
+          book.run_id === event.run_id &&
+          book.revision !== undefined &&
+          event.payload.revision !== undefined &&
+          event.payload.revision <= book.revision
+        )
+          return book;
+        return { ...book, ...patch };
+      },
     );
   } else
-    void query.invalidateQueries({
-      queryKey: ["platform", "book", event.book_id],
-    });
+    void query.invalidateQueries({ queryKey: queryKeys.book(event.book_id) });
   if (
     event.kind !== "run.changed" ||
     !books?.some((book) => book.id === event.book_id)
   ) {
     void query.invalidateQueries({ queryKey: booksKey });
-  } else {
-    query.setQueryData<Book[]>(booksKey, (current) =>
-      current?.map((book) =>
-        book.id === event.book_id
-          ? {
-              ...book,
-              ...(event.payload.pending_count !== undefined
-                ? { pending_count: event.payload.pending_count }
-                : {}),
-              ...(event.payload.navigation_pending_count !== undefined
-                ? {
-                    navigation_pending_count:
-                      event.payload.navigation_pending_count,
-                  }
-                : {}),
-              ...(event.payload.state
-                ? { state: event.payload.book_state ?? event.payload.state }
-                : {}),
-              ...(event.payload.stage ? { stage: event.payload.stage } : {}),
-              ...(event.payload.revision !== undefined
-                ? { revision: event.payload.revision }
-                : {}),
-              run_id: event.run_id,
-            }
-          : book,
-      ),
-    );
   }
   return event.sequence;
 }

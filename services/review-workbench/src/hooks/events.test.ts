@@ -2,6 +2,32 @@ import { expect, test } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { applyBookEvent, booksKey } from "@/hooks/events.ts";
 
+test("a newer list does not prevent the detail cache from catching up independently", () => {
+  const query = new QueryClient();
+  const book = { id: "book", run_id: "run", state: "ready", revision: 9 };
+  query.setQueryData(booksKey, [book]);
+  query.setQueryData(["platform", "book", "book"], {
+    ...book,
+    state: "running",
+    revision: 3,
+  });
+  applyBookEvent(
+    query,
+    JSON.stringify({
+      sequence: 8,
+      book_id: "book",
+      run_id: "run",
+      kind: "run.changed",
+      payload: { state: "awaiting_review", revision: 5 },
+    }),
+  );
+  expect(query.getQueryData(booksKey)).toEqual([book]);
+  expect(query.getQueryData(["platform", "book", "book"])).toMatchObject({
+    state: "awaiting_review",
+    revision: 5,
+  });
+});
+
 test("page telemetry refreshes only run progress without invalidating reading or review content", () => {
   const query = new QueryClient();
   for (const key of [

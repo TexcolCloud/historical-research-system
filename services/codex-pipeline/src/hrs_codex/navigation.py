@@ -1,17 +1,16 @@
 """Source-bound directory navigation; no model inference or source-text rewriting."""
 
-import hashlib
 import json
 import re
 import unicodedata
+
+from hrs_codex.hashing import digest
 
 KINDS = {"toc", "text", "frontmatter", "table", "figure", "unknown"}
 
 
 def fingerprint(value):
-    return hashlib.sha256(
-        json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
-    ).hexdigest()
+    return digest(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
 def normalized(text):

@@ -1,22 +1,17 @@
+import { queryKeys } from "@/client/query-keys.ts";
 import { useQuery } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
 import type { components } from "@/client/schema.d.ts";
 import RetryRunButton from "./RetryRunButton";
 
-const stages: Record<string, string> = {
-  ocr: "文字提取",
-  review: "原图核对",
-  verify: "修正复核",
-  navigation: "目录关联",
-  organization: "文章整理",
-};
+import { stageLabels as stages } from "./phase-display.ts";
 export default function RecoveryPanel({
   run,
 }: {
   run: components["schemas"]["RunSummary"];
 }) {
   const report = useQuery({
-    queryKey: ["platform", "recovery", run.id],
+    queryKey: queryKeys.recovery(run.id),
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/runs/{run_id}/recovery", {
         params: { path: { run_id: run.id } },

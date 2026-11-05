@@ -12,3 +12,7 @@ def sha256(value):
 
 def read_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def text_digest(value):
+    return sha256(value.encode("utf-8"))

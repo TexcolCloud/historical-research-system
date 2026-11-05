@@ -4,96 +4,63 @@ Codex is the processing authority. SQL/S3 retain the old application's immutable
 reading projections; neither Temporal nor the old recognition providers run here.
 """
 
-import hashlib
-import json
 import logging
-import re
 import threading
 import time
 from uuid import UUID, uuid5
 
 from filelock import FileLock, Timeout
-from hrs_codex.review_locations import locate_issues
+from hrs_codex.application import prepare
+from hrs_codex.progress import page_progress as document_progress
+from hrs_codex.runner import Runner
 from hrs_codex.scheduling import scheduling_plan
-from hrs_codex.server import prepare
-from hrs_codex.store import Store, digest
-from hrs_codex.workspace import ensure_workbench, resolve_workspace
-from sqlalchemy import delete, func, insert, or_, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from hrs_codex.store import Store
+from hrs_codex.workspace import resolve_workspace
+from sqlalchemy import func, insert, or_, select, update
 
 from hrs_platform import models as db
 from hrs_platform.services.books import get_run
 from hrs_platform.services.documents.review import Review
-from hrs_platform.services.documents.structure import describe_structure, project_structure
+from hrs_platform.services.native.artifacts import ProjectionArtifacts
+from hrs_platform.services.native.commit import ProjectionCommit
+from hrs_platform.services.native.facts import PROJECTION_POLICY, projection_input, projection_state
+from hrs_platform.services.native.publication import NativePublication
+from hrs_platform.services.native.publication import article_groups as article_groups
 from hrs_platform.services.runs.outputs import Outputs, fingerprint
 from hrs_platform.services.storage import objects_for
 
 logger = logging.getLogger(__name__)
-PROJECTION_POLICY = "codex-platform-v9-page-fragments"
-
-
-def article_groups(document, run_id):
-    """Adapt validated native article ranges to the existing immutable chapter contract."""
-    from hrs_codex.organization import article_parts
-
-    articles = document["organization"]["articles"]
-    groups = []
-    for article, source_parts in zip(articles, article_parts(document["pages"], articles), strict=True):
-        parts = []
-        for part in source_parts:
-            page = document["pages"][part["page"] - 1]
-            parts.append(
-                {
-                    "span_id": str(
-                        uuid5(UUID(run_id), f"codex:{part['page']}:{part['start']}:{part['end']}")
-                    ),
-                    "start": part["start"],
-                    "end": part["end"],
-                    "text": part["text"],
-                    "source": {
-                        "pages": [part["page"]],
-                        "page": part["page"],
-                        "original_start": part["original_start"],
-                        "original_end": part["original_end"],
-                        "image_sha256": page["image_sha256"],
-                        "markdown_sha256": page["approved"]["sha256"],
-                        "approval_type": page["approved"]["approval_type"],
-                    },
-                }
-            )
-        groups.append(
-            {
-                "title": article["title"],
-                "kind": article.get("kind", "article"),
-                "parts": parts,
-                "bibliography": article.get("bibliography", {"status": "unclaimed"}),
-            }
-        )
-    return groups
 
 
 class CodexBridge:
     def __init__(self, settings, engine):
         self.settings, self.engine = settings, engine
         self.store = Store(resolve_workspace(settings.codex_root))
+        self.executor = Runner(self.store)
         self.objects = objects_for(settings, engine)
         self.outputs, self.review = Outputs(settings, engine), Review(settings, engine)
         self.stop_event = threading.Event()
         self.thread = None
         self.verified_at = {}
+        self.artifacts = ProjectionArtifacts(self.store, self.objects, self.review, engine)
+        self.commit = ProjectionCommit(
+            engine, workflow_test=(self.store.root / ".workflow-test-authorization.json").exists()
+        )
+        self.publication = NativePublication(settings, engine, self.objects)
 
     def start(self):
-        ensure_workbench(self.store)
+        self.executor.start()
         self.thread = threading.Thread(target=self.loop, name="codex-platform-bridge", daemon=True)
         self.thread.start()
 
     def stop(self):
         self.stop_event.set()
+        self.executor.stop()
         if self.thread:
             self.thread.join(timeout=10)
 
     def loop(self):
-        # One local bridge owns projections. The separate workspace runner owns Codex execution.
+        # One local bridge owns projections; its executor consumes the shared durable queue.
         try:
             with FileLock(self.store.root / ".platform-bridge.lock", timeout=0):
                 while not self.stop_event.is_set():
@@ -180,7 +147,7 @@ class CodexBridge:
                             db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
                         )
                     )
-                if not shared and self.store._directory(doc_id).exists():
+                if not shared and self.store.document_directory(doc_id).exists():
                     result = self.store.cancel_document(doc_id)
                     waiting |= result["state"] == "running"
                     unshared.append(doc_id)
@@ -289,8 +256,6 @@ class CodexBridge:
                         result={**current, "codex_document_id": doc["id"]},
                     )
                 )
-        elif event["kind"] == "retry_run" and (run["result"] or {}).get("codex_document_id"):
-            self.store.request_run(run["result"]["codex_document_id"], resume=True)
         elif event["kind"] not in {"review_changed", "start_book", "retry_run"}:
             # Legacy deletion has its own immutable ownership manifest and worker.
             return
@@ -348,34 +313,7 @@ class CodexBridge:
 
     @staticmethod
     def projection_input(doc):
-        # Heartbeat extensions alone do not change the reading or execution projection.
-        return fingerprint(
-            {
-                "policy": PROJECTION_POLICY,
-                "coordinator_active": doc.get("run_request", {}).get("state") == "running"
-                and doc.get("run_request", {}).get("lease_expires_at", 0) > time.time(),
-                "state": doc["state"],
-                "revision": doc.get("revision"),
-                "pages": doc["pages"],
-                "organization": doc.get("organization"),
-                "publication": doc.get("publication"),
-                "active_publication": doc.get("active_publication"),
-                "navigation": doc.get("navigation", {}).get("sha256"),
-                "request": {
-                    k: v for k, v in doc.get("run_request", {}).items() if k not in {"claim", "updated_at"}
-                },
-                "tasks": [
-                    {k: v for k, v in t.items() if k != "claim"}
-                    | {
-                        "started_at": t.get("claim", {}).get("started_at"),
-                        "active": t["state"] == "leased"
-                        and t.get("claim", {}).get("expires_at", 0) > time.time(),
-                    }
-                    for t in doc["tasks"]
-                ],
-                "scheduling": scheduling_plan(doc),
-            }
-        )
+        return projection_input(doc)
 
     def sync(self, run):
         if not self.due(run) or run["result"].get("codex_recovery", {}).get("state") in {
@@ -405,68 +343,13 @@ class CodexBridge:
         self.verified_at[doc_id] = time.monotonic()
         publication_sha = (doc.get("publication") or {}).get("markdown_sha256")
         navigation_sha = doc.get("navigation", {}).get("sha256")
-        if (
-            doc["state"] == "published"
-            and run["result"].get("published")
-            and run["result"].get("codex_publication_sha256") == publication_sha
-            and run["result"].get("codex_projection_policy") == PROJECTION_POLICY
-            and (
-                run["result"].get("codex_indexed_publication_sha256") != publication_sha
-                or run["result"].get("codex_indexed_projection_policy") != PROJECTION_POLICY
-                or run["result"].get("codex_indexed_navigation_sha256") != navigation_sha
-            )
-            and run["result"].get("codex_projected_navigation_sha256") == navigation_sha
-        ):
-            from hrs_platform.services.retrieval.indexing import BookIndexer
-
-            BookIndexer(self.settings, self.engine).index(run["id"])
-            indexed = get_run(self.engine, run["id"])["result"]
-            with self.engine.begin() as connection:
-                connection.execute(
-                    update(db.runs)
-                    .where(db.runs.c.id == run["id"])
-                    .values(
-                        state="completed",
-                        stage="complete",
-                        revision=db.runs.c.revision + 1,
-                        updated_at=func.now(),
-                        error=None,
-                        result={
-                            **indexed,
-                            "codex_indexed_publication_sha256": publication_sha,
-                            "codex_indexed_projection_policy": PROJECTION_POLICY,
-                            "codex_indexed_navigation_sha256": navigation_sha,
-                            "bridge_failures": 0,
-                            "bridge_not_before": 0,
-                        },
-                    )
-                )
-                connection.execute(
-                    insert(db.events).values(
-                        book_id=run["book_id"],
-                        run_id=run["id"],
-                        kind="run.changed",
-                        payload={"state": "completed", "stage": "complete", "revision": run["revision"] + 1},
-                    )
-                )
-            run = get_run(self.engine, run["id"])
+        run = self.publication.index_if_needed(run, doc)
         if self.apply_decisions(run, doc):
             doc = self.store.refresh_navigation(doc_id)
         input_sha = self.projection_input(doc)
         navigation_sha = doc.get("navigation", {}).get("sha256")
         scheduling = scheduling_plan(doc)
-        latest_reviews = {
-            t["page"]: t
-            for t in doc["tasks"]
-            if t["stage"] in {"review", "verify"} and t["state"] != "superseded"
-        }
-        page_progress = {
-            "total": len(doc["pages"]),
-            "extracted": sum(bool(p.get("ocr")) for p in doc["pages"]),
-            "reviewed": sum(bool(t.get("result")) for t in latest_reviews.values()),
-            "approved": sum(p["state"] == "approved" for p in doc["pages"]),
-            "pending": sum(p["state"] == "pending" for p in doc["pages"]),
-        }
+        page_progress = document_progress(doc)
         key = fingerprint(
             {
                 "projection_policy": PROJECTION_POLICY,
@@ -484,330 +367,28 @@ class CodexBridge:
         )
         if run["result"].get("codex_sync_sha256") == key and unchanged:
             return
-        previous_files = (
-            self.review.read_json(run["conversion"]).get("files", {}) if run.get("conversion") else {}
-        )
-        files, boundaries, carrier, completion, texts = {}, [], [], [], []
-        shared = {(ref["sha256"], ref.get("media_type")): ref for ref in previous_files.values()}
-
-        def saved(name, value, media="application/json"):
-            data = (
-                value.encode("utf-8")
-                if isinstance(value, str)
-                else json.dumps(value, ensure_ascii=False).encode("utf-8")
-            )
-            previous = previous_files.get(name, {})
-            sha = hashlib.sha256(data).hexdigest()
-            files[name] = previous if previous.get("sha256") == sha else shared.get((sha, media))
-            if not files[name]:
-                files[name] = self.objects.put_bytes(data, media, run_id=run["id"])
-            shared[(sha, media)] = files[name]
-
-        offset = 0
-        for page in doc["pages"]:
-            selected = page.get("approved") or page.get("candidate") or page.get("ocr")
-            text = (selected or {}).get("markdown", "") + "\n\n"
-            texts.append(text)
-            page_markdown = f"markdown/{page['page']:05d}.md"
-            saved(page_markdown, text, "text/markdown; charset=utf-8")
-            boundaries.append({"page": page["page"], "start": offset, "end": offset + len(text)})
-            offset += len(text)
-            name = page["image"]
-            previous = previous_files.get(name, {})
-            files[name] = (
-                previous
-                if previous.get("sha256") == page["image_sha256"]
-                else self.objects.put_file(self.store._path(doc, name), "image/png", run_id=run["id"])
-            )
-            status = (
-                "release-accepted"
-                if page["state"] == "approved"
-                else "unreviewed-source"
-                if selected
-                else "awaiting-ocr"
-            )
-            carrier.append(
-                {
-                    "page": page["page"],
-                    "image": name,
-                    "markdown": page_markdown,
-                    "status": status,
-                    "extraction_method": page.get("route", "ocr"),
-                    "acceptance_basis": (selected or {}).get("approval_type"),
-                }
-            )
-            reviews = [
-                t
-                for t in doc["tasks"]
-                if t["page"] == page["page"] and t["stage"] == "review" and t.get("result")
-            ]
-            completion.append(
-                {
-                    "page": page["page"],
-                    "structure": reviews[-1]["result"].get("structure", {}) if reviews else {},
-                }
-            )
-
-        if doc["state"] == "published":
-            saved("document.md", "".join(texts), "text/markdown; charset=utf-8")
-        for relative in re.findall(
-            r"!\[[^\]]*\]\(((?:pages|evidence/details)/[\w./-]+\.png)\)", "".join(texts)
-        ):
-            asset = self.store._path(doc, relative)
-            if not asset.is_file():
-                raise ValueError("Markdown references a missing retained original image")
-            files[relative] = previous_files.get(relative) or self.objects.put_file(
-                asset, "image/png", run_id=run["id"]
-            )
-        saved("pages.json", {"pages": boundaries})
-        saved("navigation.json", doc.get("navigation", {}))
-        saved("review-cards.json", {"cards": []})
-        saved("completion.json", {"pages": completion})
-        if (doc.get("organization") or {}).get("reading_structure"):
-            saved("paddle-restructure.json", doc["organization"]["reading_structure"])
-        task_files = {}
-        for task in doc["tasks"]:
-            name = f"codex/tasks/{task['task_id']}.json"
-            saved(name, task)
-            task_files[task["task_id"]] = name
-        saved(
-            "codex-evidence.json",
-            {
-                "source": doc["source"],
-                "policy": doc.get("processing_policy"),
-                "publication": doc["publication"],
-                "task_files": task_files,
-                **({"tasks": doc["tasks"]} if doc["state"] == "published" else {}),
-            },
-        )
-        manifest = {
-            "page_count": len(carrier),
-            "pages": carrier,
-            "candidate_markdown": "document.md",
-            "page_markdown": True,
-            "page_boundaries": "pages.json",
-            "review_cards": "review-cards.json",
-        }
-        bundle = self.objects.put_bytes(
-            json.dumps({"files": files, "manifest": manifest}, ensure_ascii=False).encode(), run_id=run["id"]
-        )
+        bundle, boundaries = self.artifacts.bundle(run, doc)
         pending = [p for p in doc["pages"] if p["state"] == "pending"]
-        request = doc.get("run_request", {})
-        state = (
-            "paused"
-            if request.get("pause_requested") or request.get("state") == "paused"
-            else "completed"
-            if doc["state"] == "published"
-            and run["result"].get("codex_indexed_publication_sha256") == publication_sha
-            and run["result"].get("codex_indexed_projection_policy") == PROJECTION_POLICY
-            and run["result"].get("codex_indexed_navigation_sha256") == navigation_sha
-            else "ready"
-            if doc["state"] == "published"
-            else "awaiting_review"
-            if pending and not scheduling["automatic_work_remaining"]
-            else "failed"
-            if request.get("state") == "retryable_error"
-            else "queued"
-            if request.get("state") == "pending"
-            else "running"
-        )
-        stage = (
-            "paused"
-            if state == "paused"
-            else "complete"
-            if state == "completed"
-            else "indexing"
-            if state == "ready"
-            else "review"
-            if pending and not scheduling["automatic_work_remaining"]
-            else "organization"
-            if all(p["state"] == "approved" for p in doc["pages"])
-            else "vision"
-            if any(t["stage"] == "review" for t in doc["tasks"])
-            else "ocr"
-        )
+        state, stage = projection_state(run, doc, scheduling, pending, publication_sha, navigation_sha)
         if doc["organization"]:
             self.publish_chapters(run, doc)
-        with self.engine.connect() as connection:
-            previous_issues = {
-                r["id"]: r
-                for r in connection.execute(
-                    select(db.review_issues).where(db.review_issues.c.run_id == run["id"])
-                ).mappings()
-            }
-        prepared_issues = []
-        for page in pending:
-            packet = self.store._human_packet(doc, page["page"])
-            packet = {**packet, "input_sha256": digest(packet)}
-            scope = (
-                "codex-page:"
-                + (str(doc["revision"]) + ":" if doc.get("revision", 1) > 1 else "")
-                + str(page["page"])
-            )
-            issue_id = str(uuid5(UUID(run["id"]), scope))
-            content = {
-                "text": packet["markdown"],
-                "start": boundaries[page["page"] - 1]["start"],
-                "end": boundaries[page["page"] - 1]["end"],
-                "pages": [page["page"]],
-                "images": [page["image"]],
-                "kind": "page",
-                "reasons": page["review"]["issues"],
-                "codex_input_sha256": packet["input_sha256"],
-                "codex_revision": doc.get("revision", 1),
-                "proposed_text": packet.get("suggested_markdown"),
-                "locations": locate_issues(
-                    packet["markdown"],
-                    page["review"]["issues"],
-                    page=page["page"],
-                    image_sha256=page["image_sha256"],
-                ),
-            }
-            data = json.dumps(content, ensure_ascii=False).encode()
-            old = previous_issues.get(issue_id)
-            if old and (old["state"] != "pending" or old["draft"] is not None):
-                continue
-            if old and old["content"]["sha256"] == hashlib.sha256(data).hexdigest():
-                continue
-            ref = self.objects.put_bytes(data, run_id=run["id"])
-            prepared_issues.append(
-                dict(
-                    id=issue_id,
-                    run_id=run["id"],
-                    scope_key=scope,
-                    page=page["page"],
-                    state="pending",
-                    content=ref,
-                    text_sha256=digest(packet["markdown"]),
-                )
-            )
+        prepared_issues = self.artifacts.issues(run, doc, pending, boundaries)
         self.project_nodes(run, doc, state)
-        with self.engine.begin() as connection:
-            from hrs_platform.services.deletion import require_active
-
-            require_active(connection, run["book_id"])
-            current_revision = connection.scalar(
-                select(db.runs.c.revision).where(db.runs.c.id == run["id"]).with_for_update()
-            )
-            if current_revision != run["revision"]:
-                # A human decision arrived while objects were prepared. Retry from it next tick.
-                return
-            if prepared_issues:
-                statement = pg_insert(db.review_issues).values(prepared_issues)
-                connection.execute(
-                    statement.on_conflict_do_update(
-                        index_elements=["id"],
-                        set_={
-                            "content": statement.excluded.content,
-                            "text_sha256": statement.excluded.text_sha256,
-                            "revision": db.review_issues.c.revision + 1,
-                        },
-                        where=(db.review_issues.c.state == "pending")
-                        & db.review_issues.c.draft.is_(None)
-                        & db.review_issues.c.content.is_distinct_from(statement.excluded.content),
-                    )
-                )
-            connection.execute(
-                update(db.review_issues)
-                .where(
-                    db.review_issues.c.run_id == run["id"],
-                    db.review_issues.c.state == "pending",
-                    db.review_issues.c.page.not_in([p["page"] for p in pending]),
-                )
-                .values(state="superseded", revision=db.review_issues.c.revision + 1)
-            )
-            revision = run["revision"] + 1
-            result = {
-                **run["result"],
-                "bridge_failures": 0,
-                "bridge_not_before": 0,
-                "codex_sync_sha256": key,
-                "codex_projection_input": input_sha,
-                "codex_projected_sql_revision": revision,
-                "codex_page_progress": page_progress,
-                "codex_navigation_pending_count": sum(
-                    e["status"] == "conflict" for e in doc.get("navigation", {}).get("entries", [])
-                ),
-                "codex_scheduling": scheduling,
-                "codex_execution": {
-                    "state": request.get("state"),
-                    "paused": state == "paused",
-                    "technical_failures": request.get("technical_failures", 0),
-                    "retry_limit": request.get("retry_limit", 3),
-                    "retry_at": request.get("not_before")
-                    if request.get("technical_failures", 0) < request.get("retry_limit", 3)
-                    else None,
-                    "lease_expires_at": request.get("lease_expires_at"),
-                    "coordinator_active": request.get("state") == "running"
-                    and request.get("lease_expires_at", 0) > time.time(),
-                    "stop_reason": request.get("error"),
-                    "automatic_work_remaining": scheduling["automatic_work_remaining"],
-                    "last_progress_at": scheduling.get("last_completion_at"),
-                    "active_tasks": [
-                        {
-                            "stage": t["stage"],
-                            "page": t["page"],
-                            "started_at": t.get("claim", {}).get("started_at"),
-                        }
-                        for t in doc["tasks"]
-                        if t["state"] == "leased" and t.get("claim", {}).get("expires_at", 0) > time.time()
-                    ],
-                },
-                "codex_projection_policy": PROJECTION_POLICY,
-                "review_initialized": True,
-                "published": bool(doc.get("publication") or doc.get("active_publication")),
-                "codex_revision_pending": bool(doc.get("active_publication") and doc["state"] != "published"),
-                **({"codex_publication_sha256": publication_sha} if publication_sha else {}),
-                **(
-                    {"codex_projected_navigation_sha256": navigation_sha}
-                    if doc["state"] == "published"
-                    else {}
-                ),
-                "progress": {
-                    "stage": "vision",
-                    "completed": page_progress["reviewed"],
-                    "total": len(doc["pages"]),
-                },
-                "content_acceptance": "workflow_test"
-                if (self.store.root / ".workflow-test-authorization.json").exists()
-                else "machine_or_human",
-            }
-            connection.execute(
-                update(db.runs)
-                .where(db.runs.c.id == run["id"])
-                .values(
-                    conversion=bundle,
-                    result=result,
-                    pending_count=len(pending),
-                    state=state,
-                    stage=stage,
-                    revision=revision,
-                    updated_at=func.now(),
-                    error=request.get("error")
-                    if isinstance(request.get("error"), dict) or not request.get("error")
-                    else {"detail": str(request["error"]), "retryable": True},
-                )
-            )
-            connection.execute(
-                update(db.books)
-                .where(db.books.c.id == run["book_id"])
-                .values(state="ready" if state == "completed" else state)
-            )
-            connection.execute(
-                insert(db.events).values(
-                    book_id=run["book_id"],
-                    run_id=run["id"],
-                    kind="run.changed",
-                    payload={
-                        "state": state,
-                        "stage": stage,
-                        "revision": revision,
-                        "pending_count": len(pending),
-                        "navigation_pending_count": result["codex_navigation_pending_count"],
-                        "revision_pending": result["codex_revision_pending"],
-                    },
-                )
-            )
+        self.commit.apply(
+            run,
+            doc,
+            prepared_issues=prepared_issues,
+            pending=pending,
+            bundle=bundle,
+            state=state,
+            stage=stage,
+            key=key,
+            input_sha=input_sha,
+            page_progress=page_progress,
+            scheduling=scheduling,
+            publication_sha=publication_sha,
+            navigation_sha=navigation_sha,
+        )
 
     def project_nodes(self, run, doc, state):
         doc_id = doc["id"]
@@ -864,75 +445,7 @@ class CodexBridge:
         self.outputs.nodes(run["id"], records)
 
     def publish_chapters(self, run, doc):
-        if doc["state"] != "published":
-            return
-        with self.engine.connect() as connection:
-            if (
-                run["result"].get("codex_publication_sha256") == doc["publication"]["markdown_sha256"]
-                and run["result"].get("codex_projection_policy") == PROJECTION_POLICY
-                and run["result"].get("codex_projected_navigation_sha256")
-                == doc.get("navigation", {}).get("sha256")
-                and connection.scalar(
-                    select(func.count()).select_from(db.chapters).where(db.chapters.c.run_id == run["id"])
-                )
-            ):
-                return
-        groups = article_groups(doc, run["id"])
-        parts = sorted([p for g in groups for p in g["parts"]], key=lambda p: p["start"])
-        text = "".join(p["text"] for p in parts)
-        titles = [
-            {"page": p["source"]["pages"][0], "title": m.group().strip(), "level": len(m[1])}
-            for p in parts
-            for m in re.finditer(r"(?m)^(#{1,6})\s+[^\n]+", p["text"])
-        ]
-        metadata = {**doc["organization"].get("reading_structure", {}), "titles": titles}
-        completion = []
-        for page in doc["pages"]:
-            reviews = [
-                t
-                for t in doc["tasks"]
-                if t["stage"] == "review" and t["page"] == page["page"] and t.get("result")
-            ]
-            completion.append(
-                {
-                    "page": page["page"],
-                    "structure": reviews[-1]["result"].get("structure", {}) if reviews else {},
-                }
-            )
-        structure = describe_structure(
-            {"text": text, "parts": parts}, metadata, completion, {p["page"] for p in doc["pages"]}
-        )
-        rows = []
-        for position, group in enumerate(groups):
-            group["navigation"] = doc.get("navigation", {})
-            group["structure"] = project_structure(structure, group["parts"])
-            ref = self.objects.put_bytes(json.dumps(group, ensure_ascii=False).encode(), run_id=run["id"])
-            rows.append(
-                {
-                    "id": str(uuid5(UUID(run["id"]), f"chapter:{position}")),
-                    "book_id": run["book_id"],
-                    "run_id": run["id"],
-                    "position": position,
-                    "title": group["title"],
-                    "kind": group["kind"],
-                    "content": ref,
-                    "pages": sorted({p for part in group["parts"] for p in part["source"]["pages"]}),
-                    "codepoints": sum(len(p["text"]) for p in group["parts"]),
-                }
-            )
-        with self.engine.begin() as connection:
-            connection.execute(delete(db.chapters).where(db.chapters.c.run_id == run["id"]))
-            connection.execute(pg_insert(db.chapters).values(rows).on_conflict_do_nothing())
-            connection.execute(
-                insert(db.events).values(
-                    book_id=run["book_id"],
-                    run_id=run["id"],
-                    kind="library.revised"
-                    if run["result"].get("codex_publication_sha256")
-                    else "book.published",
-                    payload={"state": "ready", "stage": "indexing", "revision": run["revision"] + 1},
-                )
-            )
+        return self.publication.publish_chapters(run, doc)
 
     @staticmethod
     def due(run):

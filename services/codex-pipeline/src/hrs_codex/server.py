@@ -10,8 +10,8 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import TextContent
 
+from hrs_codex.application import prepare as prepare
 from hrs_codex.details import original_detail as render_original_detail
-from hrs_codex.render import render_document
 from hrs_codex.store import Store
 
 
@@ -78,27 +78,6 @@ def compact_document(doc):
         }
     doc.pop("published_versions", None)
     return doc
-
-
-def prepare(store: Store, source: str, title: str = "") -> dict:
-    from hashlib import file_digest
-
-    path = Path(source).expanduser().resolve(strict=True)
-    with path.open("rb") as stream:
-        document_id = file_digest(stream, "sha256").hexdigest()[:24]
-    manifest = render_document(path, store.root / "documents" / document_id)
-    document = store.register_manifest(manifest, title=title)
-    with store.lock:
-        saved = store._load(document["id"])
-        if not saved.get("processing_policy") and saved["state"] != "published":
-            saved["processing_policy"] = {
-                "ocr_model": "gpt-6.1-terra",
-                "review_model": "gpt-6.1-sol",
-                "organization_model": "gpt-6.1-sol",
-                "review_failure": "bounded",
-            }
-            store._save(saved)
-    return store.status(document["id"])
 
 
 def create_server(root: Path) -> MCPServer:
@@ -252,7 +231,7 @@ def create_server(root: Path) -> MCPServer:
         row = doc["pages"][page - 1]
         if row["state"] != "approved":
             raise ValueError("Page has unresolved content")
-        store._verify_evidence(doc)
+        store.verify_evidence(doc)
         return {
             "document_id": document_id,
             "page": page,

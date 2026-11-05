@@ -480,7 +480,7 @@ def test_native_fallback_and_fullpage_budget_preserve_history(tmp_path):
         store.fallback_page(doc_id, 1, "Again", new_evidence="Another crop")
     assert len(store.status(doc_id)["pages"][0]["fallback_history"]) == 2
     assert store.human_queue()[0]["page"] == 1
-    store._verify_evidence(store._load(doc_id))
+    store.verify_evidence(store.checkpoints.read(doc_id))
 
 
 def test_fallback_protects_leases_human_drafts_and_source(tmp_path):
@@ -488,9 +488,9 @@ def test_fallback_protects_leases_human_drafts_and_source(tmp_path):
     store.claim_task(doc_id, "ocr", "ocr")
     with pytest.raises(ValueError, match="active task leases"):
         store.fallback_page(doc_id, 1, "bad extraction")
-    doc = store._load(doc_id)
+    doc = store.checkpoints.read(doc_id)
     doc["tasks"][0]["claim"]["expires_at"] = 0
-    store._save(doc)
+    store.checkpoints.write(doc)
     complete(store, doc_id, "ocr", "recovered", {"markdown": "text"})
     complete(store, doc_id, "review", "review", {"verdict": "pending", "issues": ["unclear"]})
     packet = store.human_packet(doc_id, 1)
@@ -505,8 +505,8 @@ def test_fallback_protects_leases_human_drafts_and_source(tmp_path):
     )
     with pytest.raises(ValueError, match="human decisions or drafts"):
         store.fallback_page(doc_id, 1, "replace draft")
-    doc = store._load(doc_id)
-    store._path(doc, doc["source"]["path"]).write_bytes(b"changed source")
+    doc = store.checkpoints.read(doc_id)
+    store.artifact_path(doc, doc["source"]["path"]).write_bytes(b"changed source")
     with pytest.raises(ValueError, match="source hash mismatch"):
         store.request_run(doc_id)
     with pytest.raises(ValueError, match="source hash mismatch"):
@@ -515,7 +515,7 @@ def test_fallback_protects_leases_human_drafts_and_source(tmp_path):
 
 def test_run_request_deduplicates_renews_and_waits_for_task_lease(tmp_path, monkeypatch):
     store, doc_id = document(tmp_path)
-    import hrs_codex.store as module
+    import hrs_codex.run_workflow as module
 
     now = [1000.0]
     monkeypatch.setattr(module.time, "time", lambda: now[0])
@@ -540,7 +540,7 @@ def test_run_request_deduplicates_renews_and_waits_for_task_lease(tmp_path, monk
 
 def test_run_technical_errors_stop_after_three_and_require_resume(tmp_path, monkeypatch):
     store, doc_id = document(tmp_path)
-    import hrs_codex.store as module
+    import hrs_codex.run_workflow as module
 
     now = [1000.0]
     monkeypatch.setattr(module.time, "time", lambda: now[0])
@@ -560,7 +560,7 @@ def test_run_technical_errors_stop_after_three_and_require_resume(tmp_path, monk
 
 def test_expired_run_backoff_and_human_approval_requeue(tmp_path, monkeypatch):
     store, doc_id = document(tmp_path)
-    import hrs_codex.store as module
+    import hrs_codex.run_workflow as module
 
     now = [1000.0]
     monkeypatch.setattr(module.time, "time", lambda: now[0])
@@ -593,7 +593,7 @@ def test_explicit_resume_recovers_expired_coordinator_without_racing_active_work
     tmp_path, monkeypatch
 ):
     store, doc_id = document(tmp_path)
-    import hrs_codex.store as module
+    import hrs_codex.run_workflow as module
 
     now = [1000.0]
     monkeypatch.setattr(module.time, "time", lambda: now[0])
@@ -662,7 +662,7 @@ def test_revision_preserves_old_search_until_new_review_and_publication(tmp_path
     assert store.search("新版")
     current = store.status(doc_id)
     assert [version["revision"] for version in current["published_versions"]] == [1, 2]
-    old_snapshot = store._published_snapshot(current, current["published_versions"][0])
+    old_snapshot = store.publications.published_snapshot(current, current["published_versions"][0])
     assert old_snapshot["pages"][0]["approved"]["markdown"] == "旧版史料"
     assert store.begin_revision(doc_id, "Third review")["revision"] == 3
     assert store.search("新版")
@@ -678,7 +678,7 @@ def test_revision_snapshot_hash_and_original_mutation_blocked(tmp_path):
     revision = store.begin_revision(doc_id, "Audit")
     doc = store.status(doc_id)
     reference = revision["active_publication"]["files"]["document.md"]
-    store._path(doc, reference["path"]).write_text("tampered", encoding="utf-8")
+    store.artifact_path(doc, reference["path"]).write_text("tampered", encoding="utf-8")
     with pytest.raises(ValueError, match="Archived publication evidence hash"):
         store.search("原生文本")
 

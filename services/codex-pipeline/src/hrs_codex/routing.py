@@ -1,18 +1,15 @@
 """CPU-only PDF candidate routing. No route is a content approval."""
 
 import ctypes
-import hashlib
 import math
 import unicodedata
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as raw
 
+from hrs_codex.hashing import digest as _hash
+
 POLICY = "codex-pdf-routing-v1"
-
-
-def _hash(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _plan(route, reasons, text="", regions=None, evidence=None):

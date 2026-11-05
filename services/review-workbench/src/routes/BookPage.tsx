@@ -1,3 +1,4 @@
+import { queryKeys } from "@/client/query-keys.ts";
 import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button.tsx";
 import { Link, useParams, useSearchParams } from "react-router-dom";
@@ -26,7 +27,7 @@ export default function BookPage() {
   );
   const cache = useQueryClient();
   const detail = useQuery({
-    queryKey: ["platform", "book", bookId],
+    queryKey: queryKeys.book(bookId),
     initialData: () =>
       cache.getQueryData<Book[]>(booksKey)?.find((book) => book.id === bookId),
     queryFn: async ({ signal }) => {

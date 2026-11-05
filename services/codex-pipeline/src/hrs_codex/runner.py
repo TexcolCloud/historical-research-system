@@ -6,7 +6,8 @@ from uuid import uuid4
 
 from filelock import FileLock
 
-from hrs_codex.store import Store, atomic_json
+from hrs_codex.checkpoints import atomic_json
+from hrs_codex.store import Store
 
 
 class Runner:
@@ -15,7 +16,7 @@ class Runner:
     ):
         self.store = store
         if execute is None:
-            from hrs_codex.cli import run_codex
+            from hrs_codex.execution import run_codex
 
             execute = run_codex
         self.execute = execute
@@ -31,7 +32,9 @@ class Runner:
         request = self.store.claim_run(self.owner, self.lease_seconds, document_id=document_id)
         if request is None:
             return self.recover_exhausted(document_id)
-        with FileLock(self.store._directory(request["document_id"]) / ".executor.lock", timeout=10):
+        with FileLock(
+            self.store.document_directory(request["document_id"]) / ".executor.lock", timeout=10
+        ):
             return self.execute_request(request)
 
     def recover_exhausted(self, document_id=None):
@@ -64,15 +67,7 @@ class Runner:
             except RecoveryWait:
                 continue
             except (ValueError, OSError) as error:
-                with self.store.lock:
-                    current = self.store._load(doc["id"])
-                    if current.get("run_request") != request:
-                        continue
-                    current["run_request"].update(
-                        automatic_checkpoint_used=True,
-                        recovery_error={"code": "checkpoint_invalid", "detail": str(error)},
-                    )
-                    self.store._save(current)
+                self.store.record_recovery_failure(doc["id"], request, str(error))
         return False
 
     def execute_request(self, request):

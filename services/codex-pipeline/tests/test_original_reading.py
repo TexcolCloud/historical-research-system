@@ -95,7 +95,7 @@ def test_reading_is_required_immutable_and_bound_to_final_decision(tmp_path):
         {"articles": [{"title": "Synthetic", "pages": [1]}]},
     )
     store.publish(doc_id)
-    path = store._directory(doc_id) / "document.json"
+    path = store.document_directory(doc_id) / "document.json"
     changed = json.loads(path.read_text("utf-8"))
     changed["tasks"][1]["source_reading"]["reading"]["observations"] = ["Changed evidence"]
     path.write_text(json.dumps(changed), encoding="utf-8")
@@ -126,7 +126,7 @@ def test_unresolved_source_observations_cannot_turn_into_approval_after_candidat
 def test_expired_reviewer_requires_new_image_receipt_and_preserves_prior_observations(
     tmp_path, monkeypatch
 ):
-    from hrs_codex import store as module
+    from hrs_codex import workflow_rules as module
 
     store, doc_id = document(tmp_path)
     complete(store, doc_id, "ocr", "synthetic-ocr", {"markdown": "Synthetic text"})
@@ -147,3 +147,19 @@ def test_expired_reviewer_requires_new_image_receipt_and_preserves_prior_observa
     assert new_reading["image_receipt"] != old_reading["image_receipt"]
     store.review_candidate(doc_id, second["task_id"], second["lease_token"], new_reading)
     submit(store, doc_id, second, {"verdict": "approved"})
+
+
+def test_organization_can_open_its_frozen_originals_under_its_own_lease(tmp_path):
+    from test_store import complete, document
+
+    store, doc_id = document(tmp_path)
+    complete(store, doc_id, "ocr", "transcriber", {"markdown": "Source text"})
+    complete(store, doc_id, "review", "independent", {"verdict": "approved"})
+    task = store.claim_task(doc_id, "organization", "organizer")
+    metadata, pixels = store.original_page(
+        doc_id, 1, task_id=task["task_id"], lease_token=task["lease_token"]
+    )
+    assert pixels and metadata["image_receipt"]
+    assert metadata["image_sha256"] == task["inputs"]["pages"][0]["image_sha256"]
+    with pytest.raises(ValueError, match="active lease"):
+        store.original_page(doc_id, 1, task_id=task["task_id"], lease_token="stale")

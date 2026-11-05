@@ -7,8 +7,10 @@ from hrs_platform.domain.errors import ServiceError
 
 
 def recovery_reason(failure):
+    from hrs_codex.errors import EvidenceMismatch
+
     message = str(failure)
-    if "hash mismatch" in message or "differs from" in message:
+    if isinstance(failure, EvidenceMismatch) or "hash mismatch" in message or "differs from" in message:
         return "原件或证据与保存记录不一致。请在故障详情中查看受影响文件，恢复原文件后再点击“从断点恢复”。"
     if isinstance(failure, OSError):
         return "无法读取恢复所需文件或启动本机服务。请在故障详情中查看路径和原因，修复后再点击“从断点恢复”。"
@@ -98,8 +100,6 @@ def preflight(store):
     import shutil
     import subprocess
 
-    from hrs_codex.workspace import ensure_workbench
-
     executable = shutil.which("codex")
     if not executable:
         raise ValueError("未找到 Codex 执行程序，请安装并登录后恢复。")
@@ -109,7 +109,6 @@ def preflight(store):
         raise ValueError("Codex 登录检查超时，请检查本机服务后重试。") from error
     if login.returncode:
         raise ValueError("Codex 登录已失效，请重新登录后恢复。")
-    ensure_workbench(store)
 
 
 def native_report(settings, engine, run_id):

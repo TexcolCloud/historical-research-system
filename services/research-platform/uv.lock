@@ -386,7 +386,6 @@ dependencies = [
     { name = "httpx" },
     { name = "langchain-text-splitters" },
     { name = "markdown-it-py" },
-    { name = "openai-agents" },
     { name = "opencc" },
     { name = "opensearch-py" },
     { name = "pillow" },
@@ -397,12 +396,15 @@ dependencies = [
     { name = "pypdfium2" },
     { name = "python-dotenv" },
     { name = "sqlalchemy" },
-    { name = "temporalio" },
     { name = "tokenizers" },
     { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
+legacy = [
+    { name = "openai-agents" },
+    { name = "temporalio" },
+]
 retrieval = [
     { name = "numpy" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
@@ -429,7 +431,7 @@ requires-dist = [
     { name = "langchain-text-splitters", specifier = ">=0.3,<2" },
     { name = "markdown-it-py", specifier = ">=3,<5" },
     { name = "numpy", marker = "extra == 'retrieval'", specifier = ">=2,<3" },
-    { name = "openai-agents", specifier = ">=0.22.1,<0.23" },
+    { name = "openai-agents", marker = "extra == 'legacy'", specifier = ">=0.22.1,<0.23" },
     { name = "opencc", specifier = ">=1.1,<2" },
     { name = "opensearch-py", specifier = ">=3,<4" },
     { name = "pillow", specifier = ">=11,<13" },
@@ -440,7 +442,7 @@ requires-dist = [
     { name = "pypdfium2", specifier = ">=5,<6" },
     { name = "python-dotenv", specifier = ">=1,<2" },
     { name = "sqlalchemy", specifier = ">=2.0.52,<2.1" },
-    { name = "temporalio", specifier = ">=1.16,<2" },
+    { name = "temporalio", marker = "extra == 'legacy'", specifier = ">=1.16,<2" },
     { name = "tokenizers", specifier = ">=0.22,<0.23" },
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'retrieval'", specifier = ">=2.9,<3", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32' and extra == 'retrieval'", specifier = ">=2.9,<3" },
@@ -448,7 +450,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'retrieval'", specifier = "==4.57.6" },
     { name = "uvicorn", specifier = ">=0.35,<1" },
 ]
-provides-extras = ["retrieval"]
+provides-extras = ["legacy", "retrieval"]
 
 [package.metadata.requires-dev]
 dev = [

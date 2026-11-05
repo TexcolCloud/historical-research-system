@@ -1,4 +1,4 @@
-"""Official PostgreSQL dumps stored in S3; restore only into new database names.
+"""Coordinated SQL and native checkpoints; restore only into new destinations.
 
 This protects database recovery while the immutable S3 bucket is retained. It is
 not a substitute for an independent backup of the S3 storage volume or bucket.
@@ -98,12 +98,17 @@ def backup(settings):
     settings.cache_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="database-backup-", dir=settings.cache_root) as folder:
         references = {}
-        for name in DATABASES:
+        names = (
+            DATABASES
+            if settings.processing_backend == "legacy"
+            else (make_url(settings.database_url.get_secret_value()).database,)
+        )
+        for name in names:
             path = Path(folder) / (name + ".dump")
             dump_database(settings, name, path)
             references[name] = storage.put_file(path, "application/vnd.postgresql.dump")
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "quiesced-platform-databases",
             "created_at": datetime.now(UTC).isoformat(),
             "databases": references,
@@ -114,16 +119,32 @@ def backup(settings):
             },
             "scope": "Database recovery only; independent S3 volume/bucket backup is required for storage disaster recovery.",
         }
+        if settings.processing_backend == "codex":
+            from hrs_codex.backup import snapshot_workspace
+            from hrs_codex.store import Store
+            from hrs_codex.workspace import resolve_workspace
+
+            path = Path(folder) / "native-workspace.zip"
+            checkpoint = snapshot_workspace(Store(resolve_workspace(settings.codex_root)), path)
+            manifest["native_workspace"] = storage.put_file(path, "application/zip")
+            manifest["native_document_ids"] = checkpoint["documents"]
+            manifest["scope"] = (
+                "SQL and native originals/checkpoints; independent S3 volume/bucket backup remains required."
+            )
         return storage.put_bytes(json.dumps(manifest, ensure_ascii=False).encode("utf-8"))
 
 
-def restore(settings, manifest_reference, suffix):
+def restore(settings, manifest_reference, suffix, *, native_destination=None):
     if not re.fullmatch(r"[a-z0-9_]{1,20}", suffix):
         raise ValueError("Use a short lowercase restore suffix.")
     storage = objects_for(settings)
     manifest = json.loads(storage.read_bytes(manifest_reference))
-    if manifest.get("kind") != "quiesced-platform-databases" or set(manifest["databases"]) != set(DATABASES):
+    names = set(manifest.get("databases", {}))
+    native = manifest.get("schema_version") == 2 and manifest.get("native_workspace") and len(names) == 1
+    if manifest.get("kind") != "quiesced-platform-databases" or not (names == set(DATABASES) or native):
         raise ValueError("The manifest is not a complete coordinated platform database backup.")
+    if manifest.get("native_workspace") and (native_destination is None or Path(native_destination).exists()):
+        raise ValueError("Supply an absent native restore directory for the coordinated checkpoint backup.")
     settings.cache_root.mkdir(parents=True, exist_ok=True)
     restored = {}
     with tempfile.TemporaryDirectory(prefix="database-restore-", dir=settings.cache_root) as folder:
@@ -132,4 +153,9 @@ def restore(settings, manifest_reference, suffix):
             destination = f"hrs_restore_{suffix}_{number}"
             restore_database(settings, destination, path)
             restored[original] = destination
+        if manifest.get("native_workspace"):
+            from hrs_codex.backup import restore_workspace
+
+            path = storage.materialize(manifest["native_workspace"], Path(folder) / "native-workspace.zip")
+            restored["native_workspace"] = str(restore_workspace(path, native_destination))
     return restored

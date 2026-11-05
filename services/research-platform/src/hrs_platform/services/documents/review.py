@@ -1,6 +1,5 @@
 """Source-bound local decisions; a click never rebuilds the book."""
 
-import hashlib
 import json
 from uuid import UUID, uuid5
 
@@ -8,12 +7,9 @@ from sqlalchemy import func, insert, select, update
 
 from hrs_platform import models as db
 from hrs_platform.domain.errors import ServiceError
+from hrs_platform.domain.records import text_digest as digest
 from hrs_platform.services.documents.footnotes import resolve_footnotes
 from hrs_platform.services.storage import objects_for
-
-
-def digest(value):
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 class Review:

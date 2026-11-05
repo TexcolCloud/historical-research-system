@@ -1,4 +1,4 @@
-"""Book intake transactions. tusd owns bytes; Temporal owns execution."""
+"""Book intake transactions. tusd owns bytes; the durable outbox selects execution."""
 
 import hashlib
 import secrets
@@ -31,6 +31,7 @@ def create_upload(engine, settings, request, request_id=None, upload_token=None)
             .on_conflict_do_nothing(index_elements=["id"])
         )
         from hrs_platform.services.deletion import require_active
+
         require_active(connection, book_id)
         existing = (
             connection.execute(select(db.uploads).where(db.uploads.c.id == session_id))
@@ -218,8 +219,6 @@ def list_runs(engine, book_id):
     with engine.connect() as connection:
         return list(
             connection.execute(
-                select(db.runs)
-                .where(db.runs.c.book_id == str(book_id))
-                .order_by(db.runs.c.created_at.desc())
+                select(db.runs).where(db.runs.c.book_id == str(book_id)).order_by(db.runs.c.created_at.desc())
             ).mappings()
         )

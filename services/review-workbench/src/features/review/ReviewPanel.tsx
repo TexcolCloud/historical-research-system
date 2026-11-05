@@ -1,3 +1,4 @@
+import { queryKeys } from "@/client/query-keys.ts";
 import { useEffect, useState } from "react";
 import IssueEditor from "./IssueEditor.tsx";
 import { useOutletContext } from "react-router-dom";
@@ -19,7 +20,7 @@ import ConversionReader from "@/features/review/ConversionReader.tsx";
 
 const issueOptions = (id: string) =>
   queryOptions({
-    queryKey: ["platform", "issue", id],
+    queryKey: queryKeys.issue(id),
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/reviews/{issue_id}", {
         params: { path: { issue_id: id } },

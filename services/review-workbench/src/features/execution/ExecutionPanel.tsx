@@ -1,3 +1,4 @@
+import { queryKeys } from "@/client/query-keys.ts";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExecutionCanvas } from "@/components/execution/ExecutionCanvas.tsx";
@@ -22,7 +23,7 @@ const states: Record<string, string> = {
 export default function ExecutionPanel({ bookId }: { bookId: string }) {
   const [selectedRun, setSelectedRun] = useState("");
   const runs = useQuery({
-    queryKey: ["platform", "runs", bookId],
+    queryKey: queryKeys.runs(bookId),
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/books/{book_id}/runs", {
         params: { path: { book_id: bookId } },

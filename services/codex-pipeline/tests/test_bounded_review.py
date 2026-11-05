@@ -20,7 +20,7 @@ def test_policy_upgrade_is_explicit_paused_and_preserves_protected_pages(tmp_pat
 
 def test_disputed_review_gets_one_independent_unchanged_verification(tmp_path):
     store, doc_id = document(tmp_path)
-    path = store._directory(doc_id) / "document.json"
+    path = store.document_directory(doc_id) / "document.json"
     doc = json.loads(path.read_text("utf-8"))
     doc["processing_policy"] = {"review_failure": "bounded"}
     path.write_text(json.dumps(doc), "utf-8")
@@ -56,9 +56,9 @@ def test_located_correction_preserves_notes_and_requires_distinct_original_first
 
     store, doc_id = document(tmp_path)
     with store.lock:
-        doc = store._load(doc_id)
+        doc = store.checkpoints.read(doc_id)
         doc["processing_policy"] = {"review_failure": "bounded"}
-        store._save(doc)
+        store.checkpoints.write(doc)
     original = "到绥区[^1]\n\n[^1]: 原注。"
     complete(store, doc_id, "ocr", "ocr", {"markdown": original})
     task = store.claim_task(doc_id, "review", "reviewer", source_first=True)

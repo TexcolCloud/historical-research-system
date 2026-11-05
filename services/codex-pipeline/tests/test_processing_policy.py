@@ -27,9 +27,9 @@ def test_failed_sol_review_goes_to_human_and_test_release_is_not_content_accepta
     assert doc["processing_policy"]["review_failure"] == "bounded"
     # This historical fixture explicitly retains the earlier human-only policy.
     with store.lock:
-        retained = store._load(doc["id"])
+        retained = store.checkpoints.read(doc["id"])
         retained["processing_policy"]["review_failure"] = "human"
-        store._save(retained)
+        store.checkpoints.write(retained)
     complete(store, doc["id"], "ocr", {"markdown": "1938[^1]\n\n[^1]: Synthetic note."})
     complete(
         store,
@@ -113,4 +113,4 @@ def test_delete_waits_for_owned_execution_and_only_removes_workspace_copies(tmp_
     store.finish_run(doc["id"], owned["token"], error="Synthetic cancellation")
     assert store.status(doc["id"])["run_request"]["state"] == "cancelled"
     store.forget_document(doc["id"])
-    assert not store._directory(doc["id"]).exists() and image.exists()
+    assert not store.document_directory(doc["id"]).exists() and image.exists()

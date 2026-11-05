@@ -1,7 +1,8 @@
+import { queryKeys } from "@/client/query-keys.ts";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { client, type Book } from "@/client/api.ts";
-import { booksKey } from "@/hooks/events.ts";
+import { client } from "@/client/api.ts";
+import { updateBooks } from "@/features/books/book-cache.ts";
 import { Button } from "@/components/ui/button.tsx";
 import NavigationReview, {
   type NavigationChoice,
@@ -35,7 +36,7 @@ export default function NavigationPanel({
 }) {
   const query = useQueryClient();
   const report = useQuery({
-    queryKey: ["platform", "navigation", runId],
+    queryKey: queryKeys.navigation(runId),
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/runs/{run_id}/navigation", {
         params: { path: { run_id: runId } },
@@ -108,7 +109,7 @@ export default function NavigationPanel({
           ? `已确认：《${title}》 → PDF 第 ${choice.page} 页。`
           : `已确认：《${title}》保留目录文字，不设置跳转。`,
       );
-      query.setQueryData(["platform", "navigation", runId], data);
+      query.setQueryData(queryKeys.navigation(runId), data);
       setSelected(
         reviewOnly
           ? (data.entries.find((e) => e.status === "conflict")?.id ?? null)
@@ -117,13 +118,10 @@ export default function NavigationPanel({
       const navigation_pending_count = data.entries.filter(
         (e) => e.status === "conflict",
       ).length;
-      query.setQueryData<Book[]>(booksKey, (books) =>
-        books?.map((book) =>
-          book.id === bookId ? { ...book, navigation_pending_count } : book,
-        ),
-      );
-      query.setQueryData<Book>(["platform", "book", bookId], (book) =>
-        book ? { ...book, navigation_pending_count } : book,
+      updateBooks(
+        query,
+        (book) => book.id === bookId,
+        (book) => ({ ...book, navigation_pending_count }),
       );
       // The next bridge event replaces these committed local counters after projection.
     },

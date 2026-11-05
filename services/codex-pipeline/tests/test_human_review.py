@@ -34,9 +34,9 @@ def pending_document(tmp_path, pages=1):
     doc_id = prepare(store, str(image), "Synthetic human review fixture")["id"]
     # Retained correction/verification contracts remain readable and recoverable.
     with store.lock:
-        doc = store._load(doc_id)
+        doc = store.checkpoints.read(doc_id)
         doc["processing_policy"]["review_failure"] = "verify"
-        store._save(doc)
+        store.checkpoints.write(doc)
     for page in range(1, pages + 1):
         complete(
             store, doc_id, "ocr", f"ocr-{page}", {"markdown": "1938年。<script>fixture</script>"}
@@ -241,7 +241,7 @@ def test_human_review_rejects_changed_original_and_is_not_an_mcp_write_tool(tmp_
     store, doc_id = pending_document(tmp_path)
     packet = store.human_packet(doc_id, 1)
     doc = store.status(doc_id)
-    store._path(doc, doc["source"]["path"]).write_bytes(b"changed original")
+    store.artifact_path(doc, doc["source"]["path"]).write_bytes(b"changed original")
     with pytest.raises(ValueError, match="source hash"):
         store.record_human_review(
             doc_id,

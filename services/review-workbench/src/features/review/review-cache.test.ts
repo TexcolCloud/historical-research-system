@@ -48,3 +48,32 @@ test("a saved decision immediately removes only its issue and preserves the pref
     query.getQueryState(["platform", "issue", "next"])?.isInvalidated,
   ).toBe(false);
 });
+
+test("an old decision receipt cannot roll a newer book and run revision back", () => {
+  const query = new QueryClient();
+  const current = {
+    id: "book",
+    run_id: "run",
+    state: "ready",
+    revision: 9,
+    pending_count: 0,
+  };
+  query.setQueryData(["platform", "books"], [current]);
+  query.setQueryData(["platform", "book", "book"], current);
+  query.setQueryData(["platform", "run", "run"], { ...current, id: "run" });
+  applyReviewReceipt(query, {
+    decision_id: "decision",
+    issue_id: "first",
+    run_id: "run",
+    revision: 4,
+    pending_count: 1,
+    next_issue_id: null,
+    state: "awaiting_review",
+  });
+  expect(query.getQueryData(["platform", "books"])).toEqual([current]);
+  expect(query.getQueryData(["platform", "book", "book"])).toEqual(current);
+  expect(query.getQueryData(["platform", "run", "run"])).toMatchObject({
+    revision: 9,
+    pending_count: 0,
+  });
+});

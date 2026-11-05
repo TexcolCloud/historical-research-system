@@ -13,7 +13,8 @@ from uuid import uuid4
 
 from filelock import FileLock
 
-from hrs_codex.store import Store, atomic_json
+from hrs_codex.checkpoints import atomic_json
+from hrs_codex.store import Store
 
 PROJECT = Path(__file__).resolve().parents[4]
 CONFIG = PROJECT / ".codex/historical-workspace.json"

@@ -1,3 +1,4 @@
+import { queryKeys } from "@/client/query-keys.ts";
 import { useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button.tsx";
@@ -31,14 +32,14 @@ export default function RetryRunButton({
       return data;
     },
     onSuccess: (data) => {
-      query.setQueryData(["platform", "run", runId], data);
+      query.setQueryData(queryKeys.run(runId), data);
       query.setQueryData<components["schemas"]["RunSummary"][]>(
-        ["platform", "runs", data.book_id],
+        queryKeys.runs(data.book_id),
         (runs) => runs?.map((run) => (run.id === data.id ? data : run)),
       );
       void query.invalidateQueries({ queryKey: booksKey });
       void query.invalidateQueries({
-        queryKey: ["platform", "recovery", runId],
+        queryKey: queryKeys.recovery(runId),
       });
     },
   });

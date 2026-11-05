@@ -12,7 +12,6 @@ from sqlalchemy.engine import make_url
 
 from hrs_platform.core.config import Settings
 from hrs_platform.core.db import engine_for, migrate
-from hrs_platform.jobs.worker import connect, register_namespace
 
 
 def bootstrap(*, legacy=False):
@@ -66,6 +65,8 @@ def bootstrap(*, legacy=False):
         engine.dispose()
 
     async def namespace():
+        from hrs_platform.jobs.worker import connect, register_namespace
+
         for attempt in range(30):
             try:
                 await connect(settings)
