@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 
 from hrs_platform.api.deps import EngineDep, ExportsDep, LibraryDep, ReviewDep
 from hrs_platform.api.files import download
-from hrs_platform.schemas import BookSummary, ChapterSummary, DeletionReceipt, RunSummary
+from hrs_platform.schemas import BookSummary, ChapterSummary, DeletionReceipt, NavigationReport, RunSummary
 from hrs_platform.services import books
 from hrs_platform.services.deletion import request_deletion
 
@@ -37,6 +37,11 @@ def book_runs(engine: EngineDep, book_id: UUID):
 @router.get("/api/v2/books/{book_id}/chapters", response_model=list[ChapterSummary])
 def chapters(library: LibraryDep, book_id: UUID):
     return library.chapters(book_id)
+
+
+@router.get("/api/v2/books/{book_id}/reading-navigation", response_model=NavigationReport)
+def reading_navigation(library: LibraryDep, book_id: UUID):
+    return library.reading_navigation(book_id)
 
 
 @router.get("/api/v2/books/{book_id}/export", response_class=FileResponse)

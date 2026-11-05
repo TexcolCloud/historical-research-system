@@ -73,6 +73,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/books/{book_id}/reading-navigation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reading Navigation */
+        get: operations["reading_navigation_api_v2_books__book_id__reading_navigation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/books/{book_id}/export": {
         parameters: {
             query?: never;
@@ -781,6 +798,11 @@ export interface components {
             codepoints: number;
             /** Text */
             text: string;
+            /**
+             * Text Sha256
+             * @default
+             */
+            text_sha256: string;
             /** Parts */
             parts: {
                 [key: string]: unknown;
@@ -791,6 +813,10 @@ export interface components {
             reading_text?: string | null;
             /** Reading Footnotes */
             reading_footnotes?: components["schemas"]["FootnoteLink"][];
+            /** Reading Segments */
+            reading_segments?: components["schemas"]["ReadingSegment"][];
+            /** Toc Links */
+            toc_links?: components["schemas"]["ReadingTocLink"][];
             /** Structure */
             structure?: components["schemas"]["StructureItem"][];
         };
@@ -1113,6 +1139,7 @@ export interface components {
             target_image?: string | null;
             /** Target Chapter Id */
             target_chapter_id?: string | null;
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
             /** Candidates */
             candidates?: components["schemas"]["NavigationTarget"][];
         };
@@ -1191,6 +1218,67 @@ export interface components {
              * @default 0
              */
             occurrence: number;
+        };
+        /** ReadingSegment */
+        ReadingSegment: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Reading Start */
+            reading_start: number;
+            /** Reading End */
+            reading_end: number;
+            /** Exact */
+            exact: boolean;
+        };
+        /** ReadingTarget */
+        ReadingTarget: {
+            /**
+             * Chapter Id
+             * Format: uuid
+             */
+            chapter_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Physical Page */
+            physical_page: number;
+            /**
+             * Start
+             * @description Canonical chapter Markdown offset in Unicode codepoints.
+             */
+            start: number;
+            /**
+             * End
+             * @description Exclusive canonical chapter Markdown offset in Unicode codepoints.
+             */
+            end: number;
+            /** Text Sha256 */
+            text_sha256: string;
+            /** Anchor */
+            anchor: string;
+            /**
+             * Image Sha256
+             * @default
+             */
+            image_sha256: string;
+        };
+        /** ReadingTocLink */
+        ReadingTocLink: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Level */
+            level: number;
+            /** Source Start */
+            source_start: number;
+            /** Source End */
+            source_end: number;
+            target: components["schemas"]["ReadingTarget"];
         };
         /** RecoveryReport */
         RecoveryReport: {
@@ -1730,9 +1818,18 @@ export interface components {
             sources?: {
                 [key: string]: unknown;
             }[];
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
+            /**
+             * Outside Scope
+             * @default false
+             */
+            outside_scope: boolean;
         };
         /** SearchHit */
         SearchHit: {
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
+            /** Directory Links */
+            directory_links?: components["schemas"]["ReadingTocLink"][];
             /** Toc Path */
             toc_path?: string[];
             /** Toc Entry Id */
@@ -2072,6 +2169,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChapterSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reading_navigation_api_v2_books__book_id__reading_navigation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavigationReport"];
                 };
             };
             /** @description Validation Error */
@@ -2800,6 +2928,7 @@ export interface operations {
                 book_id?: string | null;
                 semantic?: boolean;
                 include_navigation?: boolean;
+                toc_entry_id?: string | null;
                 limit?: number;
                 candidate_limit?: number | null;
                 rerank_limit?: number | null;

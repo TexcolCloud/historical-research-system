@@ -1,10 +1,54 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button.tsx";
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import { client } from "@/client/api.ts";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
+import { readingNavigationOptions } from "./navigation-query";
+import {
+  readingHref,
+  readingRange,
+  requestedReadingTarget,
+  safeReaderReturn,
+  type ReadingTarget,
+} from "./reader-location";
+import type { components } from "@/client/schema";
+
+function sourcePage(chapter: components["schemas"]["Chapter"], at: number) {
+  let offset = 0;
+  for (const part of chapter.parts) {
+    const stop =
+      offset +
+      (typeof part.text === "string" ? Array.from(part.text).length : 0);
+    const source = part.source;
+    if (offset <= at && at < stop && source && typeof source === "object") {
+      if (
+        "page" in source &&
+        typeof source.page === "number" &&
+        Number.isSafeInteger(source.page) &&
+        source.page > 0
+      )
+        return source.page;
+      if ("pages" in source && Array.isArray(source.pages)) {
+        const page = source.pages.find(
+          (value: unknown) =>
+            typeof value === "number" &&
+            Number.isSafeInteger(value) &&
+            value > 0,
+        );
+        if (typeof page === "number") return page;
+      }
+    }
+    offset = stop;
+  }
+  return chapter.pages[0] ?? 1;
+}
 
 const chapterOptions = (id: string) =>
   queryOptions({
@@ -21,10 +65,22 @@ const chapterOptions = (id: string) =>
   });
 export default function ReaderPanel({ bookId }: { bookId: string }) {
   const query = useQueryClient();
-  const [params] = useSearchParams();
-  const [selected, setSelected] = useState(""),
-    [original, setOriginal] = useState(false),
+  const [params, setParams] = useSearchParams();
+  const returnTo = safeReaderReturn(params.get("returnTo"), bookId);
+  const returnParams = new URLSearchParams(
+    returnTo.slice(returnTo.indexOf("?") + 1),
+  );
+  const returnLabel =
+    returnParams.get("section") === "search" ||
+    returnParams.get("tab") === "search"
+      ? "返回检索结果"
+      : "返回目录";
+  const location = useLocation(),
+    navigate = useNavigate();
+  const [original, setOriginal] = useState(false),
     [page, setPage] = useState<number | null>(null);
+  const [mappingFailures, setMappingFailures] = useState<string[]>([]);
+  const navigation = useQuery(readingNavigationOptions(bookId));
   const chapters = useQuery({
     queryKey: ["platform", "chapters", bookId],
     queryFn: async ({ signal }) => {
@@ -36,7 +92,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       return data;
     },
   });
-  const requested = selected || params.get("chapter");
+  const requested = params.get("chapter");
   const requestedPage = Number(params.get("physicalPage"));
   const id =
     chapters.data?.find((item) => item.id === requested)?.id ||
@@ -46,24 +102,76 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
     chapters.data?.[0]?.id ||
     "";
   const chapter = useQuery({ ...chapterOptions(id), enabled: Boolean(id) });
+  const target = useMemo(() => requestedReadingTarget(params), [params]);
+  const invalidTarget =
+    !target &&
+    ["start", "end", "textSha", "run"].some((key) => params.has(key));
+  const range = useMemo(
+    () => (target && chapter.data ? readingRange(target, chapter.data) : null),
+    [target, chapter.data],
+  );
+  const readingFocus = useMemo(
+    () =>
+      range
+        ? {
+            ...range,
+            id: `${location.key}:${target?.chapter_id}:${range.start}:${range.end}`,
+          }
+        : undefined,
+    [range, location.key, target],
+  );
+  const failedTarget = Boolean(
+    chapter.data &&
+    (invalidTarget ||
+      (target &&
+        (!range ||
+          (readingFocus && mappingFailures.includes(readingFocus.id))))),
+  );
+  const inlineLinks = useMemo(() => {
+    const current = chapter.data;
+    if (!current) return [];
+    return (current.toc_links ?? []).flatMap((link) => {
+      const sourceTarget: ReadingTarget = {
+        chapter_id: current.id,
+        run_id: current.run_id,
+        physical_page: sourcePage(current, link.source_start),
+        start: link.source_start,
+        end: link.source_end,
+        text_sha256: current.text_sha256,
+        anchor: "",
+        image_sha256: "",
+      };
+      const sourceRange = readingRange(sourceTarget, current);
+      if (!sourceRange) return [];
+      return [
+        {
+          ...sourceRange,
+          id: link.id,
+          label: `阅读${link.title}`,
+          href: `#${readingHref(bookId, link.target, { returnTo: readingHref(bookId, sourceTarget) })}`,
+        },
+      ];
+    });
+  }, [chapter.data, bookId]);
   useEffect(() => {
+    if (!chapter.data) return;
     const anchor = params.get("anchor");
-    if (!chapter.data || selected) return;
     const literal = (anchor ?? "")
       .replace(/^\s*#{1,6}\s+/, "")
       .replace(/^\*\*|\*\*$/g, "")
       .trim();
-    const heading = [
+    const headings = [
       ...document.querySelectorAll(
         ".platform-reading article h1,.platform-reading article h2,.platform-reading article h3,.platform-reading article h4,.platform-reading article h5,.platform-reading article h6",
       ),
-    ].find((e) => e.textContent?.trim() === literal);
-    heading?.scrollIntoView({ block: "center" });
-    if (requestedPage > 0) {
+    ].filter((e) => e.textContent?.trim() === literal);
+    if (!target && literal && headings.length === 1)
+      headings[0].scrollIntoView?.({ block: "center" });
+    if (requestedPage > 0 && Number.isSafeInteger(requestedPage)) {
       setPage(requestedPage);
-      setOriginal(true);
+      if (!target || failedTarget) setOriginal(true);
     }
-  }, [chapter.data, params, selected]);
+  }, [chapter.data, params, requestedPage, target, failedTarget]);
   const index = chapters.data?.findIndex((item) => item.id === id) ?? -1;
   const next = chapters.data?.[index + 1],
     previous = chapters.data?.[index - 1];
@@ -72,7 +180,12 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       if (entry) void query.prefetchQuery(chapterOptions(entry.id));
   }, [next, previous, query]);
   function go(id: string) {
-    setSelected(id);
+    const next = new URLSearchParams({
+      tab: "reader",
+      section: "text",
+      chapter: id,
+    });
+    setParams(next);
     setPage(null);
   }
   if (chapters.isError || chapter.isError)
@@ -99,7 +212,57 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
   return (
     <div className="platform-reader-grid">
       <nav aria-label="章节目录">
-        <h2>目录</h2>
+        <h2>原书目录</h2>
+        {navigation.isPending && <p role="status">正在读取原书目录…</p>}
+        {navigation.isError && (
+          <p role="alert">
+            {navigation.error.message}
+            <Button variant="outline" onClick={() => void navigation.refetch()}>
+              重新读取目录
+            </Button>
+          </p>
+        )}
+        <ol className="reader-source-toc">
+          {(navigation.data?.entries ?? []).map((entry) => (
+            <li
+              key={entry.id}
+              style={{
+                paddingInlineStart: `${Math.max(0, entry.level - 1) * 0.75}rem`,
+              }}
+            >
+              {entry.reading_target ? (
+                <Link
+                  to={readingHref(bookId, entry.reading_target, {
+                    returnTo: `/books/${bookId}?tab=reader&section=directory&tocEntry=${encodeURIComponent(entry.id)}`,
+                  })}
+                  aria-current={
+                    target?.chapter_id === entry.reading_target.chapter_id &&
+                    target.start === entry.reading_target.start
+                      ? "location"
+                      : undefined
+                  }
+                >
+                  {entry.title}
+                  <small>书内页 {entry.target_label}</small>
+                </Link>
+              ) : (
+                <>
+                  <span>
+                    {entry.title}
+                    <small>{entry.target_label} · 暂无可靠正文位置</small>
+                  </span>
+                  <Link
+                    className="reader-toc-management"
+                    to={`/books/${bookId}?tab=review&task=navigation&entry=${encodeURIComponent(entry.id)}`}
+                  >
+                    核对位置
+                  </Link>
+                </>
+              )}
+            </li>
+          ))}
+        </ol>
+        <h2>章节</h2>
         {chapters.data?.map((item) => (
           <button
             key={item.id}
@@ -118,6 +281,11 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       </nav>
       <div className="platform-reading">
         <div className="platform-review-actions">
+          {params.has("returnTo") && (
+            <Link to={returnTo} className="reading-return-link">
+              {returnLabel}
+            </Link>
+          )}
           <Button
             variant="outline"
             disabled={!previous}
@@ -142,6 +310,16 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
             导出全书 Markdown
           </a>
         </div>
+        {failedTarget && (
+          <p role="status" className="workspace-status-note">
+            定位依据已更新，或此位置无法精确对应阅读版。请结合原图核对，未标记其他文字。
+          </p>
+        )}
+        {mappingFailures.some((value) => value !== readingFocus?.id) && (
+          <p className="workspace-status-note">
+            部分目录文字无法安全生成链接，可从左侧原书目录跳转。
+          </p>
+        )}
         {chapter.data && (
           <StructurePanel
             key={id}
@@ -172,6 +350,12 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
                       : chapter.data.footnotes
                   }
                   assetBaseUrl={`/api/v2/runs/${chapter.data.run_id}/artifacts`}
+                  readingLinks={inlineLinks}
+                  readingFocus={readingFocus}
+                  onReadingFailure={setMappingFailures}
+                  onReadingNavigate={(href) =>
+                    navigate(href.startsWith("#") ? href.slice(1) : href)
+                  }
                 />
               </>
             ) : (
@@ -202,7 +386,9 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
                 </select>
               </label>
               <OriginalPage
-                runId={chapter.data.run_id}
+                runId={
+                  failedTarget && target ? target.run_id : chapter.data.run_id
+                }
                 page={page ?? chapter.data.pages[0]!}
               />
             </aside>

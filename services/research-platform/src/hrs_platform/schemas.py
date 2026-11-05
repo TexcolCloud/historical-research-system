@@ -192,6 +192,17 @@ class RunSummary(BaseModel):
     )
 
 
+class ReadingTarget(BaseModel):
+    chapter_id: UUID
+    run_id: UUID
+    physical_page: int = Field(ge=1)
+    start: int = Field(ge=0, description="Canonical chapter Markdown offset in Unicode codepoints.")
+    end: int = Field(ge=0, description="Exclusive canonical chapter Markdown offset in Unicode codepoints.")
+    text_sha256: str
+    anchor: str
+    image_sha256: str = ""
+
+
 class NavigationTarget(BaseModel):
     physical_page: int
     printed_label: str | None = None
@@ -218,6 +229,7 @@ class NavigationEntry(BaseModel):
     target_url: str | None = None
     target_image: str | None = None
     target_chapter_id: str | None = None
+    reading_target: ReadingTarget | None = None
     candidates: list[NavigationTarget] = Field(default_factory=list)
 
 
@@ -391,12 +403,32 @@ class StructureReport(BaseModel):
     items: list[StructureItem] = Field(default_factory=list)
 
 
+class ReadingSegment(BaseModel):
+    start: int
+    end: int
+    reading_start: int
+    reading_end: int
+    exact: bool
+
+
+class ReadingTocLink(BaseModel):
+    id: str
+    title: str
+    level: int
+    source_start: int
+    source_end: int
+    target: ReadingTarget
+
+
 class Chapter(ChapterSummary):
     text: str
+    text_sha256: str = ""
     parts: list[dict]
     footnotes: list[FootnoteLink] = Field(default_factory=list)
     reading_text: str | None = None
     reading_footnotes: list[FootnoteLink] = Field(default_factory=list)
+    reading_segments: list[ReadingSegment] = Field(default_factory=list)
+    toc_links: list[ReadingTocLink] = Field(default_factory=list)
     structure: list[StructureItem] = Field(default_factory=list)
 
 
@@ -471,9 +503,13 @@ class SearchContext(BaseModel):
     pages: list[int]
     role: str
     sources: list[dict] = Field(default_factory=list)
+    reading_target: ReadingTarget | None = None
+    outside_scope: bool = False
 
 
 class SearchHit(BaseModel):
+    reading_target: ReadingTarget | None = None
+    directory_links: list[ReadingTocLink] = Field(default_factory=list)
     toc_path: list[str] = Field(default_factory=list)
     toc_entry_id: str | None = None
     navigation_version: int = 0

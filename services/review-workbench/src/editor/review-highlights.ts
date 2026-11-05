@@ -579,12 +579,12 @@ const defaultRenderer: ReviewRenderer = (raw) =>
   marked.parse(raw, { async: false });
 
 /** Project a source range through the full rendering pipeline, without re-matching rendered phrases. */
-function projectRange(
+export function projectSourceRange(
   joined: string,
   source: string,
   range: { start: number; end: number },
   render: ReviewRenderer,
-  editorLayout: boolean,
+  editorLayout = false,
 ) {
   const nonce = `HRSREVIEW${crypto.randomUUID().replaceAll("-", "")}`;
   const startToken = `${nonce}STARTTOKEN`,
@@ -654,7 +654,9 @@ export function renderedRanges(
   editorLayout = false,
 ) {
   return sourceRanges(source, issue).map((range) =>
-    range ? projectRange(joined, source, range, render, editorLayout) : null,
+    range
+      ? projectSourceRange(joined, source, range, render, editorLayout)
+      : null,
   );
 }
 

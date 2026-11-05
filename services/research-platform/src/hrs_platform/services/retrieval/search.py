@@ -10,7 +10,7 @@ from sqlalchemy import select
 from hrs_platform import models as db
 from hrs_platform.domain.settings import MODEL_REVISIONS
 from hrs_platform.services.documents.library import Library
-from hrs_platform.services.retrieval.chunks import expand_hits
+from hrs_platform.services.retrieval.chunks import expand_hits, source_excerpt
 from hrs_platform.services.retrieval.compute import (
     EMBEDDING_IDENTITY,
     RetrievalCompute,
@@ -19,6 +19,7 @@ from hrs_platform.services.retrieval.compute import (
     query_vector,
     search_client,
 )
+from hrs_platform.services.retrieval.directory_scope import DirectoryScope
 from hrs_platform.services.retrieval.inputs import ranking_windows
 from hrs_platform.services.retrieval.ranking import (
     candidates_for_rerank,
@@ -122,14 +123,18 @@ class Search:
         decompose=True,
         chapter_ids=None,
         include_navigation=False,
+        toc_entry_id=None,
     ):
         self._include_navigation = include_navigation
         metrics = metrics if metrics is not None else {}
+        directory_scope = (
+            DirectoryScope.resolve(self.library, book_id, toc_entry_id) if toc_entry_id else None
+        )
         try:
             with measured(metrics, "total_ms"):
                 parts = multipart_queries(query) if semantic and decompose else []
                 if parts:
-                    return self.search_parts(
+                    result = self.search_parts(
                         parts,
                         book_id,
                         limit,
@@ -146,30 +151,47 @@ class Search:
                         use_calibration=use_calibration,
                         chapter_ids=chapter_ids,
                         include_navigation=include_navigation,
+                        toc_entry_id=toc_entry_id,
+                        directory_scope=directory_scope,
                     )
-                return self._search(
-                    query,
-                    book_id,
-                    semantic,
-                    limit,
-                    candidate_limit,
-                    context_chars,
-                    total_chars,
-                    metrics,
-                    rerank_limit,
-                    diverse,
-                    fusion,
-                    lane_quota,
-                    min_rerank_score,
-                    trace,
-                    min_top_score,
-                    use_calibration,
-                    chapter_ids,
-                )
+                else:
+                    result = self._search(
+                        query,
+                        book_id,
+                        semantic,
+                        limit,
+                        candidate_limit,
+                        context_chars,
+                        total_chars,
+                        metrics,
+                        rerank_limit,
+                        diverse,
+                        fusion,
+                        lane_quota,
+                        min_rerank_score,
+                        trace,
+                        min_top_score,
+                        use_calibration,
+                        chapter_ids,
+                        directory_scope,
+                    )
+                return self.reading_results(result)
         finally:
             logger.info("retrieval.search %s", json.dumps(metrics))
 
-    def search_parts(self, parts, book_id, limit, context_chars, total_chars, metrics, trace, **options):
+    def search_parts(
+        self,
+        parts,
+        book_id,
+        limit,
+        context_chars,
+        total_chars,
+        metrics,
+        trace,
+        *,
+        directory_scope=None,
+        **options,
+    ):
         """Reserve evidence from each explicit clause using the existing search path."""
         rankings, timings = [], []
         for part in parts:
@@ -194,6 +216,8 @@ class Search:
         # across queries. Source ranges and the original context budget still apply.
         hits = fuse(*rankings)
         result = expand_hits(hits, self.library.chapter, limit, context_chars, total_chars, metrics=metrics)
+        if directory_scope:
+            result = directory_scope.clip_results(result, self.library.chapter)
         metrics.update(
             subqueries=timings,
             results=len(result),
@@ -223,6 +247,7 @@ class Search:
         min_top_score,
         use_calibration,
         chapter_ids=None,
+        directory_scope=None,
     ):
         name = self.settings.opensearch_index
         if not self.client.indices.exists(index=name):
@@ -232,6 +257,8 @@ class Search:
             scope.append({"bool": {"must_not": [{"term": {"doc_kind": "navigation"}}]}})
         if chapter_ids is not None:
             scope.append({"terms": {"chapter_id": list(chapter_ids)}})
+        if directory_scope:
+            scope.append(directory_scope.query_filter())
         policy = getattr(self, "_policy", {}) if semantic and use_calibration else {}
         candidate_limit = (
             candidate_limit if candidate_limit is not None else policy.get("candidate_limit", 50)
@@ -269,6 +296,11 @@ class Search:
         else:
             result = fetch_lexical()
         found = {row["_id"]: dict(row["_source"], score=row["_score"]) for row in result["hits"]["hits"]}
+        if directory_scope:
+            found = {
+                row["id"]: row
+                for row in directory_scope.clip_candidates(found.values(), self.library.chapter)
+            }
         if trace is not None:
             trace["lexical"] = list(found.values())
         if semantic:
@@ -295,11 +327,15 @@ class Search:
                 for row in more["hits"]["hits"]:
                     union.setdefault(row["_id"], {**row["_source"], "score": row["_score"]})
                 rows = list(union.values())
+            if directory_scope:
+                rows = directory_scope.clip_candidates(rows, self.library.chapter)
             metrics["fused_candidates"] = len(rows)
             if fusion and lane_quota:
                 rows = candidates_for_rerank(
                     [result["hits"]["hits"], more["hits"]["hits"]], max(limit, rerank_limit), lane_quota
                 )
+                if directory_scope:
+                    rows = directory_scope.clip_candidates(rows, self.library.chapter)
             rows = rows[: max(limit, rerank_limit)]
             if trace is not None:
                 trace["rerank_input"] = list(rows)
@@ -348,4 +384,44 @@ class Search:
             max(0, metrics["context_ms"] - metrics.get("chapter_load_ms", 0)), 3
         )
         metrics.update(candidates=len(found), results=len(result))
+        if directory_scope:
+            result = directory_scope.clip_results(result, self.library.chapter)
         return result
+
+    def reading_results(self, hits):
+        """Resolve immutable result ranges through the reader's shared source contract."""
+        from hrs_platform.services.documents.reading_locations import reading_target
+
+        chapters = {}
+        for hit in hits:
+            chapter_id = str(hit["chapter_id"])
+            if chapter_id not in chapters:
+                chapters[chapter_id] = self.library.chapter(chapter_id)
+            chapter = chapters[chapter_id]
+            same_text = chapter["text"][hit["start"] : hit["end"]] == hit["text"]
+            if same_text and 0 <= hit["start"] < hit["end"] <= len(chapter["text"]):
+                current = source_excerpt(chapter, hit["start"], hit["end"])
+                for field in ("doc_kind", "toc_path", "toc_entry_id", "navigation_version", "printed_pages"):
+                    hit[field] = current[field]
+            if hit.get("doc_kind") == "navigation":
+                links = [
+                    link
+                    for link in chapter.get("toc_links", [])
+                    if link["source_start"] < hit["end"] and link["source_end"] > hit["start"]
+                ]
+                identity = hit.get("toc_entry_id")
+                if identity:
+                    links = [link for link in links if link["id"] == identity]
+                hit["directory_links"] = links if same_text else []
+                hit["reading_target"] = links[0]["target"] if same_text and len(links) == 1 else None
+            else:
+                hit["reading_target"] = (
+                    reading_target(chapter, hit["start"], hit["end"]) if same_text else None
+                )
+            for extra in hit.get("context", []):
+                extra["reading_target"] = (
+                    reading_target(chapter, extra["start"], extra["end"])
+                    if chapter["text"][extra["start"] : extra["end"]] == extra["text"]
+                    else None
+                )
+        return hits

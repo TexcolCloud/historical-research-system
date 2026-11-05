@@ -316,16 +316,25 @@ def reading_view(chapter):
             continue
         replacements.append((start, end, item["display_text"], item["pages"]))
     ranges, parts, cursor = page_ranges(chapter["parts"]), [], 0
+    segments, reading_offset = [], 0
+
+    def append(start, end, value, pages, exact):
+        nonlocal reading_offset
+        parts.append({"text": value, "source": {"pages": pages}})
+        segments.append({"start": start, "end": end, "reading_start": reading_offset,
+                         "reading_end": reading_offset + len(value), "exact": exact})
+        reading_offset += len(value)
 
     def preserve(start, end):
         for a, b, pages in ranges:
             if a < end and b > start:
-                parts.append({"text": text[max(start, a) : min(end, b)], "source": {"pages": pages}})
+                left, right = max(start, a), min(end, b)
+                append(left, right, text[left:right], pages, True)
 
     for start, end, value, pages in sorted(replacements):
         preserve(cursor, start)
-        parts.append({"text": value + "\n\n", "source": {"pages": pages}})
+        append(start, end, value + "\n\n", pages, False)
         cursor = end
     preserve(cursor, len(text))
     reading = "".join(p["text"] for p in parts)
-    return {"text": reading, "footnotes": resolve_footnotes(reading, parts)}
+    return {"text": reading, "footnotes": resolve_footnotes(reading, parts), "segments": segments}

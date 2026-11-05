@@ -7,7 +7,9 @@ import {
   type ReviewRenderer,
 } from "./review-highlights.ts";
 import { withFootnotes, type FootnoteLink } from "@/editor/footnotes.ts";
+import { annotateReading, type ReadingAnnotation } from "./reading-annotations";
 const noFootnotes: FootnoteLink[] = [];
+const noReadingLinks: ReadingAnnotation[] = [];
 
 function safeHtml(markdown: string) {
   return DOMPurify.sanitize(marked.parse(markdown, { async: false }), {
@@ -25,6 +27,10 @@ export function RenderedMarkdown({
   activeHighlight,
   onHighlight,
   onLocationFailure,
+  readingLinks = noReadingLinks,
+  readingFocus,
+  onReadingFailure,
+  onReadingNavigate,
 }: {
   markdown: string;
   footnotes?: FootnoteLink[];
@@ -33,12 +39,21 @@ export function RenderedMarkdown({
   activeHighlight?: string;
   onHighlight?: (id: string) => void;
   onLocationFailure?: (ids: string[]) => void;
+  readingLinks?: ReadingAnnotation[];
+  readingFocus?: ReadingAnnotation;
+  onReadingFailure?: (ids: string[]) => void;
+  onReadingNavigate?: (href: string) => void;
 }) {
   const prefix = `footnotes-${useId()}`;
   const root = useRef<HTMLDivElement>(null);
   const failureCallback = useRef(onLocationFailure);
   const reportedFailures = useRef<string | undefined>(undefined);
+  const readingFailureCallback = useRef(onReadingFailure);
+  const reportedReadingFailures = useRef<string | undefined>(undefined);
+  const focusedReading = useRef<string | undefined>(undefined);
+  const renderedReadingSource = useRef<string | undefined>(undefined);
   failureCallback.current = onLocationFailure;
+  readingFailureCallback.current = onReadingFailure;
   const renderSource = useMemo<ReviewRenderer>(
     () => (source, insertions) => {
       const edits = insertions.map((edit) => ({
@@ -88,6 +103,8 @@ export function RenderedMarkdown({
   );
   useEffect(() => {
     if (root.current) {
+      const readingSourceChanged = renderedReadingSource.current !== html;
+      renderedReadingSource.current = html;
       const failures = highlightDom(
         root.current,
         markdown,
@@ -100,8 +117,37 @@ export function RenderedMarkdown({
         reportedFailures.current = signature;
         failureCallback.current?.(failures);
       }
+      const reading = annotateReading(
+        root.current,
+        markdown,
+        readingLinks,
+        readingFocus,
+        renderSource,
+      );
+      const readingSignature = JSON.stringify(reading.failures);
+      if (reportedReadingFailures.current !== readingSignature) {
+        reportedReadingFailures.current = readingSignature;
+        readingFailureCallback.current?.(reading.failures);
+      }
+      if (!readingFocus) focusedReading.current = undefined;
+      if (
+        reading.focusNode &&
+        (focusedReading.current !== readingFocus?.id || readingSourceChanged)
+      ) {
+        focusedReading.current = readingFocus?.id;
+        reading.focusNode.scrollIntoView?.({ block: "center" });
+        reading.focusNode.focus({ preventScroll: true });
+      }
     }
-  }, [html, markdown, highlights, activeHighlight, renderSource]);
+  }, [
+    html,
+    markdown,
+    highlights,
+    activeHighlight,
+    renderSource,
+    readingLinks,
+    readingFocus,
+  ]);
   return (
     <div
       className="prose"
@@ -117,6 +163,24 @@ export function RenderedMarkdown({
         }
       }}
       onClick={(event) => {
+        const readingLink = (
+          event.target as Element
+        ).closest<HTMLAnchorElement>("a[data-reading-link]");
+        if (
+          readingLink &&
+          onReadingNavigate &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.shiftKey &&
+          !event.altKey
+        ) {
+          const href = readingLink.getAttribute("href");
+          if (href) {
+            event.preventDefault();
+            onReadingNavigate(href);
+            return;
+          }
+        }
         const mark = (event.target as Element).closest<HTMLElement>(
           "mark[data-review-id]",
         );

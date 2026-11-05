@@ -59,6 +59,7 @@ export default function ReadingWorkspace({ book }: { book: Book }) {
             runId={book.run_id}
             bookId={book.id}
             bookState={book.state}
+            published={published}
           />
         ) : (
           <p>接收文件后会开始发现目录。</p>
