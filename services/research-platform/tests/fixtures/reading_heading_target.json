@@ -1,0 +1,58 @@
+{
+  "chapter": {
+    "id": "14e0cac8-3551-439c-aeca-86c429cb12dc",
+    "book_id": "df645eb4-3b6c-4908-99b9-b1ae6512f538",
+    "run_id": "7459b70f-cd6c-43ed-8b3f-0e9f08db5cbe",
+    "position": 0,
+    "title": "第二章",
+    "kind": "article",
+    "pages": [
+      7
+    ],
+    "codepoints": 17,
+    "text": "## 第二章\n\n😀正文。后续内容。",
+    "text_sha256": "f42ad10f43123a9945ded9ac697aad66e1b5eac25dffc366ef5a4b97177618ca",
+    "parts": [
+      {
+        "span_id": "part",
+        "start": 900,
+        "end": 917,
+        "text": "## 第二章\n\n😀正文。后续内容。",
+        "source": {
+          "page": 7,
+          "pages": [
+            7
+          ],
+          "original_start": 0,
+          "original_end": 17,
+          "markdown_sha256": "f42ad10f43123a9945ded9ac697aad66e1b5eac25dffc366ef5a4b97177618ca",
+          "image_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    ],
+    "footnotes": [],
+    "reading_text": "## 第二章\n\n😀正文。后续内容。",
+    "reading_footnotes": [],
+    "reading_segments": [
+      {
+        "start": 0,
+        "end": 17,
+        "reading_start": 0,
+        "reading_end": 17,
+        "exact": true
+      }
+    ],
+    "toc_links": [],
+    "structure": []
+  },
+  "target": {
+    "chapter_id": "14e0cac8-3551-439c-aeca-86c429cb12dc",
+    "run_id": "7459b70f-cd6c-43ed-8b3f-0e9f08db5cbe",
+    "physical_page": 7,
+    "start": 3,
+    "end": 17,
+    "text_sha256": "f42ad10f43123a9945ded9ac697aad66e1b5eac25dffc366ef5a4b97177618ca",
+    "anchor": "第二章\n\n😀正文。后续内容。",
+    "image_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

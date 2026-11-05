@@ -718,4 +718,74 @@ class Library:
             )
         if not row:
             raise ServiceError(404, "章节尚未发布。")
-        return {**row, **chapter_content(self.settings, row["content"])}
+        chapter = {**row, **chapter_content(self.settings, row["content"])}
+        from hrs_platform.services.documents.reading_locations import toc_links
+
+        navigation = chapter.get("navigation", {})
+        if any(e.get("source_page") in chapter["pages"] for e in navigation.get("entries", [])):
+            targets = self.navigation_targets(row["run_id"], navigation)
+            chapter["toc_links"] = toc_links(chapter, targets)
+        else:
+            chapter["toc_links"] = []
+        return chapter
+
+    def navigation_targets(self, run_id, navigation):
+        """Resolve only targets supported by the currently published chapter objects."""
+        from hrs_platform.services.documents.reading_locations import target_in_chapter
+
+        entries = [e for e in navigation.get("entries", [])
+                   if e.get("status") in {"matched", "matched_manual"} and e.get("target")]
+        if not entries:
+            return {}
+        with self.engine.connect() as connection:
+            rows = connection.execute(select(db.chapters).where(db.chapters.c.run_id == str(run_id))).mappings().all()
+        pages = {e["target"]["physical_page"] for e in entries}
+        chapters = [{**row, **chapter_content(self.settings, row["content"])} for row in rows
+                    if pages.intersection(row["pages"])]
+        by_page = {}
+        for chapter in chapters:
+            for page in chapter["pages"]:
+                by_page.setdefault(page, []).append(chapter)
+        targets = {}
+        for entry in entries:
+            matches = [target for chapter in by_page.get(entry["target"]["physical_page"], [])
+                       if (target := target_in_chapter(chapter, entry["target"]))]
+            if len(matches) == 1:
+                targets[entry["id"]] = matches[0]
+        return targets
+
+    def reading_navigation(self, book_id):
+        """Read the navigation frozen with the visible publication, including during revision."""
+        from copy import deepcopy
+
+        rows = self.chapters(book_id)
+        empty = {"state": "not_published", "entries": [], "version": 0, "sha256": "",
+                 "coverage_complete": False, "page_labels": [], "approved_pages": []}
+        if not rows:
+            return empty
+        run_ids = {str(row["run_id"]) for row in rows}
+        if len(run_ids) != 1:
+            # Mixed generations cannot define a reliable book-wide navigation map.
+            return {**empty, "state": "unavailable"}
+        run_id = next(iter(run_ids))
+        navigation = deepcopy(chapter_content(self.settings, rows[0]["content"]).get("navigation", {}))
+        targets = self.navigation_targets(run_id, navigation)
+        run = get_run(self.engine, run_id)
+        images = {}
+        if run["conversion"]:
+            bundle = self.review.read_json(run["conversion"])
+            images = {page["page"]: page["image"] for page in bundle["manifest"]["pages"]}
+        for entry in navigation.get("entries", []):
+            source_page = entry["source_page"]
+            entry["source_image"] = (
+                f"/api/v2/runs/{run_id}/artifacts/{images[source_page]}" if source_page in images else ""
+            )
+            target = entry.get("target")
+            page = target["physical_page"] if target else None
+            entry["target_image"] = (
+                f"/api/v2/runs/{run_id}/artifacts/{images[page]}" if page in images else None
+            )
+            entry["target_url"] = f"/api/v2/runs/{run_id}/artifacts/original.pdf#page={page}" if page else None
+            entry["reading_target"] = targets.get(entry["id"])
+            entry["target_chapter_id"] = targets[entry["id"]]["chapter_id"] if entry["id"] in targets else None
+        return {**empty, **navigation, "entries": navigation.get("entries", []), "page_count": len(images) or None}

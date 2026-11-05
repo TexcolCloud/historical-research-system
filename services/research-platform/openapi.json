@@ -243,6 +243,49 @@
         }
       }
     },
+    "/api/v2/books/{book_id}/reading-navigation": {
+      "get": {
+        "tags": [
+          "books"
+        ],
+        "summary": "Reading Navigation",
+        "operationId": "reading_navigation_api_v2_books__book_id__reading_navigation_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Book Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigationReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/books/{book_id}/export": {
       "get": {
         "tags": [
@@ -1431,6 +1474,24 @@
             }
           },
           {
+            "name": "toc_entry_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Toc Entry Id"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -2217,6 +2278,11 @@
             "type": "string",
             "title": "Text"
           },
+          "text_sha256": {
+            "type": "string",
+            "title": "Text Sha256",
+            "default": ""
+          },
           "parts": {
             "items": {
               "additionalProperties": true,
@@ -2249,6 +2315,20 @@
             },
             "type": "array",
             "title": "Reading Footnotes"
+          },
+          "reading_segments": {
+            "items": {
+              "$ref": "#/components/schemas/ReadingSegment"
+            },
+            "type": "array",
+            "title": "Reading Segments"
+          },
+          "toc_links": {
+            "items": {
+              "$ref": "#/components/schemas/ReadingTocLink"
+            },
+            "type": "array",
+            "title": "Toc Links"
           },
           "structure": {
             "items": {
@@ -3099,6 +3179,16 @@
             ],
             "title": "Target Chapter Id"
           },
+          "reading_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "candidates": {
             "items": {
               "$ref": "#/components/schemas/NavigationTarget"
@@ -3332,6 +3422,131 @@
           "quote"
         ],
         "title": "QuoteSelection"
+      },
+      "ReadingSegment": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          },
+          "reading_start": {
+            "type": "integer",
+            "title": "Reading Start"
+          },
+          "reading_end": {
+            "type": "integer",
+            "title": "Reading End"
+          },
+          "exact": {
+            "type": "boolean",
+            "title": "Exact"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "reading_start",
+          "reading_end",
+          "exact"
+        ],
+        "title": "ReadingSegment"
+      },
+      "ReadingTarget": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chapter Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "physical_page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Physical Page"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start",
+            "description": "Canonical chapter Markdown offset in Unicode codepoints."
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End",
+            "description": "Exclusive canonical chapter Markdown offset in Unicode codepoints."
+          },
+          "text_sha256": {
+            "type": "string",
+            "title": "Text Sha256"
+          },
+          "anchor": {
+            "type": "string",
+            "title": "Anchor"
+          },
+          "image_sha256": {
+            "type": "string",
+            "title": "Image Sha256",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "run_id",
+          "physical_page",
+          "start",
+          "end",
+          "text_sha256",
+          "anchor"
+        ],
+        "title": "ReadingTarget"
+      },
+      "ReadingTocLink": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "level": {
+            "type": "integer",
+            "title": "Level"
+          },
+          "source_start": {
+            "type": "integer",
+            "title": "Source Start"
+          },
+          "source_end": {
+            "type": "integer",
+            "title": "Source End"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ReadingTarget"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "level",
+          "source_start",
+          "source_end",
+          "target"
+        ],
+        "title": "ReadingTocLink"
       },
       "RecoveryReport": {
         "properties": {
@@ -4656,6 +4871,21 @@
             },
             "type": "array",
             "title": "Sources"
+          },
+          "reading_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outside_scope": {
+            "type": "boolean",
+            "title": "Outside Scope",
+            "default": false
           }
         },
         "type": "object",
@@ -4670,6 +4900,23 @@
       },
       "SearchHit": {
         "properties": {
+          "reading_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "directory_links": {
+            "items": {
+              "$ref": "#/components/schemas/ReadingTocLink"
+            },
+            "type": "array",
+            "title": "Directory Links"
+          },
           "toc_path": {
             "items": {
               "type": "string"

@@ -8,6 +8,11 @@ import NavigationReview, {
   type NavigationChoice,
 } from "./NavigationReview.tsx";
 import type { components } from "@/client/schema.d.ts";
+import {
+  navigationOptions,
+  readingNavigationOptions,
+} from "./navigation-query";
+import { readingHref } from "./reader-location";
 
 type Entry = components["schemas"]["NavigationEntry"];
 const labels: Record<string, string> = {
@@ -27,25 +32,20 @@ export default function NavigationPanel({
   bookState,
   reviewOnly = false,
   entryId,
+  published = false,
 }: {
   runId: string;
   bookId: string;
   bookState?: string;
   reviewOnly?: boolean;
   entryId?: string;
+  published?: boolean;
 }) {
   const query = useQueryClient();
-  const report = useQuery({
-    queryKey: queryKeys.navigation(runId),
-    queryFn: async ({ signal }) => {
-      const { data } = await client.GET("/api/v2/runs/{run_id}/navigation", {
-        params: { path: { run_id: runId } },
-        signal,
-      });
-      if (!data) throw new Error("目录尚未准备好，请稍后重试。");
-      return data;
-    },
-  });
+  const readingOnly = published && !reviewOnly;
+  const report = useQuery(
+    readingOnly ? readingNavigationOptions(bookId) : navigationOptions(runId),
+  );
   const [selected, setSelected] = useState<string | null>(entryId ?? null),
     [filter, setFilter] = useState(reviewOnly ? "attention" : "all"),
     [message, setMessage] = useState(""),
@@ -60,11 +60,25 @@ export default function NavigationPanel({
         : ["running", "processing", "queued"].includes(bookState ?? "")
           ? "目录尚未全部核对，新发现的项目会自动列出。"
           : "目录尚未全部核对，请在处理进展中查看剩余页面的状态。";
-  const activeId = selected ?? (reviewOnly ? attention[0]?.id : null);
+  const activeId = readingOnly
+    ? null
+    : (selected ?? (reviewOnly ? attention[0]?.id : null));
   const editor = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLOListElement>(null);
   useEffect(() => {
     if (selected) editor.current?.scrollIntoView?.({ block: "start" });
   }, [selected]);
+  useEffect(() => {
+    const requested = new URLSearchParams(
+      window.location.hash.split("?")[1] ?? "",
+    ).get("tocEntry");
+    if (requested && !reviewOnly)
+      list.current
+        ?.querySelector<HTMLElement>(
+          `[data-toc-entry="${CSS.escape(requested)}"]`,
+        )
+        ?.scrollIntoView?.({ block: "center" });
+  }, [report.data, reviewOnly]);
   const pendingDecision = useRef<{ signature: string; id: string } | null>(
     null,
   );
@@ -146,7 +160,18 @@ export default function NavigationPanel({
     <section className="platform-navigation">
       <h2>{reviewOnly ? "核对目录跳转" : "原书目录"}</h2>
       {!reviewOnly && (
-        <p>点击目录可阅读正文；跳转位置不对时，可在当前条目重新核对。</p>
+        <p>
+          {readingOnly ? (
+            <>
+              目录与当前阅读版保持一致。
+              <a href={`#/books/${bookId}?tab=review&task=navigation`}>
+                核对目录对应位置
+              </a>
+            </>
+          ) : (
+            "点击目录可阅读正文；跳转位置不对时，可在当前条目重新核对。"
+          )}
+        </p>
       )}
       {message && (
         <p role="status" className="navigation-receipt">
@@ -218,9 +243,17 @@ export default function NavigationPanel({
               </a>
             </div>
           )}
-          <ol aria-label="原书目录" className="navigation-entry-list">
+          <ol
+            ref={list}
+            aria-label="原书目录"
+            className="navigation-entry-list"
+          >
             {visible.map((e) => (
-              <li key={e.id} data-selected={activeId === e.id}>
+              <li
+                key={e.id}
+                data-toc-entry={e.id}
+                data-selected={activeId === e.id}
+              >
                 {activeId !== e.id && (
                   <>
                     <header>
@@ -239,14 +272,14 @@ export default function NavigationPanel({
                       {e.target && (
                         <a
                           href={
-                            e.target_chapter_id
-                              ? `#/books/${bookId}?tab=reader&chapter=${e.target_chapter_id}&physicalPage=${e.target.physical_page}&anchor=${encodeURIComponent(e.target.anchor)}`
+                            e.reading_target
+                              ? `#${readingHref(bookId, e.reading_target, { returnTo: `/books/${bookId}?tab=reader&section=directory&tocEntry=${encodeURIComponent(e.id)}` })}`
                               : (e.target_image ?? e.target_url ?? undefined)
                           }
-                          target={e.target_chapter_id ? undefined : "_blank"}
+                          target={e.reading_target ? undefined : "_blank"}
                           rel="noreferrer"
                         >
-                          {e.target_chapter_id
+                          {e.reading_target
                             ? "阅读正文 →"
                             : `查看正文原图 · PDF 第 ${e.target.physical_page} 页`}
                         </a>
@@ -254,7 +287,14 @@ export default function NavigationPanel({
                       <a href={e.source_image} target="_blank" rel="noreferrer">
                         目录原图 · PDF 第 {e.source_page} 页
                       </a>
-                      {e.status !== "waiting_evidence" && (
+                      {readingOnly && (
+                        <a
+                          href={`#/books/${bookId}?tab=review&task=navigation&entry=${encodeURIComponent(e.id)}`}
+                        >
+                          核对这条目录
+                        </a>
+                      )}
+                      {!readingOnly && e.status !== "waiting_evidence" && (
                         <Button
                           variant="outline"
                           disabled={decision.isPending}

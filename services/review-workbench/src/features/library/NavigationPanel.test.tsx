@@ -10,6 +10,106 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+test("published reading directory uses its frozen report and source-bound text link", async () => {
+  const requests: string[] = [];
+  respondWith((request) => {
+    requests.push(new URL(request.url).pathname);
+    return {
+      state: "available",
+      version: 1,
+      sha256: "a".repeat(64),
+      coverage_complete: true,
+      entries: [
+        {
+          id: "entry",
+          title: "章节乙",
+          level: 1,
+          path: ["章节乙"],
+          source_page: 1,
+          source_anchor: "章节乙 4",
+          source_image: "/toc.png",
+          target_label: "4",
+          status: "matched",
+          reason: "",
+          target: {
+            physical_page: 7,
+            start: 2,
+            anchor: "章节乙",
+            markdown_sha256: "a".repeat(64),
+            image_sha256: "b".repeat(64),
+          },
+          reading_target: {
+            chapter_id: "chapter",
+            run_id: "run",
+            physical_page: 7,
+            start: 10,
+            end: 13,
+            text_sha256: "c".repeat(64),
+            anchor: "章节乙",
+            image_sha256: "b".repeat(64),
+          },
+        },
+      ],
+      approved_pages: [],
+    };
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NavigationPanel
+        runId="new-run"
+        bookId="book"
+        published
+        bookState="awaiting_review"
+      />
+    </QueryClientProvider>,
+  );
+  const link = await screen.findByRole("link", { name: "阅读正文 →" });
+  expect(requests).toEqual(["/api/v2/books/book/reading-navigation"]);
+  expect(link.getAttribute("href")).toContain("section=text");
+  expect(link.getAttribute("href")).toContain("start=10");
+  expect(screen.queryByRole("button", { name: "修改跳转" })).toBeNull();
+  expect(
+    screen.getByRole("link", { name: "核对目录对应位置" }).getAttribute("href"),
+  ).toContain("task=navigation");
+});
+
+test("an unlinked published entry still reaches its existing individual human mapping form", async () => {
+  respondWith(() => ({
+    state: "available",
+    version: 1,
+    sha256: "a".repeat(64),
+    coverage_complete: true,
+    entries: [
+      {
+        id: "missing-entry",
+        title: "未找到的条目",
+        level: 1,
+        path: ["未找到的条目"],
+        source_page: 1,
+        source_anchor: "未找到的条目 9",
+        source_image: "/toc.png",
+        target_label: "9",
+        status: "not_found",
+        reason: "未找到对应正文",
+        target: null,
+        reading_target: null,
+      },
+    ],
+    approved_pages: [],
+  }));
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NavigationPanel runId="run" bookId="book" published bookState="ready" />
+    </QueryClientProvider>,
+  );
+  const item = (await screen.findByText("未找到的条目")).closest("li")!;
+  const link = within(item).getByRole("link", { name: "核对这条目录" });
+  expect(link.getAttribute("href")).toBe(
+    "#/books/book?tab=review&task=navigation&entry=missing-entry",
+  );
+  expect(within(item).queryByRole("link", { name: "阅读正文 →" })).toBeNull();
+  expect(within(item).queryByRole("button", { name: "修改跳转" })).toBeNull();
+});
 test("an incomplete directory does not claim processing is running for a paused book", async () => {
   respondWith(() => ({
     state: "not_detected",

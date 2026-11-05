@@ -22,6 +22,7 @@ def search(
     book_id: UUID | None = None,
     semantic: bool = True,
     include_navigation: bool = False,
+    toc_entry_id: str | None = Query(default=None, min_length=1, max_length=200),
     limit: int = Query(default=8, ge=1, le=50),
     candidate_limit: int | None = Query(default=None, ge=1, le=100),
     rerank_limit: int | None = Query(default=None, ge=1, le=100),
@@ -42,6 +43,7 @@ def search(
         rerank_limit=rerank_limit,
         diverse=diverse,
         include_navigation=include_navigation,
+        toc_entry_id=toc_entry_id,
     )
     response.headers["Server-Timing"] = ", ".join(
         f"{name.removesuffix('_ms')};dur={value:.3f}"

@@ -11,6 +11,7 @@ from functools import lru_cache
 from hrs_runtime.object_storage import S3Objects
 
 from hrs_platform.services.documents.footnotes import resolve_footnotes
+from hrs_platform.services.documents.reading_locations import text_digest
 from hrs_platform.services.documents.structure import reading_view
 
 MAX_CACHED_BYTES = 2 * 1024 * 1024
@@ -24,7 +25,8 @@ def read_content(storage, reference):
     text = ''.join(part['text'] for part in body['parts'])
     content = {'text': text, 'parts': body['parts'], 'structure': body.get('structure', []), 'navigation': body.get('navigation', {})}
     reading = reading_view(content)
-    return {**content, 'reading_text': reading['text'], 'reading_footnotes': reading['footnotes'],
+    return {**content, 'text_sha256': text_digest(text), 'reading_segments': reading['segments'],
+            'reading_text': reading['text'], 'reading_footnotes': reading['footnotes'],
             'footnotes': reading['footnotes'] if reading['text'] == text else resolve_footnotes(text, body['parts'])}
 
 

@@ -25,9 +25,16 @@ class Navigation:
 
     def status(self, run_id):
         store, doc_id = self.native(run_id)
-        return deepcopy(
+        result = deepcopy(
             navigation_snapshot(store.root, doc_id, str(run_id), store.checkpoints.revision(doc_id))
         )
+        from hrs_platform.services.documents.library import Library
+
+        targets = Library(self.settings, self.engine).navigation_targets(run_id, result)
+        for entry in result["entries"]:
+            entry["reading_target"] = targets.get(entry["id"])
+            entry["target_chapter_id"] = targets[entry["id"]]["chapter_id"] if entry["id"] in targets else None
+        return result
 
     def decide(self, run_id, entry_id, request):
         with self.engine.begin() as connection:
