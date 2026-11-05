@@ -10,6 +10,7 @@ from hrs_platform.schemas import (
     ExecutionWindow,
     NavigationDecision,
     NavigationReport,
+    RecoveryReport,
     RecoveryRequest,
     RunControlReceipt,
     RunSummary,
@@ -54,6 +55,13 @@ def resume(settings: SettingsDep, engine: EngineDep, run_id: UUID):
 @router.get("/api/v2/runs/{run_id}", response_model=RunSummary)
 def get_run(engine: EngineDep, run_id: UUID):
     return books.get_run(engine, run_id)
+
+
+@router.get("/api/v2/runs/{run_id}/recovery", response_model=RecoveryReport)
+def recovery(settings: SettingsDep, engine: EngineDep, run_id: UUID):
+    from hrs_platform.services.runs.recovery import native_report
+
+    return native_report(settings, engine, str(run_id))
 
 
 @router.post("/api/v2/runs/{run_id}/retry", response_model=RunSummary)

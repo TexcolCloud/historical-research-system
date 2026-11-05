@@ -669,6 +669,49 @@
         }
       }
     },
+    "/api/v2/runs/{run_id}/recovery": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Recovery",
+        "operationId": "recovery_api_v2_runs__run_id__recovery_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/runs/{run_id}/retry": {
       "post": {
         "tags": [
@@ -3253,6 +3296,109 @@
         ],
         "title": "QuoteSelection"
       },
+      "RecoveryReport": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "default": "从断点恢复"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "preserved_ocr": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preserved Ocr"
+          },
+          "preserved_approved": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preserved Approved"
+          },
+          "pending_human": {
+            "type": "integer",
+            "title": "Pending Human",
+            "default": 0
+          },
+          "unfinished_tasks": {
+            "type": "integer",
+            "title": "Unfinished Tasks",
+            "default": 0
+          },
+          "automatic_checkpoint_used": {
+            "type": "boolean",
+            "title": "Automatic Checkpoint Used",
+            "default": false
+          },
+          "retry_limit": {
+            "type": "integer",
+            "title": "Retry Limit",
+            "default": 3
+          },
+          "evidence_checked": {
+            "type": "boolean",
+            "title": "Evidence Checked",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "RecoveryReport"
+      },
       "RecoveryRequest": {
         "properties": {
           "request_id": {
@@ -3747,6 +3893,16 @@
       },
       "RunSummary": {
         "properties": {
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecoveryReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid",

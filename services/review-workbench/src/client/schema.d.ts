@@ -226,6 +226,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/runs/{run_id}/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recovery */
+        get: operations["recovery_api_v2_runs__run_id__recovery_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/runs/{run_id}/retry": {
         parameters: {
             query?: never;
@@ -1169,6 +1186,56 @@ export interface components {
              */
             occurrence: number;
         };
+        /** RecoveryReport */
+        RecoveryReport: {
+            /** State */
+            state: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Action
+             * @default 从断点恢复
+             */
+            action: string;
+            /** Retry At */
+            retry_at?: number | null;
+            /** Stage */
+            stage?: string | null;
+            /** Page */
+            page?: number | null;
+            /** Preserved Ocr */
+            preserved_ocr?: number | null;
+            /** Preserved Approved */
+            preserved_approved?: number | null;
+            /**
+             * Pending Human
+             * @default 0
+             */
+            pending_human: number;
+            /**
+             * Unfinished Tasks
+             * @default 0
+             */
+            unfinished_tasks: number;
+            /**
+             * Automatic Checkpoint Used
+             * @default false
+             */
+            automatic_checkpoint_used: boolean;
+            /**
+             * Retry Limit
+             * @default 3
+             */
+            retry_limit: number;
+            /**
+             * Evidence Checked
+             * @default false
+             */
+            evidence_checked: boolean;
+        };
         /** RecoveryRequest */
         RecoveryRequest: {
             /**
@@ -1372,6 +1439,7 @@ export interface components {
         };
         /** RunSummary */
         RunSummary: {
+            recovery?: components["schemas"]["RecoveryReport"] | null;
             /**
              * Id
              * Format: uuid
@@ -2088,6 +2156,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recovery_api_v2_runs__run_id__recovery_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryReport"];
                 };
             };
             /** @description Validation Error */

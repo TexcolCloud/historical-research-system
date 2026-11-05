@@ -238,6 +238,10 @@ class CodexBridge:
 
     def dispatch(self, event):
         run = get_run(self.engine, event["run_id"])
+        if event["kind"] == "retry_run" and (run["result"] or {}).get("codex_document_id"):
+            from hrs_platform.services.runs.recovery import resume_native
+
+            return resume_native(self, event, run)
         if event["kind"] == "retry_run":
             with self.engine.begin() as connection:
                 connection.execute(
@@ -374,7 +378,11 @@ class CodexBridge:
         )
 
     def sync(self, run):
-        if not self.due(run):
+        if not self.due(run) or run["result"].get("codex_recovery", {}).get("state") in {
+            "checking",
+            "waiting",
+            "blocked",
+        }:
             return
         doc_id = run["result"]["codex_document_id"]
         snapshot = self.store.status(doc_id)
@@ -725,9 +733,9 @@ class CodexBridge:
                     "state": request.get("state"),
                     "paused": state == "paused",
                     "technical_failures": request.get("technical_failures", 0),
-                    "retry_limit": 3,
+                    "retry_limit": request.get("retry_limit", 3),
                     "retry_at": request.get("not_before")
-                    if request.get("technical_failures", 0) < 3
+                    if request.get("technical_failures", 0) < request.get("retry_limit", 3)
                     else None,
                     "lease_expires_at": request.get("lease_expires_at"),
                     "coordinator_active": request.get("state") == "running"

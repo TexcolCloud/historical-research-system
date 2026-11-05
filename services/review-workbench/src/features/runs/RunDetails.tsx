@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, LoaderCircle, Circle } from "lucide-react";
 import { client, type Book } from "@/client/api.ts";
+import RecoveryPanel from "@/features/runs/RecoveryPanel.tsx";
 import RetryRunButton from "@/features/runs/RetryRunButton.tsx";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -50,6 +51,9 @@ export default function RunDetails({ book }: { book: Book }) {
   const paused = run?.execution?.paused || run?.state === "paused";
   const queued = run?.state === "queued";
   const pageProgress = run?.page_progress;
+  const recoveryBusy = ["checking", "waiting"].includes(
+    run?.recovery?.state ?? "",
+  );
   const active = ["organization", "indexing", "ingestion", "complete"].includes(
     book.stage ?? "",
   )
@@ -104,131 +108,13 @@ export default function RunDetails({ book }: { book: Book }) {
                       : "书籍正在处理中"}
         </h2>
         <p>已完成结果会保留，关闭页面不影响后台处理。</p>
-        {((book.pending_count ?? 0) > 0 ||
-          (book.navigation_pending_count ?? 0) > 0) && (
-          <div className="workspace-next-action">
-            <strong>
-              {book.pending_count ?? 0} 页正文待核对 ·{" "}
-              {book.navigation_pending_count ?? 0} 项目录待确认
-            </strong>
-            <a
-              className="workspace-primary-link"
-              href={`#${bookWorkspaceHref(book)}`}
-            >
-              开始人工核对 →
-            </a>
-            <p>你可以先完成待办，其他页面按当前运行状态继续处理。</p>
-          </div>
-        )}
-        {run && !done && (run.codex_document_id || paused) && (
-          <Button
-            variant="outline"
-            disabled={control.isPending}
-            onClick={() => control.mutate(paused ? "resume" : "pause")}
-          >
-            {control.isPending
-              ? "正在保存…"
-              : paused
-                ? "继续处理"
-                : "暂停自动处理"}
-          </Button>
-        )}
-        {control.isError && <p role="alert">{control.error.message}</p>}
-        {pageProgress && pageProgress.pending > 0 && (
-          <p>
-            {pageProgress.pending} 页待你核对。
-            {paused
-              ? "恢复后，系统继续其余页面。"
-              : run?.execution?.automatic_work_remaining
-                ? failed
-                  ? "其余页面的自动处理已停止，恢复后继续；可先核对已生成的待办。"
-                  : "其余页面仍在自动处理，可同时核对。"
-                : "自动处理已结束，确认剩余内容后继续整理入库。"}
-          </p>
-        )}
-        {run?.execution && !done && (
-          <p role="status">
-            {run.execution.coordinator_active
-              ? "本书协调器正在执行。"
-              : run.execution.state === "retryable_error"
-                ? run.execution.technical_failures >= run.execution.retry_limit
-                  ? `本书自动处理已停止：连续 ${run.execution.technical_failures} 次技术失败。已完成结果保留，可重试本阶段。`
-                  : `本书遇到技术故障，正在等待重试（${run.execution.technical_failures}/${run.execution.retry_limit}）。`
-                : paused
-                  ? "本书已暂停。"
-                  : "本书当前没有活动协调器。"}
-            {run.execution.retry_at &&
-            run.execution.retry_at > Date.now() / 1000
-              ? `预计 ${new Date(run.execution.retry_at * 1000).toLocaleTimeString()} 后重试。`
-              : ""}
-          </p>
-        )}
-        {run?.execution?.last_progress_at && (
-          <p>
-            最近完成：
-            {new Date(
-              run.execution.last_progress_at * 1000,
-            ).toLocaleTimeString()}
-          </p>
-        )}
-        {run?.scheduling && (
-          <details>
-            <summary>处理速度与调度</summary>
-            <p>
-              最多 {run.scheduling.capacity} 个工作代理，每批最多{" "}
-              {run.scheduling.batch_size} 页；完成当前页后再调整分配。
-            </p>
-            {run.scheduling.cooldown_until > Date.now() / 1000 && (
-              <p>服务限流，正在冷却。已完成结果保留。</p>
-            )}
-            <table>
-              <thead>
-                <tr>
-                  <th>阶段</th>
-                  <th>运行 / 建议</th>
-                  <th>排队</th>
-                  <th>单页中位耗时</th>
-                  <th>近 5 分钟速度</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(run.scheduling.metrics).map(([stage, m]) => (
-                  <tr key={stage}>
-                    <td>
-                      {(
-                        {
-                          ocr: "识别",
-                          review: "核验",
-                          verify: "修正复核",
-                          navigation: "目录关联",
-                          organization: "文章整理",
-                        } as Record<string, string>
-                      )[stage] ?? stage}
-                    </td>
-                    <td>
-                      {m.active} / {run.scheduling?.workers[stage]}
-                    </td>
-                    <td>{m.queued}</td>
-                    <td>
-                      {m.median_seconds == null
-                        ? "采样中"
-                        : `${m.median_seconds} 秒`}
-                    </td>
-                    <td>{m.pages_per_minute} 项/分</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {run.execution?.active_tasks?.map((t, i) => (
-              <p key={i}>
-                {t.stage} · {t.page ? `原件第 ${t.page} 页` : "整书任务"}
-                {t.started_at
-                  ? ` · 开始于 ${new Date(t.started_at * 1000).toLocaleTimeString()}`
-                  : ""}
-              </p>
-            ))}
-          </details>
-        )}
+        {run?.codex_document_id &&
+          !done &&
+          (failed ||
+            queued ||
+            ["checking", "waiting", "blocked"].includes(
+              run.recovery?.state ?? "",
+            )) && <RecoveryPanel run={run} />}
         {run?.codex_document_id && (
           <p>Codex 自动处理 · Terra 识别 → Sol 原图审核 → 文章组织与入库</p>
         )}
@@ -344,7 +230,133 @@ export default function RunDetails({ book }: { book: Book }) {
         <StructurePanel runId={book.run_id} revision={book.revision} />
       )}
       {runs.isError && <p role="alert">{runs.error.message}</p>}
-      {failed && run && (
+      {((book.pending_count ?? 0) > 0 ||
+        (book.navigation_pending_count ?? 0) > 0) && (
+        <div className="workspace-next-action">
+          <strong>
+            {book.pending_count ?? 0} 页正文待核对 ·{" "}
+            {book.navigation_pending_count ?? 0} 项目录待确认
+          </strong>
+          <a
+            className="workspace-primary-link"
+            href={`#${bookWorkspaceHref(book)}`}
+          >
+            开始人工核对 →
+          </a>
+          <p>你可以先完成待办，其他页面按当前运行状态继续处理。</p>
+        </div>
+      )}
+      {run &&
+        !done &&
+        !(failed && run.codex_document_id) &&
+        !recoveryBusy &&
+        (run.codex_document_id || paused) && (
+          <Button
+            variant="outline"
+            disabled={control.isPending}
+            onClick={() => control.mutate(paused ? "resume" : "pause")}
+          >
+            {control.isPending
+              ? "正在保存…"
+              : paused
+                ? "继续处理"
+                : "暂停自动处理"}
+          </Button>
+        )}
+      {control.isError && <p role="alert">{control.error.message}</p>}
+      {pageProgress && pageProgress.pending > 0 && (
+        <p>
+          {pageProgress.pending} 页待你核对。
+          {paused
+            ? "恢复后，系统继续其余页面。"
+            : run?.execution?.automatic_work_remaining
+              ? failed
+                ? "其余页面的自动处理已停止，恢复后继续；可先核对已生成的待办。"
+                : "其余页面仍在自动处理，可同时核对。"
+              : "自动处理已结束，确认剩余内容后继续整理入库。"}
+        </p>
+      )}
+      {run?.execution && !done && !recoveryBusy && (
+        <p role="status">
+          {run.execution.coordinator_active
+            ? "本书协调器正在执行。"
+            : run.execution.state === "retryable_error"
+              ? run.execution.technical_failures >= run.execution.retry_limit
+                ? `本书自动处理已停止：连续 ${run.execution.technical_failures} 次技术失败。已完成结果保留，可从断点恢复。`
+                : `本书遇到技术故障，正在等待重试（${run.execution.technical_failures}/${run.execution.retry_limit}）。`
+              : paused
+                ? "本书已暂停。"
+                : "本书当前没有活动协调器。"}
+          {run.execution.retry_at && run.execution.retry_at > Date.now() / 1000
+            ? `预计 ${new Date(run.execution.retry_at * 1000).toLocaleTimeString()} 后重试。`
+            : ""}
+        </p>
+      )}
+      {run?.execution?.last_progress_at && (
+        <p>
+          最近完成：
+          {new Date(run.execution.last_progress_at * 1000).toLocaleTimeString()}
+        </p>
+      )}
+      {run?.scheduling && (
+        <details>
+          <summary>处理速度与调度</summary>
+          <p>
+            最多 {run.scheduling.capacity} 个工作代理，每批最多{" "}
+            {run.scheduling.batch_size} 页；完成当前页后再调整分配。
+          </p>
+          {run.scheduling.cooldown_until > Date.now() / 1000 && (
+            <p>服务限流，正在冷却。已完成结果保留。</p>
+          )}
+          <table>
+            <thead>
+              <tr>
+                <th>阶段</th>
+                <th>运行 / 建议</th>
+                <th>排队</th>
+                <th>单页中位耗时</th>
+                <th>近 5 分钟速度</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(run.scheduling.metrics).map(([stage, m]) => (
+                <tr key={stage}>
+                  <td>
+                    {(
+                      {
+                        ocr: "识别",
+                        review: "核验",
+                        verify: "修正复核",
+                        navigation: "目录关联",
+                        organization: "文章整理",
+                      } as Record<string, string>
+                    )[stage] ?? stage}
+                  </td>
+                  <td>
+                    {m.active} / {run.scheduling?.workers[stage]}
+                  </td>
+                  <td>{m.queued}</td>
+                  <td>
+                    {m.median_seconds == null
+                      ? "采样中"
+                      : `${m.median_seconds} 秒`}
+                  </td>
+                  <td>{m.pages_per_minute} 项/分</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {run.execution?.active_tasks?.map((t, i) => (
+            <p key={i}>
+              {t.stage} · {t.page ? `原件第 ${t.page} 页` : "整书任务"}
+              {t.started_at
+                ? ` · 开始于 ${new Date(t.started_at * 1000).toLocaleTimeString()}`
+                : ""}
+            </p>
+          ))}
+        </details>
+      )}
+      {failed && run && !run.codex_document_id && (
         <RetryRunButton key={`${run.id}:${run.revision}`} runId={run.id} />
       )}
     </section>

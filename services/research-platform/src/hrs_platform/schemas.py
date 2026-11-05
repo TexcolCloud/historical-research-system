@@ -115,7 +115,26 @@ class SchedulingReport(BaseModel):
     cooldown_until: float = 0
 
 
+class RecoveryReport(BaseModel):
+    state: str
+    reason: str = ""
+    action: str = "从断点恢复"
+    retry_at: float | None = None
+    stage: str | None = None
+    page: int | None = None
+    preserved_ocr: int | None = None
+    preserved_approved: int | None = None
+    pending_human: int = 0
+    unfinished_tasks: int = 0
+    automatic_checkpoint_used: bool = False
+    retry_limit: int = 3
+    evidence_checked: bool = False
+
+
 class RunSummary(BaseModel):
+    recovery: RecoveryReport | None = Field(
+        default=None, validation_alias=AliasChoices("recovery", AliasPath("result", "codex_recovery"))
+    )
     id: UUID
     book_id: UUID
     state: str

@@ -85,6 +85,7 @@ export default function ExecutionPanel({ bookId }: { bookId: string }) {
         )}
       {activeRun &&
         activeRun.kind !== "cards" &&
+        !activeRun.codex_document_id &&
         activeRun.state === "failed" &&
         id && (
           <RetryRunButton key={`${id}:${activeRun.revision}`} runId={id} />

@@ -4,7 +4,13 @@ import { Button } from "@/components/ui/button.tsx";
 import { client } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
 import type { components } from "@/client/schema.d.ts";
-export default function RetryRunButton({ runId }: { runId: string }) {
+export default function RetryRunButton({
+  runId,
+  checkpoint = false,
+}: {
+  runId: string;
+  checkpoint?: boolean;
+}) {
   const identity = useRef(crypto.randomUUID()),
     query = useQueryClient();
   const retry = useMutation({
@@ -31,6 +37,9 @@ export default function RetryRunButton({ runId }: { runId: string }) {
         (runs) => runs?.map((run) => (run.id === data.id ? data : run)),
       );
       void query.invalidateQueries({ queryKey: booksKey });
+      void query.invalidateQueries({
+        queryKey: ["platform", "recovery", runId],
+      });
     },
   });
   return (
@@ -41,10 +50,16 @@ export default function RetryRunButton({ runId }: { runId: string }) {
         onClick={() => retry.mutate()}
       >
         {retry.isPending
-          ? "正在提交…"
+          ? checkpoint
+            ? "正在保存恢复请求…"
+            : "正在提交…"
           : retry.isSuccess
-            ? "已加入处理队列"
-            : "重试本阶段"}
+            ? checkpoint
+              ? "恢复请求已保存"
+              : "已加入处理队列"
+            : checkpoint
+              ? "从断点恢复"
+              : "重试本阶段"}
       </Button>
       {retry.isError && <p role="alert">{retry.error.message}</p>}
     </>

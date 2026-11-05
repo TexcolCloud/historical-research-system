@@ -15,6 +15,11 @@ def retry_run(engine, run_id, request_id):
     run_id = str(run_id)
     key = f"retry:{run_id}:{request_id}"
     with engine.begin() as connection:
+        book_id = connection.scalar(select(db.runs.c.book_id).where(db.runs.c.id == run_id))
+        from hrs_platform.services.deletion import require_active
+
+        if book_id is not None:
+            require_active(connection, book_id)
         run = (
             connection.execute(select(db.runs).where(db.runs.c.id == run_id).with_for_update())
             .mappings()
@@ -22,9 +27,6 @@ def retry_run(engine, run_id, request_id):
         )
         if run is None:
             raise ServiceError(404, "任务不存在。")
-        from hrs_platform.services.deletion import require_active
-
-        require_active(connection, run["book_id"])
         if connection.scalar(select(db.outbox.c.id).where(db.outbox.c.dedup_key == key)):
             return dict(run)
         if run["state"] != "failed" and not (run["kind"] == "cards" and run["state"] == "needs_revision"):
@@ -36,6 +38,16 @@ def retry_run(engine, run_id, request_id):
             "recovery_attempt": attempt,
             "revision": run["revision"] + 1,
         }
+        if (run["result"] or {}).get("codex_document_id"):
+            values["result"] = {
+                **run["result"],
+                "codex_recovery": {
+                    "state": "checking",
+                    "request_id": str(request_id),
+                    "attempt": attempt,
+                    "reason": "正在检查执行器、登录状态和保存的检查点。",
+                },
+            }
         if run["kind"] == "cards" and run["state"] == "needs_revision":
             values["result"] = {
                 **(run["result"] or {}),
@@ -50,7 +62,7 @@ def retry_run(engine, run_id, request_id):
                 dedup_key=key,
                 run_id=run_id,
                 kind="retry_run",
-                payload={"recovery_attempt": attempt, "run_kind": run["kind"]},
+                payload={"recovery_attempt": attempt, "run_kind": run["kind"], "request_id": str(request_id)},
             )
         )
         connection.execute(
@@ -68,3 +80,171 @@ def retry_run(engine, run_id, request_id):
             )
         )
     return {**run, **values}
+
+
+def preflight(store):
+    """Local readiness checks; no paid model request and no content decision."""
+    import shutil
+    import subprocess
+
+    from hrs_codex.workspace import ensure_workbench
+
+    executable = shutil.which("codex")
+    if not executable:
+        raise ValueError("未找到 Codex 执行程序，请安装并登录后恢复。")
+    try:
+        login = subprocess.run([executable, "login", "status"], capture_output=True, timeout=10, check=False)
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("Codex 登录检查超时，请检查本机服务后重试。") from error
+    if login.returncode:
+        raise ValueError("Codex 登录已失效，请重新登录后恢复。")
+    ensure_workbench(store)
+
+
+def native_report(settings, engine, run_id):
+    from hrs_codex.recovery import plan
+    from hrs_codex.store import Store
+    from hrs_codex.workspace import resolve_workspace
+
+    from hrs_platform.services.books import get_run
+
+    run = get_run(engine, run_id)
+    identity = (run["result"] or {}).get("codex_document_id")
+    if not identity:
+        raise ServiceError(409, "本任务使用历史恢复入口。")
+    saved = (run["result"] or {}).get("codex_recovery", {})
+    try:
+        doc = Store(resolve_workspace(settings.codex_root)).status(identity)
+    except (OSError, ValueError):
+        return {
+            "state": "blocked",
+            "reason": "保存的检查点暂不可读，请恢复工作区文件后重试。",
+            "action": "检查原件与工作区文件",
+            "preserved_ocr": None,
+            "preserved_approved": None,
+        }
+    report = plan(doc)
+    request = doc.get("run_request", {})
+    exhausted = request.get("technical_failures", 0) >= request.get("retry_limit", 3)
+    reason = (
+        "自动检查点恢复仍未成功，请修复故障后从断点恢复。"
+        if request.get("automatic_checkpoint_used")
+        else "自动重试已停止。恢复时将校验已保存结果，只继续未完成任务。"
+    )
+    if request.get("recovery_error"):
+        reason = "检查点校验未通过，请检查原件与证据文件后恢复。"
+    if request.get("state") == "retryable_error" and not exhausted:
+        report.update(
+            state="retrying",
+            retry_at=request.get("not_before"),
+            reason="正在等待下一次自动重试，已保存结果保留，无需重复点击。",
+        )
+    elif (
+        exhausted
+        and request.get("checkpoint_recovery_enabled")
+        and not request.get("automatic_checkpoint_used")
+    ):
+        report.update(
+            state="checkpoint",
+            retry_at=request.get("not_before"),
+            reason="普通重试已结束，等待从已保存检查点进行最后一次自动恢复。",
+        )
+    else:
+        report["reason"] = reason
+    if saved.get("state") in {"checking", "waiting", "blocked"} or (
+        saved.get("state") == "resumed" and not exhausted
+    ):
+        report.update(saved)
+    if report["state"] == "waiting":
+        report["reason"] = "旧任务仍有有效租约，退出后继续检查，不会启动第二份处理。"
+    report.setdefault("action", "从断点恢复")
+    return report
+
+
+def resume_native(bridge, event, run):
+    """Dispatch one durable recovery request; never hold SQL locks across readiness or evidence I/O."""
+    import time
+
+    from hrs_codex.recovery import RecoveryWait, plan
+
+    with bridge.engine.connect() as connection:
+        if connection.scalar(select(db.outbox.c.delivered).where(db.outbox.c.id == event["id"])):
+            return
+    identity = run["result"]["codex_document_id"]
+    saved = run["result"].get("codex_recovery", {})
+    if saved.get("state") == "waiting" and saved.get("retry_at", 0) > time.time():
+        if plan(bridge.store.status(identity))["retry_at"]:
+            return
+    try:
+        snapshot = bridge.store.status(identity)
+        receipt_id = "platform:" + str(event["id"])
+        receipt = snapshot.get("recoveries", {}).get(receipt_id)
+        if not receipt:
+            current = plan(snapshot)
+            if current["retry_at"]:
+                raise RecoveryWait(current["retry_at"])
+            preflight(bridge.store)
+            receipt = bridge.store.recover_run(identity, receipt_id)
+        status = {**receipt, "state": "resumed", "reason": "检查通过，已从保存的断点加入处理队列。"}
+        state, delivered, error = "queued", True, None
+    except RecoveryWait as waiting:
+        status = {"state": "waiting", "retry_at": waiting.retry_at, "reason": str(waiting)}
+        state, delivered, error = "queued", False, None
+    except (ValueError, OSError, RuntimeError) as failure:
+        message = str(failure)
+        if "hash mismatch" in message or "differs from" in message:
+            message = "检查点证据校验未通过，请恢复原件或工作区文件后重试。"
+        status = {"state": "blocked", "reason": message, "action": "修复后从断点恢复"}
+        state, delivered, error = "failed", True, {"code": "recovery_preflight", "detail": str(failure)}
+        try:
+            paused = bridge.store.status(identity).get("run_request", {}).get("pause_requested")
+        except (OSError, ValueError):
+            paused = False
+        if paused:
+            status = {"state": "paused", "reason": "本书已暂停，恢复请求已取消。"}
+            state, error = "paused", None
+    with bridge.engine.begin() as connection:
+        from hrs_platform.services.deletion import DELETING
+
+        book_state = connection.scalar(
+            select(db.books.c.state).where(db.books.c.id == run["book_id"]).with_for_update()
+        )
+        if book_state is None or book_state in DELETING:
+            return
+        latest = (
+            connection.execute(select(db.runs).where(db.runs.c.id == run["id"]).with_for_update())
+            .mappings()
+            .one()
+        )
+        result = {
+            **(latest["result"] or {}),
+            "codex_recovery": status,
+            "bridge_failures": 0,
+            "bridge_not_before": 0,
+        }
+        if (latest["result"] or {}).get("codex_recovery") != status or delivered:
+            revision = latest["revision"] + 1
+            connection.execute(
+                update(db.runs)
+                .where(db.runs.c.id == run["id"])
+                .values(state=state, error=error, result=result, revision=revision)
+            )
+            if not result.get("published"):
+                connection.execute(
+                    update(db.books).where(db.books.c.id == run["book_id"]).values(state=state)
+                )
+            connection.execute(
+                insert(db.events).values(
+                    book_id=run["book_id"],
+                    run_id=run["id"],
+                    kind="run.changed",
+                    payload={
+                        "state": state,
+                        "book_state": "ready" if result.get("published") else state,
+                        "stage": run["stage"],
+                        "revision": revision,
+                    },
+                )
+            )
+        if delivered:
+            connection.execute(update(db.outbox).where(db.outbox.c.id == event["id"]).values(delivered=True))

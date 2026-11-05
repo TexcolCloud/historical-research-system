@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 STAGES = {"ocr", "review", "verify", "navigation", "organization"}
 
@@ -1342,6 +1342,8 @@ class Store:
                 "state": "pending",
                 "attempts": 0,
                 "technical_failures": 0,
+                "checkpoint_recovery_enabled": True,
+                "retry_limit": 3,
                 "not_before": 0,
                 "ready_after": 0,
                 "history": [],
@@ -1370,15 +1372,23 @@ class Store:
                 if followup:
                     request["continuation_requested"] = True
                 return request
-        if request.get("technical_failures", 0) >= 3 and not resume:
+        if request.get("technical_failures", 0) >= request.get("retry_limit", 3) and not resume:
             return request
         if resume:
             request["history"].append({"event": "explicit_resume", "at": time.time()})
             request["technical_failures"] = 0
+            request.update(
+                retry_limit=3, automatic_checkpoint_used=False, checkpoint_recovery_enabled=True
+            )
         if request["state"] not in {"pending", "retryable_error"} or resume:
             request.update(state="pending", not_before=0)
         request["ready_after"] = request["not_before"]
         return request
+
+    def recover_run(self, document_id, recovery_id, *, automatic=False):
+        from hrs_codex.recovery import recover
+
+        return recover(self, document_id, recovery_id, automatic=automatic)
 
     def request_run(self, document_id: str, *, resume: bool = False) -> dict:
         with self._verified(document_id) as doc:
@@ -1412,7 +1422,10 @@ class Store:
                     continue
                 if not request or request["state"] not in {"pending", "retryable_error", "running"}:
                     continue
-                if request.get("technical_failures", 0) >= 3 or request.get("not_before", 0) > now:
+                if (
+                    request.get("technical_failures", 0) >= request.get("retry_limit", 3)
+                    or request.get("not_before", 0) > now
+                ):
                     continue
                 if request["state"] == "running" and request["lease_expires_at"] > now:
                     continue
@@ -1420,6 +1433,11 @@ class Store:
                 if any(
                     t["state"] == "leased" and t["claim"]["expires_at"] > now for t in doc["tasks"]
                 ):
+                    continue
+                try:
+                    with FileLock(path.parent / ".executor.lock", timeout=0):
+                        pass
+                except Timeout:
                     continue
                 if request["state"] == "running":
                     request["history"].append(

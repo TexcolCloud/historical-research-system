@@ -62,3 +62,62 @@ def test_parent_recovery_reuses_child_and_only_grants_one_request_epoch(platform
     assert first["workflow_id"] == f"cards/{child}/retry/1"
     with engine.connect() as connection:
         assert connection.scalar(select(db.runs.c.recovery_attempt).where(db.runs.c.id == child)) == 1
+
+
+def test_native_recovery_preflight_failure_is_durable_and_can_be_retried(platform, tmp_path, monkeypatch):
+    from hrs_codex.server import prepare
+    from PIL import Image
+
+    from hrs_platform.services.books import get_run
+    from hrs_platform.services.codex_bridge import CodexBridge
+
+    settings, engine = platform
+    settings = settings.model_copy(update={"codex_root": tmp_path / "native"})
+    bridge = CodexBridge(settings, engine)
+    source = tmp_path / "fixture.png"
+    Image.new("RGB", (40, 50), "white").save(source)
+    identity = prepare(bridge.store, str(source))["id"]
+    book, run = str(uuid4()), str(uuid4())
+    with engine.begin() as connection:
+        connection.execute(insert(db.books).values(id=book, title="Recovery fixture", state="failed"))
+        connection.execute(
+            insert(db.runs).values(
+                id=run,
+                book_id=book,
+                state="failed",
+                stage="ocr",
+                result={"processing_backend": "codex", "codex_document_id": identity},
+            )
+        )
+
+    def offline(*args):
+        raise ValueError("Codex 登录已失效，请重新登录后恢复。")
+
+    monkeypatch.setattr("hrs_platform.services.runs.recovery.preflight", offline)
+    with TestClient(create_app(settings, engine)) as client:
+        url = f"/api/v2/runs/{run}/retry"
+        request = {"request_id": str(uuid4())}
+        assert client.post(url, json=request).json()["recovery"]["state"] == "checking"
+        with engine.connect() as connection:
+            event = dict(connection.execute(select(db.outbox)).mappings().one())
+        bridge.dispatch(event)
+        assert get_run(engine, run)["state"] == "failed"
+        report = client.get(f"/api/v2/runs/{run}/recovery").json()
+        assert report["state"] == "blocked" and "登录" in report["reason"]
+        assert not bridge.store.status(identity).get("run_request")
+        assert client.post(url, json=request).json()["recovery"]["state"] == "blocked"
+        monkeypatch.setattr("hrs_platform.services.runs.recovery.preflight", lambda *_: None)
+        assert client.post(url, json={"request_id": str(uuid4())}).status_code == 200
+        with engine.connect() as connection:
+            event = dict(
+                connection.execute(select(db.outbox).where(db.outbox.c.delivered.is_(False))).mappings().one()
+            )
+        bridge.dispatch(event)
+        assert bridge.store.status(identity)["run_request"]["state"] == "pending"
+        assert client.get(f"/api/v2/runs/{run}/recovery").json()["state"] == "resumed"
+
+    # A dispatcher restart after native commit must replay its receipt, even if login is now offline.
+    monkeypatch.setattr("hrs_platform.services.runs.recovery.preflight", offline)
+    bridge.dispatch(event)
+    assert get_run(engine, run)["state"] == "queued"
+    assert len(bridge.store.status(identity)["recoveries"]) == 1

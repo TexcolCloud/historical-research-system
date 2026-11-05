@@ -4,6 +4,8 @@ import threading
 import time
 from uuid import uuid4
 
+from filelock import FileLock
+
 from hrs_codex.store import Store, atomic_json
 
 
@@ -28,7 +30,52 @@ class Runner:
             return False
         request = self.store.claim_run(self.owner, self.lease_seconds, document_id=document_id)
         if request is None:
-            return False
+            return self.recover_exhausted(document_id)
+        with FileLock(self.store._directory(request["document_id"]) / ".executor.lock", timeout=10):
+            return self.execute_request(request)
+
+    def recover_exhausted(self, document_id=None):
+        from hrs_codex.recovery import RecoveryWait
+
+        documents = [dict(id=document_id)] if document_id else self.store.list_documents()
+        for item in documents:
+            doc = self.store.status(item["id"])
+            request = doc.get("run_request", {})
+            if (
+                not request.get("checkpoint_recovery_enabled")
+                or request.get("automatic_checkpoint_used")
+                or request.get("pause_requested")
+                or request.get("cancel_requested")
+                or request.get("state") != "retryable_error"
+                or request.get("technical_failures", 0) < request.get("retry_limit", 3)
+                or request.get("not_before", 0) > time.time()
+            ):
+                continue
+            try:
+                self.store.recover_run(
+                    doc["id"],
+                    "auto:"
+                    + str(request.get("recovery_id", "initial"))
+                    + ":"
+                    + str(request["attempts"]),
+                    automatic=True,
+                )
+                return True
+            except RecoveryWait:
+                continue
+            except (ValueError, OSError) as error:
+                with self.store.lock:
+                    current = self.store._load(doc["id"])
+                    if current.get("run_request") != request:
+                        continue
+                    current["run_request"].update(
+                        automatic_checkpoint_used=True,
+                        recovery_error={"code": "checkpoint_invalid", "detail": str(error)},
+                    )
+                    self.store._save(current)
+        return False
+
+    def execute_request(self, request):
         done = threading.Event()
         run_stop = threading.Event()
         self.active_stop = run_stop
