@@ -335,6 +335,10 @@ class Dispatch:
                     if (
                         session.get("prewarmed")
                         and (session.get("overlap_reading") or not session["completed"])
+                        and (
+                            session["stage"] != "organization"
+                            or not any(page["state"] == "pending" for page in doc["pages"])
+                        )
                         and any(
                             task["stage"]
                             in (

@@ -206,3 +206,42 @@ def test_reclaim_does_not_interrupt_an_unfrozen_original_read_or_reserved_task(t
     assert not store.dispatch.reserve(second)["assignments"]
     assert store.dispatch.open(reviewer, "reading-original")[0]["state"] == "wait"
     assert store.checkpoints.ledger.capacity_used() == 2
+
+
+def test_waiting_organizer_exits_when_human_review_blocks_its_future_work(tmp_path):
+    from test_store import complete
+
+    from hrs_codex.execution_policy import configure_execution
+
+    store, identity = document(tmp_path, count=2)
+    configure_execution(store.root, capacity=14, overlap_reading=True)
+    assignments = store.dispatch.reserve(identity)["assignments"]
+    organizer = next(a["session_token"] for a in assignments if a["stage"] == "organization")
+    assert store.dispatch.open(organizer, "waiting-organizer")[0]["state"] == "wait"
+    for assignment in assignments:
+        if assignment["stage"] != "organization":
+            store.dispatch.close(assignment["session_token"], "unstarted")
+    complete(store, identity, "ocr", "ocr", {"markdown": "Synthetic unreadable content"})
+    complete(
+        store,
+        identity,
+        "review",
+        "review",
+        {
+            "verdict": "pending",
+            "issues": [{"location": "body", "issue": "Synthetic human handoff"}],
+        },
+    )
+    before = store.checkpoints.revision(identity)
+    packet, _, _ = store.dispatch.open(organizer, "waiting-organizer")
+    assert packet["state"] == "exited"
+    assert store.checkpoints.ledger.capacity_used() == 0
+    assert store.checkpoints.revision(identity) == before
+    doc = store.status(identity)
+    assert doc["pages"][0]["state"] == "pending"
+    assert any(
+        t["stage"] == "ocr" and t["page"] == 2 and t["state"] == "ready" for t in doc["tasks"]
+    )
+    assert store.dispatch.reserve(identity, active_session_tokens=[organizer])[
+        "retired_sessions"
+    ] == [organizer]

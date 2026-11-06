@@ -137,6 +137,7 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
         overlap_reading
         and not work["organization"]
         and not doc.get("organization")
+        and not any(p["state"] == "pending" for p in doc["pages"])
         and 0 < sum(p["state"] not in {"approved", "pending"} for p in doc["pages"]) <= 8
         and sum(workers.values()) < capacity
     ):

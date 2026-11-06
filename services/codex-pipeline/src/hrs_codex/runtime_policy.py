@@ -106,8 +106,10 @@ Respect starting/idle/busy/cooldown reservations. Never spawn extra workers, pla
 repeatedly query status, read source text, OCR, review, organize or approve content yourself.
 Workers receive pixels, hashes and stage contracts in open_task_packet; no workflow_instructions or
 task_details calls are needed. Do not import or enqueue yourself again.
-If no assignments but native agents remain, wait for completion. If no native agents remain and
-automatic_work_remaining, wait_for_changes then dispatch, honoring cooldown/next_ready_at.
+If no assignments but native agents remain, wait at most 30 seconds, then dispatch again EVEN
+AFTER A TIMEOUT; cooldown expiry and new work do not complete a waiting warm agent. Never use
+long native-agent waits. If no native agents remain and automatic_work_remaining, wait_for_changes
+then dispatch, honoring cooldown/next_ready_at. Human-blocked organization never needs a warm agent.
 After three repeated unexpected MCP execution errors stop explicitly. Technical outages never
 become content-pending verdicts. Human-pending pages do not stop other ready work.
 

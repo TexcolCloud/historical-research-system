@@ -36,6 +36,18 @@ def test_review_backlog_receives_capacity_without_stopping_for_human_pages():
     assert plan["batch_size"] == 2
 
 
+def test_human_pending_content_prevents_speculative_organization():
+    doc = {
+        "pages": [{"page": 1, "state": "pending"}, {"page": 2, "state": "awaiting_verify"}],
+        "tasks": [{"stage": "verify", "page": 2, "state": "ready"}],
+    }
+    plan = scheduling_plan(doc, capacity=14, overlap_reading=True)
+    assert plan["workers"]["verify"] == 1
+    assert plan["workers"]["organization"] == 0
+    doc["pages"][0]["state"] = "approved"
+    assert scheduling_plan(doc, capacity=14, overlap_reading=True)["workers"]["organization"] == 1
+
+
 def test_pause_and_technical_cooldown_retain_tasks(tmp_path):
     store, doc_id = document(tmp_path, 3)
     task = store.claim_task(doc_id, "ocr", "worker", scheduled=True)
