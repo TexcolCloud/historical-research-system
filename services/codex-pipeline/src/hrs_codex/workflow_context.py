@@ -17,8 +17,8 @@ class WorkflowContext:
     def inputs(self, document, task):
         return task_inputs(self.repository, document, task)
 
-    def verified_page(self, document_id, page):
-        return self._scoped(document_id, lambda doc: page)
+    def verified_page(self, document_id, page, validate=None):
+        return self._scoped(document_id, lambda doc: page, validate)
 
     def verified_task(self, document_id, task_id=None, stage=None, selector=None):
         def page_for(doc):
@@ -46,7 +46,7 @@ class WorkflowContext:
 
         return self._scoped(document_id, page_for)
 
-    def _scoped(self, document_id, page_for):
+    def _scoped(self, document_id, page_for, validate=None):
         def select(doc):
             page = page_for(doc)
             selected = {
@@ -73,8 +73,10 @@ class WorkflowContext:
                 selected["organization"] = doc.get("organization")
             return digest(selected)
 
-        def validate(doc):
+        def validate_snapshot(doc):
+            if validate is not None:
+                return validate(doc)
             page = page_for(doc)
             self.evidence.verify(doc, None if page is None else [page])
 
-        return self.repository.validated(document_id, validate, select)
+        return self.repository.validated(document_id, validate_snapshot, select)

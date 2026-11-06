@@ -178,3 +178,35 @@ def test_opening_original_pixels_does_not_block_mutation(tmp_path, monkeypatch):
             release.set()
         assert image.result(timeout=3)[1]
     assert other.status(doc_id)["run_request"]["pause_requested"]
+
+
+@pytest.mark.parametrize("lease_bound", [False, True])
+def test_original_pixels_ignore_concurrent_changes_on_other_pages(
+    tmp_path, monkeypatch, lease_bound
+):
+    import hrs_codex.task_inspection as module
+
+    store, identity = document(tmp_path, count=2)
+    other = Store(store.root)
+    task = store.claim_task(identity, "ocr", "transcriber") if lease_bound else None
+    hashed = []
+    original = module.file_digest
+
+    def concurrent_page_progress(path):
+        result = original(path)
+        hashed.append(path)
+        with other.lock:
+            current = other.checkpoints.read(identity)
+            current["pages"][1]["carrier_progress"] = len(hashed)
+            other.checkpoints.write(current)
+        return result
+
+    monkeypatch.setattr(module, "file_digest", concurrent_page_progress)
+    arguments = {"task_id": task["task_id"], "lease_token": task["lease_token"]} if task else {}
+    metadata, pixels = store.original_page(identity, 1, **arguments)
+    assert pixels == b"original-page-1"
+    assert metadata["page"] == 1
+    assert len(hashed) == 1, "Another page's progress must not invalidate these original pixels"
+    assert other.status(identity)["pages"][1]["carrier_progress"] == 1
+    if lease_bound:
+        assert metadata["image_receipt"]
