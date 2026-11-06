@@ -1,152 +1,189 @@
-# Codex local pipeline
+# Codex Pipeline
 
-默认入口见[根 README](../../README.md)。该模块只在本机执行原件留存、PDF/图片渲染、队列与入库校验；所有识别和内容判断由 Codex 原生子代理完成。[工作流契约](src/hrs_codex/workflow.md) 同时供 MCP 和协调器读取。
+本模块管理史料原件、页面渲染、持久任务、审核证据与 Markdown 发布。OCR、独立原图审核、修正验证和文章组织由 Codex 原生子代理执行；本地 MCP 负责分派任务、校验证据和保存状态，不执行模型推理。
 
-验收报告、史料样本和运行日志仅保留本地，不随模块分发。原图读法争议仍交人工，工程测试和流程验收不作为内容准确率证明。
+完整网页平台的安装和日常使用见[根 README](../../README.md)。本页介绍独立运行、MCP 接入和队列维护；阶段输入与提交规则以[工作流契约](src/hrs_codex/workflow.md)为准。
 
-完整网页集成：原项目上传经 tus/S3 自动进入同一队列；原阅读器继续提供脚注双向跳转、原图对照、结构和检索补充。新文档由 Terra 识别，Sol 独立审核及组织；新文档执行有限独立复核，无法确认或复核失败进入单用户人工终审；旧任务保留冻结策略。下面命令也可独立使用。
+## 独立使用
 
-网页分别显示识别、已审核、已通过和待人工页数；有人工待办时，其余自动页面继续处理。可显式暂停/继续，保存草稿会自动进行，人工终审逐项作出保留或修改的最终决定，全部处理后提交本页。特殊脚注和表格可使用 Markdown 源码编辑。
+需要 Python 3.11 或 3.12、uv，以及已登录且可使用项目指定模型的 Codex CLI。独立工作台不需要 Docker、SQL/S3、BGE 或本地 OCR 模型。
 
-程序按实际单页耗时和审核积压分配原生工作代理。新工作区默认开启原图预读、14 个共享名额、每会话至多八页，并在处理 48,000 字符后轮换；未配置的旧工作区保留七个名额、每会话两页，不擅自升级。显式速度策略支持 2–64 个共享名额。启动中、预热和空闲会话都计入容量，名额跨书共享；现有非空阶段保持三十秒的调度稳定窗口。Sol 在 OCR 期间独立观察原页，冻结观察后等待候选完成对照；不能因提速省略原图审核。限流按账户/模型范围降速和退避，冷却后用单真实任务探测，再按成功结果逐档恢复；额度耗尽和登录失效等待显式恢复。当前页和原图阅读继续完成，内容不清仍交人工。目录按已核验原文关联物理页和印刷页，冲突留给人工，导航不改正文和脚注。
-
-性能路径：SQLite/WAL 是任务状态的唯一写入端；文档字段、页面和任务分别有版本，提交结果、后续任务、会话和事件在同一事务中落盘。日常校验覆盖当前页及依赖，发布、迁移和完整验收仍全书验签，不以修改时间代替证据哈希。平台增量消费事件，不再每秒扫描所有书。每个执行器最多监督两个 CLI 协调进程，实际模型调用仍为原生子代理，工作区名额跨书共享。旧 JSON 工作区须先停机迁移，原 JSON 逐字节封存为 `document.legacy.json`。
-
-
-## 统一入口
+以下示例使用 **PowerShell**，全部在仓库根目录执行。在新的终端中安装独立环境，避免继承完整平台的环境路径：
 
 ```powershell
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli start 'D:/materials/source.pdf'
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli workbench
+$env:UV_PROJECT_ENVIRONMENT = [System.IO.Path]::GetFullPath('services/codex-pipeline/.venv')
+uv sync --project services/codex-pipeline --locked --group dev
+codex login status
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli doctor
 ```
 
-`start` 返回文档 ID、实际工作区 ID 和工作台网址，提交持久队列并启动执行器。工作台提供导入、任务进度、原图、人工待审和已入库检索；浏览器关闭后，已提交的检查点及后台处理继续保留。后台进程退出后，下次打开工作台恢复队列；它不是操作系统开机服务。默认配置为 [historical-workspace.json](../../.codex/historical-workspace.json)，显式 `--root`、环境变量 `HRS_CODEX_ROOT` 可选择独立工作区。
+`doctor` 检查 Codex 命令、登录与本地存储，不运行模型，也不证明材料已审核。后续命令继承同一环境；更新依赖前先停止使用该环境的常驻进程。
 
-在需要提速的同一工作区配置上限，然后重启其执行器，使 CLI 并发设置同时更新。示例 14 只是配置值，实际最优值需要用账号和材料测量；降低上限只限制新任务，不中断当前页：
+导入已有的本地文件，将示例路径替换为真实文件：
 
 ```powershell
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root 'D:/workspace' configure-execution --capacity 14 --batch-pages 8 --overlap-reading
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli start 'C:/materials/source.pdf' --title '待处理史料'
 ```
 
-回退执行策略使用 `--capacity 7 --batch-pages 2 --no-overlap-reading`。配置不改变冻结的内容审核策略、人工草稿或已发布结果；原生备份保存配置，临时服务退避状态不作为恢复配置。
+`start` 留存原件、提交持久队列，并启动或复用后台工作台。返回值包括 `document_id`、`workspace_id` 和实际访问网址。后台启动使用空闲端口，网址带本机访问令牌；不要提交或公开该令牌。
 
-网页按持久状态变化自动更新，保留导入输入、当前审核页与未提交正文；提交失败仍停留原表单，临时断线自动重连。另一窗口更新同页后会保留本地编辑并阻止旧版本提交。保存待审草稿保持同一物理页；确认最后一页才自动进入文章组织。工作台复用会核对实际工作区和执行器健康，避免仅网页存活而运行器已停止。
+也可在前台启动工作台，再从网页导入：
 
-先用 `uv sync` 安装依赖，常驻运行使用 `uv run --no-sync ... python -m hrs_codex.cli`，MCP 项目配置也使用模块入口。这样 Windows 上的常驻控制台启动器不会阻止后续更新。执行端使用独立上下文、最小账号路由和按阶段任务包，不加载完整开发 skill、无关插件和应用；仅向工作子代理开放所需 MCP，无需依赖桌面安装目录中的 shell。开发对话的配置与登录不变。
-
-导入时逐页探测：可靠文字进入原生候选；有独立图像/描边区域时合并原生候选与区域识别；扫描、隐藏 OCR、坏字符映射或不确定几何进入整页 OCR。空白候选也需要原图审核。探测保存证据，不授予内容批准。新策略对明确错误或读法冲突最多做一次独立复核，其余内容问题进入人工队列。显式技术恢复或旧任务保留原生/混合回退与有限重试协议，不能覆盖人工决定。运行故障与内容问题分别记录，技术恢复遵循下面的任务、协调器和共享范围预算。
-
-```mermaid
-flowchart TD
-    A[原 React 上传 / 对话 Skill / CLI] --> B[同一工作区：原件与持久队列]
-    B --> C{逐页探测}
-    C -->|可靠文字| D[原生 Markdown 候选]
-    C -->|混合内容| E[Terra 区域识别并合并]
-    C -->|扫描或不可靠| F[Terra 整页 OCR]
-    D --> G[Sol 独立原图审核]
-    E --> G
-    F --> G
-    G -->|通过| I{全文已处理}
-    G -->|未通过或有修改建议| K[单用户人工队列：原图 / 正文 / 历史]
-    K -->|确认或保存修改后确认| I
-    K -->|保存草稿| K
-    I -->|是| L[Sol 文章组织与唯一边界]
-    L --> M[证据校验后发布 Markdown]
-    M --> N[原阅读器：脚注 / 表格 / 插图 / 原图]
-    N --> O[BGE 索引与检索 / Markdown 导出]
-    N --> P[用户定位勘误：保留旧发布版本]
-    P --> G
+```powershell
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli workbench --port 8766
 ```
 
-## 工具
+前台默认端口为 8766，`--port 0` 可分配空闲端口；在该终端按 `Ctrl+C` 停止前台实例。关闭浏览器不会停止后台处理。工作台不是操作系统开机服务，后台进程退出后需要重新启动。
 
-| MCP 工具 | 用途 |
+已通过完整平台上传的资料，应在同一工作区继续现有文档，不能再次运行 `start` 导入。
+
+## 工作区与 MCP 接入
+
+工作区选择优先级：CLI `--root` → 进程环境变量 `HRS_CODEX_ROOT` → [共享配置](../../.codex/historical-workspace.json) → `state/codex`。CLI 不会自动读取根 `.env` 中的变量。`--root` 必须位于子命令之前：
+
+```powershell
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root state/codex workspace
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root state/codex list
+```
+
+`.workspace.json` 保存持久身份。操作前对比网页、CLI 和 MCP 的 `workspace_id`，尤其是平台设置了 `PLATFORM_CODEX_ROOT` 时。仅修改平台 `.env` 不会切换已连接的聊天 MCP。
+
+[项目 MCP 配置](../../.codex/config.toml)通过下面的 stdio 命令连接本模块：
+
+```powershell
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli mcp
+```
+
+正常使用时由 Codex 启动该进程，无需手动常驻一份。先完成独立环境安装，再连接项目 MCP；需要指定根目录时，在连接进程设置 `HRS_CODEX_ROOT` 并重新连接。对话入口见 [historical-research Skill](../../.agents/skills/historical-research/SKILL.md)，原生角色定义见 [.codex/agents](../../.codex/agents)。
+
+完整平台的 Runner 使用平台自己的 Python 环境启动工作进程，不依赖独立 `.venv`；桌面对话 MCP 则需要其配置所引用的独立环境。
+
+## 处理与发布规则
+
+1. **逐页探测**：可靠文字层生成原生候选；混合页面结合文字层与区域识别；扫描件、不可靠字符映射及隐藏 OCR 等进入整页识别。探测结果不代表内容通过。
+2. **独立原图审核**：新文档使用 GPT-6.1 Terra 识别，GPT-6.1 Sol 审核。审核者先读取原图像素、冻结观察，再读取候选对照；空白候选同样需要审核。
+3. **有限修正复核**：明确且唯一定位的错误可修正；明确修正或读法冲突至多进行一次独立整页验证。原件不清、无法可靠定位或验证失败进入人工终审，不循环猜测。
+4. **人工终审**：用户对疑点作出保留或修改的最终决定并提交本页。保存草稿不等于通过，无需填写审核人或审核意见。
+5. **组织与发布**：所有页面通过、文章组织通过且目录解析任务完成后，校验证据并发布。目录跳转关系的争议可保留人工待办，不伪装成已确认关系。
+
+旧文档保留冻结的模型与审核策略，只有明确迁移或恢复时才按对应协议更新。机器决定、人工决定和隔离流程测试分别标记；机器通过不等于整本书经人工批准。
+
+脚注锚点与归属、文章边界、表格及插图原件、物理页来源需要贯穿组织与 Markdown 导出。定位疑点使用正文锚点、偏移和文本哈希；不可靠的位置明确降级为区域或整页核对，不伪造字级高亮。
+
+### 任务接口
+
+运行时协调器使用 `dispatch_work` / `open_task_packet`；直接 MCP 客户端先读取 `workflow_instructions`。不要通过修改任务状态代替代理执行与证据提交。
+
+| 接口组 | 常用工具与职责 |
 | --- | --- |
-| `workflow_instructions` | 读取协调步骤、分工和提交契约 |
-| `dispatch_work` / `open_task_packet` | 预留全工作区容量，发出具体任务与原页、规则、租约 |
-| `freeze_observations` / `submit_packet` | 原图观察冻结后分段交付候选；原子提交及幂等回执 |
-| `wait_for_changes` / `finish_worker` | 等待持久事件，释放空闲原生会话 |
-| `original_details` | 一次查看最多六个原件局部，逐项保留哈希回执 |
-| `workspace_status` / `open_workbench` | 确认工作区身份，启动或复用工作台与执行器 |
-| `process_document` / `resume_document` | 一次导入并排队，或显式恢复技术故障 |
-| `prepare_document` | 低层导入：留存原件、渲染物理页、探测并生成提取/审核任务 |
-| `list_documents` / `document_status` | 查看文档、干净内容和待办 |
-| `approved_page_catalog` / `approved_page_text` / `approved_pages_text` | 遍历冻结快照，逐页或按完整页面批量读取全文，不截断脚注 |
-| `scheduling_plan` / `wait_for_work` / `report_task_failure` | 有界分配、耗时统计和技术冷却 |
-| `pause_document` / `resume_document` | 保留检查点，显式暂停及继续 |
-| `navigation_status` | 分页读取目录关联和冲突；人工导航决定只在本地网页提交 |
-| `claim_task` / `task_details` | 领取有过期时间的任务，读取带哈希输入 |
-| `original_image` | 返回原页图像像素及 SHA-256 |
-| `review_candidate` | 冻结带原图回执的观察与不确定项，然后开放审核/验证候选；没有观察不能提交机器批准 |
-| `candidate_text` | 原图观察冻结后分段读取长候选；完整覆盖前不能批准 |
-| `original_detail` | 从原 PDF 以 432 dpi 重渲染指定区域，或从原始图片取原生像素细节，保存哈希证据 |
-| `human_review_queue` | 读取待人工审核的页面、未解决次数及原因；只读，不代替人工裁决 |
-| `request_human_review` | 独立终验仍有原图读法争议时，以当前文本/原图哈希和细节证据交接人工；保留版本并暂停自动重跑 |
-| `submit_task` | 提交有租约、输入哈希与结构校验的机器结果 |
-| `retry_task` | 保留旧裁决并重开待处理任务 |
-| `fallback_page` | 带原因、新证据和次数限制的内容回退 |
-| `begin_revision` | 开启显式复核版本，保留原发布快照和人工记录 |
-| `publish_document` | 全文与文章组织通过后发布 Markdown |
-| `search_library` | 在已发布文本中检索，返回页码与原图证据 |
+| 工作区与文档 | `workspace_status`、`list_documents`、`document_status`、`open_workbench`：确认身份、进度和工作台 |
+| 导入与控制 | `process_document`、`resume_document`、`pause_document`：导入排队、显式恢复与暂停 |
+| 原生分派 | `dispatch_work`、`open_task_packet`、`wait_for_changes`、`finish_worker`：共享容量、租约、任务包和会话退出 |
+| 原图证据 | `original_image`、`original_detail`、`original_details`：读取像素与局部证据哈希 |
+| 审核与提交 | `freeze_observations`、`review_candidate`、`candidate_text`、`submit_packet`：先冻结原图观察，再覆盖候选并提交 |
+| 人工交接与目录 | `human_review_queue`、`request_human_review`、`navigation_status`：保留疑点与冲突，人工决定在本地网页提交 |
+| 组织与使用 | `approved_page_catalog`、`approved_pages_text`、`publish_document`、`search_library`：读取完整通过页、校验发布及检索 |
 
-并行子代理共享 SQLite/WAL 任务账本和命令锁。模块自带的 `search_library` 对已审文本直接检索；原 React 平台桥接同一文档的阅读投影，并使用 BGE/OpenSearch。Docker 为平台提供存储与检索，MCP 本身不执行模型推理。
+具体参数、兼容低层工具和提交格式由 MCP 工具 schema 及[工作流契约](src/hrs_codex/workflow.md)提供。独立 `search_library` 直接检索已发布文本；完整 React 平台另用 BGE/OpenSearch 建立检索索引。
 
-新 MCP 审核/验证任务的候选默认隐藏。`original_image` 携带任务 ID 与租约后返回原图回执，代理记录关键用词、专名、数字、否定因果及结构，再调用 `review_candidate` 获得候选。原图观察冻结后不能重写；观察仍有未解决内容时不能批准。最终裁决绑定观察哈希，失败记录和人工待审历史也保留观察。旧已完成决定及已领取的兼容契约保持可追溯。
+## 调度与容量
 
-审核与复核共用疑点契约。文字位置按保留的 Markdown 字面锚点、码点偏移及文本哈希传递；无法可靠定位时明确降级，原始疑点与编号保持不变。人工页默认展示当前正文标记和原图框，多处原图可切换，草稿的位置与草稿正文一起保存。预热分配让位于可执行任务，空闲预热会话可跨书归还名额，不中断进行中的原图读取。
+新工作区默认使用 14 个跨书共享名额、每会话至多 8 页，并开启原图预读。未配置的旧工作区保留 7 个名额、每会话 2 页，不自动提升。启动、预热和空闲会话均占用名额；调度依据单页耗时及识别、审核积压分配容量。
 
-新导入使用有界修正与独立整页复核：清楚且唯一定位的错误可修正一次；审核与候选读法冲突可对未改候选独立核验一次。真正不清或复核失败交人工，不循环重试。旧候选、失败裁决和输入快照保留；旧策略仅在明确恢复时迁移，保护人工草稿和决定。疑点文字高亮与原图区域按版本单独保存，不改写Markdown。原件不清仍保持待核对。
-
-小字、无法识别的字符或读法冲突应先调用 `original_detail` 检查原始证据。细节区域使用归一化边界 `[left, top, right, bottom]`；原 PDF 重渲染后再裁切。扫描源的实际像素不足时，提高渲染 DPI 不会补出缺失信息，仍应待审。细节图片和来源元数据存于文档的 `evidence/details/`，由提交结果的 `original_details` 列表引用；提交及后续读取会校验来源、页码、文件哈希和元数据。
-
-## 人工审核
-
-原图细节重试后仍不确定的页面交给人工；所有待审页面自动进入人工队列，多轮失败显示累计未解决记录。无需一直重跑模型。启动当前工作区的本地审核页：
+显式配置同一工作区的执行策略：
 
 ```powershell
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root state/codex review
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root state/codex configure-execution --capacity 14 --batch-pages 8 --overlap-reading
 ```
 
-打开终端输出的网址。界面并排展示原图和正文，可放大查看由原件重渲染的页面、查看 OCR 初稿和历史修订；清晰度仍受原始扫描限制。无需填写审核人及审核意见，可以修订正文并“提交本页并确认通过”，也可以“保存进度，稍后继续”暂存草稿，草稿不提交审核结果。审核页只监听本机回环地址，网址含本次启动的访问凭据；重启后使用新网址。
+容量范围为 2–64，批次范围为 1–8。配置后重启所属执行器，使协调进程采用新设置。保守配置可使用 `--capacity 7 --batch-pages 2 --no-overlap-reading`。容量上限不代表实际可达并发或吞吐保证，也不会改变内容审核门槛。
 
-人工决定保存输入快照、原件与页图哈希、修改后正文和原因，页面批准标记为 `human`。机器结果始终保持 `machine`，Codex 不得代填真实史料的人工裁决。单用户身份由本地回执自动记录，不作身份认证或 sealed gold 认证。明确授权的隔离流程测试使用 `workflow_test`，不属于人工准确率批准。历史机器失败记录和人工草稿保留；机器重试不能覆盖人工待审草稿。
+账户或模型限流触发共享降速与退避，冷却后用真实待处理任务探测，再逐档恢复。额度耗尽或登录失效需要修复后显式继续。尚待人工的页面不会阻止其他可执行页面处理。
 
-全部页面通过后自动排队，由工作台执行器继续文章组织和发布。无需再向对话发送继续指令；工作台尚未运行时，下次打开即可接续。显式技术恢复使用 `hrs-codex --root <工作区> resume <文档ID>`，同步诊断使用 `run`。仍有一页未解决就继续阻断发布。人工审页、机器组织的发布回执标为 `mixed`，列出 `human_reviewed_pages`；整份文档的 `human_approval` 仍为 false，因为文章组织没有人工批准。
+## 状态、人工核对与恢复
 
-## 技术中断与断点恢复
+查看已有文档时，将占位标识替换为返回的原生 `document_id`：
 
-新运行遇到技术故障时，普通执行最多尝试三次；耗尽后校验保存的证据与检查点，最多自动回退执行一次。仍失败则停止，交给平台的“从断点恢复”。人工恢复开启新的有限批次，不改变内容审核结论。升级前已经停止的运行不会自行重启，只有显式恢复后才启用这套预算。
+```powershell
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root state/codex status 'DOCUMENT_ID'
+```
 
-恢复复用已通过页面与回执，仅重开租约已过期的未完成任务。每本文档的执行锁覆盖协调器及其清理过程；有效任务租约和仍在退出的旧实例会阻止第二份处理。恢复身份和回执持久化，重复请求不会重复授予预算，旧租约不能提交新任务结果。最新的暂停要求优先于恢复。
+“已识别”“已审核”与“已通过”分别统计；审核完成但仍有疑点的页面会留在人工队列。可运行 `review` 打开同一工作台，或使用已返回的后台网址：
 
-原件、页图和修订证据校验失败时停止恢复，修复文件后可再次请求；不会修改证据哈希强行通过。人工决定、草稿、脚注、目录关联及发布门槛继续保留。断点摘要只是快速提示，实际执行前仍需完整校验。
+```powershell
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root state/codex review --port 0
+```
 
-## 产物
+核对页展示原图、疑点、正文及历史，支持保留当前识别或修改后确认。草稿与人工决定保留版本；自动重试不能覆盖人工修改。全部页面通过后，由正在运行的执行器继续组织和发布。
+
+技术故障修复后，从界面继续，或显式恢复现有文档：
+
+```powershell
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root state/codex resume 'DOCUMENT_ID'
+```
+
+恢复保留已通过页面、人工草稿和证据，只重开可恢复的未完成任务。新运行的普通技术尝试最多三次，预算耗尽后最多自动从已校验检查点回退执行一次，仍失败则停止等待人工恢复。用户主动暂停或取消的任务不会自动重启。
+
+`run` 是同步执行入口，会请求模型处理，**不是只读诊断**；未完成发布时退出码为 2，错误为 1，中断为 130。`prepare`、`retry` 等低层维护命令不能用来绕过人工争议、证据校验或发布门槛。`run --model` 只选择协调模型，不替换冻结的识别与审核角色。
+
+| 问题 | 处理方式 |
+| --- | --- |
+| CLI 与网页看不到同一资料 | 核对实际根目录和 `workspace_id`，不要重复导入 |
+| 原件看不清 | 保留原图，必要时检查原始局部，再由用户终审；放大不能补出缺失像素 |
+| 登录失效、额度耗尽 | 修复账户状态后显式恢复，保留当前检查点 |
+| 原件、页图或文本哈希不符 | 找回对应原文件并重新校验，不能改哈希强行放行 |
+| 状态显示待人工 | 完成真实内容决定；草稿不会批准内容，也不需要继续调用模型碰运气 |
+| 恢复提示仍有实例或有效租约 | 等待原实例正常退出，避免同时启动第二份处理 |
+
+## 数据与备份
+
+工作区采用 SQLite/WAL，`ledger.sqlite3` 是现役任务、页面、会话与决定的唯一写入账本。文件示意：
 
 ```text
 state/codex/
-  .workspace.json          持久工作区身份
-  .workbench.json          本次工作台进程与本机访问凭据（不提交仓库）
-  documents/<source-sha256-first-24>/
-    source.pdf|png|jpg|tif    原件字节
-    pages/*.png             渲染页及工作副本
-    render.json             渲染清单与原件/页图哈希
-    document.json           页、任务、OCR/修订/审核、文章映射
-    document.md             全部通过后的文本
-    publication.json        机器入库回执与哈希
-    revisions/              不可覆盖的已发布正文、清单和回执快照
+  .workspace.json                   持久工作区身份
+  ledger.sqlite3                    现役状态与事件
+  .workbench.json                   本机进程与访问令牌，不共享
+  documents/<source-hash-prefix>/
+    source.*                        留存原件
+    pages/*.png                     渲染页与审核工作副本
+    render.json                     渲染清单与原件、页图哈希
+    evidence/details/               原件局部与证据元数据
+    document.md                     全文通过后的发布文本
+    publication.json                发布回执与哈希
+    revisions/                      不可覆盖的旧发布快照
   runs/<document-id>/<timestamp>/
-    request.json            协调器指令
-    events.jsonl            Codex 原生执行事件（含子代理活动）
+    request.json
+    events.jsonl
     stderr.log
     summary.txt
     receipt.json
 ```
 
-`document.json` 的 `pages[].ocr` 保留初稿，`candidate` 保留修订，`approved` 保存通过的最终正文；`tasks[].result` 与 `receipt` 保留历史结果。图片原件可能有独立的归档页和审核工作副本，两者均保留。
+原稿、候选、通过正文及历史裁决在账本中保留。`document.json` 只属于旧格式或兼容快照，不是当前可写状态入口。不得手动编辑账本或覆盖证据文件。
 
-CLI 的 `--root` 选项位于子命令前。以复制整个工作目录进行本机备份，恢复后通过 `status`/`run` 继续。渲染清单含绝对路径，移动目录时应保留原路径或从原件导入新工作区；不要手动改证据哈希。
+完整平台使用[协调备份与恢复](../research-platform/README.md#备份与恢复)，并独立保存 S3 对象。独立模块的校验快照实现位于 [backup.py](src/hrs_codex/backup.py)，没有 CLI 备份子命令；调用前必须停止执行器写入，恢复到不存在的新目录。不能在运行时只复制主 SQLite 文件，也不能只备份数据库而遗漏原件和修订证据。
 
-MCP 使用官方 Python SDK 2.2.0 的 stdio 传输。启动工具为 `uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli mcp`。该进程不调用模型 API、不加载本地视觉或 OCR 模型；模型连接与子代理生命周期由 Codex 管理。
+日志、原件、访问令牌与工作区不进入 Git。分享排障记录前脱敏；仓库跟踪边界见[根 README](../../README.md#仓库跟踪范围)。
 
-接入方式依据 [OpenAI 本地 MCP 文档](https://developers.openai.com/codex/mcp)、[原生子代理文档](https://developers.openai.com/codex/subagents) 和 [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/)。本地 MCP 的工具预批准仅限项目注册的服务；协调器保留 workspace-write 沙箱。
+## 旧工作区迁移
+
+出现 `Legacy workspace is read-only` 时，先停止该工作区所有执行器和工作台，保存完整备份，再在同一环境执行：
+
+```powershell
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --root state/codex migrate-ledger
+```
+
+迁移校验原件与审核证据，将旧 JSON 导入账本并封存为 `document.legacy.json`。迁移中断时保持执行器停止，修复报错后重跑同一命令；不要删除迁移标记或重写哈希。完成后用 `workspace`、`list` 和 `status` 核对身份及文档，再启动工作台。迁移不等于内容重新批准。
+
+## 开发验证
+
+使用本页独立环境，在仓库根目录执行：
+
+```powershell
+uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli --help
+uv run --no-sync --project services/codex-pipeline --locked python -m pytest services/codex-pipeline/tests --basetemp .cache/readme-codex-tests -q
+uv run --no-sync --project services/codex-pipeline --locked ruff check services/codex-pipeline
+```
+
+单元测试不调用真实模型。真实史料验收需使用独立工作区，实际执行原图审核并保留证据，未解决内容交用户处理。涉及完整平台时，还需验证上传、投影、阅读、检索及导出，见[平台说明](../research-platform/README.md)。

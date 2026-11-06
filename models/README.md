@@ -1,44 +1,19 @@
-# Local Models
+# 本地模型与缓存
 
-本目录保存运行所需的模型权重与缓存。权重不随 Git 分发，也不作为书籍业务文件写入 S3；原件、OCR 产物和研究记录使用平台 S3 存储。返回 [项目部署说明](../README.md#快速开始)。
+默认 Codex 流程由 Terra 执行 OCR、Sol 执行独立原图审核、复核和文章组织，不依赖本地 PaddleOCR、Qwen 或 DeepSeek。完整 React 平台的检索仍使用本地 BGE 权重；独立 MCP 的使用要求见 [根 README 快速开始](../README.md#快速开始)。所有命令从项目根目录执行，并继承根 README 设置的 `UV_PROJECT_ENVIRONMENT`。
 
-## 当前模型与目录
+权重和下载缓存不随 Git 分发。此目录不保存书籍业务原件或审核记录；业务持久化职责见 [平台说明](../services/research-platform/README.md#模块与数据职责)。
 
-| 用途     | 模型／工件                                    | 默认目录                                            |
-| -------- | --------------------------------------------- | --------------------------------------------------- |
-| OCR      | PaddleOCR-VL-1.6 与 PaddleX 所需模型          | `paddleocr/`                                        |
-| 文档转换 | Docling 工件                                  | `docling/`                                          |
-| 原图核对 | Qwen3-VL-8B-Instruct Q4_K_M 与 F16 视觉投影器 | `local-vision/`                                     |
-| 嵌入     | BAAI/bge-m3                                   | `document-retrieval/bge-m3/<revision>/`             |
-| 重排     | BAAI/bge-reranker-v2-m3                       | `document-retrieval/bge-reranker-v2-m3/<revision>/` |
-| 框架缓存 | Hugging Face、PyTorch                         | `huggingface/`、`torch/`                            |
+## 当前检索模型
 
-旧 Table Transformer／TableCenterNet 权重不是现役单路 OCR 的运行要求。RapidOCR 仅作为显式替代配置保留，不在默认流程中自动补读。
+| 用途 | 模型 | 本地目录 |
+| --- | --- | --- |
+| 嵌入 | `BAAI/bge-m3` | `models/document-retrieval/bge-m3/<revision>/` |
+| 重排 | `BAAI/bge-reranker-v2-m3` | `models/document-retrieval/bge-reranker-v2-m3/<revision>/` |
 
-更新本指南不要求删除或迁移本地已有权重。
+revision 由 [domain/settings.py](../services/research-platform/src/hrs_platform/domain/settings.py) 固定。运行时只读本地模型，不自动下载。GPU broker 使用根 README 指定的 `.cache/engineering-envs/research-platform` Python 环境；CPU 模式须在 API 自身环境安装 `retrieval` extra，并显式设置 `PLATFORM_RETRIEVAL_DEVICE=cpu`。CPU 模式仍需要两份 BGE 权重。
 
-## OCR 与视觉
-
-在项目根目录，按 [快速开始](../README.md#快速开始) 准备本地根目录标记和配置后执行：
-
-```powershell
-$env:UV_PROJECT_ENVIRONMENT="$PWD/services/document-extraction/.venv"
-.\deploy\windows\bootstrap.ps1
-```
-
-该脚本安装独立 OCR 环境并初始化检查当前后端，首次运行可能下载 Paddle 工件。缓存位置由 [转换设置](../services/document-extraction/src/document_extraction/settings.py) 统一指定；识别路径由 [default.json](../services/document-extraction/config/default.json) 决定。
-
-平台环境安装后，运行：
-
-```powershell
-.cache/engineering-envs/research-platform/Scripts/python.exe scripts/setup_local_vision.py
-```
-
-[安装脚本](../scripts/setup_local_vision.py) 固定 Qwen 上游版本和 Windows llama.cpp 版本，校验下载摘要，生成 `local-vision/installation.json`。其中记录当前机器上的 `llama-server.exe` 路径；运行时文件位于 `.cache/llama.cpp/`。迁移主机后重新运行安装脚本，不直接沿用另一台机器的绝对路径。
-
-## 嵌入与重排
-
-当前后端使用 [模型配置](../services/research-platform/src/hrs_platform/domain/settings.py) 中注册的固定 revision，运行时只读取本地文件。安装平台的 `retrieval` extra 后，在根目录运行下列命令下载对应快照，无需另建下载工具：
+安装根 README 中的检索依赖后，可执行下面的下载命令；它需要网络和足够的磁盘空间，不启动模型推理：
 
 ```powershell
 @'
@@ -52,21 +27,48 @@ for name, revision in MODEL_REVISIONS.items():
 '@ | .cache/engineering-envs/research-platform/Scripts/python.exe -
 ```
 
-需要联网访问上游模型仓库，并为权重与下载缓存预留磁盘空间。示例直接读取项目注册版本，避免文档内复制的版本号与代码分叉。下载本身不启动模型推理。
+模型目录和固定 revision 必须与运行时代码一致。主机检索直接读取 `models/document-retrieval/`；旧应用 Compose 将它只读挂载到容器内相同项目布局。不要只改一侧路径。
 
-## 检查与显存调度
+## 旧 OCR／视觉兼容
 
-- OCR 检查：`services/document-extraction/.venv/Scripts/history-extract.exe check`。它会初始化识别后端并可能占用 GPU，不要与正在处理的书籍并行执行。
-- 平台运行状态：使用根目录的 `scripts/hrs_v2.py doctor`；这只检查服务，不验证全部权重是否能成功推理。
-- `scripts/local_vision.py` 协调 OCR、Qwen 和检索模型的 GPU 使用。当前以阶段切换为主，不以多个模型同时驻留作为运行前提。
-- Docker 中的平台按现有 Compose 只读挂载 `models/document-retrieval/`，Windows broker 从主机模型目录加载。修改目录时同时核对两侧路径。
+下列工件只用于显式旧转换／平台路径，不是默认 Codex 处理的安装步骤。配置与 CLI 见 [document-extraction README](../services/document-extraction/README.md)；旧平台选择方式见 [research-platform README](../services/research-platform/README.md#旧路径兼容)。不需要删除本机已有权重。
 
-### 切换与排障
+| 用途 | 工件 | 默认目录 |
+| --- | --- | --- |
+| OCR | PaddleOCR-VL-1.6、PaddleX 工件 | `models/paddleocr/` |
+| 文档转换 | Docling 工件 | `models/docling/` |
+| 本地原图核对 | Qwen3-VL-8B-Instruct Q4_K_M、F16 视觉投影器 | `models/local-vision/` |
+| 框架缓存 | Hugging Face、PyTorch | `models/huggingface/`、`models/torch/` |
 
-OCR 申请共享锁后，broker 先释放检索进程；空闲显存不足时再卸载视觉模型。视觉请求先释放检索；检索请求先卸载视觉。只管理本启动器拥有的进程，不终止其他应用来腾显存。
+[Windows bootstrap](../deploy/windows/bootstrap.ps1) 安装旧 OCR 环境并执行后端检查，首次运行可能下载模型、初始化后端并占用 GPU。它不属于只读健康检查；仅在明确准备旧 OCR 路径时运行：
 
-broker 默认预留 1.5 GiB，OCR、视觉、检索的准入预算分别为 6、9、6 GiB，配置变量见 [local_vision.py](../scripts/local_vision.py)。这些是调度阈值，不是测得峰值；OCR 配置中的 15 GB 上限属于另一个层面的设备约束，不应混为模型实际占用。显存不足会返回错误，仍须根据真实输入测量后调整预算。
+```powershell
+.\deploy\windows\bootstrap.ps1
+```
 
-视觉服务冷启动默认允许 600 秒，`HRS_VISION_START_TIMEOUT` 可在 30–900 秒范围调整。排查时查看 `state/local-vision/events.jsonl` 和 `llama.log`，结合 NVIDIA 显存状态区分模型加载、排队和推理。一次健康响应不代表整书核验已完成；超时不作为内容通过。
+该脚本使用提取模块自己的 `services/document-extraction/.venv`；若当前终端已为平台设置 `UV_PROJECT_ENVIRONMENT`，应在单独终端运行旧 OCR 安装，避免将依赖同步到平台环境。
 
-不要将模型权重、下载临时文件或本机 `installation.json` 提交 Git；模型许可证以各上游仓库为准。
+[视觉安装脚本](../scripts/setup_local_vision.py) 下载固定版本 Qwen 权重和 Windows llama.cpp，校验下载摘要并生成 `models/local-vision/installation.json`：
+
+```powershell
+uv run --no-sync --project services/research-platform --locked python scripts/setup_local_vision.py
+```
+
+运行时位于 `.cache/llama.cpp/`。安装记录包含当前机器的可执行文件路径；迁移主机后重新安装，不直接复用另一台机器的安装记录。旧 OCR 缓存可通过 `HRS_MODEL_ROOT` 指定，路径规则见 [提取设置](../services/document-extraction/src/document_extraction/settings.py)；平台 BGE 路径并不读取该变量。RapidOCR 仅为显式替代配置，不在默认单路 OCR 后自动补读。
+
+## 检查与排障
+
+```powershell
+uv run --no-sync --project services/research-platform --locked python -m hrs_platform.cli doctor
+```
+
+平台 `doctor` 检查依赖服务和 Codex 登录，不加载 BGE／旧视觉模型，也不证明权重能成功推理。旧 OCR 的 `history-extract check` 会初始化模型，使用方式见提取模块 README。
+
+| 问题 | 检查 |
+| --- | --- |
+| 找不到 BGE 权重／tokenizer | 下载目录是否包含代码固定 revision，运行进程是否从项目模型目录读取 |
+| GPU 检索不可用 | CUDA 检索环境、显卡状态、`18160` broker；主机日志位于 `.cache/platform-diagnostics/codex-retrieval.log` |
+| 选择 CPU 后缺少 torch／transformers | `retrieval` extra 是否安装在 API 实际使用的 Python 环境 |
+| 旧视觉模型无法启动 | 安装记录、`.cache/llama.cpp/`、`state/local-vision/llama.log` 与 `events.jsonl` |
+
+[local_vision.py](../scripts/local_vision.py) 按请求协调旧 OCR、视觉与检索的 GPU 使用；显存准入配置是调度阈值，不能当作实际峰值或内容验收证据。不要将权重、安装记录、下载临时文件或缓存提交 Git；模型使用条款以各上游许可证为准。
