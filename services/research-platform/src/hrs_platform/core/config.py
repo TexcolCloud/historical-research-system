@@ -4,6 +4,48 @@ from typing import Literal
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import ArgumentError
+
+
+def load_environment(root: Path) -> dict[str, str]:
+    """Resolve local defaults and derived URLs without changing files or process state."""
+    env = {
+        key: value
+        for key, value in {**dotenv_values(Path(root) / ".env"), **os.environ}.items()
+        if value is not None
+    }
+    for key, value in {
+        "INGEST_S3_ENDPOINT_URL": "http://127.0.0.1:58333",
+        "INGEST_S3_BUCKET": "ingestion-acceptance",
+        "INGEST_S3_REGION": "us-east-1",
+    }.items():
+        env.setdefault(key, value)
+    if env.get("INGEST_DATABASE_URL") or env.get("INGEST_DEV_DB_PASSWORD"):
+        try:
+            ingest = (
+                make_url(env["INGEST_DATABASE_URL"])
+                if env.get("INGEST_DATABASE_URL")
+                else URL.create(
+                    "postgresql+psycopg",
+                    username="ingestion_owner",
+                    password=env["INGEST_DEV_DB_PASSWORD"],
+                    host=env.get("INGEST_DATABASE_HOST", "127.0.0.1"),
+                    port=int(env.get("INGEST_DEV_DB_PORT", "55436")),
+                    database="postgres",
+                )
+            )
+        except (ArgumentError, ValueError):
+            raise ValueError("Invalid PostgreSQL connection configuration.") from None
+        env["INGEST_DATABASE_URL"] = ingest.render_as_string(hide_password=False)
+        for key, database, host in (
+            ("PLATFORM_DATABASE_URL", "historical_research_v2", ingest.host),
+            ("PLATFORM_TEST_DATABASE_URL", "historical_research_v2_test", ingest.host),
+            ("PLATFORM_DOCKER_DATABASE_URL", "historical_research_v2", "host.docker.internal"),
+        ):
+            if not env.get(key):
+                env[key] = ingest.set(database=database, host=host).render_as_string(hide_password=False)
+    return env
 
 
 class Settings(BaseModel):
@@ -51,7 +93,7 @@ class Settings(BaseModel):
     @classmethod
     def load(cls, root=None):
         root = Path(root or os.environ.get("HRS_PROJECT_ROOT", Path(__file__).resolve().parents[5])).resolve()
-        env = {**dotenv_values(root / ".env"), **os.environ}
+        env = load_environment(root)
         values = {
             name: env["PLATFORM_" + name.upper()]
             for name in cls.model_fields

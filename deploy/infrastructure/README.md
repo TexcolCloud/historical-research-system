@@ -9,9 +9,9 @@
 | [compose.storage.yml](compose.storage.yml) | `historical-ingestion-acceptance` | PostgreSQL：`127.0.0.1:55436`；SeaweedFS S3：`127.0.0.1:58333` | `postgres-data`、`s3-data` |
 | [compose.search.yml](compose.search.yml) | `historical-retrieval` | OpenSearch：`127.0.0.1:19260` | `index-data`、`index-recovery` |
 
-表中的卷名由各 Compose 项目加前缀。保留项目名是为了继续使用既有数据；不要随意更名或使用 `down -v`。OpenSearch 的 `index-recovery` 为快照存储位置，配置挂载不等于已创建快照。SQL 与 S3 保存业务状态／对象，OpenSearch 索引可重建。
+表中的卷名由各 Compose 项目加前缀；新安装的 `COMPOSE_PROJECT_NAME` 留空时使用表中的项目名，已有部署须保留原覆盖值。保留项目名是为了继续使用既有数据；不要随意更名或使用 `down -v`。OpenSearch 的 `index-recovery` 为快照存储位置，配置挂载不等于已创建快照。SQL 与 S3 保存业务状态／对象，OpenSearch 索引可重建。
 
-存储 Compose 从根 `.env` 读取 `INGEST_DEV_DB_PASSWORD`、`INGEST_S3_ACCESS_KEY`、`INGEST_S3_SECRET_KEY`，以及可选 `INGEST_DEV_DB_PORT`、`INGEST_S3_BUCKET`。填写 [配置模板](../../.env.platform.example) 的占位符，并与平台连接配置保持一致。PostgreSQL 初始化使用 [postgres-init.sql](postgres-init.sql)，仅在空数据目录首次初始化时执行；更改初始化 SQL 或密码环境变量不会重建现有数据库。
+存储 Compose 从根 `.env` 读取 `INGEST_DEV_DB_PASSWORD`、`INGEST_S3_ACCESS_KEY`、`INGEST_S3_SECRET_KEY` 三项凭据。填写 [配置模板](../../.env.platform.example) 的占位符即可使用默认连接；S3 bucket 默认为 `ingestion-acceptance`，region 为 `us-east-1`，与平台默认值一致。已有显式端口、桶名等覆盖仍兼容，不需要为默认值增加配置项。PostgreSQL 初始化使用 [postgres-init.sql](postgres-init.sql)，仅在空数据目录首次初始化时执行；更改初始化 SQL 或密码环境变量不会重建现有数据库。
 
 S3 主机端口固定为 `58333`，OpenSearch 固定为 `19260`。OpenSearch 是关闭安全插件的本机单节点配置，堆上限为 4 GiB、容器内存上限为 8 GiB；部署到其他边界前需另行配置。
 

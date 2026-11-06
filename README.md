@@ -34,18 +34,16 @@ if (-not (Test-Path -LiteralPath '.env')) {
 }
 ```
 
-用编辑器修改 `.env` 中的占位值，至少核对：
+用编辑器填写 `.env` 中的三项凭据，并核对部署身份：
 
 | 配置 | 用途 |
 | --- | --- |
-| `INGEST_DATABASE_URL` | 主机访问 PostgreSQL 的连接信息，使用具备创建专用数据库权限的本地账号 |
-| `INGEST_DEV_DB_PASSWORD` | 首次创建 PostgreSQL 容器的密码，应与上述连接信息一致 |
-| `INGEST_S3_ENDPOINT_URL`、`INGEST_S3_BUCKET` | S3 地址与业务桶 |
-| `INGEST_S3_ACCESS_KEY`、`INGEST_S3_SECRET_KEY` | 专用 S3 凭据 |
-| `PLATFORM_PROCESSING_BACKEND=codex` | 默认原生处理路径；省略时也为 `codex` |
-| `PLATFORM_RETRIEVAL_DEVICE` | 默认 `cuda`；需要 CPU 时显式设为 `cpu` |
+| `INGEST_DEV_DB_PASSWORD` | 本地 PostgreSQL 密码 |
+| `INGEST_S3_ACCESS_KEY` | 专用 S3 访问键 |
+| `INGEST_S3_SECRET_KEY` | 专用 S3 密钥 |
+| `COMPOSE_PROJECT_NAME` | 新安装留空；已有部署填写或保留原项目名 |
 
-模板包含完整网页平台的 SQL/S3 配置，以及原生工作区和检索可选项；独立 MCP 不需要这份 `.env`。首次 `init` 会补写缺失的业务、测试及容器数据库 URL，后续保留生成值。原生识别与审核不依赖本地 OCR／视觉权重或 DeepSeek 密钥。数据库 URL 中的特殊字符需要按 URL 规则编码。端口、数据库、模型及备份配置详见[平台 README](services/research-platform/README.md)。
+默认地址、端口、库名和存储桶由代码与 Compose 提供，数据库连接在内存中派生，`init` 不向 `.env` 回写配置。独立 MCP 不需要这份文件；原生识别与审核不依赖本地 OCR／视觉权重或 DeepSeek 密钥。默认值、兼容覆盖和备份配置详见[平台 README](services/research-platform/README.md)。
 
 已有环境应保留 Compose 项目名和凭据，它们关系到现有容器与卷的归属。
 

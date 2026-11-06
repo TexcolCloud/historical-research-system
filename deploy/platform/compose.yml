@@ -52,7 +52,7 @@ services:
       - '-behind-proxy'
       - '-disable-download'
       - '-max-size=268435456'
-      - '-s3-bucket=${INGEST_S3_BUCKET:?S3 bucket required}'
+      - '-s3-bucket=${INGEST_S3_BUCKET:-ingestion-acceptance}'
       - '-s3-endpoint=http://host.docker.internal:58333'
       - '-s3-object-prefix=hrs/v2/uploads/'
       - '-s3-part-size=8388608'
@@ -74,9 +74,12 @@ services:
     restart: unless-stopped
     environment: &application-environment
       PLATFORM_PROCESSING_BACKEND: legacy
-      PLATFORM_DATABASE_URL: ${PLATFORM_DOCKER_DATABASE_URL:?Set the V2 container database URL}
+      PLATFORM_DATABASE_URL: ${PLATFORM_DOCKER_DATABASE_URL:-}
+      INGEST_DEV_DB_PASSWORD: ${INGEST_DEV_DB_PASSWORD:?Database password required}
+      INGEST_DEV_DB_PORT: ${INGEST_DEV_DB_PORT:-55436}
+      INGEST_DATABASE_HOST: host.docker.internal
       PLATFORM_S3_ENDPOINT: http://host.docker.internal:58333
-      PLATFORM_S3_BUCKET: ${INGEST_S3_BUCKET}
+      PLATFORM_S3_BUCKET: ${INGEST_S3_BUCKET:-ingestion-acceptance}
       PLATFORM_S3_ACCESS_KEY: ${INGEST_S3_ACCESS_KEY}
       PLATFORM_S3_SECRET_KEY: ${INGEST_S3_SECRET_KEY}
       PLATFORM_S3_REGION: ${INGEST_S3_REGION:-us-east-1}

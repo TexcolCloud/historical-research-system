@@ -1,22 +1,22 @@
 """Create only dedicated V2 databases, then apply official versioned schemas."""
 
 import asyncio
-import os
 import subprocess
 from pathlib import Path
 
 import psycopg
-from dotenv import dotenv_values, set_key
 from psycopg import sql
 from sqlalchemy.engine import make_url
 
-from hrs_platform.core.config import Settings
+from hrs_platform.core.config import Settings, load_environment
 from hrs_platform.core.db import engine_for, migrate
 
 
 def bootstrap(*, legacy=False):
     root = Path(__file__).resolve().parents[4]
-    env = {**dotenv_values(root / ".env"), **os.environ}
+    env = load_environment(root)
+    if not env.get("INGEST_DATABASE_URL"):
+        raise ValueError("Set INGEST_DEV_DB_PASSWORD or INGEST_DATABASE_URL before initialization.")
     ingest = make_url(env["INGEST_DATABASE_URL"])
     admin = ingest.set(drivername="postgresql", database="postgres").render_as_string(hide_password=False)
     names = [
@@ -29,15 +29,6 @@ def bootstrap(*, legacy=False):
         for name in names:
             if not connection.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone():
                 connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-    for key, name in [("PLATFORM_DATABASE_URL", names[0]), ("PLATFORM_TEST_DATABASE_URL", names[1])]:
-        if not env.get(key):
-            set_key(root / ".env", key, ingest.set(database=name).render_as_string(hide_password=False))
-    if not env.get("PLATFORM_DOCKER_DATABASE_URL"):
-        set_key(
-            root / ".env",
-            "PLATFORM_DOCKER_DATABASE_URL",
-            ingest.set(database=names[0], host="host.docker.internal").render_as_string(hide_password=False),
-        )
     logdir = root / ".cache/platform-diagnostics"
     logdir.mkdir(parents=True, exist_ok=True)
     compose = ["docker", "compose", "--env-file", ".env", "-f", "deploy/platform/compose.yml"]
@@ -49,6 +40,7 @@ def bootstrap(*, legacy=False):
                 stdout=log,
                 stderr=log,
                 check=True,
+                env=env,
             )
         subprocess.run(
             [*compose, "up", "-d", "--wait", *(["temporal"] if legacy else []), "tusd"],
@@ -56,6 +48,7 @@ def bootstrap(*, legacy=False):
             stdout=log,
             stderr=log,
             check=True,
+            env=env,
         )
     settings = Settings.load(root)
     engine = engine_for(settings)
