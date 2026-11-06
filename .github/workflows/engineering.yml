@@ -6,12 +6,13 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: platform-${{ github.workflow }}-${{ github.ref }}
+  group: checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 env:
   PYTHONUTF8: '1'
   UV_LINK_MODE: copy
-  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.cache/engineering-envs/research-platform
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
   PLATFORM_DATABASE_URL: postgresql+psycopg://hrs_test:engineering-only@127.0.0.1:55439/historical_research_v2_test
   PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://hrs_test:engineering-only@127.0.0.1:55439/historical_research_v2_test
   PLATFORM_S3_ENDPOINT: http://127.0.0.1:58339
@@ -20,8 +21,9 @@ env:
   PLATFORM_S3_SECRET_KEY: engineering-only-secret
   PLATFORM_OPENSEARCH_URL: http://127.0.0.1:19269
   PLATFORM_OPENSEARCH_INDEX: platform-ci-chunks
+
 jobs:
-  platform:
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -41,79 +43,47 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: services/review-workbench/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            web/tooling/openapi/package-lock.json
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.12.6'
           enable-cache: true
-      - run: uv sync --project services/research-platform --locked --group dev --extra legacy
-      - run: npm --prefix services/review-workbench ci
-      - run: npm --prefix services/review-workbench/tooling/openapi ci
-      - run: docker compose -f deploy/platform/compose.test.yml up -d --wait
-      - run: .cache/engineering-envs/research-platform/bin/python scripts/platform_test_infra.py
-      - run: .cache/engineering-envs/research-platform/bin/python -m ruff check services/research-platform/src scripts/hrs_v2.py
-      - name: Check standalone tool test imports
-        run: .cache/engineering-envs/research-platform/bin/python -m pytest scripts --collect-only -q --basetemp "${{ runner.temp }}/tool-collection"
-      - run: npm --prefix services/review-workbench run contracts
-      - run: .cache/engineering-envs/research-platform/bin/python -m pytest services/research-platform/tests packages/runtime-support/tests --basetemp "${{ runner.temp }}/platform-ci" --junitxml=reports/platform.xml
-      - name: Check conversion review policy without OCR model weights
-        env:
-          PYTHONPATH: services/document-extraction/src
-        run: >-
-          .cache/engineering-envs/research-platform/bin/python -m pytest
-          services/document-extraction/tests/test_review_scope_repairs.py
-          services/document-extraction/tests/test_review_recovery.py
-          services/document-extraction/tests/test_single_ocr_completion.py
-          services/document-extraction/tests/test_review_routing.py
-          services/document-extraction/tests/test_review_transport.py
-          services/document-extraction/tests/test_visual_source.py
-          services/document-extraction/tests/test_page_number_cleanup.py
-          services/document-extraction/tests/test_settings.py
-          services/document-extraction/tests/test_native_pdf.py
-          services/document-extraction/tests/test_native_layout.py
-          services/document-extraction/tests/test_phase_checkpoint.py
-          --basetemp "${{ runner.temp }}/conversion-review" --junitxml=reports/conversion-review.xml
-      - run: npm --prefix services/review-workbench test
-      - run: npm --prefix services/review-workbench run check-unused
-      - run: npm --prefix services/review-workbench run build
-      - name: Build production images
+      - name: Install the unified Python environment
+        run: uv sync --locked --group dev
+      - run: npm --prefix web ci
+      - run: npm --prefix web/tooling/openapi ci
+      - name: Start isolated test storage
+        run: docker compose --project-name hrs-platform-ci -f deploy/compose.test.yml up -d --wait
+      - name: Wait for the isolated object store
+        run: uv run --no-sync --locked python -m hrs check-test-infra
+      - name: Lint Python source and tests
+        run: uv run --no-sync --locked ruff check src tests
+      - name: Build the Python distribution
         run: |
-          docker build -f deploy/platform/Dockerfile -t hrs-platform:ci .
-          docker build -f deploy/platform/Dockerfile.web -t hrs-platform-web:ci .
+          uv build --wheel
+          wheel=$(find "$PWD/dist" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          printf 'HRS_TEST_WHEEL=%s\n' "$wheel" >> "$GITHUB_ENV"
+      - name: Verify application and native MCP contracts without model credentials
+        run: uv run --no-sync --locked pytest tests/unit tests/integration --basetemp "${{ runner.temp }}/hrs-tests" --junitxml=reports/tests.xml
+      - name: Verify generated API contracts
+        run: |
+          npm --prefix web run contracts
+          git diff --exit-code -- web/openapi.json web/src/client/schema.d.ts
+      - run: npm --prefix web test
+      - run: npm --prefix web run check-unused
+      - run: npm --prefix web run build
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: platform-checks
+          name: application-checks
           path: |
-            reports/platform.xml
-            reports/conversion-review.xml
-            services/review-workbench/dist/
+            reports/tests.xml
+            dist/*.whl
+            web/dist/
           retention-days: 14
-      - if: always()
-        run: docker compose -f deploy/platform/compose.test.yml down
-
-  codex-pipeline:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.cache/engineering-envs/codex-pipeline
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: '0.12.6'
-          enable-cache: true
-      - run: uv sync --project services/codex-pipeline --locked --group dev
-      - name: Lint local MCP and pipeline
-        run: uv run --project services/codex-pipeline --locked ruff check services/codex-pipeline/src services/codex-pipeline/tests
-      - name: Verify evidence workflow and local MCP protocol without model credentials
-        run: uv run --project services/codex-pipeline --locked pytest services/codex-pipeline/tests --junitxml=reports/codex-pipeline.xml
-      - uses: actions/upload-artifact@v4
+      - name: Stop isolated test storage
         if: always()
-        with:
-          name: codex-pipeline-checks
-          path: reports/codex-pipeline.xml
-          retention-days: 14
+        run: docker compose --project-name hrs-platform-ci -f deploy/compose.test.yml down
