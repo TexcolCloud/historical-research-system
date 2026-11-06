@@ -1,24 +1,16 @@
 import { lazy, Suspense } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "@/app/AppShell.tsx";
 const BooksPage = lazy(() => import("@/routes/BooksPage.tsx"));
 const BookPage = lazy(() => import("@/routes/BookPage.tsx"));
 const ReviewsPage = lazy(() => import("@/routes/ReviewsPage.tsx"));
-const WelcomePage = lazy(() => import("@/routes/WelcomePage.tsx"));
 
 /** Route composition only; application providers and feature state live elsewhere. */
 export default function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route
-          path="/welcome"
-          element={
-            <Suspense fallback={<p role="status">正在打开产品介绍…</p>}>
-              <WelcomePage />
-            </Suspense>
-          }
-        />
+        <Route path="/welcome" element={<Navigate to="/" replace />} />
         <Route
           path="/reviews"
           element={

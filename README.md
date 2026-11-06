@@ -44,7 +44,7 @@ uv run --no-sync --locked python -m hrs up --build
 
 打开 [工作台](http://127.0.0.1:18170)。`init` 启动基础设施并迁移专用数据库，`up --build` 构建前端并启动 API、原生执行器及所需 BGE broker；已有前端构建时可省略 `--build`。使用已启动的自定义 SQL/S3/搜索/上传服务时，显式传 `--existing-services`。
 
-[产品介绍](http://127.0.0.1:18170/#/welcome) 提供功能示例与本机试用入口；默认网址继续进入书库。网页介绍不提供云端试用额度，真实处理使用本机已登录的 Codex。
+工作台面向单人使用，按桌面窗口设计，打开后直接进入书籍列表。处理使用本机已登录的 Codex。
 
 ```powershell
 uv run --no-sync --locked python -m hrs status

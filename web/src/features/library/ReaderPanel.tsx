@@ -7,10 +7,11 @@ import {
 } from "react-router-dom";
 import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button.tsx";
-import { PanelLeftClose, PanelLeftOpen, BookOpen } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, BookOpen, Search } from "lucide-react";
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import { client } from "@/client/api.ts";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
+import SearchPanel from "@/features/search/SearchPanel.tsx";
 import { readingNavigationOptions } from "./navigation-query";
 import { navigationStatusLabel } from "./navigation-status";
 import {
@@ -79,16 +80,23 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       : "返回目录";
   const location = useLocation(),
     navigate = useNavigate();
+  // Drawer and query changes preserve the current reading position. Following a
+  // source link still gets a fresh navigation key, including repeated hits.
+  const focusNavigation = useRef(location.key);
+  if (!location.state?.preserveReadingPosition)
+    focusNavigation.current = location.key;
+  const focusKey = focusNavigation.current;
   const [original, setOriginal] = useState(false),
     [page, setPage] = useState<number | null>(null);
   const [mappingFailures, setMappingFailures] = useState<string[]>([]);
-  const [navigationOpen, setNavigationOpen] = useState(
-    () => !window.matchMedia("(max-width: 760px)").matches,
-  );
+  const [navigationOpen, setNavigationOpen] = useState(true);
+  const searchOpen =
+    params.get("section") === "search" || params.get("tab") === "search";
   const [navigationView, setNavigationView] = useState<
     "original" | "chapters" | null
   >(null);
   const navigationToggle = useRef<HTMLButtonElement>(null);
+  const structureControl = useRef<HTMLDivElement>(null);
   const article = useRef<HTMLElement>(null);
   const [bodyHasTitle, setBodyHasTitle] = useState(false);
   const navigation = useQuery(readingNavigationOptions(bookId));
@@ -166,10 +174,10 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       range
         ? {
             ...range,
-            id: `${location.key}:${target?.chapter_id}:${range.start}:${range.end}`,
+            id: `${focusKey}:${target?.run_id}:${target?.chapter_id}:${target?.text_sha256}:${range.start}:${range.end}`,
           }
         : undefined,
-    [range, location.key, target],
+    [range, focusKey, target],
   );
   const failedTarget = Boolean(
     chapter.data &&
@@ -212,9 +220,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       .replace(/^\*\*|\*\*$/g, "")
       .trim();
     const headings = [
-      ...document.querySelectorAll(
-        ".platform-reading article h1,.platform-reading article h2,.platform-reading article h3,.platform-reading article h4,.platform-reading article h5,.platform-reading article h6",
-      ),
+      ...(article.current?.querySelectorAll("h1,h2,h3,h4,h5,h6") ?? []),
     ].filter((e) => e.textContent?.trim() === literal);
     if (!target && literal && headings.length === 1)
       headings[0].scrollIntoView?.({ block: "center" });
@@ -231,18 +237,29 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       if (entry) void query.prefetchQuery(chapterOptions(entry.id));
   }, [next, previous, query]);
   function go(id: string) {
-    const next = new URLSearchParams({
-      tab: "reader",
-      section: "text",
-      chapter: id,
-    });
+    const next = new URLSearchParams(params);
+    for (const key of [
+      "physicalPage",
+      "start",
+      "end",
+      "textSha",
+      "run",
+      "anchor",
+    ])
+      next.delete(key);
+    next.set("tab", "reader");
+    next.set("section", searchOpen ? "search" : "text");
+    next.set("chapter", id);
     if (params.has("returnTo")) next.set("returnTo", returnTo);
     setParams(next);
     setPage(null);
-    if (window.matchMedia("(max-width: 760px)").matches) {
-      setNavigationOpen(false);
-      navigationToggle.current?.focus();
-    }
+  }
+  function toggleSearch(open: boolean) {
+    const next = new URLSearchParams(params);
+    next.set("tab", "reader");
+    next.set("section", open ? "search" : "text");
+    if (id) next.set("chapter", id);
+    setParams(next, { state: { preserveReadingPosition: true } });
   }
   if (chapters.isError || chapter.isError)
     return (
@@ -266,7 +283,11 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       </section>
     );
   return (
-    <div className="platform-reader-grid" data-navigation-open={navigationOpen}>
+    <div
+      className="platform-reader-grid"
+      data-navigation-open={navigationOpen}
+      data-search-open={searchOpen}
+    >
       <nav aria-label="章节目录" hidden={!navigationOpen}>
         <div className="reader-navigation-heading">
           <h2>本书导航</h2>
@@ -400,6 +421,12 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
             </button>
           ))}
         </div>
+        <Link
+          className="reader-directory-link"
+          to={`/books/${bookId}?tab=reader&section=directory${id ? `&chapter=${encodeURIComponent(id)}` : ""}`}
+        >
+          查看完整目录与核对状态
+        </Link>
       </nav>
       <div className="platform-reading">
         <div className="reader-toolbar">
@@ -438,6 +465,31 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
           <Button variant="outline" onClick={() => setOriginal(!original)}>
             {original ? "收起原书" : "对照原书"}
           </Button>
+          <Button
+            variant={searchOpen ? "default" : "outline"}
+            aria-expanded={searchOpen}
+            aria-controls="reader-search-sidebar"
+            onClick={() => toggleSearch(!searchOpen)}
+          >
+            <Search size={17} aria-hidden="true" />
+            检索本书
+          </Button>
+          {chapter.data && (
+            <div className="reader-structure-control" ref={structureControl}>
+              <StructurePanel
+                key={id}
+                runId={chapter.data.run_id}
+                items={chapter.data.structure ?? []}
+                onLocate={(value) => {
+                  setPage(value);
+                  setOriginal(true);
+                  const details =
+                    structureControl.current?.querySelector("details");
+                  if (details) details.open = false;
+                }}
+              />
+            </div>
+          )}
           <a
             className="platform-export"
             href={`/api/v2/books/${bookId}/export?download=latest`}
@@ -455,83 +507,86 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
             部分目录文字无法安全生成链接，可从左侧原书目录跳转。
           </p>
         )}
-        {chapter.data && (
-          <StructurePanel
-            key={id}
-            runId={chapter.data.run_id}
-            items={chapter.data.structure ?? []}
-            onLocate={(value) => {
-              setPage(value);
-              setOriginal(true);
-            }}
-          />
-        )}
-        <div
-          className={
-            original
-              ? "platform-reading-columns"
-              : "platform-reading-columns single"
-          }
-        >
-          <article ref={article}>
-            {chapter.data ? (
-              <>
-                <div className="reading-provenance">
-                  <BookOpen size={16} aria-hidden="true" />
-                  <details className="reading-page-details">
-                    <summary>{pageSummary}</summary>
-                    <p>完整 PDF 页码：{sourcePages.join("、")}</p>
-                  </details>
-                </div>
-                {!bodyHasTitle && <h1>{chapter.data.title}</h1>}
-                <RenderedMarkdown
-                  markdown={chapter.data.reading_text ?? chapter.data.text}
-                  footnotes={
-                    chapter.data.reading_text != null
-                      ? chapter.data.reading_footnotes
-                      : chapter.data.footnotes
+        <div className="reader-body" data-search-open={searchOpen}>
+          <div
+            className={
+              original
+                ? "platform-reading-columns"
+                : "platform-reading-columns single"
+            }
+          >
+            <article ref={article}>
+              {chapter.data ? (
+                <>
+                  <div className="reading-provenance">
+                    <BookOpen size={16} aria-hidden="true" />
+                    <details className="reading-page-details">
+                      <summary>{pageSummary}</summary>
+                      <p>完整 PDF 页码：{sourcePages.join("、")}</p>
+                    </details>
+                  </div>
+                  {!bodyHasTitle && <h1>{chapter.data.title}</h1>}
+                  <RenderedMarkdown
+                    markdown={chapter.data.reading_text ?? chapter.data.text}
+                    footnotes={
+                      chapter.data.reading_text != null
+                        ? chapter.data.reading_footnotes
+                        : chapter.data.footnotes
+                    }
+                    assetBaseUrl={`/api/v2/runs/${chapter.data.run_id}/artifacts`}
+                    readingLinks={inlineLinks}
+                    readingFocus={readingFocus}
+                    onReadingFailure={setMappingFailures}
+                    onReadingNavigate={(href) =>
+                      navigate(href.startsWith("#") ? href.slice(1) : href)
+                    }
+                  />
+                </>
+              ) : (
+                <p role="status">正在读取章节…</p>
+              )}
+            </article>
+            {original && chapter.data && (
+              <aside>
+                <label>
+                  关联原件页{" "}
+                  <select
+                    aria-label="关联原件页"
+                    value={page ?? chapter.data.pages[0]}
+                    onChange={(e) => setPage(Number(e.target.value))}
+                  >
+                    {Array.from(
+                      new Set([
+                        ...chapter.data.pages,
+                        ...(page == null ? [] : [page]),
+                      ]),
+                    )
+                      .sort((a, b) => a - b)
+                      .map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <OriginalPage
+                  runId={
+                    failedTarget && target ? target.run_id : chapter.data.run_id
                   }
-                  assetBaseUrl={`/api/v2/runs/${chapter.data.run_id}/artifacts`}
-                  readingLinks={inlineLinks}
-                  readingFocus={readingFocus}
-                  onReadingFailure={setMappingFailures}
-                  onReadingNavigate={(href) =>
-                    navigate(href.startsWith("#") ? href.slice(1) : href)
-                  }
+                  page={page ?? chapter.data.pages[0]!}
                 />
-              </>
-            ) : (
-              <p role="status">正在读取章节…</p>
+              </aside>
             )}
-          </article>
-          {original && chapter.data && (
-            <aside>
-              <label>
-                关联原件页{" "}
-                <select
-                  aria-label="关联原件页"
-                  value={page ?? chapter.data.pages[0]}
-                  onChange={(e) => setPage(Number(e.target.value))}
-                >
-                  {Array.from(
-                    new Set([
-                      ...chapter.data.pages,
-                      ...(page == null ? [] : [page]),
-                    ]),
-                  )
-                    .sort((a, b) => a - b)
-                    .map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <OriginalPage
-                runId={
-                  failedTarget && target ? target.run_id : chapter.data.run_id
-                }
-                page={page ?? chapter.data.pages[0]!}
+          </div>
+          {searchOpen && (
+            <aside
+              id="reader-search-sidebar"
+              className="reader-search-sidebar"
+              aria-label="本书检索侧栏"
+            >
+              <SearchPanel
+                bookId={bookId}
+                onClose={() => toggleSearch(false)}
               />
             </aside>
           )}

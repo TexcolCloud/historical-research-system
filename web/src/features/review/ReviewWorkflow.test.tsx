@@ -71,6 +71,11 @@ test("a pending draft save cannot claim that page judgments are already complete
     await screen.findByRole("button", { name: "识别正确，保留" }),
   );
   expect(screen.queryByRole("region", { name: "本页提交" })).toBeNull();
+  expect(
+    screen
+      .getByRole("button", { name: "提交本页并继续" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
   acknowledge();
   await screen.findByRole("region", { name: "本页提交" });
 });
@@ -127,7 +132,11 @@ test("terminal human review separates judgment, editing and final page submissio
   );
   await screen.findByRole("button", { name: "识别正确，保留" });
   expect(screen.queryByRole("button", { name: /暂不确定/ })).toBeNull();
-  expect(screen.queryByRole("button", { name: "提交本页并继续" })).toBeNull();
+  expect(
+    screen
+      .getByRole("button", { name: "提交本页并继续" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
   await userEvent.click(screen.getByRole("button", { name: "需要修改" }));
   const input = screen.getByRole("textbox", {
     name: "本处最终文字",

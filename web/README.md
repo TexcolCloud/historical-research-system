@@ -2,7 +2,7 @@
 
 React 工作台提供书架上传、处理进展、人工核对、全文阅读、目录、检索和 Markdown 导出。网页与独立 MCP 使用同一处理队列；历史卡片保留读取和导出。
 
-产品介绍位于 `/#/welcome`，展示原件对照、阅读与检索示例；“开始本机试用”进入真实书库。原有 `/#/`、书籍深链及 `/platform.html` 入口保留，产品介绍与书库切换不会销毁上传会话。
+界面面向单人桌面使用，最低布局宽度为 1080px；`/#/` 直接进入书籍，书籍深链及 `/platform.html` 入口保留。书籍、核对与阅读之间切换不会销毁上传会话。
 
 [项目快速开始](../README.md) · [API 契约](openapi.json)
 
@@ -52,7 +52,7 @@ npm --prefix web run contracts
 
 React Router 管理路由，TanStack Query 管理服务端状态；Uppy/tus 提供可恢复上传，Tiptap 编辑 Markdown，React Flow 展示执行关系。正文、原图、问题与执行详情按需加载。
 
-样式按职责组织：`theme.css` 提供语义令牌和本地字体，`workbench.css` 拥有外壳、书籍与进展，`review-evidence.css` 拥有正文核对，`reader-navigation.css` 拥有目录、阅读和检索，`welcome.css` 仅随产品介绍加载。素材与字体许可见 [assets/README](src/assets/README.md)。
+样式按职责组织：`theme.css` 提供语义令牌和本地字体，`workbench.css` 拥有外壳、书籍与进展，`review-evidence.css` 拥有正文核对，`reader-navigation.css` 拥有目录、阅读和检索。字体许可见 [assets/README](src/assets/README.md)。
 
 ## 交互约定
 

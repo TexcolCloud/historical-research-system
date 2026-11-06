@@ -20,6 +20,7 @@ export default function ReviewFocus({
   onEdit,
   disabled,
   editing = false,
+  machineReasons = [],
 }: {
   locations: ReviewLocation[];
   active: string;
@@ -30,6 +31,7 @@ export default function ReviewFocus({
   onEdit: () => void;
   disabled: boolean;
   editing?: boolean;
+  machineReasons?: string[];
 }) {
   const index = locations.findIndex((l) => l.id === active),
     issue = locations[index];
@@ -62,20 +64,20 @@ export default function ReviewFocus({
           </nav>
         )}
       </div>
-      <div className="review-reading-pair">
-        <div>
-          <small>
-            {range ? "当前待核文字" : "原识别片段 · 请结合整页核对"}
-          </small>
-          <mark>
-            {range
-              ? range.start === range.end
-                ? "▏（此处缺字）"
-                : text.slice(range.start, range.end)
-              : issue.candidate || issue.anchor.exact || "请查看整页"}
-          </mark>
+      {!editing && (
+        <div className="review-reading-pair">
+          <div>
+            {!range && <small>原识别片段 · 请结合整页核对</small>}
+            <mark aria-label="当前待核文字">
+              {range
+                ? range.start === range.end
+                  ? "▏（此处缺字）"
+                  : text.slice(range.start, range.end)
+                : issue.candidate || issue.anchor.exact || "请查看整页"}
+            </mark>
+          </div>
         </div>
-      </div>
+      )}
       {!editing && (
         <div className="review-judgment-actions">
           <Button
@@ -90,13 +92,22 @@ export default function ReviewFocus({
           </Button>
         </div>
       )}
-      <details className="review-observation">
-        <summary>为什么需要核对</summary>
-        <p>{issue.message || "请核对这处文字与原图是否一致。"}</p>
-        {issue.source_reading && (
-          <p>机器参考读法 · 由你裁决：{issue.source_reading}</p>
-        )}
-      </details>
+      {!editing && (
+        <details className="review-observation">
+          <summary>为什么需要核对</summary>
+          <p>{issue.message || "请核对这处文字与原图是否一致。"}</p>
+          {issue.source_reading && (
+            <p>机器参考读法 · 由你裁决：{issue.source_reading}</p>
+          )}
+          {machineReasons.length > 0 && (
+            <ul aria-label="本页机器核对依据">
+              {machineReasons.map((reason, i) => (
+                <li key={i}>{reason}</li>
+              ))}
+            </ul>
+          )}
+        </details>
+      )}
       {!range && (
         <p role="status">
           {issue.boxes.length

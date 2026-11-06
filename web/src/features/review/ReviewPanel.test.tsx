@@ -11,61 +11,51 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-test.each([true, false])(
-  "a native handoff selects its physical page and restores queue focus only on mobile (%s)",
-  async (mobile) => {
-    const viewport = window.matchMedia("(max-width: 760px)");
-    Object.defineProperty(viewport, "matches", { value: mobile });
-    vi.spyOn(window, "matchMedia").mockReturnValue(viewport);
-    const issues = [1, 7].map((page) => ({
-      id: `issue-${page}`,
-      run_id: "run",
-      page,
-      revision: 1,
-      state: "pending",
-      text_sha256: "d".repeat(64),
-      text: `候选页 ${page}`,
-      images: [],
-      pages: [page],
-      kind: "page",
-      reasons: [],
-      locations: [],
-      resolutions: [],
-    }));
-    respondWith((request) => {
-      const path = new URL(request.url).pathname;
-      return path === "/api/v2/reviews"
-        ? issues
-        : issues.find((issue) => path.endsWith(issue.id));
-    });
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <RuntimeScopeContext.Provider value="content">
-          <ReviewPanel runId="run" requestedPage={7} />
-        </RuntimeScopeContext.Provider>
-      </QueryClientProvider>,
-    );
-    expect(
-      await screen.findByRole("heading", { name: "原件第 7 页" }),
-    ).toBeDefined();
-    expect(
-      screen
-        .getByRole("button", { name: "原件第 7 页" })
-        .getAttribute("aria-current"),
-    ).toBe("true");
-    const user = userEvent.setup();
-    const queue = screen.getByRole("button", { name: "待核对页面 · 2" });
-    expect(queue.getAttribute("aria-expanded")).toBe("false");
-    await user.click(queue);
-    expect(queue.getAttribute("aria-expanded")).toBe("true");
-    const page = screen.getByRole("button", { name: "原件第 1 页" });
-    page.focus();
-    await user.keyboard("{Enter}");
-    await screen.findByRole("heading", { name: "原件第 1 页" });
-    expect(queue.getAttribute("aria-expanded")).toBe("false");
-    expect(document.activeElement).toBe(mobile ? queue : page);
-  },
-);
+test("a native handoff selects its physical page and keeps the desktop queue keyboard accessible", async () => {
+  const issues = [1, 7].map((page) => ({
+    id: `issue-${page}`,
+    run_id: "run",
+    page,
+    revision: 1,
+    state: "pending",
+    text_sha256: "d".repeat(64),
+    text: `候选页 ${page}`,
+    images: [],
+    pages: [page],
+    kind: "page",
+    reasons: [],
+    locations: [],
+    resolutions: [],
+  }));
+  respondWith((request) => {
+    const path = new URL(request.url).pathname;
+    return path === "/api/v2/reviews"
+      ? issues
+      : issues.find((issue) => path.endsWith(issue.id));
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="run" requestedPage={7} />
+      </RuntimeScopeContext.Provider>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("候选页 7")).toBeDefined();
+  expect(
+    screen
+      .getByRole("button", { name: "原件第 7 页" })
+      .getAttribute("aria-current"),
+  ).toBe("true");
+  const user = userEvent.setup();
+  expect(screen.getByRole("navigation", { name: "问题清单" })).toBeDefined();
+  expect(screen.queryByRole("button", { name: "待核对页面 · 2" })).toBeNull();
+  const page = screen.getByRole("button", { name: "原件第 1 页" });
+  page.focus();
+  await user.keyboard("{Enter}");
+  await screen.findByText("候选页 1");
+  expect(page.getAttribute("aria-current")).toBe("true");
+  expect(document.activeElement).toBe(page);
+});
 test("located doubts highlight text, show source region, and require an explicit per-doubt decision", async () => {
   const location = {
     id: "doubt-1",
@@ -125,8 +115,10 @@ test("located doubts highlight text, show source region, and require an explicit
       ?.getAttribute("x"),
   ).toBe("0.2");
   expect(
-    Boolean(screen.queryByRole("button", { name: "提交本页并继续" })),
-  ).toBe(false);
+    screen
+      .getByRole("button", { name: "提交本页并继续" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
   await userEvent.click(screen.getByRole("button", { name: "识别正确，保留" }));
   await waitFor(() => expect(put).toHaveBeenCalled());
   await waitFor(() =>

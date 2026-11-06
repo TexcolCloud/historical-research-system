@@ -21,10 +21,9 @@ export default function IssueEditor({
   onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void;
 }) {
   const [unmapped, setUnmapped] = useState<string[]>([]);
-  const [view, setView] = useState<"text" | "source">("text");
   const [focusRequest, setFocusRequest] = useState(0);
   const workspace = useRef<HTMLDivElement>(null);
-  const preview = useRef<HTMLDetailsElement>(null);
+  const preview = useRef<HTMLElement>(null);
   const {
     text,
     resolutions,
@@ -55,7 +54,9 @@ export default function IssueEditor({
     saveDraft,
     setBoxes,
   } = useReviewSession(issue, onSaved, runtimeScope);
-  const previousLocation = useRef({ id: current?.id, request: focusRequest });
+  const previousLocation = useRef<{ id?: string; request: number }>({
+    request: -1,
+  });
   function selectLocation(id: string) {
     setActive(id);
     setFocusRequest((value) => value + 1);
@@ -66,7 +67,7 @@ export default function IssueEditor({
     const fit = () => {
       const available =
         window.innerHeight - element.getBoundingClientRect().top - 24;
-      element.style.setProperty(
+      (element.parentElement ?? element).style.setProperty(
         "--review-available-height",
         `${Math.max(360, available)}px`,
       );
@@ -80,7 +81,7 @@ export default function IssueEditor({
       window.removeEventListener("resize", fit);
       observer?.disconnect();
     };
-  }, [view]);
+  }, []);
   useEffect(() => {
     if (
       previousLocation.current.id === current?.id &&
@@ -94,7 +95,6 @@ export default function IssueEditor({
         pane?.querySelectorAll<HTMLElement>("mark[data-review-id]") ?? [],
       ).find((node) => node.dataset.reviewId === current?.id);
       if (pane && mark) {
-        pane.open = true;
         pane.scrollTo?.({
           top: Math.max(
             0,
@@ -110,28 +110,40 @@ export default function IssueEditor({
     return () => cancelAnimationFrame(frame);
   }, [current?.id, focusRequest]);
   return (
-    <div className="evidence-review-session" ref={workspace} data-view={view}>
-      <nav className="evidence-review-view-switch" aria-label="核对显示方式">
-        <Button
-          variant={view === "source" ? "default" : "outline"}
-          aria-pressed={view === "source"}
-          onClick={() => setView("source")}
-        >
-          原图
-        </Button>
-        <Button
-          variant={view === "text" ? "default" : "outline"}
-          aria-pressed={view === "text"}
-          onClick={() => setView("text")}
-        >
-          文字
-        </Button>
-      </nav>
+    <div className="evidence-review-session" ref={workspace}>
+      <aside aria-label="原书对照">
+        {current && issue.images[issue.pages.indexOf(current.page)] ? (
+          <SourceFocus
+            src={issue.images[issue.pages.indexOf(current.page)]}
+            issue={current}
+            locations={locations}
+            onSelect={editing ? undefined : selectLocation}
+            onBox={(box) => setBoxes((old) => ({ ...old, [current.id]: box }))}
+          />
+        ) : issue.images.length ? (
+          issue.images.map((src, i) => (
+            <figure key={src}>
+              <a href={src} target="_blank" rel="noreferrer">
+                打开原图 · 第 {issue.pages[i] ?? issue.page} 页
+              </a>
+              <img
+                src={src}
+                alt={`原书第 ${issue.pages[i] ?? issue.page} 页`}
+              />
+            </figure>
+          ))
+        ) : (
+          <div className="evidence-review-no-source" role="status">
+            <h3>原图暂不可用</h3>
+            <p>本页文字和草稿已保留。重新打开本页取得原图后再核对。</p>
+          </div>
+        )}
+      </aside>
       <article>
         <header className="review-page-heading">
           <div>
-            <small>人工终审</small>
-            <h2>原件第 {issue.pages.join("、")} 页</h2>
+            <h2>当前文字</h2>
+            <small>原件第 {issue.pages.join("、")} 页</small>
           </div>
           <span>
             {locations.length
@@ -150,38 +162,50 @@ export default function IssueEditor({
             </details>
           </section>
         )}
-        {issue.draft_text && !draft.isSuccess && (
-          <p className="review-save-status">
-            已恢复草稿，尚未提交本页审核结果。
-          </p>
-        )}
+        <section
+          ref={preview}
+          className="review-page-preview"
+          aria-label="整页文字与上下文"
+        >
+          {issue.kind === "figure" && (
+            <p>本项为插图或地图，请核对原图及图说；图内标签保留在原件中。</p>
+          )}
+          <div inert={submission.isPending}>
+            <RenderedMarkdown
+              markdown={issue.kind === "figure" ? figurePreview(text) : text}
+              highlights={locations}
+              activeHighlight={current?.id}
+              onHighlight={editing ? undefined : selectLocation}
+              footnotes={text === issue.text ? issue.footnotes : []}
+              onLocationFailure={setUnmapped}
+              assetBaseUrl={`/api/v2/runs/${issue.run_id}/artifacts`}
+            />
+            {current && unmapped.includes(current.id) && (
+              <section
+                className="review-source-text"
+                aria-label="当前疑点的原文定位"
+              >
+                <p>阅读视图暂不能标记本处，请对照以下 Markdown 原文片段。</p>
+                <pre>
+                  <mark>
+                    {current.anchor.exact ||
+                      current.candidate ||
+                      "请查看整页 Markdown"}
+                  </mark>
+                </pre>
+              </section>
+            )}
+          </div>
+        </section>
         <div className="evidence-review-actions">
           {ready && !editing ? (
             <section className="review-page-complete" aria-label="本页提交">
               <h3>本页疑点已处理，等待提交</h3>
               <p>
                 {changed
-                  ? "草稿已保存。请检查最终文字，提交后本页才计入已通过。"
+                  ? "文字已修改。请检查最终文字，提交后本页才计入已通过。"
                   : "已记录保留当前文字的判断，提交后本页才计入已通过。"}
               </p>
-              <Button
-                disabled={
-                  busy ||
-                  draft.isPending ||
-                  draft.isError ||
-                  runtimeScope === "unknown" ||
-                  issue.state !== "pending"
-                }
-                onClick={() => submission.mutate()}
-              >
-                {runtimeScope === "unknown"
-                  ? "确认工作区范围后再提交"
-                  : submission.isPending
-                    ? "正在提交…"
-                    : workflowTest
-                      ? "按授权提交流程测试结果"
-                      : "提交本页并继续"}
-              </Button>
               <Button variant="outline" disabled={busy} onClick={recheckPage}>
                 重新检查当前页
               </Button>
@@ -199,6 +223,7 @@ export default function IssueEditor({
               onEdit={beginEdit}
               disabled={busy}
               editing={editing}
+              machineReasons={issue.reasons.map(reasonText)}
             />
           ) : (
             <section className="review-focus">
@@ -297,109 +322,74 @@ export default function IssueEditor({
               </div>
             </section>
           )}
-          {(draft.isError || submission.isError) && (
+          {issue.reasons.length > 0 && (!current || ready || editing) && (
+            <details className="review-machine-report">
+              <summary>查看机器核对依据 · {issue.reasons.length} 项</summary>
+              <ul>
+                {issue.reasons.map((r, i) => (
+                  <li key={i}>{reasonText(r)}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      </article>
+
+      <footer className="review-page-footer">
+        <div className="review-footer-state">
+          {draft.isError || submission.isError ? (
             <p role="alert">
               {draft.error?.message ?? submission.error?.message}
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  if (draft.isError)
-                    void saveDraft(text).catch(() => undefined);
-                  else submission.mutate();
-                }}
-              >
-                {draft.isError ? "重试保存草稿" : "重试提交本页"}
-              </Button>
+            </p>
+          ) : (
+            <p role="status">
+              {draft.isPending || finishing
+                ? "正在保存草稿，请等待保存完成。"
+                : draft.isSuccess
+                  ? "草稿已自动保存 · 尚未提交本页"
+                  : issue.draft_text
+                    ? "已恢复草稿，尚未提交本页审核结果。"
+                    : "逐处核对后提交本页"}
             </p>
           )}
-          {(draft.isPending || finishing) && (
-            <p role="status" className="review-save-status">
-              正在保存草稿，请等待保存完成。
-            </p>
-          )}
-          {draft.isSuccess && !draft.isPending && !finishing && (
-            <p role="status" className="review-save-status">
-              草稿已自动保存 · 尚未提交本页
-            </p>
-          )}
-          <details className="review-machine-report">
-            <summary>查看机器核对依据 · {issue.reasons.length} 项</summary>
-            <ul>
-              {issue.reasons.map((r, i) => (
-                <li key={i}>{reasonText(r)}</li>
-              ))}
-            </ul>
-          </details>
+          <small>
+            {ready
+              ? "本页判断已完成，请检查最终文字。"
+              : "保留或修改会保存草稿；提交后本页才计入已通过。"}
+          </small>
         </div>
-        <details
-          ref={preview}
-          key={`${current?.id ?? "page"}:${ready ? "complete" : "review"}`}
-          className="review-page-preview"
-          open
-        >
-          <summary>
-            {ready ? "检查本页最终文字" : "查看整页文字与上下文"}
-          </summary>
-          {issue.kind === "figure" && (
-            <p>本项为插图或地图，请核对原图及图说；图内标签保留在原件中。</p>
-          )}
-          <div inert={submission.isPending}>
-            <RenderedMarkdown
-              markdown={issue.kind === "figure" ? figurePreview(text) : text}
-              highlights={locations}
-              activeHighlight={current?.id}
-              onHighlight={editing ? undefined : selectLocation}
-              footnotes={text === issue.text ? issue.footnotes : []}
-              onLocationFailure={setUnmapped}
-              assetBaseUrl={`/api/v2/runs/${issue.run_id}/artifacts`}
-            />
-            {current && unmapped.includes(current.id) && (
-              <section
-                className="review-source-text"
-                aria-label="当前疑点的原文定位"
-              >
-                <p>阅读视图暂不能标记本处，请对照以下 Markdown 原文片段。</p>
-                <pre>
-                  <mark>
-                    {current.anchor.exact ||
-                      current.candidate ||
-                      "请查看整页 Markdown"}
-                  </mark>
-                </pre>
-              </section>
-            )}
-          </div>
-        </details>
-      </article>
-      <aside aria-label="原书对照">
-        {current && issue.images[issue.pages.indexOf(current.page)] ? (
-          <SourceFocus
-            src={issue.images[issue.pages.indexOf(current.page)]}
-            issue={current}
-            locations={locations}
-            onSelect={editing ? undefined : selectLocation}
-            onBox={(box) => setBoxes((old) => ({ ...old, [current.id]: box }))}
-          />
-        ) : issue.images.length ? (
-          issue.images.map((src, i) => (
-            <figure key={src}>
-              <a href={src} target="_blank" rel="noreferrer">
-                打开原图 · 第 {issue.pages[i] ?? issue.page} 页
-              </a>
-              <img
-                src={src}
-                alt={`原书第 ${issue.pages[i] ?? issue.page} 页`}
-              />
-            </figure>
-          ))
-        ) : (
-          <div className="evidence-review-no-source" role="status">
-            <h3>原图暂不可用</h3>
-            <p>本页文字和草稿已保留。重新打开本页取得原图后再核对。</p>
-          </div>
+        {draft.isError && (
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => void saveDraft(text).catch(() => undefined)}
+          >
+            重试保存草稿
+          </Button>
         )}
-      </aside>
+        <Button
+          disabled={
+            !ready ||
+            editing ||
+            busy ||
+            draft.isPending ||
+            draft.isError ||
+            runtimeScope === "unknown" ||
+            issue.state !== "pending"
+          }
+          onClick={() => submission.mutate()}
+        >
+          {runtimeScope === "unknown"
+            ? "确认工作区范围后再提交"
+            : submission.isPending
+              ? "正在提交…"
+              : submission.isError
+                ? "重试提交本页"
+                : workflowTest
+                  ? "按授权提交流程测试结果"
+                  : "提交本页并继续"}
+        </Button>
+      </footer>
     </div>
   );
 }

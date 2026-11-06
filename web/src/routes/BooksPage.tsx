@@ -53,12 +53,11 @@ export default function BooksPage() {
     [books.data, filter, search],
   );
   return (
-    <>
+    <section className="books-shelf">
       <div className="platform-heading">
         <div>
-          <p className="platform-eyebrow">本机资料库</p>
           <h1>书籍</h1>
-          <p>导入原件，核对内容，整理成可以阅读与研究的材料。</p>
+          <p>{books.data?.length ?? 0} 本资料 · 原件、核对结果与阅读版本</p>
         </div>
         <Button onClick={upload}>
           <Upload size={17} />
@@ -120,6 +119,12 @@ export default function BooksPage() {
         </section>
       ) : (
         <section className="platform-books" aria-label="书籍列表">
+          <div className="platform-books-heading" aria-hidden="true">
+            <span>书名与导入时间</span>
+            <span>处理状态</span>
+            <span>下一步</span>
+            <span />
+          </div>
           {visible.map((book) => (
             <article key={book.id} className="platform-book-item">
               <button
@@ -167,6 +172,6 @@ export default function BooksPage() {
           ))}
         </section>
       )}
-    </>
+    </section>
   );
 }

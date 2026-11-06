@@ -6,8 +6,14 @@ import { Input } from "@/components/ui/input.tsx";
 import { client } from "@/client/api.ts";
 import { readingHref } from "@/features/library/reader-location";
 import { readingNavigationOptions } from "@/features/library/navigation-query";
-import { ArrowUpRight, Search } from "lucide-react";
-export default function SearchPanel({ bookId }: { bookId: string }) {
+import { ArrowUpRight, Search, X } from "lucide-react";
+export default function SearchPanel({
+  bookId,
+  onClose,
+}: {
+  bookId: string;
+  onClose?: () => void;
+}) {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const request = {
@@ -53,7 +59,21 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
         .find((entry) => entry.id === request.toc_entry_id)
         ?.path.join(" / ") ?? "所选目录（需重新确认）")
     : "全书";
-  const returnTo = location.pathname + location.search;
+  const returnParams = new URLSearchParams(params);
+  returnParams.delete("returnTo");
+  returnParams.set("tab", "reader");
+  returnParams.set("section", "search");
+  const returnTo = `${location.pathname}?${returnParams}`;
+  function chapterHref(book: string, chapter: string, page?: number) {
+    const next = new URLSearchParams({
+      tab: "reader",
+      section: "text",
+      chapter,
+      returnTo,
+    });
+    if (page != null) next.set("physicalPage", String(page));
+    return `/books/${book}?${next}`;
+  }
   const results = useQuery({
     queryKey: ["platform", "search", bookId, request],
     placeholderData: keepPreviousData,
@@ -77,9 +97,19 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
       <header className="search-workspace-heading">
         <div>
           <h2>检索本书</h2>
-          <p>按人物、事件或原文关键词，找到段落与出处。</p>
         </div>
-        <Search size={23} aria-hidden="true" />
+        {onClose ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="关闭检索"
+            onClick={onClose}
+          >
+            <X size={18} aria-hidden="true" />
+          </Button>
+        ) : (
+          <Search size={20} aria-hidden="true" />
+        )}
       </header>
       <form
         onSubmit={(event) => {
@@ -94,7 +124,7 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
           next.set("include_navigation", String(includeNavigation && !scope));
           if (scope) next.set("toc_entry_id", scope);
           else next.delete("toc_entry_id");
-          setParams(next);
+          setParams(next, { state: { preserveReadingPosition: true } });
         }}
       >
         <Input
@@ -244,7 +274,11 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
                       </Link>
                     )}
                     <Link
-                      to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}&physicalPage=${part.pages[0]}`}
+                      to={chapterHref(
+                        hit.book_id,
+                        hit.chapter_id,
+                        part.pages[0],
+                      )}
                     >
                       查看原件第 {part.pages.join("、")} 页
                     </Link>
@@ -278,14 +312,10 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
                 <p>这段目录尚未可靠关联正文，可先查看目录原件。</p>
               )}
             <footer className="search-result-links">
-              <Link
-                to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}`}
-              >
+              <Link to={chapterHref(hit.book_id, hit.chapter_id)}>
                 阅读所在章节
               </Link>
-              <Link
-                to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}&physicalPage=${hit.pages[0]}`}
-              >
+              <Link to={chapterHref(hit.book_id, hit.chapter_id, hit.pages[0])}>
                 {hit.doc_kind === "navigation"
                   ? "查看目录原件第 "
                   : "查看原件第 "}

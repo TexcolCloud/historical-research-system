@@ -336,11 +336,18 @@ test("search preserves the hit and exposes separately cited context and its chap
   );
   expect(new URL(requested).searchParams.get("diverse")).toBe("true");
   await userEvent.click(screen.getByText("查看相关上下文、表头与注释"));
-  expect(
-    screen.getByRole("link", { name: "查看原件第 9 页" }).getAttribute("href"),
-  ).toBe("/books/book?tab=reader&chapter=chapter2&physicalPage=9");
-  expect(
-    screen.getByRole("link", { name: "阅读所在章节" }).getAttribute("href"),
-  ).toBe("/books/book?tab=reader&chapter=chapter2");
+  const original = new URL(
+    screen.getByRole("link", { name: "查看原件第 9 页" }).getAttribute("href")!,
+    "http://local",
+  );
+  expect(original.searchParams.get("chapter")).toBe("chapter2");
+  expect(original.searchParams.get("physicalPage")).toBe("9");
+  expect(original.searchParams.get("returnTo")).toContain("q=");
+  const chapter = new URL(
+    screen.getByRole("link", { name: "阅读所在章节" }).getAttribute("href")!,
+    "http://local",
+  );
+  expect(chapter.searchParams.get("chapter")).toBe("chapter2");
+  expect(chapter.searchParams.get("returnTo")).toContain("section=search");
   expect(screen.getByText("不包括乙地")).toBeTruthy();
 });

@@ -73,7 +73,6 @@ export default function NavigationReview({
     ? navigationOpening(evidence.data?.text ?? "", candidate.anchor)
     : null;
   const [searching, setSearching] = useState(!candidate);
-  const [mobileEvidence, setMobileEvidence] = useState("body");
   const section = useRef<HTMLElement>(null);
   const candidatePanel = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
@@ -120,54 +119,33 @@ export default function NavigationReview({
       className="navigation-review-workspace"
       aria-label="目录跳转核对"
     >
-      <header className="navigation-review-heading">
-        <div>
-          <p className="navigation-eyebrow">目录与正文位置</p>
-          <h3>确认这条目录跳到哪里</h3>
-        </div>
-        <Button variant="ghost" disabled={busy} onClick={onCancel}>
-          返回目录
-        </Button>
-      </header>
-      <div
-        className="navigation-mobile-views"
-        role="group"
-        aria-label="目录证据视图"
-      >
-        <Button
-          variant={mobileEvidence === "source" ? "default" : "outline"}
-          aria-pressed={mobileEvidence === "source"}
-          onClick={() => setMobileEvidence("source")}
-        >
-          目录证据
-        </Button>
-        <Button
-          variant={mobileEvidence === "body" ? "default" : "outline"}
-          aria-pressed={mobileEvidence === "body"}
-          onClick={() => setMobileEvidence("body")}
-        >
-          正文候选
-        </Button>
-      </div>
-      <div
-        className="navigation-review-evidence"
-        data-mobile-evidence={mobileEvidence}
-      >
+      <h3 className="sr-only">确认这条目录跳到哪里</h3>
+      <div className="navigation-review-evidence">
         <div className="navigation-source-column">
           <header>
             <h4>目录中的这一条</h4>
-            <span>PDF 第 {entry.source_page} 页</span>
+            <div className="navigation-column-actions">
+              <span>PDF 第 {entry.source_page} 页</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={onCancel}
+              >
+                返回目录
+              </Button>
+            </div>
           </header>
           <div className="navigation-column-scroll">
-            <blockquote>
-              <mark>{entry.source_anchor}</mark>
-            </blockquote>
-            <dl className="navigation-comparison">
-              <dt>标题</dt>
-              <dd>{entry.title}</dd>
-              <dt>书内页码</dt>
-              <dd>{entry.target_label || "未标示"}</dd>
-            </dl>
+            <details className="navigation-source-details">
+              <summary>
+                <strong>{entry.title}</strong>
+                <span>书内页 {entry.target_label || "未标示"}</span>
+              </summary>
+              <blockquote>
+                <mark>{entry.source_anchor}</mark>
+              </blockquote>
+            </details>
             <Original
               src={entry.source_image}
               label={`目录原图 · PDF 第 ${entry.source_page} 页`}
@@ -177,7 +155,10 @@ export default function NavigationReview({
         <div className="navigation-body-column" ref={candidatePanel}>
           <header>
             <h4 tabIndex={-1}>{searching ? "查找对应正文" : "待确认的正文"}</h4>
-            <span>先预览，再确认</span>
+            <span>
+              {candidate ? `PDF 第 ${candidate.physical_page} 页 · ` : ""}
+              先预览，再确认
+            </span>
           </header>
           <div className="navigation-column-scroll">
             {searching ? (
@@ -251,19 +232,15 @@ export default function NavigationReview({
                     不是这篇，查找其他正文
                   </Button>
                 </div>
-                <dl className="navigation-comparison">
-                  <dt>标题</dt>
-                  <dd>
+                <div className="navigation-candidate-meta">
+                  <h4>
                     <mark>{candidate?.anchor}</mark>
-                  </dd>
-                  <dt>PDF 页序</dt>
-                  <dd>第 {candidate?.physical_page} 页</dd>
-                  <dt>书内页码</dt>
-                  <dd>
-                    {candidate?.printed_label ?? "未知"}
-                    <small>系统识别，请以原图为准</small>
-                  </dd>
-                </dl>
+                  </h4>
+                  <p>
+                    书内页 {candidate?.printed_label ?? "未知"} ·
+                    系统识别，请以原图为准
+                  </p>
+                </div>
                 {candidate?.printed_label &&
                   entry.target_label &&
                   entry.target_label !== candidate.printed_label && (

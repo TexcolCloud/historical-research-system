@@ -40,6 +40,17 @@ test("reads a complete logical chapter first and opens only its associated origi
     </QueryClientProvider>,
   );
   await screen.findByText("连续的章节正文");
+  expect(
+    screen.getByText("结构整理结果").closest(".reader-toolbar"),
+  ).not.toBeNull();
+  await userEvent.click(screen.getByText("结构整理结果"));
+  expect(
+    await screen.findByText("暂无可展示的结构关系，仍按原文阅读。"),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("0 项可用于连续阅读 · 0 项暂按原页显示"),
+  ).toBeTruthy();
+  await userEvent.click(screen.getByText("结构整理结果"));
   expect(screen.queryByTitle("原书 PDF")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "对照原书" }));
   expect((await screen.findByAltText("原书第 7 页")).getAttribute("src")).toBe(

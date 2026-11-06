@@ -1,5 +1,5 @@
 import { queryKeys } from "@/client/query-keys.ts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import IssueEditor from "./IssueEditor.tsx";
 import { useRuntimeScope } from "@/app/runtime-scope.ts";
 import {
@@ -50,8 +50,6 @@ export default function ReviewPanel({
   const [selected, setSelected] = useState<string | null>(null),
     [message, setMessage] = useState("");
   const [showDraft, setShowDraft] = useState(false);
-  const [queueOpen, setQueueOpen] = useState(false);
-  const queueToggle = useRef<HTMLButtonElement>(null);
   const preparing = ["upload", "conversion", "ocr", "vision"].includes(
     stage ?? "",
   );
@@ -144,21 +142,10 @@ export default function ReviewPanel({
         </div>
       ) : (
         <div className="evidence-review-queue-layout">
-          <Button
-            className="evidence-review-queue-toggle"
-            ref={queueToggle}
-            variant="outline"
-            aria-expanded={queueOpen}
-            aria-controls="review-page-queue"
-            onClick={() => setQueueOpen(!queueOpen)}
-          >
-            待核对页面 · {issues.data.length}
-          </Button>
           <nav
             id="review-page-queue"
             aria-label="问题清单"
             className="evidence-review-queue"
-            data-open={queueOpen}
           >
             <h3>
               待核对页 <span>{issues.data.length}</span>
@@ -172,12 +159,7 @@ export default function ReviewPanel({
                 onPointerEnter={() =>
                   void query.prefetchQuery(issueOptions(issue.id))
                 }
-                onClick={() => {
-                  setSelected(issue.id);
-                  setQueueOpen(false);
-                  if (window.matchMedia("(max-width: 760px)").matches)
-                    queueToggle.current?.focus();
-                }}
+                onClick={() => setSelected(issue.id)}
               >
                 <strong>原件第 {issue.page} 页</strong>
                 <small aria-hidden="true">

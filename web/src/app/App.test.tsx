@@ -30,7 +30,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("navigation retains one workspace stream and an active upload until the application closes", async () => {
+test("retired introduction redirects to books while navigation retains one stream and active upload", async () => {
   const close = vi.fn();
   const streams: string[] = [];
   vi.stubGlobal(
@@ -49,7 +49,7 @@ test("navigation retains one workspace stream and an active upload until the app
     defaultOptions: { queries: { retry: false } },
   });
   const view = render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={["/welcome"]}>
       <QueryClientProvider client={query}>
         <App />
       </QueryClientProvider>
@@ -63,12 +63,8 @@ test("navigation retains one workspace stream and an active upload until the app
   await screen.findByTestId("upload-session");
   await user.click(screen.getByRole("link", { name: "待办" }));
   await screen.findByRole("heading", { name: "待办" });
-  await user.click(screen.getByRole("link", { name: "产品介绍" }));
-  await screen.findByRole("heading", {
-    name: /从一份 PDF，\s*到有出处的资料库。/,
-  });
-  expect(screen.getByTestId("upload-session")).toBeTruthy();
-  await user.click(screen.getByRole("link", { name: "开始本机试用" }));
+  expect(screen.queryByRole("link", { name: "产品介绍" })).toBeNull();
+  await user.click(screen.getByRole("link", { name: "书籍" }));
   await screen.findByRole("heading", { name: "书籍" });
   expect(screen.getByTestId("upload-session")).toBeTruthy();
   expect(lifetime.mounts).toBe(1);
