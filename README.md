@@ -1,87 +1,194 @@
 # Historical Research System
 
-本地史料工作流，默认由 **Codex 原生子代理 + 本地 MCP** 完成识别、独立原图审核和文章组织。本地程序负责原件留存、页面渲染、任务状态、证据校验、Markdown 入库和全文检索。史料卡生成已退出使用。
+面向单人使用的本地史料处理系统。导入 PDF 或图片后，由 Codex 原生子代理完成识别、独立原图审核和文章组织；本地程序保存原件与审核证据，并提供人工核对、阅读、检索和 Markdown 导出。
 
-任务、页面、会话和事件使用 SQLite/WAL 事务化保存；旧 JSON 工作区升级前须停机迁移。新工作区默认 14 个共享名额与八页暖会话，既有工作区不自动升级执行配置。预热会话使用实际任务分配后的余量，空闲名额可跨书归还。
+- **内容处理**：按页选择原生文字候选、混合识别或整页 OCR；Terra 负责识别，Sol 负责独立审核、修正复核和组织。
+- **人工终审**：对照疑点文字和原图，保留或修改后确认；草稿、旧版本及原件保留。
+- **资料使用**：保留脚注双向跳转、表格与插图证据，目录与搜索复用正文定位。
 
-人工终审提供正文疑点、原图定位和连续编辑草稿恢复。核对后的目录可在正文及侧栏点击，目录与搜索共用精确正文定位，支持返回原条目和目录章节范围检索。未找到正文或候选冲突时交人工确认，等待证据的条目不催人工，明确不设置跳转则完成。
+## 环境要求
+
+以下完整平台命令面向 **Windows PowerShell**，全部在仓库根目录执行。
+
+| 依赖 | 要求 |
+| --- | --- |
+| Python | 3.11；平台依赖限定为 `>=3.11,<3.12` |
+| uv | 安装与运行锁定的 Python 项目环境 |
+| Node.js / npm | Node.js 24 或更新版本，用于安装和构建工作台 |
+| Docker Desktop | Linux 容器引擎已启动，可运行 Docker Compose |
+| Codex CLI | 已安装、已登录，并能使用项目配置的 Terra/Sol 原生子代理模型 |
+| 检索模型 | 本地 BGE-M3 与 BGE reranker 权重，准备方法见[模型说明](models/README.md) |
+| GPU | 默认检索使用 CUDA，需要兼容的 NVIDIA 驱动；CPU 检索必须显式配置 |
+
+独立 MCP 工作台只需要 Python、uv 和 Codex CLI，不依赖 Docker、SQL/S3 或 BGE。其安装与使用见 [Codex 模块](services/codex-pipeline/README.md#独立使用)。
 
 ## 快速开始
 
-完整网页入口复用原项目的上传、核对、阅读、脚注、检索与导出；上传完成后自动写入同一 Codex 持久队列，无需在聊天中再次发出处理指令。准备 Docker Desktop、Python 3.11、uv、Node.js 和已登录的 Codex CLI，然后执行：
+### 1. 准备配置
+
+首次使用时复制配置模板，已有 `.env` 时保留原文件：
 
 ```powershell
-uv sync --project services/research-platform --locked --group dev
+if (-not (Test-Path -LiteralPath '.env')) {
+    Copy-Item -LiteralPath '.env.platform.example' -Destination '.env'
+}
+```
+
+用编辑器修改 `.env` 中的占位值，至少核对：
+
+| 配置 | 用途 |
+| --- | --- |
+| `INGEST_DATABASE_URL` | 主机访问 PostgreSQL 的连接信息，使用具备创建专用数据库权限的本地账号 |
+| `INGEST_DEV_DB_PASSWORD` | 首次创建 PostgreSQL 容器的密码，应与上述连接信息一致 |
+| `INGEST_S3_ENDPOINT_URL`、`INGEST_S3_BUCKET` | S3 地址与业务桶 |
+| `INGEST_S3_ACCESS_KEY`、`INGEST_S3_SECRET_KEY` | 专用 S3 凭据 |
+| `PLATFORM_PROCESSING_BACKEND=codex` | 默认原生处理路径；省略时也为 `codex` |
+| `PLATFORM_RETRIEVAL_DEVICE` | 默认 `cuda`；需要 CPU 时显式设为 `cpu` |
+
+模板保留了旧链路字段，**完整网页平台仍需要 `.env`**；原生识别与审核不依赖其中的 DeepSeek 配置。数据库 URL 中的特殊字符需要按 URL 规则编码。端口、数据库、模型及备份配置详见[平台 README](services/research-platform/README.md)。
+
+已有环境应保留 Compose 项目名和凭据，它们关系到现有容器与卷的归属。
+
+### 2. 安装运行环境
+
+默认 GPU 启动器从固定目录启动检索服务。每次打开新的平台终端，先设置以下环境路径；各模块的 `uv run` 命令继承此设置：
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = [System.IO.Path]::GetFullPath('.cache/engineering-envs/research-platform')
+uv sync --project services/research-platform --locked --group dev --extra retrieval
 npm --prefix services/review-workbench ci
-uv run --no-sync --project services/research-platform python scripts/hrs_v2.py up --build
-```
-
-打开 http://127.0.0.1:18170 。SQL、S3 和 OpenSearch 使用根 `.env` 中的配置；完整检索沿用已安装的 BGE 嵌入/重排运行时，见[平台说明](services/research-platform/README.md)。本地 Codex 协调器通过 `codex exec` 分派原生子代理，不使用交互 TUI，也不调用旧 OCR 服务。识别固定为 GPT-6.1 Terra，独立原图审核与文章组织固定为 GPT-6.1 Sol。新任务按冻结的有限复核策略处理，复核未通过进入人工终审。
-
-也可仅使用不依赖 SQL/S3 的本地 MCP 工作台。其安装命令与完整网页入口分开：
-
-准备 Python 3.11、[uv](https://docs.astral.sh/uv/) 和已登录的 Codex CLI；在项目根目录执行：
-
-```powershell
-uv sync --project services/codex-pipeline --locked
 codex login status
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli doctor
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli start 'D:/materials/source.pdf' --title '待处理史料'
 ```
 
-依赖安装与运行分开：先执行 `uv sync`，常驻服务使用 `--no-sync python -m hrs_codex.cli`。这避免 Windows 上正在运行的控制台入口占用自身文件、后续启动又触发重装的问题；原有 `hrs-codex` 命令继续兼容。
+`--extra retrieval` 安装 BGE 所需的 PyTorch、Transformers 等依赖。继续按[模型说明](models/README.md)准备固定版本的检索权重。CPU 检索同样需要这些依赖和权重。
 
-start 返回文档 ID、工作区 ID 和本地工作台网址，后台执行器自动接续处理。也可以先打开工作台，从网页导入：
+安装与常驻运行分开：后续启动使用 `--no-sync`，避免运行中的环境被安装步骤改写。已有服务运行时，先停止所属启动器，再更新依赖。
+
+### 3. 初始化并启动
 
 ```powershell
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli workbench
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli status <document_id>
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli search '中东铁路'
+uv run --no-sync --project services/research-platform --locked python scripts/hrs_v2.py init
+uv run --no-sync --project services/research-platform --locked python scripts/hrs_v2.py up --build
 ```
 
-后台执行器启动 Codex 主代理，由主代理分派原生子代理完成各阶段，使用已登录的 Codex 账号和项目固定角色模型。PDF 按物理页选择原生文字候选、混合区域识别或整页 OCR，所有路径都经过独立原图审核。统一根目录由 [.codex/historical-workspace.json](.codex/historical-workspace.json) 设置；CLI、MCP、工作台读取相同配置。显式 `--root` 或 `HRS_CODEX_ROOT` 用于单独工作区，界面展示实际工作区 ID，验收数据与正式库分开。新流程无需启动旧平台容器或加载旧 OCR 权重。
+`init` 准备基础服务、专用业务/测试数据库、数据库迁移和上传服务；`up --build` 构建前端并在主机启动 API、工作台与原生执行器。后续前端没有变更时可省略 `--build`。
+
+启动日志出现 `Research workbench: http://127.0.0.1:18170` 后，在浏览器打开 [工作台](http://127.0.0.1:18170)。默认主机入口固定为 18170；旧容器 Web 的 18156 端口配置不改变该入口。
+
+### 4. 检查安装
+
+在设置了相同运行环境的另一个终端执行：
+
+```powershell
+uv run --no-sync --project services/research-platform --locked python scripts/hrs_v2.py status
+uv run --no-sync --project services/research-platform --locked python -m hrs_platform.cli doctor
+```
+
+`status` 查看工作区及本机监听状态；平台 `doctor` 检查数据库、S3、OpenSearch 和 Codex 登录等依赖。`/health/live` 与 `/health/ready` 可用于查看服务健康。检索模型是否可用还需在一份已完成入库的资料上实际检索，单纯端口可达不代表所有模型已就绪。
+
+## 日常使用
+
+1. 在书架上传 PDF。上传完成后自动进入同一持久队列，无需再到聊天中重复导入；图片可通过独立 CLI/MCP 导入。
+2. 在“处理进展”查看识别、审核、通过与待人工数量。识别结束或审核结束都不等于全书已通过。
+3. 在“内容核对”对照疑点原图，选择保留或修改并提交本页；离开页面保存的草稿不会放行内容。
+4. 对目录冲突确认正文起点，或明确选择不设置跳转。PDF 物理页序与书内印刷页码分别处理。
+5. 全部页面通过、文章组织和目录解析任务完成后，发布 Markdown；平台继续建立阅读投影和检索索引。
+6. 入库后阅读、搜索或导出资料。目录关联争议可以单独保留待办，不会被伪装成已确认跳转。
+
+```mermaid
+flowchart TD
+    A[上传与原件留存] --> B{页面探测}
+    B -->|可靠文字层| C[原生 Markdown 候选]
+    B -->|混合或扫描| D[Terra 识别]
+    C --> E[Sol 独立原图审核]
+    D --> E
+    E -->|通过| F[累计已通过页面]
+    E -->|明确修正或读法冲突| G[一次独立整页复核]
+    E -->|原件不清| H[人工终审]
+    G -->|通过| F
+    G -->|未通过| H
+    H -->|确认| F
+    F -->|全文通过| I[Sol 文章组织与发布校验]
+    I --> J[Markdown 与阅读投影]
+    J --> K[BGE 与 OpenSearch 索引]
+```
+
+正文、脚注归属、表格、插图和原件证据需要贯穿审核、组织与导出。机器裁决和人工决定分别记录；流程测试或工程测试通过不证明史料准确率。
+
+## 工作区与文件
+
+默认原生根目录由 [.codex/historical-workspace.json](.codex/historical-workspace.json) 指定，通常为 `state/codex`。任务、页面与会话的现役状态保存在 `ledger.sqlite3`，原件、页图、修订和发布文件保存在该工作区；完整平台还使用 PostgreSQL、S3 与 OpenSearch。
+
+| 入口 | 选择原生工作区的方式 |
+| --- | --- |
+| 完整网页平台 | `.env` 的 `PLATFORM_CODEX_ROOT`；未设置时使用共享默认根 |
+| CLI | `--root`、进程环境变量 `HRS_CODEX_ROOT`、共享默认根，依次取值 |
+| Codex 对话 MCP | 进程环境变量 `HRS_CODEX_ROOT` 或共享默认根；连接启动后生效 |
+
+对同一本资料操作前，核对界面、CLI 与 MCP 返回的 **workspace_id** 是否一致。仅修改平台的 `.env` 不会自动切换已经连接的对话 MCP。不要因为看不到已有任务就在另一个工作区重复导入。
+
+备份应在执行器与上传写入停止后进行，采用平台协调备份，并独立保存 S3 业务对象。恢复到新的数据库与不存在的新原生目录；操作步骤见[平台备份说明](services/research-platform/README.md)。
 
 ## 在 Codex 对话中使用
 
-项目的 [.codex/config.toml](.codex/config.toml) 注册本地 historical_research stdio MCP。安装依赖后重新打开或重启项目的 Codex 会话，再通过 /mcp 查看连接；项目须按 Codex 的规则受到信任。可以直接说：
+[项目 MCP 配置](.codex/config.toml)注册 `historical_research`，角色定义位于 [.codex/agents](.codex/agents)，对话入口由 [historical-research Skill](.agents/skills/historical-research/SKILL.md)提供。先按[独立模块安装说明](services/codex-pipeline/README.md#独立使用)准备该配置引用的 Python 环境，再重新连接项目 MCP。
 
-> 使用 historical-research 处理 D:/materials/source.pdf，并打开工作台查看进度。
+可以请求“使用 historical-research 处理指定 PDF，并打开工作台”。对已在网页上传的资料，提供现有文档或书籍标识继续处理，避免再次导入。本地协调器通过 `codex exec` 分派原生子代理，MCP 保存状态与校验证据，不执行模型推理。
 
-项目 [historical-research skill](.agents/skills/historical-research/SKILL.md) 通过 `workspace_status`、`process_document`、`open_workbench` 接入统一入口。独立角色定义在 [.codex/agents](.codex/agents)。[工作流契约](services/codex-pipeline/src/hrs_codex/workflow.md) 同时供 skill、MCP 和协调器读取。
+## 停止与故障恢复
 
-## 验收和恢复
-
-每页保存原图与 SHA-256、OCR 初稿、审核结论、修订补丁、输入/结果哈希和子代理身份。Codex 审核记为机器裁决；人工确认记录本地使用者与原图依据，无需填写姓名和审核意见，两者均不视为 sealed gold 审核。新任务的明确、唯一定位修正先经过另一名 Sol 子代理对原图完整复核；无法确认或复核失败进入人工终审。既有任务保留冻结策略。全文通过且文章组织完成后才发布 document.md；清晰页面在待核对期间仍可读取。
-
-独立审核未通过时，工作台的人工队列保留原图、候选和失败原因。人工确认最后一页后自动排队续跑文章组织和发布；保存待审草稿则继续阻断。技术故障记录退避重试，连续三次后，新策略允许最后一次检查点自动恢复；仍失败时等待显式恢复，不会被写成原件不清。已发布内容的复核使用新版本；新版本失败时旧发布版本仍可检索，人工决定受到保护。
-
-工作台自动同步进度与待审数量，提交错误和临时断线保留正在编辑的内容。审核与修订验证先通过 MCP 获取带任务回执的原图、保存原图观察，再读取候选正文；观察和最终裁决绑定哈希。独立终验发现的内容错误使用显式复核版本关闭，历史发布文本会提示复核状态。
-
-原件不清、读法不确定、修订无法唯一定位或复核失败时保持 pending。run 对未发布文档返回退出码 2；Codex 执行失败保留检查点和日志并报错。确认需要重试后运行：
+在启动器终端按 `Ctrl+C`，或从相同平台环境执行：
 
 ```powershell
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli retry <document_id> <pending_task_id>
-uv run --no-sync --project services/codex-pipeline --locked python -m hrs_codex.cli run <document_id>
+uv run --no-sync --project services/research-platform --locked python scripts/hrs_v2.py stop
 ```
 
-中断中的租约过期后可重新领取，已完成阶段不会重做。state/codex/runs/ 保留协调器请求、Codex JSONL 事件与执行回执。书目身份默认为 unclaimed，文章与物理页码映射显式保存。
+该命令请求停止所属主机启动器和执行器，保留检查点；共享存储、OpenSearch 与上传容器的停止方式见[基础设施 README](deploy/infrastructure/README.md)。暂停某一本资料使用进展页的暂停操作，继续时明确点击继续。
+
+| 现象 | 处理方式 |
+| --- | --- |
+| Docker 无法连接 | 先确认 Docker Desktop 的 Linux 引擎已就绪，再启动平台 |
+| 缺少 `.env` 或数据库认证失败 | 按配置模板核对地址、账号和容器初始化凭据，不覆盖现有业务卷 |
+| 18170 已占用 | 核对已有启动器，使用已有工作台或先正常停止其所属实例 |
+| GPU 检索环境或权重缺失 | 核对固定 Python 环境与[模型目录](models/README.md)；CPU 模式也需显式配置 |
+| 一直等待人工 | 完成内容终审或目录决定；保存草稿不等于确认通过 |
+| 处于技术冷却或重试中 | 按界面提示等待有限退避，保留检查点；其他可执行页面继续处理 |
+| 自动恢复预算耗尽 | 修复故障后使用“从断点恢复”，不重新上传或删除已完成结果 |
+| 原件或证据哈希不一致 | 恢复原文件后重新校验，不能修改哈希强行通过 |
+| 目录位置不确定 | 进入目录核对选择实际正文位置，或明确不建立跳转 |
+
+主机启动日志与控制记录在 `.cache/platform-diagnostics/`；原生运行事件在工作区 `runs/`。排障时保留相应记录，分享前去除凭据与访问令牌。旧 JSON 工作区需要停机执行账本迁移，见[原生模块说明](services/codex-pipeline/README.md#旧工作区迁移)。
 
 ## 开发验证
 
+继承前述平台运行环境，在根目录执行无模型的原生测试：
+
 ```powershell
-uv sync --project services/codex-pipeline --locked --group dev
-uv run --no-sync --project services/codex-pipeline --locked python -m pytest services/codex-pipeline/tests --basetemp .cache/codex-tests
-uv run --no-sync --project services/codex-pipeline --locked python -m ruff check services/codex-pipeline
+uv run --no-sync --project services/research-platform --locked python -m pytest services/codex-pipeline/tests --basetemp .cache/readme-native-tests -q
+npm --prefix services/review-workbench test
+npm --prefix services/review-workbench run build
 ```
 
-新流程的工程验证不依赖旧平台容器。[模块说明](services/codex-pipeline/README.md) 给出工具、流程图及恢复方式。真实史料的原件、验收记录与日志保留在本地；工程测试或流程验收通过不代表内容准确率，未解决的原件读法仍需人工判断。
+平台集成测试需要专用测试数据库和存储，前端接口变更需同步 OpenAPI 与客户端类型；分别见[平台测试](services/research-platform/README.md)和[前端契约说明](services/review-workbench/README.md)。真实史料验收使用独立工作区，保留原件与机器证据，未解决内容交人工。
+
+## 模块导航
+
+| 模块 | 职责与文档 |
+| --- | --- |
+| 原生处理与 MCP | [services/codex-pipeline](services/codex-pipeline/README.md) |
+| 平台 API、持久化与检索 | [services/research-platform](services/research-platform/README.md) |
+| 上传、核对与阅读界面 | [services/review-workbench](services/review-workbench/README.md) |
+| 共享运行组件 | [packages/runtime-support](packages/runtime-support/README.md) |
+| 存储与检索部署 | [deploy/infrastructure](deploy/infrastructure/README.md) |
+| 模型目录与安装 | [models](models/README.md) |
+| 旧转换模块 | [services/document-extraction](services/document-extraction/README.md) |
+| 检索评测工具 | [Ragas 工具](services/research-platform/evaluation/tools/ragas/README.md) |
+| 本地历史参考资料 | [evaluation/reference](evaluation/reference/README.md) |
+
+默认处理不依赖旧 Temporal、Qwen/Paddle OCR 或 DeepSeek 链路。已有历史数据和历史卡片保留读取与导出；新史料卡生成已退出。只有显式选择 `--legacy` 才启动兼容部署，具体前提见平台模块。
 
 ## 仓库跟踪范围
 
-Git 保留业务源码、测试及必需数据、API 契约、构建部署配置和 README。`historical-research/SKILL.md` 与 `hrs_codex/workflow.md` 是实际执行所需的代理契约，作为运行资源保留。
+Git 保留业务源码、测试及必需数据、API 契约、部署配置和 README。实际执行使用的 `SKILL.md` 与 `workflow.md` 作为运行资源保留。辅助报告、验收快照、截图、日志、史料和本地工作区由 [.gitignore](.gitignore)排除，不能从 README 链接未分发的本地记录。
 
-辅助报告、验收快照、历史图示、日志、史料与本地工作区由 `.gitignore` 排除，不随代码提交。取消跟踪只从 Git 索引移除，本地文件继续保留。CI 检查已跟踪文件是否违反忽略规则，防止辅助资料再次混入提交。
-
-## 原有平台与历史资料
-
-[Research Platform](services/research-platform/README.md)、[Review Workbench](services/review-workbench/README.md)、[Docling/Paddle 转换模块](services/document-extraction/README.md) 和相关 GPU 运维脚本保留。原 React UI 的上传、人工核对、阅读、脚注、表格/插图、检索、Markdown 导出、删除与勘误已接入 Codex 队列和结果。原 SQL/S3 历史数据继续可读；不会自动重跑或迁移历史任务。默认运行不依赖 Temporal 或 Qwen/Paddle/DeepSeek 识别服务；`scripts/hrs_v2.py --legacy` 才使用旧处理路径。制卡新建、重试和调度保持退出，历史卡片只读与导出继续保留。
+提交前核对 `git diff --check`、README 链接和配置示例；源码或命令入口变更时，同一 PR 更新对应 README。CI 拒绝跟踪符合忽略规则的本地文件。问题反馈应附复现步骤、脱敏错误与受影响模块，保留原件及人工修改。

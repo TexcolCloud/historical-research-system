@@ -1,82 +1,86 @@
 # Review Workbench
 
-> 2026-11-04：本工作台的上传、待审、阅读、脚注、检索、导出、删除和勘误已接入原生 Codex 持久队列；默认由主机平台启动器提供同源界面。历史 SQL/S3 资料继续可读，史料卡生成入口保持退出。运行方式见[根 README](../../README.md)。
+以书籍任务为中心的 React 工作台，提供上传、处理进展、人工核对、阅读、原书目录、检索和导出。默认通过统一平台连接原生 Codex 持久队列；历史资料与卡片保留读取兼容，当前流程不生成新卡片。
 
-以书籍任务为中心的 React 工作台：书架、待办，以及每本书的处理进展、人工核对、阅读资料三个工作区。原书目录与检索归入阅读资料，运行诊断在进展页按需展开。
+[项目快速开始](../../README.md#快速开始) · [统一平台](../research-platform/README.md) · [API 契约](../research-platform/openapi.json)
 
-[首次启动](../../README.md#快速开始) · [业务行为](../research-platform/README.md#处理流程与数据职责) · [API 契约](../research-platform/openapi.json)
+## 启动与开发
 
-## 本地开发
+完整系统的安装、配置和启动见项目快速开始。默认主机启动器将本模块的 `dist/`、`/api/v2` 和上传代理放在同一来源 `http://127.0.0.1:18170`，不需要另开 Vite。启动器的 `--build` 会执行前端构建，前提是已安装 Node.js 24+ 和本模块依赖。
 
-需要 Node.js 24+、平台 Python 环境及可访问的后端／上传服务。下面命令在本模块目录执行：
+开发前端需要 Node.js 24+，以及已配置、可访问的统一平台 API 与 tus 上传服务。以下命令均在项目根目录执行：
 
 ```powershell
-npm ci
-npm --prefix tooling/openapi ci
-npm run contracts
-npm run dev
+npm --prefix services/review-workbench ci
+npm --prefix services/review-workbench run dev
 ```
 
-开发服务器默认 18156，不能与生产 Web 同时占用。需要并行开发时使用 `npm run dev -- --port 18157`。根配置的 `WORKBENCH_API_ORIGIN` 和 `WORKBENCH_UPLOAD_ORIGIN` 可覆盖默认代理目标 18170／18171，见 [vite.config.ts](vite.config.ts)。
+Vite 监听 `http://127.0.0.1:18156`，端口被占用时直接报错。可用 `npm --prefix services/review-workbench run dev -- --port 18157` 指定其他端口。
 
-生产 [Dockerfile](../../deploy/platform/Dockerfile.web) 自动构建前端，由 [Nginx](../../deploy/platform/nginx.conf) 同源代理 `/api/v2` 与 `/uploads/`。`/` 和 `/platform.html` 使用同一应用；无需额外启动 Vite。
+[vite.config.ts](vite.config.ts) 从项目根目录读取环境配置，并在开发和预览模式代理以下路径：
 
-## 页面与组件
+| 浏览器路径 | 默认目标 | 覆盖变量 |
+| --- | --- | --- |
+| `/api/v2` | `http://127.0.0.1:18170` | `WORKBENCH_API_ORIGIN` |
+| `/uploads/` | `http://127.0.0.1:18171` | `WORKBENCH_UPLOAD_ORIGIN` |
 
-| 功能                | 实现                                                      |
-| ------------------- | --------------------------------------------------------- |
-| 路由与数据          | React Router、TanStack Query、生成的 openapi-fetch 客户端 |
-| 可恢复上传          | Uppy、Golden Retriever、tusd；最终文件保存在 S3           |
-| Markdown 查看与编辑 | 渲染器及 Tiptap；编辑器按需加载                           |
-| 执行关系图          | React Flow + Dagre，节点和连线由实际运行记录生成          |
-| 界面基础            | Radix UI、Tailwind、Lucide；复用现有组件                  |
+上传也可经主机平台的同源代理转发，此时将 `WORKBENCH_UPLOAD_ORIGIN` 设为 `http://127.0.0.1:18170`。前端开发服务器不会启动后端、上传服务或处理任务。
 
-目录参考 [Full Stack FastAPI Template 前端职责划分](https://github.com/fastapi/full-stack-fastapi-template/tree/cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7/frontend/src)，沿用已有 React Router、TanStack Query 和 openapi-fetch。
+保留的 Docker Web 部署使用 [Dockerfile.web](../../deploy/platform/Dockerfile.web) 构建静态文件，由 [Nginx](../../deploy/platform/nginx.conf) 在容器内监听 8080，并代理 API 和 tusd；外部 Web 端口由 Compose 配置。它属于显式 `--legacy` 部署路径，与默认主机平台部署分开。两个 HTML 构建入口 `/` 与 `/platform.html` 使用同一 React 应用。
+
+## API 契约
+
+客户端 [api.ts](src/client/api.ts) 使用 `openapi-fetch`，类型来自生成的 [schema.d.ts](src/client/schema.d.ts)。普通前端开发可使用仓库内的已生成类型；修改接口时再重新生成。
+
+[export-contracts.ts](scripts/export-contracts.ts) 先运行统一平台的 `hrs_platform.export_openapi`，覆写 `services/research-platform/openapi.json`，再生成前端类型。执行前需完成统一平台 Python 环境安装和配置，使 `Settings.load()` 能读取所需数据库与对象存储配置；导出器不启动 API 服务。
+
+脚本通过 `UV_PROJECT_ENVIRONMENT` 选择 Python 环境；请继承根 README 安装时使用的设置，新终端需重新设置同一变量。未设置时脚本查找 `services/research-platform/.venv`，不会自动查找根快速开始中的缓存环境。
+
+契约工具有独立锁文件，保持其 TypeScript 依赖与应用隔离。在项目根目录执行：
+
+```powershell
+npm --prefix services/review-workbench/tooling/openapi ci
+npm --prefix services/review-workbench run contracts
+```
+
+接口变更应同时提交后端 OpenAPI 和前端类型，避免手工编辑生成文件。
+
+## 代码职责
 
 | 位置 | 职责 |
 | --- | --- |
 | [main.tsx](src/main.tsx) | 创建根节点、QueryClient 和 Router provider |
-| [app/App.tsx](src/app/App.tsx)、[app/AppShell.tsx](src/app/AppShell.tsx) | 路由装配及跨页面外壳；上传会话随外壳存活，切换页面不会销毁正在上传的任务 |
-| `routes/` | 书架、单书、待办和卡片集合页面，组合对应功能；页面懒加载 |
-| `features/` | 上传、书籍管理、内容核对、阅读、卡片、搜索、运行与执行图；测试与功能同目录 |
-| `hooks/` | 全应用唯一的 SSE 订阅、断线显示、补充刷新与查询缓存更新 |
-| [client/api.ts](src/client/api.ts)、[client/schema.d.ts](src/client/schema.d.ts) | 类型化客户端、分页读取与生成的 API 契约 |
-| `components/`、`editor/`、`styles/` | 跨功能的基础界面、编辑器、布局与主题样式 |
+| [app/](src/app/) | 路由装配、错误边界和共享外壳；保留上传会话及书架搜索、筛选条件 |
+| [routes/](src/routes/) | 书架、单书和待办页面，按需加载功能 |
+| [features/](src/features/) | 上传、书籍管理、内容核对、阅读、目录、搜索、运行进展与执行图 |
+| [hooks/](src/hooks/) | 工作区 SSE 订阅、断线刷新及查询缓存更新 |
+| [client/](src/client/) | 类型化 API 客户端、列表分页与缓存键 |
+| [components/](src/components/)、[editor/](src/editor/)、[styles/](src/styles/) | 公共界面、执行关系图、Markdown 渲染编辑和样式 |
 
-功能通过客户端访问后端，不依赖应用装配文件；共享外壳保留书架搜索／筛选状态，具体筛选和列表查询留在页面中，因此进入详情再返回不会丢失列表条件。问题详情、原件、章节和卡片详情按需读取，书架不加载整书正文。现有 URL、API 和缓存键保持兼容，旧 `src/platform/` 目录已移除。
+路由使用 React Router，服务端状态使用 TanStack Query；上传使用 Uppy、Golden Retriever 和 tus 协议；Markdown 编辑器使用 Tiptap 并按需加载；执行图使用 React Flow 与 Dagre。功能通过客户端访问后端，正文、原件、问题详情与执行历史按需读取。
 
 ## 交互约定
 
-- 首次 SSE 连接使用一致快照和游标，断线自动补收；同类事件在 200 毫秒内合并刷新，健康连接不额外轮询，隐藏页面不做断线轮询。事件版本防止旧结果覆盖新状态。
-- 内容确认先保存最新草稿，持久回执返回后立即显示下一项；明确区分“决定已保存”与后台同步，网络重试复用同一决定标识。
-- 人工是最后一道内容裁决：对照疑点局部原图，选择保留或修改，保存当前疑点后处理下一处；全部处理后才出现本页终审提交。没有不确定或跳过结论，离开页面仅保存未提交草稿。
-- 默认编辑疑点文字，整页可视化与 Markdown 编辑保留为次级操作；机器参考读法需要人工选择，不能替代终审。原件、脚注及修改记录保留。
-- 正文与目录待办均在人工核对工作区展示。目录候选仅作预览，必须明确提交才形成跳转决定；确认位置或明确不建立关联均为目录终局决定，不构成正文批准。旧的暂不关联记录保持原语义。
-- 目录核对直接对照当前候选的标题、日期、正文开头与原图，用“就是这篇，确认跳转”提交；候选预览不产生决定。不是同一篇时才进入标题搜索或 PDF 页序定位，无标题页面可选取唯一的原文段落作为起点。PDF 页序与书内页码分别标明，识别到的差异不会自动改写原页码。
-- “保留目录文字，不设置跳转”是明确终局结果。提交后自动进入下一项，全部完成提供目录试用入口；已确认项目可在原书目录修改跳转，历史决定保留。后台更新使证据版本变化时，提交失败会在操作区提示重新载入核对证据。
-- 书架、待办和默认单书入口使用同一待办路由；未入库资料可阅读底稿，检索明确提示尚未建立索引。上传成功后直接提供处理进展入口。
-- 保存期间保护当前编辑范围；失败保留输入，草稿保存不等于放行。机器可在独立核验后自动写回，人工只处理剩余问题。
-- 章节结构不额外要求人工批准。历史卡片保持可读，当前流程不生成新卡片。
-- 列表按游标继续获取元数据，避免固定上限隐藏卡片或待办。
-- 原件、页码或精确范围不足时明确说明，不用推测位置冒充引文出处。
+- 单书工作区分为处理进展、人工核对和阅读资料；正文与目录待办共享人工核对入口，原书目录和检索归入阅读资料。
+- 上传会话随共享外壳存活，页面切换保留进行中的上传；上传支持恢复，成功后提供处理进展入口。
+- 内容核对逐项对照原图，明确选择保留或修改。草稿保存完成后才能继续；全部疑点处理后仍需提交本页终审。离开页面保存草稿不等于内容放行。
+- 默认编辑当前疑点，整页可视化和 Markdown 编辑作为次级操作；机器建议需人工选择，原件、脚注及修改记录保留。没有可靠局部定位时展示整页核对。
+- 目录候选预览不产生决定。核对标题、日期、正文开头与原图后确认跳转；也可搜索标题、按 PDF 页序定位，或明确保留目录文字而不设置跳转。目录决定不构成正文批准，PDF 页序与书内页码分别显示。
+- 提交使用持久回执与幂等决定标识；失败保留输入，证据版本变化时提示重新载入。成功回执可直接切换下一项，后台同步状态单独显示。
+- SSE 由共享外壳统一订阅，先读取快照和游标，再接续事件；健康连接不额外轮询，断线时只刷新可见页面的活动查询。执行诊断按阶段分页加载，图只绘制视口内节点。
+- 未入库资料可阅读底稿，检索提示索引尚未建立。修订待复核时继续读取已发布版本；原件或精确范围不足时明确显示缺失信息。
 
-执行诊断默认显示阶段累计数与当前/异常记录，历史按阶段、每批 40 条查询。React Flow 仅绘制视口内节点；同一窗口的状态更新保留位置，换批后重新聚焦，不再把千条完整历史一次挂入 DOM。页面明确显示当前范围与真实总数。技术故障、等待重试、达到预算后的停止分别显示；恢复不改变已有内容决定。
+## 检查与构建
 
-## 契约与检查
-
-`npm run contracts` 使用 [export-contracts.ts](scripts/export-contracts.ts)，先运行现役 FastAPI 的导出器，再生成 [schema.d.ts](src/client/schema.d.ts)。契约工具依赖独立锁定，应用与工具的 TypeScript 版本不需要混装。修改接口时同时提交后端 OpenAPI 与前端类型。
+安装本模块依赖后，在项目根目录执行：
 
 ```powershell
-npm run typecheck
-npm run check-unused
-npm test
-npm run build
+npm --prefix services/review-workbench run typecheck
+npm --prefix services/review-workbench run check-unused
+npm --prefix services/review-workbench test
+npm --prefix services/review-workbench run build
 ```
 
-Knip 检查生产入口及契约导出脚本；`tw-animate-css` 由 CSS 导入，因此保留显式例外。Vitest 测试与对应组件放在同一目录。浏览器内容验收仍需真实原件与实际任务，组件测试不替代整书验收。
+`build` 先执行 TypeScript 检查，再输出 `services/review-workbench/dist/`。`npm --prefix services/review-workbench run preview` 可在 18156 端口预览已有构建，仍依赖上述 API 和上传代理。
 
-2026-11-05 此前交互回归：前端 60 项、后端 492 项通过（15 项跳过）。隔离浏览器回放覆盖正文终审，以及目录直接确认、搜索与页序选取、连续任务、不设跳转、版本冲突重载和再次修改。真实材料仅作界面只读核对，未代替人工提交；这轮不构成新的史料识别准确率验收。本地截图、证据哈希和详细记录保存在根目录 `output/ux-implementation-20261105/` 与 `output/directory-guidance-20261105/`，按仓库约定不提交历史报告。
-
-旧 `docs/` 内的草案契约、页面设计和评审记录仅作本地历史资料，当前运行不读取它们。
-
-2026-11-05 性能回归（原生 121 项、平台 384 项、前端 63 项通过，15 项可选测试跳过）：825 页真实工作区在后台完整证据校验期间，目录、进展、分页执行记录和逐页阅读的 P95 均低于 300 毫秒；静置无重复执行事件。1012 条真实执行记录的隔离生产构建回放首屏约 21–60 毫秒；独立 SQL 回执测试在后台对象写入阻塞时约 41 毫秒返回，并验证幂等重试和并发决定保留。浏览器回执延迟回放约 54 毫秒显示下一项，这不是整书内容准确率或真实端到端网络时延认证。完整性能、截图与证据哈希在本地 `output/performance-implementation-20261105/`，不提交报告。已发布整书检索和导出的性能仍需已发布的大样本单独评估，现有功能回归继续覆盖兼容性。
+Vitest 测试与功能同目录；Knip 检查生产入口和契约脚本，CSS 导入的 `tw-animate-css` 配有显式例外。组件测试和构建验证界面实现；整书内容验收仍须使用真实原件与完整处理任务。

@@ -1,105 +1,98 @@
-# Document Extraction
+# Document Extraction（旧转换模块）
 
-> 2026-10-21：本模块作为历史转换实现保留。项目默认 OCR 与审核改由 [Codex 原生子代理 + 本地 MCP](../codex-pipeline/README.md) 完成，下文仅适用于旧转换模块。
+本模块保留 Docling、单路 OCR、本地视觉复核和来源映射的兼容实现。项目默认处理路径已改为 [Codex 原生子代理与本地 MCP](../codex-pipeline/README.md)，新资料导入与继续处理见 [项目 README](../../README.md)。本模块不是默认流程的依赖；保留代码不表示重新开放 OCR 选型或调优。
 
-PDF／图片转换模块，使用 Docling 与一个配置明确的 OCR 后端生成 Markdown、原页图及来源映射。默认后端为 PaddleOCR-VL-1.6；RapidOCR 是显式替代，不自动作为第二识别器。
+## 职责与使用前提
 
-[项目安装](../../README.md#快速开始) · [模型准备](../../models/README.md) · [平台处理流程](../research-platform/README.md#处理流程与数据职责)
+输入为 PDF 或 Docling 支持的图片，输出为本地可恢复的转换工作目录。模块保存原页、候选 Markdown、来源坐标、核验记录和待审项，不确定书目身份、不划分正式文章、不建立检索索引。旧平台通过 `stages` 入口拆分识别与审核，并另外管理持久化和入库；独立 CLI 完成不等于已入库。
 
-## 使用范围
+仅在维护既有转换任务或明确使用旧路径时运行。需要 Windows、Python 3.11，以及按 [pyproject.toml](pyproject.toml) 安装的独立 OCR 环境。模型和缓存位置见 [模型说明](../../models/README.md)。旧环境安装入口为 [bootstrap.ps1](../../deploy/windows/bootstrap.ps1)：它会安装依赖、执行后端初始化检查，并可能下载工件和占用 GPU。
 
-本模块负责原始载体提取、内容核验、证据和待办输出，不负责正式书目身份、章节入库、嵌入或研究制卡。平台通过独立阶段入口复用它，完整工作流由 Research Platform 管理。
+旧路径的视觉复核使用本地 Qwen3-VL-8B-Instruct Q4_K_M 和共享 broker；配置缺失时不会改用 DeepSeek 视觉。模型准备、broker 和设备要求属于旧路径，不适用于默认 Codex 审核。
 
-独立 CLI 的本地输出是可恢复的转换工作目录；平台会把业务证据提交 S3。本地 CLI 完成不等于平台已入库，也不代表全部内容通过审核。
+## 命令
 
-## 安装与命令
-
-使用独立 OCR 环境，避免与平台依赖混装。在项目根目录按 [快速开始](../../README.md#快速开始) 准备配置，再运行：
+以下 PowerShell 命令均从仓库根目录执行。先查看帮助，不会启动识别或审核：
 
 ```powershell
-$env:UV_PROJECT_ENVIRONMENT="$PWD/services/document-extraction/.venv"
-.\deploy\windows\bootstrap.ps1
+$env:PYTHONUTF8 = '1'
+$extract = 'services/document-extraction/.venv/Scripts/history-extract.exe'
+& $extract --help
+& $extract extract --help
 ```
 
-安装脚本可能下载权重并初始化 GPU。原图核验需要另外准备 Qwen 模型并启动共享 broker，步骤见模型说明；不因配置缺失改用 DeepSeek 视觉。
-
-以下命令仍在项目根目录执行：
+以下示例会实际转换或核验，需先替换输入路径并准备上述旧环境：
 
 ```powershell
-$extract = 'services/document-extraction/.venv/Scripts/history-extract.exe'
-& $extract check
 & $extract extract 'C:/materials/book.pdf' --output 'output/book'
 & $extract extract-batch 'C:/materials' --output-root 'output/batch'
 & $extract verify-quote 'output/book' --quote '要核对的原文'
 ```
 
-输入路径仅为占位示例，需替换为实际材料。`check` 初始化识别后端，可能占用 GPU；不是只读健康探针。`verify-quote` 校验既有结果的精确来源，不生成史料卡。
+`extract-batch` 递归查找 `*.pdf`，按相对路径生成子目录，并写入 `batch-summary.json`；有转换异常时退出码为 1。`extract` 的成功退出只表示命令完成，应继续检查 `manifest.json` 的内容状态和待审数量。
 
-切换识别后端时，配置选项放在子命令之前：
+`verify-quote` 检查候选正文中的精确引文及其来源，退出码为 0 表示 `evidence-linked`。引文重复时可用 `--start` 指定候选正文偏移，用 `--markdown-sha256` 绑定正文版本。它不会发起模型复核，也不生成研究卡。
+
+```powershell
+& $extract check
+```
+
+`check` 会初始化 Docling/OCR 后端，可能下载模型并占用 GPU；它不是只读健康探针，也不证明整份资料已通过审核。
+
+## 配置
+
+默认读取 [config/default.json](config/default.json) 和仓库根 `.env`。全局 `--config`、`--env` 必须放在子命令之前：
 
 ```powershell
 & $extract --config services/document-extraction/config/rapidocr.json extract 'C:/materials/book.pdf' --output 'output/book-rapidocr'
 ```
 
-后端选择与模型调优是独立工作；不要为复核失败自动重跑另一种 OCR。
+| 配置 | 行为 |
+| --- | --- |
+| `ocr_backends` | 必须且只能有一个后端；默认 PaddleOCR-VL-1.6，`rapidocr.json` 为显式替代，不自动补读 |
+| `native_pdf.policy` | 默认 `native-pdf-layout-v2`，检查文字层并保留原生布局证据；不满足条件的页交 OCR 或视觉复核 |
+| `vision_review` | 默认开启 `full` 复核和缓存；旧平台 `review` 阶段要求视觉开启且模式为 `full` |
+| `risk` | 管理风险检查与自动接受；未解决内容仍保留待审 |
+| `acceleration` | 设备、精度、CPU 回退及显存约束，实际环境覆盖见 [settings.py](src/document_extraction/settings.py) |
 
-## 当前审核规则
+`HRS_MODEL_ROOT` 指定模型根目录，`HRS_ENV_FILE` 可覆盖环境文件；`HRS_OCR_DEVICE`、`HRS_OCR_DEVICE_ID` 和 `HRS_MAX_VRAM_GB` 可覆盖设备设置。`HRS_LOCAL_VISION_URL` 指向本机 broker，`HRS_VISION_CACHE` 覆盖审核缓存目录。不要将密钥、权重或本机缓存提交 Git。
 
-[default.json](config/default.json) 启用 `vision_review.review_mode=full`、自动接受和风险检查。视觉模型由 [settings.py](src/document_extraction/settings.py) 绑定本地 Qwen3-VL-8B-Instruct Q4_K_M，当前生产视觉不使用 DeepSeek。
+原生提取的确定性通过属于本模块的旧规则，不替代默认 Codex 流程的独立原图审核。旧策略和检查点继续按绑定配置恢复，不能通过改配置追溯放宽审核。
 
-1. 默认先在 CPU 上检查 PDF 文字层。PDFium 检查可见 Unicode，pdfplumber 提取段落、分栏和表格；两者字符覆盖一致后保留块框、表格单元格与合并关系、物理页和原件摘要。缩进、明显段间距、多栏、不同字号与独立脚注不再单独触发 OCR。扫描、隐藏文字层、提取缺失和无法可靠定位的内容仍交 PaddleOCR-VL。
-2. 依据原页边缘、数字和上下文规则清理页码噪声，记录删除范围和摘要；不一律删除所有 footer，保留表格数字、注释与署名。
-3. 原生页通过证据绑定的确定性检查后标记 `native-pass`，无需 OCR 或视觉模型；不伪造识别置信度或视觉回执。有边框表格只有字符归属和行列跨度一致才能直接通过。无边框数字列、行内变字号／上标、重叠结构与图像保留原生提取和原图，进入本地视觉机审，不重复 OCR；机审未解决的问题才交人工。Docling 序列化若改变文字、段落顺序或单元格结构，则批量回退到 OCR，重新取得 GPU 租约。
-4. 唯一定位的修正经独立原图复核且无未解决内容后才能写回；歧义、不可读、未定位、请求失败或复核失败保留待审。
-5. 平台保护已有人工决定和草稿。整书未解决／未核验内容清空后才入库和分块。
+## 输出与恢复
 
-PDF 物理页序与印刷页码分开使用，表外页码不应作为表格正文比较。没有可信细粒度坐标时只承诺定位到原页，不把占位框当作精确证据。
+| 产物 | 用途 |
+| --- | --- |
+| `docling-document.json`、`docling-document.md` | 转换结构与原始序列化正文 |
+| `docling-assets/`、`pages/`、`ocr/` | 图像资产、原页图和识别证据 |
+| `conversion.json` | 来源摘要、后端、页数和转换错误 |
+| `document.candidate.md` | 复核后的候选正文 |
+| `source-map.json`、`page-boundaries.json` | 正文字符范围与物理原页的对应关系 |
+| `reviews/`、`completion.json`、`semantic-acceptance.json` | 逐页核验、修正与汇总状态 |
+| `manual-review.json`、`review-cards.json` | 未解决内容及其证据；这里的 review cards 是待审条目 |
+| `content-readiness.json`、`article-structure-review.json` | 块级可用性与页面结构观察，不声明文章身份 |
+| `artifact-manifest.json`、`manifest.json` | 资产入口、状态和证据哈希 |
 
-默认原生策略为 `native_pdf.policy=native-pdf-layout-v2`；删除此配置即保持旧全 OCR 路径，RapidOCR 配置仍使用全页 OCR。配置类接受旧 `risk_based` 与 `conversion_only`，用于既有产物与显式 CLI 配置；平台 `stages review` 仍要求视觉开启且为 `full`，该模式核验所有未通过原生规则的页。不能关闭审核来绕过平台放行门槛。
+文件随执行阶段和成功状态生成，失败目录不保证包含完整清单。以 [artifacts.py](src/document_extraction/artifacts.py) 的实际输出为准。表格通过 HTML 保存合并关系，图片通过相对资源路径保留。物理页与印刷页码分开记录；缺少可靠细粒度坐标时，只能定位到原页。
 
-原生放行验证字符覆盖、可见性、几何范围和输出结构，不以字号、缩进或分栏本身判失败。图像以原页裁剪保留，输出使用可移植的相对资源路径。该规则不保证发现字体自身的错误字符映射，也没有真实书籍的免审率承诺。冻结运行中的 `native-pdf-simple-text-v1` 保持原判定，避免旧检查点被追溯放宽；所有该版本运行和可恢复检查点退出后才能移除此兼容路径。Paddle 跨页结构处理仅在连续 OCR 页段内执行，表格组 ID 包含该段起始物理页，不跨过原生页合并。序列化不一致页会在同一轮收集后批量回退，避免逐页重跑整书。
+[stages.py](src/document_extraction/stages.py) 提供旧平台的 `ocr`、`review` 阶段入口。`ocr-checkpoint.json` 绑定来源、提取配置和文件摘要；审核可复用已提交的识别证据。恢复必须使用匹配的原件、目录和配置，不能手改哈希或复用另一份资料的检查点。独立 `extract` 命令没有 `resume` 子命令。
 
-## 平台阶段与恢复
+唯一定位的修正只有经独立原图复核且无未解决内容后才能写回。不可读、歧义、请求失败和复核失败保留待审；候选正文与清晰块可供查看，不能据此宣布整份资料完成。已有人工决定和草稿应保留，研究卡生成已退役。
 
-[stages.py](src/document_extraction/stages.py) 提供 `ocr` 和 `review` 两个阶段，供 GPU worker 调用：
+## 开发验证与排障
 
-- v2 OCR 检查点绑定输入、提取配置指纹和文件摘要，记录页图、原生提取证据与转换产物；审核参数变化不使已有识别失效。
-- 平台在提取开始前将该运行的配置冻结到 S3，重试和恢复继续使用该配置。旧 v1 检查点保持全量视觉审核，不能因新默认配置而免审。
-- 平台先将 OCR 证据提交 S3；视觉失败后可恢复这份证据，无需重新识别。
-- 恢复前校验来源、提取指纹、文件摘要和路径范围；不把其他书籍的检查点复用为当前结果。完成进度包含规则通过的原生页与已完成首轮机审的 OCR 页，进度不代表最终放行。
-- 视觉缓存和修正记录保留来源绑定；仅服务健康或产生底稿不能算作机器通过。
+在已安装本模块 `dev` 依赖的环境中，从仓库根目录运行：
 
-阶段接口与 CLI 参数见 [cli.py](src/document_extraction/cli.py)。既有 `--memory-scope` 仅兼容旧命令，现役流程不使用纠错记忆。
+```powershell
+& 'services/document-extraction/.venv/Scripts/python.exe' -m pytest services/document-extraction/tests
+```
 
-## 输出参考
+这些测试检查转换契约、来源绑定、原生分流、审核和恢复；集成测试使用临时 PDF 和模拟识别／审核响应，不证明真实史料准确率。[工程 CI](../../.github/workflows/engineering.yml) 另外从平台轻量环境运行无需模型权重的指定测试。
 
-| 产物                                                      | 内容                                 |
-| --------------------------------------------------------- | ------------------------------------ |
-| `docling-document.json`、`docling-document.md`            | Docling 原始结构及序列化结果         |
-| `docling-assets/`、`pages/`、`ocr/`                       | 图像资产、原页图和单路识别证据       |
-| `conversion.json`                                         | 输入摘要、后端、页数、耗时与失败信息 |
-| `document.candidate.md`                                   | 复核后的候选正文                     |
-| `reviews/`、`completion.json`、`semantic-acceptance.json` | 核验、修正、原图和文字摘要及最终状态 |
-| `source-map.json`、`page-boundaries.json`                 | 候选字符范围与原页的对应关系         |
-| `content-readiness.json`                                  | 块级可用性、依赖和受限字段           |
-| `manual-review.json`、`review-cards.json`                 | 待人工核对的内容及证据               |
-| `artifact-manifest.json`、`manifest.json`                 | 产物入口与哈希绑定                   |
-
-文件取决于运行阶段和完成状态；失败目录不保证包含完整成功清单。契约实际生成逻辑见 [artifacts.py](src/document_extraction/artifacts.py)。
-
-Docling 使用 PDFium；表格采用 HTML 保留合并单元格，原图用于核对。布局检测分数不是 OCR 文字置信度；没有可靠页级分数时不伪造高置信度。脚注、标题和书目线索保留，但 `article_id: null`、`article_structure_status: not-claimed` 等状态不应被下游解释成已确定身份。
-
-## 开发与验证
-
-| 入口                                                                                                                         | 职责                         |
-| ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| [pipeline.py](src/document_extraction/pipeline.py)、[stages.py](src/document_extraction/stages.py)                           | 转换／核验编排、检查点       |
-| [docling_conversion.py](src/document_extraction/docling_conversion.py)、[ocr.py](src/document_extraction/ocr.py)             | 单路识别与模型适配           |
-| [native_pdf.py](src/document_extraction/native_pdf.py)、[native_layout.py](src/document_extraction/native_layout.py) | PDFium 文字层验证、pdfplumber 布局提取、原生证据分流 |
-| [semantic_completion.py](src/document_extraction/semantic_completion.py)                                                     | 当前本地视觉校读、修正与复查 |
-| [provenance.py](src/document_extraction/provenance.py)、[content_readiness.py](src/document_extraction/content_readiness.py) | 来源与可用性                 |
-| [settings.py](src/document_extraction/settings.py)、[accelerator.py](src/document_extraction/accelerator.py)                 | 配置与设备资源               |
-
-在已安装 OCR 环境中安装 `dev` 组后，运行 `.venv/Scripts/python.exe -m pytest tests`。混合 PDF 集成测试使用真实 PDFium／Docling 与模拟识别、审核响应，不加载模型。平台 CI 另外使用轻量环境运行无需 OCR 权重的原生分流与审核策略回归，实际选定文件与环境见 [CI](../../.github/workflows/engineering.yml)。
-
-自动化行为检查不代表 OCR 准确率或真实整书审核完成。选型、历史样本修正、性能和验收报告保存在本地 `output/` 与历史资料目录，不随仓库交付，也不作为当前操作步骤。双 OCR、表格仲裁和纠错记忆已退役；历史实现通过 Git 追溯。
+| 现象 | 检查方法 |
+| --- | --- |
+| CLI 不存在或依赖导入失败 | 确认使用独立 OCR 环境及 Python 3.11；不要混用平台环境 |
+| 后端初始化、权重或设备失败 | 检查模型目录、所选 OCR extra 与设备配置；`check` 本身会加载后端 |
+| 视觉请求超时或 broker 不可达 | 检查旧本地视觉配置及日志；保留待审状态，不将服务健康当作核验完成 |
+| 检查点摘要不符 | 核对原件、冻结配置和工作目录；保留错误证据，不绕过摘要校验 |
+| 命令完成但仍有待审 | 查看 `manifest.json`、`manual-review.json` 和相应逐页证据；不通过关闭审核放行 |
