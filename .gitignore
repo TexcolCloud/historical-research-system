@@ -20,13 +20,13 @@ node_modules/
 ![Rr][Ee][Aa][Dd][Mm][Ee].[Mm][Dd]
 ![Rr][Ee][Aa][Dd][Mm][Ee]
 !/.agents/skills/historical-research/SKILL.md
-!/services/codex-pipeline/src/hrs_codex/workflow.md
-# Historical diagrams, evaluation snapshots and tuning archives are local only.
+!/src/hrs/codex/workflow.md
+# Retired modules and historical material remain local.
 /assets/diagrams/
-/evaluation/reference/normalization/
-/services/codex-pipeline/evidence/
-/services/codex-pipeline/*acceptance-*.json
-/services/codex-pipeline/*validation-*.json
+/evaluation/
+/services/
+/packages/
+/scripts/
 docs/
 /文档提取管道调优文档案/
 /文档提取管道调优档案/
@@ -39,40 +39,10 @@ docs/
 *.sqlite-wal
 *.sqlite-shm
 .env.*
-!.env.platform.example
+!.env.example
 build/
 dist/
 tmp/
 output/
 .env
-services/*/.venv/
-services/*/.pytest_cache/
-services/*/output/
-services/*/state/
-/state/workbench-conversion/
-services/*/tmp/
-services/*/evaluation/runs/
-services/*/evaluation/gold-*/
-services/*/evaluation/table-holdout-*/
-services/*/evaluation/table-development-*/
-# Historical evaluation data stays local; retain evaluation tools.
-services/*/evaluation/**/*.json
-!services/*/evaluation/tools/**/package.json
-!services/*/evaluation/tools/**/package-lock.json
-# Generated evaluation assets.
-services/*/evaluation/**/original-pages/
-services/*/evaluation/**/workflow/
-services/*/evaluation/**/*.xml
-services/*/evaluation/**/*.zip
-services/*/evaluation/**/*.pdf
-models/**
-!models/README.md
-!models/manifest.sha256
-!models/docling/
-!models/docling/.gitkeep
-!models/paddleocr/
-!models/paddleocr/.gitkeep
-!models/huggingface/
-!models/huggingface/.gitkeep
-!models/torch/
-!models/torch/.gitkeep
+/models/

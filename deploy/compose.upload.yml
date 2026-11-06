@@ -1,0 +1,28 @@
+name: hrs-platform
+services:
+  tusd:
+    image: tusproject/tusd:v2.9.2@sha256:9c61565fccd2689b052aa78e52d9558f309e98f6320960746f225d2fd73a35e3
+    restart: unless-stopped
+    environment:
+      AWS_ACCESS_KEY_ID: ${INGEST_S3_ACCESS_KEY:?S3 access key required}
+      AWS_SECRET_ACCESS_KEY: ${INGEST_S3_SECRET_KEY:?S3 secret required}
+      AWS_REGION: ${INGEST_S3_REGION:-us-east-1}
+    command:
+      - '-host=0.0.0.0'
+      - '-base-path=/uploads/'
+      - '-behind-proxy'
+      - '-disable-download'
+      - '-max-size=268435456'
+      - '-s3-bucket=${INGEST_S3_BUCKET:-ingestion-acceptance}'
+      - '-s3-endpoint=${INGEST_S3_UPLOAD_ENDPOINT:-http://host.docker.internal:58333}'
+      - '-s3-object-prefix=hrs/v2/uploads/'
+      - '-s3-part-size=8388608'
+      - '-s3-concurrent-part-uploads=2'
+      - '-hooks-http=${PLATFORM_TUS_HOOK_URL:-http://host.docker.internal:18170/internal/tus}'
+      - '-hooks-http-forward-headers=Authorization'
+      - '-hooks-enabled-events=pre-create,post-create,post-receive,post-finish'
+    ports:
+      - '127.0.0.1:${PLATFORM_UPLOAD_PORT:-18171}:8080'
+    tmpfs:
+      - /tmp:size=128m
+    stop_grace_period: 30s
