@@ -6,7 +6,7 @@
 
 Codex 模式的协调备份保存业务 SQL 与原生原件、队列、审核和发布检查点。先停止应用、上传和原生执行器，再运行 `python -m hrs_platform.cli backup`。恢复使用 `python -m hrs_platform.cli restore --manifest-reference <清单JSON> --restore-suffix <新库后缀> --restore-native-root <不存在的新目录>`；不会覆盖既有数据库或工作区。S3 业务对象仍须独立备份。旧三库备份清单继续可读。
 
-[本轮功能映射与20页流程验收](../codex-pipeline/INTEGRATION-20261104.md)给出脚注、表格、插图、检索、导出、删除、勘误及异常恢复的对应路径。完整网页入口使用共享存储与 BGE 检索模型；独立 MCP 工作台仍可单独运行。
+脚注、表格、插图、检索、导出、删除、勘误及异常恢复接入同一原生队列，运行契约见 [Codex 模块说明](../codex-pipeline/README.md)。完整网页入口使用共享存储与 BGE 检索模型；独立 MCP 工作台仍可单独运行。
 
 
 原生性能路径：桥接先比较文档投影摘要与 SQL 决定版本，未变化时跳过投影，并每分钟保留完整证据巡检。变化页写入 `markdown/<物理页>.md`，变化任务写入 `codex/tasks/<任务ID>.json`；小清单引用不可变 S3 对象。未完成书籍按页读取，`document.md` 在请求下载或正式发布时组装，Markdown、脚注和物理页映射保持兼容。待审材料和对象写入在事务外准备，短 SQL 提交再次核对版本，保护期间新到的人工决定。
@@ -56,7 +56,7 @@ docker compose -f deploy/infrastructure/compose.search.yml up -d --wait
 
 要统一使用 Flash，在根 `.env` 设置两项 `CARDS_REASONING_MODEL=deepseek-flash`、`CARDS_READING_MODEL=deepseek-flash`；同时核对是否有更高优先级的 `PLATFORM_REASONING_MODEL` 或 `PLATFORM_READING_MODEL`。此说明不代表对用户现有配置作了修改。
 
-当前 Codex 主链与兼容模块的实际边界见[重构说明](../../REFACTOR-20261105.md)。以下旧 Temporal/制卡分层说明保留用于历史兼容，不代表默认装配。
+当前默认主链见 [Codex 模块说明](../codex-pipeline/README.md)。以下旧 Temporal/制卡分层说明保留用于历史兼容，不代表默认装配。
 
 ## 分层与职责
 

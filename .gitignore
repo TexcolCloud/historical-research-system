@@ -12,16 +12,22 @@ node_modules/
 # Local backups and disposable test workspaces (keep files on disk).
 /backups/
 /.scratch/
-# Local project documentation and tuning archives.
-# Local agent instructions (all filename case variants).
-[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
-[Aa][Gg][Ee][Nn][Tt].[Mm][Dd]
-[Cc][Oo][Nn][Tt][Ee][Xx][Tt].[Mm][Dd]
-/GITHUB_PREPARATION.md
+# Documentation stays local except README files and executable agent contracts.
+*.[Mm][Dd]
+*.mdx
+*.rst
+*.adoc
+![Rr][Ee][Aa][Dd][Mm][Ee].[Mm][Dd]
+![Rr][Ee][Aa][Dd][Mm][Ee]
+!/.agents/skills/historical-research/SKILL.md
+!/services/codex-pipeline/src/hrs_codex/workflow.md
+# Historical diagrams, evaluation snapshots and tuning archives are local only.
+/assets/diagrams/
+/evaluation/reference/normalization/
+/services/codex-pipeline/evidence/
+/services/codex-pipeline/*acceptance-*.json
+/services/codex-pipeline/*validation-*.json
 docs/
-# Historical reports remain local; current operating instructions live in README files.
-/services/research-platform/RETRIEVAL_TUNING.md
-/services/research-platform/RAGAS_EVALUATION.md
 /文档提取管道调优文档案/
 /文档提取管道调优档案/
 .mypy_cache/
