@@ -52,21 +52,15 @@ export default function RuntimeControlNotice({
   const title = runtimeControlTitles[control.state];
   return (
     <div
-      className="workspace-next-action"
+      className="workspace-next-action runtime-control-note"
       role="status"
       aria-label="自动恢复状态"
+      data-state={control.state}
     >
       <strong>{title}</strong>
       {scopes.map((scope) => (
         <p key={`${scope.scope}:${scope.model ?? "account"}`}>
           {scopeName(scope)}：{cause(scope)}。
-          {scope.state === "cooldown"
-            ? `恢复后并发上限 ${scope.limit} 个（配置上限 ${scope.configured_limit}）。`
-            : scope.state === "blocked"
-              ? "已暂停该范围的新任务。"
-              : scope.state === "probing"
-                ? `恢复目标并发上限 ${scope.limit} 个（配置上限 ${scope.configured_limit}）。`
-                : `当前并发上限 ${scope.limit} 个（配置上限 ${scope.configured_limit}）。`}
           {scope.state === "probing"
             ? "先用一个待处理任务验证服务，成功后再逐档提速。"
             : scope.state === "recovering"
@@ -82,6 +76,21 @@ export default function RuntimeControlNotice({
           ? "请处理上述原因，再使用断点恢复入口继续。"
           : "系统会自动恢复，暂无需操作；已正常运行的任务继续完成。"}
       </p>
+      <details>
+        <summary>查看恢复与并发详情</summary>
+        {scopes.map((scope) => (
+          <p key={`${scope.scope}:${scope.model ?? "account"}`}>
+            {scopeName(scope)}：
+            {scope.state === "cooldown"
+              ? `恢复后并发上限 ${scope.limit} 个（配置上限 ${scope.configured_limit}）。`
+              : scope.state === "blocked"
+                ? "已暂停该范围的新任务。"
+                : scope.state === "probing"
+                  ? `恢复目标并发上限 ${scope.limit} 个（配置上限 ${scope.configured_limit}）。`
+                  : `当前并发上限 ${scope.limit} 个（配置上限 ${scope.configured_limit}）。`}
+          </p>
+        ))}
+      </details>
     </div>
   );
 }

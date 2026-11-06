@@ -114,6 +114,37 @@ test("human confirmation and automatic waiting filters use the same server class
   expect(screen.queryByText("还在核验的条目")).toBeNull();
 });
 
+test("the desktop entry queue changes the evidence preview without submitting a decision", async () => {
+  const post = vi.spyOn(client, "POST");
+  mount(
+    report([
+      entry("第一条", "not_found", true),
+      entry("第二条", "not_found", true),
+    ]),
+    true,
+  );
+  await screen.findByRole("navigation", { name: "目录待办" });
+  expect(
+    screen
+      .getByRole("button", { name: "选择目录：第一条" })
+      .getAttribute("aria-current"),
+  ).toBe("true");
+  await userEvent.click(
+    screen.getByRole("button", { name: "选择目录：第二条" }),
+  );
+  expect(
+    within(screen.getByRole("region", { name: "目录跳转核对" })).getByText(
+      "第二条 9",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "选择目录：第二条" })
+      .getAttribute("aria-current"),
+  ).toBe("true");
+  expect(post).not.toHaveBeenCalled();
+});
+
 test("an explicit final no-link decision updates the book count and advances to the remaining human task", async () => {
   let current = report([
     entry("未找到的条目", "not_found", true),
@@ -231,11 +262,18 @@ test("an external final decision closes an automatically selected task when the 
 });
 
 test("an explicit reader entry can still reopen a completed directory mapping", async () => {
-  respondWith(() => report([entry("重新核对的条目", "unlinked_manual", false)]));
+  respondWith(() =>
+    report([entry("重新核对的条目", "unlinked_manual", false)]),
+  );
   render(
     <QueryClientProvider client={new QueryClient()}>
       <RuntimeScopeContext.Provider value="content">
-        <NavigationPanel runId="run" bookId="book" reviewOnly entryId="重新核对的条目" />
+        <NavigationPanel
+          runId="run"
+          bookId="book"
+          reviewOnly
+          entryId="重新核对的条目"
+        />
       </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );

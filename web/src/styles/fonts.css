@@ -1,0 +1,33 @@
+/* Noto SC, SIL Open Font License 1.1. Common Chinese glyphs; system fallback
+   retains rare historical characters. Files are bundled as versioned assets. */
+@font-face {
+  font-family: "Hrs Sans";
+  src: url("../assets/fonts/hrs-sans-sc.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hrs Sans";
+  src: url("../assets/fonts/hrs-sans-sc-semibold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 550 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hrs Serif";
+  src: url("../assets/fonts/hrs-serif-sc.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hrs Serif";
+  src: url("../assets/fonts/hrs-serif-sc-semibold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 550 700;
+  font-display: swap;
+}

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "@/app/AppShell.tsx";
 const BooksPage = lazy(() => import("@/routes/BooksPage.tsx"));
 const BookPage = lazy(() => import("@/routes/BookPage.tsx"));
@@ -10,6 +10,7 @@ export default function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
+        <Route path="/welcome" element={<Navigate to="/" replace />} />
         <Route
           path="/reviews"
           element={

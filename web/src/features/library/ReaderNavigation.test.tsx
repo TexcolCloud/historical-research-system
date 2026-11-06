@@ -69,6 +69,7 @@ function setup(initial = "/books/book?tab=reader&chapter=toc") {
   }));
   respondWith((request) => {
     const path = new URL(request.url).pathname;
+    if (path === "/api/v2/search") return [];
     if (path.endsWith("/reading-navigation"))
       return {
         entries: [
@@ -126,16 +127,70 @@ test("inline original TOC entry reaches the second duplicate heading and can ret
 
 test("local chapter changes never override a later source-bound URL", async () => {
   setup();
+  await userEvent.click(screen.getByRole("button", { name: "章节" }));
   await userEvent.click(
     await screen.findByRole("button", { name: /正文合集/ }),
   );
   await screen.findByText("第二段。");
+  await userEvent.click(screen.getByRole("button", { name: "原书目录" }));
   await userEvent.click(screen.getByRole("link", { name: /第二篇.*书内页/ }));
   expect(document.querySelector("mark[data-reading-focus] h1")).toBeNull();
   expect((await screen.findByLabelText("正文定位位置")).textContent).toBe(
     "同名",
   );
   expect(screen.getByLabelText("地址").textContent).toContain("start=");
+});
+
+test("chapter navigation keeps the original search return context", async () => {
+  const returnTo =
+    "/books/book?tab=reader&section=search&q=人物&semantic=false";
+  setup(readingHref("book", target, { returnTo }));
+  await screen.findByText("第二段。");
+  await userEvent.click(screen.getByRole("button", { name: "上一章" }));
+  await screen.findByRole("link", { name: "阅读第二篇" });
+  expect(
+    screen.getByRole("link", { name: "返回检索结果" }).getAttribute("href"),
+  ).toBe(returnTo);
+  expect(
+    new URLSearchParams(screen.getByLabelText("地址").textContent ?? "").get(
+      "returnTo",
+    ),
+  ).toBe(returnTo);
+  await userEvent.click(screen.getByRole("button", { name: "下一章" }));
+  await screen.findByText("第二段。");
+  expect(
+    screen.getByRole("link", { name: "返回检索结果" }).getAttribute("href"),
+  ).toBe(returnTo);
+});
+
+test("reader switches one navigation list and can collapse it", async () => {
+  setup();
+  await screen.findByRole("link", { name: /第二篇.*书内页/ });
+  expect(screen.queryByRole("button", { name: /正文合集/ })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "章节" }));
+  expect(screen.getByRole("button", { name: /正文合集/ })).toBeTruthy();
+  expect(screen.queryByRole("link", { name: /第二篇.*书内页/ })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "关闭导航" }));
+  expect(screen.queryByRole("navigation", { name: "章节目录" })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "目录" }));
+  expect(screen.getByRole("navigation", { name: "章节目录" })).toBeTruthy();
+});
+
+test("drawer and query changes preserve source focus while following the same source link focuses it again", async () => {
+  const scroll = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
+  setup(readingHref("book", target));
+  await screen.findByLabelText("正文定位位置");
+  scroll.mockClear();
+  await userEvent.click(screen.getByRole("button", { name: "检索本书" }));
+  await userEvent.type(screen.getByLabelText("检索本书正文"), "人物");
+  await userEvent.click(screen.getByRole("button", { name: "查找" }));
+  await screen.findByText(/未找到相关内容/);
+  await userEvent.click(screen.getByRole("button", { name: "关闭检索" }));
+  expect(scroll).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("link", { name: /第二篇.*书内页/ }));
+  await vi.waitFor(() => expect(scroll).toHaveBeenCalled());
 });
 
 test("an outdated target exposes the original instead of highlighting another publication", async () => {

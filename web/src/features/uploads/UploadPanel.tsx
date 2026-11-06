@@ -14,17 +14,41 @@ import { booksKey } from "@/hooks/events.ts";
 import type { Book } from "@/client/api.ts";
 import "@uppy/core/css/style.min.css";
 import "@uppy/dashboard/css/style.min.css";
+import { Button } from "@/components/ui/button.tsx";
+
+export type UploadActivity = { total: number; pending: number };
 
 export default function UploadPanel({
   open,
   onOpenChange,
+  onActivityChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onActivityChange?: (activity: UploadActivity) => void;
 }) {
   const [{ uppy, cancelBooks }] = useState(createBookUploader),
     query = useQueryClient();
   const [completed, setCompleted] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let previous: UploadActivity | undefined;
+    const notify = () => {
+      const files = uppy.getFiles();
+      const next = {
+        total: files.length,
+        pending: files.filter((file) => !file.progress.uploadComplete).length,
+      };
+      if (previous?.total !== next.total || previous.pending !== next.pending) {
+        previous = next;
+        onActivityChange?.(next);
+      }
+    };
+    notify();
+    uppy.on("state-update", notify);
+    return () => {
+      uppy.off("state-update", notify);
+    };
+  }, [uppy, onActivityChange]);
   useEffect(() => {
     const refresh = () => {
       void query.invalidateQueries({ queryKey: booksKey });
@@ -101,6 +125,12 @@ export default function UploadPanel({
               ))}
           </section>
         )}
+        <div className="workspace-upload-footer">
+          <span>收起后仍可在顶部查看导入进展。</span>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            收起窗口
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

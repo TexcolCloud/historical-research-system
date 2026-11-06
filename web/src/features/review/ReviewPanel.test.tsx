@@ -7,8 +7,11 @@ import ReviewPanel from "@/features/review/ReviewPanel.tsx";
 import { client } from "@/client/api.ts";
 import { RuntimeScopeContext } from "@/app/runtime-scope.ts";
 import { respondWith } from "@/test/responses.ts";
-afterEach(cleanup);
-test("a native handoff selects its physical page instead of the first unrelated doubt", async () => {
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+test("a native handoff selects its physical page and keeps the desktop queue keyboard accessible", async () => {
   const issues = [1, 7].map((page) => ({
     id: `issue-${page}`,
     run_id: "run",
@@ -37,14 +40,21 @@ test("a native handoff selects its physical page instead of the first unrelated 
       </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
-  expect(
-    await screen.findByRole("heading", { name: "原件第 7 页" }),
-  ).toBeDefined();
+  expect(await screen.findByText("候选页 7")).toBeDefined();
   expect(
     screen
       .getByRole("button", { name: "原件第 7 页" })
       .getAttribute("aria-current"),
   ).toBe("true");
+  const user = userEvent.setup();
+  expect(screen.getByRole("navigation", { name: "问题清单" })).toBeDefined();
+  expect(screen.queryByRole("button", { name: "待核对页面 · 2" })).toBeNull();
+  const page = screen.getByRole("button", { name: "原件第 1 页" });
+  page.focus();
+  await user.keyboard("{Enter}");
+  await screen.findByText("候选页 1");
+  expect(page.getAttribute("aria-current")).toBe("true");
+  expect(document.activeElement).toBe(page);
 });
 test("located doubts highlight text, show source region, and require an explicit per-doubt decision", async () => {
   const location = {
@@ -105,8 +115,10 @@ test("located doubts highlight text, show source region, and require an explicit
       ?.getAttribute("x"),
   ).toBe("0.2");
   expect(
-    Boolean(screen.queryByRole("button", { name: "提交本页并继续" })),
-  ).toBe(false);
+    screen
+      .getByRole("button", { name: "提交本页并继续" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
   await userEvent.click(screen.getByRole("button", { name: "识别正确，保留" }));
   await waitFor(() => expect(put).toHaveBeenCalled());
   await waitFor(() =>

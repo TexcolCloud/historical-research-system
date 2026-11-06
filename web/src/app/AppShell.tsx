@@ -1,11 +1,13 @@
 import { lazy, Suspense, useState } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { BookOpen, LibraryBig, ClipboardCheck, CloudCheck } from "lucide-react";
+import { Link, Outlet, useLocation } from "react-router-dom";
+import { CloudCheck, Upload } from "lucide-react";
 import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents.ts";
 import { useQuery } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
 import { RuntimeScopeContext, type RuntimeScope } from "./runtime-scope.ts";
 const UploadPanel = lazy(() => import("@/features/uploads/UploadPanel.tsx"));
+import type { UploadActivity } from "@/features/uploads/UploadPanel.tsx";
+import { Button } from "@/components/ui/button.tsx";
 
 export type WorkspaceContext = {
   upload: () => void;
@@ -17,6 +19,10 @@ export type WorkspaceContext = {
 
 export default function AppShell() {
   const location = useLocation();
+  const reviewing =
+    location.pathname === "/reviews" ||
+    (location.pathname.startsWith("/books/") &&
+      new URLSearchParams(location.search).get("tab") === "review");
   const connected = useWorkspaceEvents();
   const runtime = useQuery({
     queryKey: ["platform", "runtime"],
@@ -39,6 +45,10 @@ export default function AppShell() {
         : "content";
   const [open, setOpen] = useState(false);
   const [started, setStarted] = useState(false);
+  const [activity, setActivity] = useState<UploadActivity>({
+    total: 0,
+    pending: 0,
+  });
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   function upload() {
@@ -47,47 +57,37 @@ export default function AppShell() {
   }
   return (
     <div className="platform-workspace">
-      <aside className="platform-sidebar">
-        <a href="/platform.html" className="platform-brand">
-          <LibraryBig />
-          <span>
-            史料研究<small>阅读 · 核对 · 研究</small>
+      <header className="platform-header">
+        <Link to="/" className="platform-brand" aria-label="史料研究 · 书籍">
+          <span className="platform-seal" aria-hidden="true">
+            史
           </span>
-        </a>
+          <span>史料研究</span>
+        </Link>
         <nav aria-label="主要导航">
-          <Link
-            to="/"
-            aria-current={
-              location.pathname === "/" ||
-              location.pathname.startsWith("/books/")
-                ? "page"
-                : undefined
-            }
-          >
-            <BookOpen size={19} />
+          <Link to="/" aria-current={!reviewing ? "page" : undefined}>
             书籍
           </Link>
-          <NavLink to="/reviews">
-            <ClipboardCheck size={19} />
+          <Link to="/reviews" aria-current={reviewing ? "page" : undefined}>
             待办
-          </NavLink>
+          </Link>
         </nav>
-        <p className="platform-sidebar-note">
-          从原始材料出发
-          <br />
-          让每一条认识都有出处
-        </p>
-      </aside>
-      <div className="platform-body">
-        <header className="platform-topbar">
-          <span>
-            研究工作台 / {location.pathname === "/reviews" ? "待办" : "书籍"}
-          </span>
-          <span className="platform-sync">
+        <div className="platform-header-actions">
+          <span className="platform-sync" data-connected={connected}>
             <CloudCheck size={16} />
-            {connected ? "状态实时同步" : "正在重新连接"}
+            {connected ? "本地书库" : "正在重新连接"}
           </span>
-        </header>
+          <Button
+            variant="outline"
+            onClick={upload}
+            aria-label={started ? "查看导入进展" : "上传史料"}
+          >
+            <Upload size={16} />
+            {activity.pending ? `上传中 · ${activity.pending}` : "上传史料"}
+          </Button>
+        </div>
+      </header>
+      <div className="platform-body">
         <main>
           {scope === "workflow_only" && (
             <p role="note" className="platform-inline-status">
@@ -132,7 +132,11 @@ export default function AppShell() {
         <Suspense
           fallback={open ? <p role="status">正在打开上传工具…</p> : null}
         >
-          <UploadPanel open={open} onOpenChange={setOpen} />
+          <UploadPanel
+            open={open}
+            onOpenChange={setOpen}
+            onActivityChange={setActivity}
+          />
         </Suspense>
       )}
     </div>

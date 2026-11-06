@@ -81,7 +81,7 @@ export default function ReviewPanel({
     );
   }
   return (
-    <section className="platform-review">
+    <section className="evidence-review">
       {bookId ? (
         <div className="review-workspace-intro">
           <p>逐处完成保留或修改，全部处理后提交本页。草稿会自动保存。</p>
@@ -141,11 +141,19 @@ export default function ReviewPanel({
           )}
         </div>
       ) : (
-        <div className="platform-review-grid">
-          <nav aria-label="问题清单">
+        <div className="evidence-review-queue-layout">
+          <nav
+            id="review-page-queue"
+            aria-label="问题清单"
+            className="evidence-review-queue"
+          >
+            <h3>
+              待核对页 <span>{issues.data.length}</span>
+            </h3>
             {issues.data.map((issue) => (
               <button
                 key={issue.id}
+                aria-label={`原件第 ${issue.page} 页`}
                 disabled={busy}
                 aria-current={issue.id === currentId ? "true" : undefined}
                 onPointerEnter={() =>
@@ -153,7 +161,14 @@ export default function ReviewPanel({
                 }
                 onClick={() => setSelected(issue.id)}
               >
-                原件第 {issue.page} 页
+                <strong>原件第 {issue.page} 页</strong>
+                <small aria-hidden="true">
+                  {issue.id === currentId
+                    ? current.data?.draft_text
+                      ? "当前页 · 已有草稿"
+                      : "当前页 · 待核对"
+                    : "待核对"}
+                </small>
               </button>
             ))}
           </nav>

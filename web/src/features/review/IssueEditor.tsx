@@ -5,7 +5,7 @@ import { MarkdownEditor } from "@/editor/LazyMarkdownEditor.tsx";
 import { useReviewSession } from "./useReviewSession.ts";
 import ReviewFocus from "./ReviewFocus.tsx";
 import SourceFocus from "./SourceFocus.tsx";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RuntimeScope } from "@/app/runtime-scope.ts";
 
 type Issue = components["schemas"]["ReviewIssue"];
@@ -21,6 +21,9 @@ export default function IssueEditor({
   onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void;
 }) {
   const [unmapped, setUnmapped] = useState<string[]>([]);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const workspace = useRef<HTMLDivElement>(null);
+  const preview = useRef<HTMLElement>(null);
   const {
     text,
     resolutions,
@@ -51,13 +54,96 @@ export default function IssueEditor({
     saveDraft,
     setBoxes,
   } = useReviewSession(issue, onSaved, runtimeScope);
+  const previousLocation = useRef<{ id?: string; request: number }>({
+    request: -1,
+  });
+  function selectLocation(id: string) {
+    setActive(id);
+    setFocusRequest((value) => value + 1);
+  }
+  useEffect(() => {
+    const element = workspace.current;
+    if (!element) return;
+    const fit = () => {
+      const available =
+        window.innerHeight - element.getBoundingClientRect().top - 24;
+      (element.parentElement ?? element).style.setProperty(
+        "--review-available-height",
+        `${Math.max(360, available)}px`,
+      );
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    if (element.parentElement) observer?.observe(element.parentElement);
+    return () => {
+      window.removeEventListener("resize", fit);
+      observer?.disconnect();
+    };
+  }, []);
+  useEffect(() => {
+    if (
+      previousLocation.current.id === current?.id &&
+      previousLocation.current.request === focusRequest
+    )
+      return;
+    previousLocation.current = { id: current?.id, request: focusRequest };
+    const frame = requestAnimationFrame(() => {
+      const pane = preview.current;
+      const mark = Array.from(
+        pane?.querySelectorAll<HTMLElement>("mark[data-review-id]") ?? [],
+      ).find((node) => node.dataset.reviewId === current?.id);
+      if (pane && mark) {
+        pane.scrollTo?.({
+          top: Math.max(
+            0,
+            pane.scrollTop +
+              mark.getBoundingClientRect().top -
+              pane.getBoundingClientRect().top -
+              pane.clientHeight / 2,
+          ),
+          behavior: "auto",
+        });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [current?.id, focusRequest]);
   return (
-    <div className="platform-review-content guided-review">
+    <div className="evidence-review-session" ref={workspace}>
+      <aside aria-label="原书对照">
+        {current && issue.images[issue.pages.indexOf(current.page)] ? (
+          <SourceFocus
+            src={issue.images[issue.pages.indexOf(current.page)]}
+            issue={current}
+            locations={locations}
+            onSelect={editing ? undefined : selectLocation}
+            onBox={(box) => setBoxes((old) => ({ ...old, [current.id]: box }))}
+          />
+        ) : issue.images.length ? (
+          issue.images.map((src, i) => (
+            <figure key={src}>
+              <a href={src} target="_blank" rel="noreferrer">
+                打开原图 · 第 {issue.pages[i] ?? issue.page} 页
+              </a>
+              <img
+                src={src}
+                alt={`原书第 ${issue.pages[i] ?? issue.page} 页`}
+              />
+            </figure>
+          ))
+        ) : (
+          <div className="evidence-review-no-source" role="status">
+            <h3>原图暂不可用</h3>
+            <p>本页文字和草稿已保留。重新打开本页取得原图后再核对。</p>
+          </div>
+        )}
+      </aside>
       <article>
         <header className="review-page-heading">
           <div>
-            <small>人工终审</small>
-            <h2>原件第 {issue.pages.join("、")} 页</h2>
+            <h2>当前文字</h2>
+            <small>原件第 {issue.pages.join("、")} 页</small>
           </div>
           <span>
             {locations.length
@@ -76,183 +162,11 @@ export default function IssueEditor({
             </details>
           </section>
         )}
-        {issue.draft_text && !draft.isSuccess && (
-          <p className="review-save-status">
-            已恢复草稿，尚未提交本页审核结果。
-          </p>
-        )}
-        {ready && !editing ? (
-          <section className="review-page-complete" aria-label="本页提交">
-            <h3>本页疑点已处理，等待提交</h3>
-            <p>
-              {changed
-                ? "草稿已保存。请检查最终文字，提交后本页才计入已通过。"
-                : "已记录保留当前文字的判断，提交后本页才计入已通过。"}
-            </p>
-            <Button
-              disabled={
-                busy ||
-                draft.isPending ||
-                draft.isError ||
-                runtimeScope === "unknown" ||
-                issue.state !== "pending"
-              }
-              onClick={() => submission.mutate()}
-            >
-              {runtimeScope === "unknown"
-                ? "确认工作区范围后再提交"
-                : submission.isPending
-                  ? "正在提交…"
-                  : workflowTest
-                    ? "按授权提交流程测试结果"
-                    : "提交本页并继续"}
-            </Button>
-            <Button variant="outline" disabled={busy} onClick={recheckPage}>
-              重新检查当前页
-            </Button>
-          </section>
-        ) : current ? (
-          <ReviewFocus
-            locations={locations}
-            active={current.id}
-            onSelect={setActive}
-            text={text}
-            resolutions={resolutions}
-            onResolve={(action) => {
-              void finish(action).catch(() => undefined);
-            }}
-            onEdit={beginEdit}
-            disabled={busy}
-            editing={editing}
-          />
-        ) : (
-          <section className="review-focus">
-            <h3>对照原图核对整页</h3>
-            <p>本页没有可靠的局部定位，请检查正文与原图。</p>
-            {!editing && (
-              <div className="review-judgment-actions">
-                <Button
-                  disabled={busy}
-                  onClick={() => {
-                    void finish("keep").catch(() => undefined);
-                  }}
-                >
-                  识别正确，保留
-                </Button>
-                <Button variant="outline" disabled={busy} onClick={beginEdit}>
-                  需要修改
-                </Button>
-              </div>
-            )}
-          </section>
-        )}
-        {editing && (
-          <section className="review-edit-step" aria-label="修改当前内容">
-            {!wholePage && editRange ? (
-              <>
-                <label>
-                  本处最终文字
-                  <textarea
-                    aria-label="本处最终文字"
-                    autoFocus
-                    value={text.slice(editRange.start, editRange.end)}
-                    onChange={(e) => changeFocus(e.target.value)}
-                    rows={3}
-                  />
-                </label>
-                <p>只修改当前选中的文字。原件缺损时，可保留明确的缺字标记。</p>
-                {proposal && (
-                  <Button
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => changeFocus(proposal.replacement)}
-                  >
-                    填入机器建议
-                  </Button>
-                )}
-                <button
-                  className="review-text-link"
-                  disabled={busy}
-                  onClick={editWholePage}
-                >
-                  编辑整页 Markdown
-                </button>
-              </>
-            ) : (
-              <div>
-                <Button variant="outline" onClick={toggleSourceMode}>
-                  {sourceMode ? "切换可视化编辑" : "切换 Markdown 源码"}
-                </Button>
-                {sourceMode ? (
-                  <label>
-                    整页 Markdown
-                    <textarea
-                      className="platform-markdown-source"
-                      aria-label="Markdown 源码"
-                      value={text}
-                      onChange={(e) => changeText(e.target.value)}
-                      rows={18}
-                      spellCheck={false}
-                    />
-                  </label>
-                ) : (
-                  <MarkdownEditor
-                    value={text}
-                    highlights={locations}
-                    activeHighlight={current?.id}
-                    onChange={changeText}
-                  />
-                )}
-              </div>
-            )}
-            <div className="review-edit-actions">
-              <Button
-                disabled={busy || !text.trim()}
-                onClick={() => {
-                  void finish("edit").catch(() => undefined);
-                }}
-              >
-                {finishing ? "正在保存…" : "保存修改并继续"}
-              </Button>
-              <Button variant="outline" disabled={busy} onClick={cancelEdit}>
-                取消修改
-              </Button>
-            </div>
-          </section>
-        )}
-        {(draft.isError || submission.isError) && (
-          <p role="alert">
-            {draft.error?.message ?? submission.error?.message}
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                if (draft.isError) void saveDraft(text).catch(() => undefined);
-                else submission.mutate();
-              }}
-            >
-              {draft.isError ? "重试保存草稿" : "重试提交本页"}
-            </Button>
-          </p>
-        )}
-        {(draft.isPending || finishing) && (
-          <p role="status" className="review-save-status">
-            正在保存草稿，请等待保存完成。
-          </p>
-        )}
-        {draft.isSuccess && !draft.isPending && !finishing && (
-          <p role="status" className="review-save-status">
-            草稿已自动保存 · 尚未提交本页
-          </p>
-        )}
-        <details
-          key={`${current?.id ?? "page"}:${ready ? "complete" : "review"}`}
+        <section
+          ref={preview}
           className="review-page-preview"
-          open
+          aria-label="整页文字与上下文"
         >
-          <summary>
-            {ready ? "检查本页最终文字" : "查看整页文字与上下文"}
-          </summary>
           {issue.kind === "figure" && (
             <p>本项为插图或地图，请核对原图及图说；图内标签保留在原件中。</p>
           )}
@@ -261,7 +175,7 @@ export default function IssueEditor({
               markdown={issue.kind === "figure" ? figurePreview(text) : text}
               highlights={locations}
               activeHighlight={current?.id}
-              onHighlight={editing ? undefined : setActive}
+              onHighlight={editing ? undefined : selectLocation}
               footnotes={text === issue.text ? issue.footnotes : []}
               onLocationFailure={setUnmapped}
               assetBaseUrl={`/api/v2/runs/${issue.run_id}/artifacts`}
@@ -282,39 +196,200 @@ export default function IssueEditor({
               </section>
             )}
           </div>
-        </details>
-        <details className="review-machine-report">
-          <summary>查看机器核对依据 · {issue.reasons.length} 项</summary>
-          <ul>
-            {issue.reasons.map((r, i) => (
-              <li key={i}>{reasonText(r)}</li>
-            ))}
-          </ul>
-        </details>
+        </section>
+        <div className="evidence-review-actions">
+          {ready && !editing ? (
+            <section className="review-page-complete" aria-label="本页提交">
+              <h3>本页疑点已处理，等待提交</h3>
+              <p>
+                {changed
+                  ? "文字已修改。请检查最终文字，提交后本页才计入已通过。"
+                  : "已记录保留当前文字的判断，提交后本页才计入已通过。"}
+              </p>
+              <Button variant="outline" disabled={busy} onClick={recheckPage}>
+                重新检查当前页
+              </Button>
+            </section>
+          ) : current ? (
+            <ReviewFocus
+              locations={locations}
+              active={current.id}
+              onSelect={selectLocation}
+              text={text}
+              resolutions={resolutions}
+              onResolve={(action) => {
+                void finish(action).catch(() => undefined);
+              }}
+              onEdit={beginEdit}
+              disabled={busy}
+              editing={editing}
+              machineReasons={issue.reasons.map(reasonText)}
+            />
+          ) : (
+            <section className="review-focus">
+              <h3>对照原图核对整页</h3>
+              <p>本页没有可靠的局部定位，请检查正文与原图。</p>
+              {!editing && (
+                <div className="review-judgment-actions">
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      void finish("keep").catch(() => undefined);
+                    }}
+                  >
+                    识别正确，保留
+                  </Button>
+                  <Button variant="outline" disabled={busy} onClick={beginEdit}>
+                    需要修改
+                  </Button>
+                </div>
+              )}
+            </section>
+          )}
+          {editing && (
+            <section className="review-edit-step" aria-label="修改当前内容">
+              {!wholePage && editRange ? (
+                <>
+                  <label>
+                    本处最终文字
+                    <textarea
+                      aria-label="本处最终文字"
+                      autoFocus
+                      value={text.slice(editRange.start, editRange.end)}
+                      onChange={(e) => changeFocus(e.target.value)}
+                      rows={3}
+                    />
+                  </label>
+                  <p>
+                    只修改当前选中的文字。原件缺损时，可保留明确的缺字标记。
+                  </p>
+                  {proposal && (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => changeFocus(proposal.replacement)}
+                    >
+                      填入机器建议
+                    </Button>
+                  )}
+                  <button
+                    className="review-text-link"
+                    disabled={busy}
+                    onClick={editWholePage}
+                  >
+                    编辑整页 Markdown
+                  </button>
+                </>
+              ) : (
+                <div>
+                  <Button variant="outline" onClick={toggleSourceMode}>
+                    {sourceMode ? "切换可视化编辑" : "切换 Markdown 源码"}
+                  </Button>
+                  {sourceMode ? (
+                    <label>
+                      整页 Markdown
+                      <textarea
+                        className="platform-markdown-source"
+                        aria-label="Markdown 源码"
+                        value={text}
+                        onChange={(e) => changeText(e.target.value)}
+                        rows={18}
+                        spellCheck={false}
+                      />
+                    </label>
+                  ) : (
+                    <MarkdownEditor
+                      value={text}
+                      highlights={locations}
+                      activeHighlight={current?.id}
+                      onChange={changeText}
+                    />
+                  )}
+                </div>
+              )}
+              <div className="review-edit-actions">
+                <Button
+                  disabled={busy || !text.trim()}
+                  onClick={() => {
+                    void finish("edit").catch(() => undefined);
+                  }}
+                >
+                  {finishing ? "正在保存…" : "保存修改并继续"}
+                </Button>
+                <Button variant="outline" disabled={busy} onClick={cancelEdit}>
+                  取消修改
+                </Button>
+              </div>
+            </section>
+          )}
+          {issue.reasons.length > 0 && (!current || ready || editing) && (
+            <details className="review-machine-report">
+              <summary>查看机器核对依据 · {issue.reasons.length} 项</summary>
+              <ul>
+                {issue.reasons.map((r, i) => (
+                  <li key={i}>{reasonText(r)}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       </article>
-      <aside aria-label="原书对照">
-        {current && issue.images[issue.pages.indexOf(current.page)] ? (
-          <SourceFocus
-            src={issue.images[issue.pages.indexOf(current.page)]}
-            issue={current}
-            locations={locations}
-            onSelect={editing ? undefined : setActive}
-            onBox={(box) => setBoxes((old) => ({ ...old, [current.id]: box }))}
-          />
-        ) : (
-          issue.images.map((src, i) => (
-            <figure key={src}>
-              <a href={src} target="_blank" rel="noreferrer">
-                打开原图 · 第 {issue.pages[i] ?? issue.page} 页
-              </a>
-              <img
-                src={src}
-                alt={`原书第 ${issue.pages[i] ?? issue.page} 页`}
-              />
-            </figure>
-          ))
+
+      <footer className="review-page-footer">
+        <div className="review-footer-state">
+          {draft.isError || submission.isError ? (
+            <p role="alert">
+              {draft.error?.message ?? submission.error?.message}
+            </p>
+          ) : (
+            <p role="status">
+              {draft.isPending || finishing
+                ? "正在保存草稿，请等待保存完成。"
+                : draft.isSuccess
+                  ? "草稿已自动保存 · 尚未提交本页"
+                  : issue.draft_text
+                    ? "已恢复草稿，尚未提交本页审核结果。"
+                    : "逐处核对后提交本页"}
+            </p>
+          )}
+          <small>
+            {ready
+              ? "本页判断已完成，请检查最终文字。"
+              : "保留或修改会保存草稿；提交后本页才计入已通过。"}
+          </small>
+        </div>
+        {draft.isError && (
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => void saveDraft(text).catch(() => undefined)}
+          >
+            重试保存草稿
+          </Button>
         )}
-      </aside>
+        <Button
+          disabled={
+            !ready ||
+            editing ||
+            busy ||
+            draft.isPending ||
+            draft.isError ||
+            runtimeScope === "unknown" ||
+            issue.state !== "pending"
+          }
+          onClick={() => submission.mutate()}
+        >
+          {runtimeScope === "unknown"
+            ? "确认工作区范围后再提交"
+            : submission.isPending
+              ? "正在提交…"
+              : submission.isError
+                ? "重试提交本页"
+                : workflowTest
+                  ? "按授权提交流程测试结果"
+                  : "提交本页并继续"}
+        </Button>
+      </footer>
     </div>
   );
 }

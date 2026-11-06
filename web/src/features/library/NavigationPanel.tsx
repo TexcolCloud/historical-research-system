@@ -59,8 +59,7 @@ export default function NavigationPanel({
   );
   const activeId = readingOnly
     ? null
-    : (selectedEntry?.id ??
-      (reviewOnly ? attention[0]?.id : null));
+    : (selectedEntry?.id ?? (reviewOnly ? attention[0]?.id : null));
   const editor = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
   useEffect(() => {
@@ -166,8 +165,8 @@ export default function NavigationPanel({
     setRestart((v) => v + 1);
   }
   return (
-    <section className="platform-navigation">
-      <h2>{reviewOnly ? "核对目录跳转" : "原书目录"}</h2>
+    <section className="platform-navigation" data-review-only={reviewOnly}>
+      {!reviewOnly && <h2>原书目录</h2>}
       {!reviewOnly && (
         <p>
           {readingOnly ? (
@@ -252,101 +251,146 @@ export default function NavigationPanel({
               </a>
             </div>
           )}
-          <ol
-            ref={list}
-            aria-label="原书目录"
-            className="navigation-entry-list"
+          <div
+            className={
+              reviewOnly && activeId ? "navigation-review-layout" : undefined
+            }
           >
-            {visible.map((e) => (
-              <li
-                key={e.id}
-                data-toc-entry={e.id}
-                data-selected={activeId === e.id}
-              >
-                {activeId !== e.id && (
-                  <>
-                    <header>
-                      <div>
-                        <strong>{e.title}</strong>
-                        <p>
-                          书内页码 {e.target_label}
-                          {e.target_end_label ? `–${e.target_end_label}` : ""}
-                        </p>
-                      </div>
-                      <span className="workspace-status-tag">
-                        {navigationStatusLabel(e)}
-                      </span>
-                    </header>
-                    <div className="navigation-entry-links">
-                      {e.target && (
-                        <a
-                          href={
-                            e.reading_target
-                              ? `#${readingHref(bookId, e.reading_target, { returnTo: `/books/${bookId}?tab=reader&section=directory&tocEntry=${encodeURIComponent(e.id)}` })}`
-                              : (e.target_image ?? e.target_url ?? undefined)
+            {reviewOnly && activeId && (
+              <nav className="navigation-review-queue" aria-label="目录待办">
+                <header>
+                  <h2>目录待办</h2>
+                  <p>{attention.length} 项需要确认</p>
+                </header>
+                <ol>
+                  {entries
+                    .filter(
+                      (entry) =>
+                        entry.needs_confirmation || entry.id === activeId,
+                    )
+                    .map((entry) => (
+                      <li key={entry.id}>
+                        <button
+                          type="button"
+                          aria-label={`选择目录：${entry.title}`}
+                          aria-current={
+                            entry.id === activeId ? "true" : undefined
                           }
-                          target={e.reading_target ? undefined : "_blank"}
+                          disabled={decision.isPending}
+                          onClick={() => choose(entry.id)}
+                        >
+                          <strong>{entry.title}</strong>
+                          <small>书内页 {entry.target_label || "未标示"}</small>
+                          <span>{navigationStatusLabel(entry)}</span>
+                        </button>
+                      </li>
+                    ))}
+                </ol>
+                <a href={`#/books/${bookId}?tab=reader&section=directory`}>
+                  浏览原书目录
+                </a>
+              </nav>
+            )}
+            <ol
+              ref={list}
+              aria-label="原书目录"
+              className="navigation-entry-list"
+            >
+              {visible.map((e) => (
+                <li
+                  key={e.id}
+                  data-toc-entry={e.id}
+                  data-selected={activeId === e.id}
+                >
+                  {activeId !== e.id && (
+                    <>
+                      <header>
+                        <div>
+                          <strong>{e.title}</strong>
+                          <p>
+                            书内页码 {e.target_label}
+                            {e.target_end_label ? `–${e.target_end_label}` : ""}
+                          </p>
+                        </div>
+                        <span className="workspace-status-tag">
+                          {navigationStatusLabel(e)}
+                        </span>
+                      </header>
+                      <div className="navigation-entry-links">
+                        {e.target && (
+                          <a
+                            href={
+                              e.reading_target
+                                ? `#${readingHref(bookId, e.reading_target, { returnTo: `/books/${bookId}?tab=reader&section=directory&tocEntry=${encodeURIComponent(e.id)}` })}`
+                                : (e.target_image ?? e.target_url ?? undefined)
+                            }
+                            target={e.reading_target ? undefined : "_blank"}
+                            rel="noreferrer"
+                          >
+                            {e.reading_target
+                              ? "阅读正文 →"
+                              : `查看正文原图 · PDF 第 ${e.target.physical_page} 页`}
+                          </a>
+                        )}
+                        <a
+                          href={e.source_image}
+                          target="_blank"
                           rel="noreferrer"
                         >
-                          {e.reading_target
-                            ? "阅读正文 →"
-                            : `查看正文原图 · PDF 第 ${e.target.physical_page} 页`}
+                          目录原图 · PDF 第 {e.source_page} 页
                         </a>
-                      )}
-                      <a href={e.source_image} target="_blank" rel="noreferrer">
-                        目录原图 · PDF 第 {e.source_page} 页
-                      </a>
-                      {readingOnly && (
-                        <a
-                          href={`#/books/${bookId}?tab=review&task=navigation&entry=${encodeURIComponent(e.id)}`}
-                        >
-                          核对这条目录
-                        </a>
-                      )}
-                      {!readingOnly && e.status !== "waiting_evidence" && (
-                        <Button
-                          variant="outline"
-                          disabled={decision.isPending}
-                          onClick={() => choose(e.id)}
-                        >
-                          {e.needs_confirmation ? "确认目录跳转" : "修改跳转"}
-                        </Button>
-                      )}
-                    </div>
-                  </>
-                )}
-                {activeId === e.id && (
-                  <div ref={editor}>
-                    <NavigationReview
-                      key={`${e.id}:${restart}`}
-                      entry={e}
-                      report={report.data!}
-                      runId={runId}
-                      busy={decision.isPending}
-                      approvalReady={runtimeScope !== "unknown"}
-                      error={decision.error?.message}
-                      reloading={report.isFetching}
-                      onReload={async () => {
-                        const result = await report.refetch();
-                        if (result.isSuccess) {
-                          decision.reset();
-                          setRestart((v) => v + 1);
+                        {readingOnly && (
+                          <a
+                            href={`#/books/${bookId}?tab=review&task=navigation&entry=${encodeURIComponent(e.id)}`}
+                          >
+                            核对这条目录
+                          </a>
+                        )}
+                        {!readingOnly && e.status !== "waiting_evidence" && (
+                          <Button
+                            variant="outline"
+                            disabled={decision.isPending}
+                            onClick={() => choose(e.id)}
+                          >
+                            {e.needs_confirmation ? "确认目录跳转" : "修改跳转"}
+                          </Button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                  {activeId === e.id && (
+                    <div ref={editor}>
+                      <NavigationReview
+                        key={`${e.id}:${restart}`}
+                        entry={e}
+                        report={report.data!}
+                        runId={runId}
+                        busy={decision.isPending}
+                        approvalReady={runtimeScope !== "unknown"}
+                        error={decision.error?.message}
+                        reloading={report.isFetching}
+                        onReload={async () => {
+                          const result = await report.refetch();
+                          if (result.isSuccess) {
+                            decision.reset();
+                            setRestart((v) => v + 1);
+                          }
+                        }}
+                        onDecide={(choice, sha) =>
+                          decision.mutate({ choice, sha, id: e.id })
                         }
-                      }}
-                      onDecide={(choice, sha) =>
-                        decision.mutate({ choice, sha, id: e.id })
-                      }
-                      onCancel={() => {
-                        if (reviewOnly)
-                          window.location.hash = `/books/${bookId}?tab=reader&section=directory`;
-                        else setSelected(null);
-                      }}
-                    />
-                  </div>
-                )}
-              </li>
-            ))}
-          </ol>
+                        onCancel={() => {
+                          if (reviewOnly)
+                            window.location.hash = `/books/${bookId}?tab=reader&section=directory`;
+                          else setSelected(null);
+                        }}
+                      />
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </div>
           {!report.data.coverage_complete && visible.length > 0 && (
             <p className="navigation-queue-status">
               {incompleteMessage} 标为“等待系统核验”的条目暂无需人工处理。

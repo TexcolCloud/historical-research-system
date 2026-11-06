@@ -56,6 +56,12 @@ export default function BookPage() {
     next.set("tab", value);
     setParams(next);
   }
+  function chooseReviewTask(value: string) {
+    const next = new URLSearchParams(params);
+    next.set("task", value);
+    next.set("tab", "review");
+    setParams(next);
+  }
   if (detail.isPending) return <p role="status">正在读取书籍…</p>;
   if (!book)
     return (
@@ -85,13 +91,52 @@ export default function BookPage() {
       </section>
     );
   return (
-    <>
-      <Link to="/" className="platform-back">
-        ← 全部书籍
-      </Link>
+    <div
+      className={`book-workspace book-workspace-${tab}`}
+      data-state={book.state}
+      data-published={
+        book.state === "ready" || book.revision_pending ? "true" : "false"
+      }
+    >
+      <div className="book-context-bar">
+        <Link to="/" className="platform-back">
+          ← 书籍
+        </Link>
+        <span title={book.title}>{book.title}</span>
+        <Tabs value={tab} onValueChange={chooseTab}>
+          <TabsList aria-label="书籍工作区" className="workspace-main-tabs">
+            <TabsTrigger value="progress">处理进展</TabsTrigger>
+            <TabsTrigger value="review">人工核对</TabsTrigger>
+            <TabsTrigger value="reader">阅读资料</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <details className="book-more-actions">
+          <summary>更多操作</summary>
+          <div className="book-more-menu">
+            <DeleteBookButton book={book} />
+          </div>
+        </details>
+      </div>
       <div className="platform-heading book-heading">
         <div>
-          <h1 title={book.title}>{book.title}</h1>
+          <div className="book-heading-title">
+            <h1>
+              {tab === "review"
+                ? directoryTask
+                  ? "目录确认"
+                  : "正文核对"
+                : tab === "reader"
+                  ? "阅读资料"
+                  : "处理进展"}
+            </h1>
+            {tab === "review" && (
+              <span className="book-task-count">
+                {directoryTask
+                  ? `${book.navigation_pending_count ?? 0} 项待确认`
+                  : `${book.pending_count ?? 0} 页待核对`}
+              </span>
+            )}
+          </div>
           <p>
             {book.state === "failed"
               ? "自动处理已停止，请在处理进展中从断点恢复。"
@@ -110,48 +155,34 @@ export default function BookPage() {
             </p>
           )}
         </div>
-        <DeleteBookButton book={book} />
-      </div>
-      <Tabs value={tab} onValueChange={chooseTab}>
-        <TabsList aria-label="书籍工作区" className="workspace-main-tabs">
-          <TabsTrigger value="progress">处理进展</TabsTrigger>
-          <TabsTrigger value="review">人工核对</TabsTrigger>
-          <TabsTrigger value="reader">阅读资料</TabsTrigger>
-        </TabsList>
-      </Tabs>
-      <Suspense fallback={<p role="status">正在打开工作区…</p>}>
-        {tab === "reader" ? (
-          <ReadingWorkspace book={book} />
-        ) : tab === "review" && book.run_id ? (
-          <section className="human-workspace">
+        <div className="book-heading-actions">
+          {tab === "review" && (
             <div
               className="workspace-section-tabs"
               role="group"
               aria-label="核对任务类型"
             >
               <Button
-                variant={directoryTask ? "outline" : "default"}
-                onClick={() => {
-                  const next = new URLSearchParams(params);
-                  next.set("task", "content");
-                  next.set("tab", "review");
-                  setParams(next);
-                }}
+                variant={directoryTask ? "ghost" : "outline"}
+                onClick={() => chooseReviewTask("content")}
               >
                 正文核对 · {book.pending_count ?? 0} 页
               </Button>
               <Button
-                variant={directoryTask ? "default" : "outline"}
-                onClick={() => {
-                  const next = new URLSearchParams(params);
-                  next.set("task", "navigation");
-                  next.set("tab", "review");
-                  setParams(next);
-                }}
+                variant={directoryTask ? "outline" : "ghost"}
+                onClick={() => chooseReviewTask("navigation")}
               >
                 目录确认 · {book.navigation_pending_count ?? 0} 项
               </Button>
             </div>
+          )}
+        </div>
+      </div>
+      <Suspense fallback={<p role="status">正在打开工作区…</p>}>
+        {tab === "reader" ? (
+          <ReadingWorkspace book={book} />
+        ) : tab === "review" && book.run_id ? (
+          <section className="human-workspace">
             {directoryTask ? (
               <NavigationPanel
                 runId={book.run_id}
@@ -184,6 +215,6 @@ export default function BookPage() {
           </>
         )}
       </Suspense>
-    </>
+    </div>
   );
 }

@@ -6,7 +6,14 @@ import { Input } from "@/components/ui/input.tsx";
 import { client } from "@/client/api.ts";
 import { readingHref } from "@/features/library/reader-location";
 import { readingNavigationOptions } from "@/features/library/navigation-query";
-export default function SearchPanel({ bookId }: { bookId: string }) {
+import { ArrowUpRight, Search, X } from "lucide-react";
+export default function SearchPanel({
+  bookId,
+  onClose,
+}: {
+  bookId: string;
+  onClose?: () => void;
+}) {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const request = {
@@ -52,7 +59,21 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
         .find((entry) => entry.id === request.toc_entry_id)
         ?.path.join(" / ") ?? "所选目录（需重新确认）")
     : "全书";
-  const returnTo = location.pathname + location.search;
+  const returnParams = new URLSearchParams(params);
+  returnParams.delete("returnTo");
+  returnParams.set("tab", "reader");
+  returnParams.set("section", "search");
+  const returnTo = `${location.pathname}?${returnParams}`;
+  function chapterHref(book: string, chapter: string, page?: number) {
+    const next = new URLSearchParams({
+      tab: "reader",
+      section: "text",
+      chapter,
+      returnTo,
+    });
+    if (page != null) next.set("physicalPage", String(page));
+    return `/books/${book}?${next}`;
+  }
   const results = useQuery({
     queryKey: ["platform", "search", bookId, request],
     placeholderData: keepPreviousData,
@@ -73,6 +94,23 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
   });
   return (
     <section className="platform-search-panel">
+      <header className="search-workspace-heading">
+        <div>
+          <h2>检索本书</h2>
+        </div>
+        {onClose ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="关闭检索"
+            onClick={onClose}
+          >
+            <X size={18} aria-hidden="true" />
+          </Button>
+        ) : (
+          <Search size={20} aria-hidden="true" />
+        )}
+      </header>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -86,7 +124,7 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
           next.set("include_navigation", String(includeNavigation && !scope));
           if (scope) next.set("toc_entry_id", scope);
           else next.delete("toc_entry_id");
-          setParams(next);
+          setParams(next, { state: { preserveReadingPosition: true } });
         }}
       >
         <Input
@@ -162,7 +200,7 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
         </details>
       </form>
       {request.q && (
-        <p>
+        <p className="search-current-scope">
           当前检索范围：{scopeName}
           {request.toc_entry_id ? "（含下级目录）" : ""}
         </p>
@@ -185,24 +223,38 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
       )}
       {!results.isPlaceholderData &&
         results.data?.map((hit) => (
-          <article key={hit.id}>
+          <article key={hit.id} className="search-result">
             <h2>{hit.title}</h2>
-            {hit.doc_kind === "navigation" && <p>原书目录条目</p>}
-            {!!hit.toc_path?.length && (
-              <p>原书目录：{hit.toc_path.join(" / ")}</p>
+            <div className="search-result-provenance">
+              {hit.doc_kind === "navigation" && <p>原书目录条目</p>}
+              {!!hit.toc_path?.length && (
+                <p>原书目录：{hit.toc_path.join(" / ")}</p>
+              )}
+              {!!hit.printed_pages?.length && (
+                <p>
+                  印刷页：
+                  {hit.printed_pages
+                    .map((p) => String(p.label ?? "未知"))
+                    .join("、")}
+                </p>
+              )}
+              {(hit.section_path?.length ?? 0) > 1 && (
+                <p>{hit.section_path?.join(" / ")}</p>
+              )}
+              <p>PDF 第 {hit.pages.join("、")} 页</p>
+            </div>
+            <p className="search-result-excerpt">{hit.text}</p>
+            {hit.reading_target && (
+              <Link
+                className="search-primary-link"
+                to={readingHref(hit.book_id, hit.reading_target, { returnTo })}
+              >
+                {hit.doc_kind === "navigation"
+                  ? "阅读对应正文"
+                  : "阅读命中段落"}
+                <ArrowUpRight size={17} aria-hidden="true" />
+              </Link>
             )}
-            {!!hit.printed_pages?.length && (
-              <p>
-                印刷页：
-                {hit.printed_pages
-                  .map((p) => String(p.label ?? "未知"))
-                  .join("、")}
-              </p>
-            )}
-            {(hit.section_path?.length ?? 0) > 1 && (
-              <p>{hit.section_path?.join(" / ")}</p>
-            )}
-            <p style={{ whiteSpace: "pre-wrap" }}>{hit.text}</p>
             {(hit.context?.length ?? 0) > 0 && (
               <details>
                 <summary>查看相关上下文、表头与注释</summary>
@@ -222,7 +274,11 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
                       </Link>
                     )}
                     <Link
-                      to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}&physicalPage=${part.pages[0]}`}
+                      to={chapterHref(
+                        hit.book_id,
+                        hit.chapter_id,
+                        part.pages[0],
+                      )}
                     >
                       查看原件第 {part.pages.join("、")} 页
                     </Link>
@@ -232,15 +288,6 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
             )}
             {hit.context_truncated && (
               <p>部分上下文较长，请打开章节继续阅读。</p>
-            )}
-            {hit.reading_target && (
-              <Link
-                to={readingHref(hit.book_id, hit.reading_target, { returnTo })}
-              >
-                {hit.doc_kind === "navigation"
-                  ? "阅读对应正文"
-                  : "阅读命中段落"}
-              </Link>
             )}
             {hit.doc_kind === "navigation" &&
               !hit.reading_target &&
@@ -264,19 +311,17 @@ export default function SearchPanel({ bookId }: { bookId: string }) {
               !hit.directory_links?.length && (
                 <p>这段目录尚未可靠关联正文，可先查看目录原件。</p>
               )}
-            <Link
-              to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}`}
-            >
-              阅读所在章节
-            </Link>
-            <Link
-              to={`/books/${hit.book_id}?tab=reader&chapter=${hit.chapter_id}&physicalPage=${hit.pages[0]}`}
-            >
-              {hit.doc_kind === "navigation"
-                ? "查看目录原件第 "
-                : "查看原件第 "}
-              {hit.pages.join("、")} 页
-            </Link>
+            <footer className="search-result-links">
+              <Link to={chapterHref(hit.book_id, hit.chapter_id)}>
+                阅读所在章节
+              </Link>
+              <Link to={chapterHref(hit.book_id, hit.chapter_id, hit.pages[0])}>
+                {hit.doc_kind === "navigation"
+                  ? "查看目录原件第 "
+                  : "查看原件第 "}
+                {hit.pages.join("、")} 页
+              </Link>
+            </footer>
           </article>
         ))}
     </section>

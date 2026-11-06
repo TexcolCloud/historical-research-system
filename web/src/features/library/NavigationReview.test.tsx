@@ -97,7 +97,7 @@ test("a rejected candidate leads to title search and requires comparison before 
   );
   expect(decide).not.toHaveBeenCalled();
   await userEvent.click(
-    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+    screen.getByRole("button", { name: /确认跳转到 PDF 第 \d+ 页/ }),
   );
   expect(decide).toHaveBeenCalledWith(
     { page: 8, anchor: "第一章 修订稿" },
@@ -125,7 +125,7 @@ test("a page without headings can use a unique source paragraph as its navigatio
   expect(decide).not.toHaveBeenCalled();
   await screen.findByText(/第二段内容/);
   await userEvent.click(
-    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+    screen.getByRole("button", { name: /确认跳转到 PDF 第 \d+ 页/ }),
   );
   expect(decide).toHaveBeenCalledWith(
     { page: 9, anchor: "无标题的独立正文开始。" },
@@ -136,13 +136,13 @@ test("not setting a jump is an explicit final decision and does not claim the ar
   const decide = mount();
   await screen.findByText(/旧的正文开头/);
   expect(
-    screen.queryByRole("button", { name: "保留目录文字，不设置跳转" }),
-  ).toBeNull();
+    screen.getByRole("button", { name: "保留目录文字，不设置跳转" }),
+  ).toBeDefined();
   await userEvent.click(
     screen.getByRole("button", { name: "不是这篇，查找其他正文" }),
   );
   expect(
-    screen.getByText("这条目录仍会显示，但不能点击跳转；正文和原图均保留。"),
+    screen.getByText("预览不会保存。确认后仅更新目录跳转，正文与原件保留。"),
   ).toBeDefined();
   await userEvent.click(
     screen.getByRole("button", { name: "保留目录文字，不设置跳转" }),

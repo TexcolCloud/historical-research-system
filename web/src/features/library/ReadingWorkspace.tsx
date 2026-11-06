@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button.tsx";
 import type { Book } from "@/client/api.ts";
 import ReaderPanel from "./ReaderPanel.tsx";
 import NavigationPanel from "./NavigationPanel.tsx";
-import SearchPanel from "@/features/search/SearchPanel.tsx";
 import ConversionReader from "@/features/review/ConversionReader.tsx";
 
 export default function ReadingWorkspace({ book }: { book: Book }) {
@@ -24,30 +23,18 @@ export default function ReadingWorkspace({ book }: { book: Book }) {
   }
   return (
     <section className="reading-workspace">
-      <div
-        className="workspace-section-tabs"
-        role="group"
-        aria-label="阅读资料内容"
-      >
-        <Button
-          variant={section === "text" ? "default" : "outline"}
-          onClick={() => choose("text")}
-        >
-          {published ? "正式阅读" : "阅读底稿"}
-        </Button>
-        <Button
-          variant={section === "directory" ? "default" : "outline"}
-          onClick={() => choose("directory")}
-        >
-          原书目录
-        </Button>
-        <Button
-          variant={section === "search" ? "default" : "outline"}
-          onClick={() => choose("search")}
-        >
-          检索本书
-        </Button>
-      </div>
+      {(section === "directory" || !published) && (
+        <div className="reading-workspace-tools">
+          <Button variant="outline" onClick={() => choose("text")}>
+            {published ? "返回正文" : "阅读底稿"}
+          </Button>
+          {section !== "directory" && (
+            <Button variant="ghost" onClick={() => choose("directory")}>
+              原书目录
+            </Button>
+          )}
+        </div>
+      )}
       {book.revision_pending && (
         <p className="workspace-status-note">
           新版本核对中，正式阅读与检索使用此前发布的版本。
@@ -64,21 +51,17 @@ export default function ReadingWorkspace({ book }: { book: Book }) {
         ) : (
           <p>接收文件后会开始发现目录。</p>
         )
-      ) : section === "search" ? (
-        published ? (
-          <SearchPanel bookId={book.id} />
-        ) : (
-          <div className="workspace-empty">
-            <h2>本书尚未建立检索索引</h2>
-            <p>完成内容核对和入库后开放正式检索。你可以先阅读已有底稿。</p>
-            <Button onClick={() => choose("text")}>先阅读底稿</Button>
-            {(book.pending_count ?? 0) > 0 && (
-              <a href={`#/books/${book.id}?tab=review`}>处理待核对内容</a>
-            )}
-          </div>
-        )
       ) : published ? (
         <ReaderPanel bookId={book.id} />
+      ) : section === "search" ? (
+        <div className="workspace-empty">
+          <h2>本书尚未建立检索索引</h2>
+          <p>完成内容核对和入库后开放正式检索。你可以先阅读已有底稿。</p>
+          <Button onClick={() => choose("text")}>先阅读底稿</Button>
+          {(book.pending_count ?? 0) > 0 && (
+            <a href={`#/books/${book.id}?tab=review`}>处理待核对内容</a>
+          )}
+        </div>
       ) : book.run_id ? (
         <>
           <div className="workspace-status-note">

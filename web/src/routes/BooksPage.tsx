@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { BookOpen, Upload, Search, ArrowUpRight } from "lucide-react";
+import { BookOpen, Upload, Search, ArrowRight, Ellipsis } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
@@ -53,12 +53,11 @@ export default function BooksPage() {
     [books.data, filter, search],
   );
   return (
-    <>
+    <section className="books-shelf">
       <div className="platform-heading">
         <div>
-          <p className="platform-eyebrow">你的研究，从这里开始</p>
           <h1>书籍</h1>
-          <p>导入原件，核对内容，整理成可以阅读与研究的材料。</p>
+          <p>{books.data?.length ?? 0} 本资料 · 原件、核对结果与阅读版本</p>
         </div>
         <Button onClick={upload}>
           <Upload size={17} />
@@ -120,21 +119,25 @@ export default function BooksPage() {
         </section>
       ) : (
         <section className="platform-books" aria-label="书籍列表">
+          <div className="platform-books-heading" aria-hidden="true">
+            <span>书名与导入时间</span>
+            <span>处理状态</span>
+            <span>下一步</span>
+            <span />
+          </div>
           {visible.map((book) => (
             <article key={book.id} className="platform-book-item">
               <button
                 className="platform-book"
                 onClick={() => navigate(bookWorkspaceHref(book))}
               >
-                <div className="platform-book-cover" aria-hidden="true">
-                  <BookOpen size={27} />
-                  <span>史料</span>
-                </div>
                 <div className="platform-book-copy">
                   <h2>{book.title}</h2>
                   <p>
                     {new Date(book.created_at).toLocaleDateString("zh-CN")} 导入
                   </p>
+                </div>
+                <div className="platform-book-state">
                   <span className="platform-status" data-state={book.state}>
                     {states[book.state] ?? book.state}
                   </span>
@@ -145,15 +148,30 @@ export default function BooksPage() {
                     <p>{book.navigation_pending_count} 项目录位置待确认</p>
                   )}
                 </div>
-                <ArrowUpRight size={18} />
+                <span className="platform-book-next">
+                  {(book.pending_count ?? 0) > 0 ||
+                  (book.navigation_pending_count ?? 0) > 0 ||
+                  book.state === "awaiting_review"
+                    ? "继续核对"
+                    : book.state === "ready"
+                      ? "阅读资料"
+                      : "查看进展"}
+                  <ArrowRight size={17} />
+                </span>
               </button>
-              <div className="platform-book-actions">
-                <DeleteBookButton book={book} />
-              </div>
+              <details className="platform-book-actions">
+                <summary aria-label={`更多操作：${book.title}`}>
+                  <Ellipsis size={20} />
+                  <span className="sr-only">更多操作</span>
+                </summary>
+                <div className="platform-book-menu">
+                  <DeleteBookButton book={book} />
+                </div>
+              </details>
             </article>
           ))}
         </section>
       )}
-    </>
+    </section>
   );
 }
