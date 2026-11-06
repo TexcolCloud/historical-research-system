@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from filelock import FileLock
 
-from hrs_codex.checkpoints import atomic_json
+from hrs_codex.checkpoints import atomic_json, read_snapshot
 from hrs_codex.store import Store
 
 PROJECT = Path(__file__).resolve().parents[4]
@@ -33,11 +33,12 @@ def resolve_workspace(explicit: Path | str | None = None) -> Path:
 
 
 def identity(store: Store) -> dict:
-    with store.lock:
-        path = store.root / ".workspace.json"
-        if not path.exists():
-            atomic_json(path, {"schema_version": 1, "workspace_id": uuid4().hex})
-        record = json.loads(path.read_text(encoding="utf-8"))
+    path = store.root / ".workspace.json"
+    if not path.exists():
+        with store.lock:
+            if not path.exists():
+                atomic_json(path, {"schema_version": 1, "workspace_id": uuid4().hex})
+    record = json.loads(read_snapshot(path))
     return {
         **record,
         "root": str(store.root),

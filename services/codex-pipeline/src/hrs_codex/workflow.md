@@ -11,7 +11,15 @@ Existing JSON workspaces remain read-only until all executors are stopped and
 
 The coordinator calls `dispatch_work(document_id)`. The returned assignments already
 reserve concrete task leases and workspace capacity, including starting/prewarmed
-agents. Spawn each exact native `agent_type` with its session token. A worker calls
+agents. On later calls, pass `active_session_tokens` for every spawned native agent
+which has not been closed, including completed ones. Close all returned
+`retired_sessions` native agents before spawning replacements: ending an MCP session
+does not close its native thread. Local `agent thread limit reached` errors require
+closing retired/completed native agents and retrying the same assignment, never
+model pressure. If nothing can close, release the unstarted session without a
+failure code and wait. Unclassified failed-spawn JSON summaries defer to the
+coordinator's full tool diagnostic; explicit provider errors retain normal recovery.
+Spawn each exact native `agent_type` with its session token. A worker calls
 `open_task_packet(session_token, worker_id)` to receive its stage-specific rules,
 processing policy, claim and original pixels in one response. Review/verify packets
 withhold candidates until `freeze_observations` freezes independent original reading;
@@ -20,6 +28,9 @@ through `candidate_text`. `submit_packet` commits the result and a minimal recei
 identical replays return the saved receipt. Reuse a worker only up to the returned
 session_max_tasks (legacy two; configured warm sessions up to eight), also bounded
 by 48,000 processed characters. Never reuse an OCR agent as its reviewer.
+Session page budgets count only that session's completions, never historical receipts
+with a reused display name. Coordinators derive worker IDs from stage + session token
+so names remain unique across restarts; earlier receipts remain unchanged.
 Prewarmed reviewers wait on `wait_for_changes` without consuming a model turn per poll.
 Only native Codex subagents perform inference; Python threads supervise CLI processes.
 

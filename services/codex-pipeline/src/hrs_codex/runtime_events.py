@@ -227,8 +227,10 @@ class RuntimeEvents:
                     for agent in receivers:
                         if isinstance(agent, str):
                             self.agents[agent] = assignment
-                if item.get("status") in ("failed", "errored"):
-                    self._failed(assignment, item.get("error") or item, evidence)
+                if item.get("status") in ("failed", "errored") and item.get("error"):
+                    # CLI summaries omit local thread-limit diagnostics; the coordinator
+                    # sees the full tool result and must classify those before any retry.
+                    self._failed(assignment, item["error"], evidence)
         states = item.get("agents_states")
         if not isinstance(states, dict):
             return

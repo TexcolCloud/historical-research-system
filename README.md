@@ -2,17 +2,9 @@
 
 本地史料工作流，默认由 **Codex 原生子代理 + 本地 MCP** 完成识别、独立原图审核和文章组织。本地程序负责原件留存、页面渲染、任务状态、证据校验、Markdown 入库和全文检索。史料卡生成已退出使用。
 
-重构后的模块职责、去重边界与依赖规则见[架构说明](REFACTOR-20261105.md)，测试与20页真实材料结果见[本地验证](REFACTOR-VALIDATION-20261105.md)。
+任务、页面、会话和事件使用 SQLite/WAL 事务化保存；旧 JSON 工作区升级前须停机迁移。新工作区默认 14 个共享名额与八页暖会话，既有工作区不自动升级执行配置。预热会话使用实际任务分配后的余量，空闲名额可跨书归还。
 
-后续性能重构已将任务写入、调度、执行上下文和投影改为事务化主链，见[执行引擎、旧工作区迁移与恢复](EXECUTION-ENGINE-20261105.md)及[最终本地验收](EXECUTION-ENGINE-VALIDATION-20261105.md)。旧 JSON 工作区升级前须停机迁移；新工作区自动使用 SQLite/WAL。
-
-单页原图预读、暖代理复用和并发实测见[吞吐策略与验证](THROUGHPUT-20261106.md)。新工作区默认 14 个共享名额与八页暖会话；既有工作区不自动升级执行配置。
-
-人工终审的文字/原图定位、连续编辑草稿恢复与独立真实材料验证见[疑点定位修复](REVIEW-HIGHLIGHT-20261106.md)。预热会话只使用实际任务分配后的余量，跨书满容量时可归还空闲名额，避免阻塞识别和复核。
-
-核对后的原书目录可在正文和侧栏点击，目录与搜索共用精确正文定位；支持返回原条目、搜索结果及目录章节范围检索。实现与实际材料验证见[阅读导航与范围检索](READING-NAVIGATION-20261106.md)。
-
-人工目录待办与阅读提示共用统一分类：未找到正文和候选冲突均需确认，等待证据不催人工，明确不设置跳转则完成。旧计数刷新和缓存同步见[目录待办一致性修复](NAVIGATION-REVIEW-20261106.md)。
+人工终审提供正文疑点、原图定位和连续编辑草稿恢复。核对后的目录可在正文及侧栏点击，目录与搜索共用精确正文定位，支持返回原条目和目录章节范围检索。未找到正文或候选冲突时交人工确认，等待证据的条目不催人工，明确不设置跳转则完成。
 
 ## 快速开始
 
@@ -82,10 +74,14 @@ uv run --no-sync --project services/codex-pipeline --locked python -m pytest ser
 uv run --no-sync --project services/codex-pipeline --locked python -m ruff check services/codex-pipeline
 ```
 
-新流程的验证不依赖旧平台容器。[模块说明](services/codex-pipeline/README.md) 给出工具和流程图；[融合验收](services/codex-pipeline/FUSION-VALIDATION.md) 记录默认工作区的真实后台处理、原图优先协议、人工交接、应用内浏览器实测和 96 项工程测试。郭村报告的“政／攻”读法分歧与[更早宁夏材料](services/codex-pipeline/ACCEPTANCE.md)的模糊字仍待人工判断；不计作内容修复成功。[统一流程验收](services/codex-pipeline/UNIFIED-VALIDATION.md)及[首次单页验证](services/codex-pipeline/VALIDATION.md) 保留历史运行与后续复评说明。
+新流程的工程验证不依赖旧平台容器。[模块说明](services/codex-pipeline/README.md) 给出工具、流程图及恢复方式。真实史料的原件、验收记录与日志保留在本地；工程测试或流程验收通过不代表内容准确率，未解决的原件读法仍需人工判断。
+
+## 仓库跟踪范围
+
+Git 保留业务源码、测试及必需数据、API 契约、构建部署配置和 README。`historical-research/SKILL.md` 与 `hrs_codex/workflow.md` 是实际执行所需的代理契约，作为运行资源保留。
+
+辅助报告、验收快照、历史图示、日志、史料与本地工作区由 `.gitignore` 排除，不随代码提交。取消跟踪只从 Git 索引移除，本地文件继续保留。CI 检查已跟踪文件是否违反忽略规则，防止辅助资料再次混入提交。
 
 ## 原有平台与历史资料
 
 [Research Platform](services/research-platform/README.md)、[Review Workbench](services/review-workbench/README.md)、[Docling/Paddle 转换模块](services/document-extraction/README.md) 和相关 GPU 运维脚本保留。原 React UI 的上传、人工核对、阅读、脚注、表格/插图、检索、Markdown 导出、删除与勘误已接入 Codex 队列和结果。原 SQL/S3 历史数据继续可读；不会自动重跑或迁移历史任务。默认运行不依赖 Temporal 或 Qwen/Paddle/DeepSeek 识别服务；`scripts/hrs_v2.py --legacy` 才使用旧处理路径。制卡新建、重试和调度保持退出，历史卡片只读与导出继续保留。
-
-本轮完整功能映射与20页真实史料流程验收见[融合验收记录](services/codex-pipeline/INTEGRATION-20261104.md)。流程验收授权只验证顺序与格式，不能证明内容准确率。

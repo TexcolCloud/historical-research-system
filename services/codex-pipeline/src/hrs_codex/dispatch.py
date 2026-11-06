@@ -32,13 +32,16 @@ class Dispatch:
     def sessions(self):
         return self.ledger.sessions()
 
-    def reserve(self, document_id):
+    def reserve(self, document_id, *, active_session_tokens=()):
         """Lease concrete work before allocating shared capacity to speculative warmup."""
         from hrs_codex.execution_policy import execution_policy
         from hrs_codex.scheduling import ready_tasks
 
         policy = execution_policy(self.store.root)
         with self.store.lock:
+            for token in active_session_tokens:
+                if self.session(token, allow_closed=True)["document_id"] != document_id:
+                    raise ValueError("Tracked native sessions must belong to this document")
             self.expire()
             plan = self.store.scheduling_plan(document_id)
             concrete = ready_tasks(self.store.checkpoints.read(document_id))
@@ -60,6 +63,7 @@ class Dispatch:
                 if not any(task["stage"] == stage for task in concrete):
                     continue
                 with self.store.lock:
+                    self.make_room(stage, plan)
                     live = [
                         s
                         for s in self.sessions()
@@ -129,6 +133,11 @@ class Dispatch:
                         assignments.append(self.assignment(warm))
         return {
             "assignments": assignments,
+            "retired_sessions": [
+                token
+                for token in active_session_tokens
+                if self.session(token, allow_closed=True)["state"] == "exited"
+            ],
             "plan": plan,
             "sequence": self.ledger.sequence(),
             "sessions": [
@@ -150,9 +159,13 @@ class Dispatch:
         gate = self.store.runtime_control.gate(model)
         if not gate["allowed"]:
             return
+        capacity = min(plan["capacity"], self.store.runtime_control.snapshot()["account"]["limit"])
         while True:
-            full = self.ledger.capacity_used() >= plan["capacity"]
-            model_full = self.ledger.model_capacity_used(model) >= gate["limit"]
+            occupied = self.ledger.capacity_used()
+            model_occupied = self.ledger.model_capacity_used(model)
+            full = occupied >= capacity
+            model_full = model_occupied >= gate["limit"]
+            overcommitted = occupied > capacity or model_occupied > gate["limit"]
             if not full and not model_full:
                 return
             waiting = []
@@ -166,7 +179,7 @@ class Dispatch:
                 if model_full and not full and model_for_stage(session["stage"]) != model:
                     continue
                 doc = self.store.checkpoints.read(session["document_id"])
-                if any(
+                if not overcommitted and any(
                     task["stage"] == session["stage"]
                     and (
                         not session.get("preflight_page")
@@ -322,6 +335,10 @@ class Dispatch:
                     if (
                         session.get("prewarmed")
                         and (session.get("overlap_reading") or not session["completed"])
+                        and (
+                            session["stage"] != "organization"
+                            or not any(page["state"] == "pending" for page in doc["pages"])
+                        )
                         and any(
                             task["stage"]
                             in (

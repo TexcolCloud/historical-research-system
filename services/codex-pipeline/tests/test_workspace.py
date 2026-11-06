@@ -2,6 +2,7 @@
 
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from hrs_codex import workspace
 from hrs_codex.human_review import create_review_server
@@ -27,6 +28,23 @@ def test_default_root_is_project_relative_and_identity_survives_restart(tmp_path
     monkeypatch.setenv("HRS_CODEX_ROOT", str(nested))
     assert workspace.resolve_workspace() == nested
     assert workspace.resolve_workspace(root) == root
+
+
+def test_reading_existing_identity_does_not_wait_for_document_processing(tmp_path):
+    store = Store(tmp_path)
+    original = workspace.identity(store)
+    reader = Store(store.root)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with store.lock:
+            result = pool.submit(workspace.identity, reader).result(timeout=0.5)
+    assert result == original
+
+
+def test_concurrent_identity_creation_retains_one_workspace_id(tmp_path):
+    store = Store(tmp_path)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        values = list(pool.map(lambda _: workspace.identity(Store(store.root)), range(8)))
+    assert len({value["workspace_id"] for value in values}) == 1
 
 
 def test_existing_loopback_workbench_is_reused_without_spawning_an_executor(tmp_path, monkeypatch):

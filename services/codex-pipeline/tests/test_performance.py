@@ -84,6 +84,34 @@ def test_background_validation_does_not_block_status_or_overwrite_a_newer_snapsh
     assert len(passes) == 2
 
 
+@pytest.mark.parametrize("stage", ["ocr", "organization"])
+def test_progress_and_lease_heartbeats_do_not_invalidate_evidence(tmp_path, monkeypatch, stage):
+    store, identity = document(tmp_path)
+    if stage == "organization":
+        complete(store, identity, "ocr", "transcriber", {"markdown": "Retained source"})
+        complete(store, identity, "review", "reviewer", {"verdict": "approved", "issues": []})
+    store.request_run(identity)
+    other = Store(store.root)
+    verify = store.context.evidence.verify
+    passes = []
+
+    def concurrent_heartbeat(snapshot, pages=None):
+        verify(snapshot, pages)
+        passes.append(pages)
+        with other.lock:
+            current = other.checkpoints.read(identity)
+            current["run_request"]["last_progress_at"] = len(passes)
+            current["run_request"]["lease_expires_at"] = 100000 + len(passes)
+            current.setdefault("scheduler", {})["rebalanced_at"] = len(passes)
+            other.checkpoints.write(current)
+
+    monkeypatch.setattr(store.context.evidence, "verify", concurrent_heartbeat)
+    task = store.claim_task(identity, stage, "worker")
+    assert task["stage"] == stage
+    assert len(passes) == 1, "Telemetry does not change retained source or decision evidence"
+    assert other.status(identity)["run_request"]["last_progress_at"] == 1
+
+
 def test_status_reads_last_atomic_commit_without_waiting_for_a_writer(tmp_path):
     store, doc_id = document(tmp_path)
     other = Store(store.root)
@@ -150,3 +178,35 @@ def test_opening_original_pixels_does_not_block_mutation(tmp_path, monkeypatch):
             release.set()
         assert image.result(timeout=3)[1]
     assert other.status(doc_id)["run_request"]["pause_requested"]
+
+
+@pytest.mark.parametrize("lease_bound", [False, True])
+def test_original_pixels_ignore_concurrent_changes_on_other_pages(
+    tmp_path, monkeypatch, lease_bound
+):
+    import hrs_codex.task_inspection as module
+
+    store, identity = document(tmp_path, count=2)
+    other = Store(store.root)
+    task = store.claim_task(identity, "ocr", "transcriber") if lease_bound else None
+    hashed = []
+    original = module.file_digest
+
+    def concurrent_page_progress(path):
+        result = original(path)
+        hashed.append(path)
+        with other.lock:
+            current = other.checkpoints.read(identity)
+            current["pages"][1]["carrier_progress"] = len(hashed)
+            other.checkpoints.write(current)
+        return result
+
+    monkeypatch.setattr(module, "file_digest", concurrent_page_progress)
+    arguments = {"task_id": task["task_id"], "lease_token": task["lease_token"]} if task else {}
+    metadata, pixels = store.original_page(identity, 1, **arguments)
+    assert pixels == b"original-page-1"
+    assert metadata["page"] == 1
+    assert len(hashed) == 1, "Another page's progress must not invalidate these original pixels"
+    assert other.status(identity)["pages"][1]["carrier_progress"] == 1
+    if lease_bound:
+        assert metadata["image_receipt"]

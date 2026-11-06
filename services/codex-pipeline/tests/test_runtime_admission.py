@@ -45,6 +45,59 @@ def test_sol_capacity_failure_keeps_terra_ocr_admission_available(tmp_path, cloc
     assert store.status(identity)["pages"][task["page"] - 1]["state"] == "awaiting_ocr"
 
 
+@pytest.mark.parametrize("scope", ["model", "account"])
+def test_recovery_reclaims_frozen_ready_reviewers_before_reusing_one(tmp_path, clock, scope):
+    store, identity = document(tmp_path, 12)
+    configure_execution(store.root, capacity=14, overlap_reading=True)
+    assignments = store.dispatch.reserve(identity)["assignments"]
+    reviewers = []
+    for assignment in assignments:
+        token = assignment["session_token"]
+        if assignment["stage"] != "review":
+            store.dispatch.close(token, "unstarted")
+            continue
+        worker = "source-reader-" + token
+        packet, metadata, _ = store.dispatch.open(token, worker)
+        assert packet["state"] == "preflight"
+        store.dispatch.freeze(
+            token,
+            worker,
+            {
+                "image_receipt": metadata["image_receipt"],
+                "image_sha256": metadata["image_sha256"],
+                "observations": ["Synthetic independent original reading"],
+                "unresolved": [],
+            },
+        )
+        reviewers.append((token, worker))
+    assert len(reviewers) > 1
+    for page in range(12):
+        complete(store, identity, "ocr", f"transcriber-{page}", {"markdown": "Retained text"})
+    failure = store.runtime_control.failure("tool_error", "warm-outage", model=SOL, scope=scope)
+    clock[0] = failure["retry_at"] + 1
+    token, worker = reviewers[0]
+    probe, _, _ = store.dispatch.open(token, worker)
+    store.dispatch.submit(
+        token, worker, {"input_sha256": probe["input_sha256"], "verdict": "approved", "issues": []}
+    )
+    assert store.runtime_control.gate(SOL)["limit"] == 1
+    before = deepcopy(store.status(identity)["pages"])
+    store.dispatch.reserve(identity)
+    live = [
+        session
+        for session in store.dispatch.sessions()
+        if session["state"] != "exited" and session["stage"] == "review"
+    ]
+    assert len(live) == 1, "Frozen ready reviewers must not occupy every recovery slot"
+    session = live[0]
+    task, _, _ = store.dispatch.open(session["session_token"], session["worker_id"])
+    assert task["stage"] == "review"
+    assert task["source_reading"]["reading"]["observations"] == [
+        "Synthetic independent original reading"
+    ]
+    assert store.status(identity)["pages"] == before
+
+
 @pytest.mark.parametrize("first", ["mcp", "observer"])
 def test_mcp_and_observer_failure_replays_share_one_lease_failure(tmp_path, clock, first):
     store, identity = document(tmp_path, 4)

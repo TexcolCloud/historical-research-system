@@ -103,6 +103,26 @@ def test_closing_a_worker_which_never_started_requeues_its_reserved_task(tmp_pat
     assert store.dispatch.close(assignment["session_token"], "never-started")["state"] == "exited"
 
 
+def test_dispatch_identifies_retired_native_threads_before_replacement_spawn(tmp_path):
+    from hrs_codex.execution_policy import configure_execution
+
+    store, identity = document(tmp_path, count=10)
+    configure_execution(store.root, capacity=2, overlap_reading=False)
+    assignments = store.dispatch.reserve(identity)["assignments"]
+    native_threads = {a["session_token"] for a in assignments}
+    assert len(native_threads) == 2
+    first, second = sorted(native_threads)
+    # MCP sessions can end before the coordinator receives both native completions.
+    for token in (first, second):
+        store.dispatch.close(token, "finished-before-parent-wait")
+    native_threads.remove(first)
+    result = store.dispatch.reserve(identity, active_session_tokens=list(native_threads))
+    assert result["retired_sessions"] == [second]
+    native_threads.difference_update(result["retired_sessions"])
+    native_threads.update(a["session_token"] for a in result["assignments"])
+    assert len(native_threads) <= 2
+
+
 def test_submission_timing_is_reported_without_rewriting_the_machine_receipt(tmp_path):
     store, identity = document(tmp_path)
     token = store.dispatch.reserve(identity)["assignments"][0]["session_token"]
@@ -186,3 +206,42 @@ def test_reclaim_does_not_interrupt_an_unfrozen_original_read_or_reserved_task(t
     assert not store.dispatch.reserve(second)["assignments"]
     assert store.dispatch.open(reviewer, "reading-original")[0]["state"] == "wait"
     assert store.checkpoints.ledger.capacity_used() == 2
+
+
+def test_waiting_organizer_exits_when_human_review_blocks_its_future_work(tmp_path):
+    from test_store import complete
+
+    from hrs_codex.execution_policy import configure_execution
+
+    store, identity = document(tmp_path, count=2)
+    configure_execution(store.root, capacity=14, overlap_reading=True)
+    assignments = store.dispatch.reserve(identity)["assignments"]
+    organizer = next(a["session_token"] for a in assignments if a["stage"] == "organization")
+    assert store.dispatch.open(organizer, "waiting-organizer")[0]["state"] == "wait"
+    for assignment in assignments:
+        if assignment["stage"] != "organization":
+            store.dispatch.close(assignment["session_token"], "unstarted")
+    complete(store, identity, "ocr", "ocr", {"markdown": "Synthetic unreadable content"})
+    complete(
+        store,
+        identity,
+        "review",
+        "review",
+        {
+            "verdict": "pending",
+            "issues": [{"location": "body", "issue": "Synthetic human handoff"}],
+        },
+    )
+    before = store.checkpoints.revision(identity)
+    packet, _, _ = store.dispatch.open(organizer, "waiting-organizer")
+    assert packet["state"] == "exited"
+    assert store.checkpoints.ledger.capacity_used() == 0
+    assert store.checkpoints.revision(identity) == before
+    doc = store.status(identity)
+    assert doc["pages"][0]["state"] == "pending"
+    assert any(
+        t["stage"] == "ocr" and t["page"] == 2 and t["state"] == "ready" for t in doc["tasks"]
+    )
+    assert store.dispatch.reserve(identity, active_session_tokens=[organizer])[
+        "retired_sessions"
+    ] == [organizer]

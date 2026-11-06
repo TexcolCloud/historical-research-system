@@ -115,7 +115,7 @@ class TaskInspection:
                 raise ValueError("Original page image hash mismatch")
             pixels["data"] = data
 
-        with self.context.verified(document_id, validate) as doc:
+        with self.context.verified_page(document_id, page, validate) as doc:
             row, data = doc["pages"][page - 1], pixels["data"]
             metadata = {
                 "document_id": document_id,
