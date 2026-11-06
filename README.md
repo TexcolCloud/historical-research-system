@@ -75,7 +75,7 @@ uv run --no-sync --locked python -m hrs workbench --port 0
 
 正常情况下 MCP 由 Codex 启动，无需另开一份。将示例文件替换为真实路径。`start` 返回文档 ID、工作区 ID 与本机网址；独立界面网址可能含访问令牌，不要公开。同一工作区的平台在线时直接打开 React 工作台；已有 MCP 文档通过幂等附接进入同一书籍队列，不重复识别。平台离线时使用不依赖 SQL 的独立核对界面，也支持疑点定位和目录终审。
 
-全平台使用 `PLATFORM_CODEX_ROOT`，CLI 使用前置 `--root`，二者未设置时均遵循共享工作区配置及 `HRS_CODEX_ROOT`。操作前核对 `workspace_id`，不要因连接到了另一个工作区而重复导入。已有工作区与证据路径在代码重构时保持原位。
+API 与独立 MCP 共用工作区选择：显式 `--root`（或直接提供的 API 设置）> 进程 `PLATFORM_CODEX_ROOT` > 进程 `HRS_CODEX_ROOT` > 根 `.env` 的 `PLATFORM_CODEX_ROOT` > 根 `.env` 的 `HRS_CODEX_ROOT` > 共享 JSON 配置。需要本机自定义目录时，可在被忽略的根 `.env` 中可选设置 `HRS_CODEX_ROOT`；dotenv 相对路径以项目根为准，CLI `--root` 和进程 `HRS_CODEX_ROOT` 的相对路径保持以当前目录为准。操作前核对 `workspace_id`，不要因连接到了另一个工作区而重复导入。已有工作区与证据路径在代码重构时保持原位。
 
 ```powershell
 uv run --no-sync --locked python -m hrs --root state/codex document-status 'DOCUMENT_ID'

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 from uuid import uuid4
 
-from hrs.config import project_root
+from hrs.config import project_root, read_environment, resolve_path
 from hrs.processing.snapshots import atomic_json, read_snapshot
 from hrs.processing.store import Store
 
@@ -17,9 +17,17 @@ CONFIG = PROJECT / ".codex/historical-workspace.json"
 
 
 def resolve_workspace(explicit: Path | str | None = None) -> Path:
-    selected = explicit or os.environ.get("HRS_CODEX_ROOT")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    if selected := os.environ.get("PLATFORM_CODEX_ROOT"):
+        return resolve_path(PROJECT, selected)
+    selected = os.environ.get("HRS_CODEX_ROOT")
     if selected:
         return Path(selected).expanduser().resolve()
+    env = read_environment(PROJECT)
+    selected = env.get("PLATFORM_CODEX_ROOT") or env.get("HRS_CODEX_ROOT")
+    if selected:
+        return resolve_path(PROJECT, selected)
     config = (
         json.loads(CONFIG.read_text(encoding="utf-8"))
         if CONFIG.exists()

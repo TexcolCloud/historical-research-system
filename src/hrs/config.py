@@ -50,13 +50,18 @@ def resolve_path(root: Path, value: str | Path) -> Path:
     return path.resolve() if path.is_absolute() else (root / path).resolve()
 
 
-def load_environment(root: Path) -> dict[str, str]:
-    """Resolve local defaults and derived URLs without changing files or process state."""
-    env = {
+def read_environment(root: Path) -> dict[str, str]:
+    """Read local overrides without deriving or validating unrelated service settings."""
+    return {
         key: value
         for key, value in {**dotenv_values(Path(root) / ".env"), **os.environ}.items()
         if value is not None
     }
+
+
+def load_environment(root: Path) -> dict[str, str]:
+    """Resolve local defaults and derived URLs without changing files or process state."""
+    env = read_environment(root)
     for key, value in {
         "INGEST_S3_ENDPOINT_URL": "http://127.0.0.1:58333",
         "INGEST_S3_BUCKET": "ingestion-acceptance",
@@ -180,6 +185,10 @@ class Settings(BaseModel):
             for name in cls.model_fields
             if "PLATFORM_" + name.upper() in env
         }
+        if not values.get("codex_root"):
+            values.pop("codex_root", None)
+        if not os.environ.get("PLATFORM_CODEX_ROOT") and (native := os.environ.get("HRS_CODEX_ROOT")):
+            values["codex_root"] = Path(native).expanduser().resolve()
         for name, source in {
             "s3_endpoint": "INGEST_S3_ENDPOINT_URL",
             "s3_bucket": "INGEST_S3_BUCKET",
