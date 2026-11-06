@@ -30,6 +30,10 @@ COMPOSE = [
 
 
 def compose(*args, **kwargs):
+    from hrs_platform.core.config import load_environment
+
+    if "env" not in kwargs:
+        kwargs["env"] = load_environment(ROOT)
     return subprocess.run([*COMPOSE, *args], cwd=ROOT, check=True, **kwargs)
 
 
@@ -82,11 +86,10 @@ def start(build=False):
         raise RuntimeError("This delivery profile requires the validated Windows GPU host.")
     available(18160)
     available(18161)
-    from dotenv import dotenv_values
+    from hrs_platform.core.config import load_environment
 
     env = {
-        **dotenv_values(ROOT / ".env"),
-        **os.environ,
+        **load_environment(ROOT),
         "PLATFORM_TUS_HOOK_URL": "http://api:18170/internal/tus",
     }
     # Validate ports before changing the running application profile.

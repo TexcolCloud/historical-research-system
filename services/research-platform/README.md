@@ -15,18 +15,21 @@ uv run --no-sync --project services/research-platform --locked python -m hrs_pla
 
 启动器的 `status` 与 `doctor` 都只输出工作区、端口和 Codex 命令存在情况。上面的平台 CLI `doctor` 才会检查 SQL 迁移、S3 bucket、OpenSearch 和 Codex 登录；这些检查不执行模型推理，也不批准内容。
 
-[配置加载器](src/hrs_platform/core/config.py) 先读根 `.env`，再由同名进程环境变量覆盖。字段优先使用 `PLATFORM_*`，部分字段兼容 [模板](../../.env.platform.example) 的 `INGEST_*` 等名称。模板顶部的 legacy 提示不适用于完整 React 平台：独立 MCP 可以不使用 `.env`，本模块仍需要 SQL/S3 配置。
+[配置加载器](src/hrs_platform/core/config.py) 先读根 `.env`，再由同名进程环境变量覆盖，并在内存中派生管理、业务、测试和容器数据库连接。`init` 创建缺失数据库并应用迁移，不回写 `.env`。[模板](../../.env.platform.example) 只保留三项必填凭据和部署身份；新安装的 `COMPOSE_PROJECT_NAME` 留空，已有部署保留原名。独立 MCP 不依赖这些 SQL/S3 配置。
 
-| 配置 | 用途与默认行为 |
+| 配置项 | 默认值与行为 |
 | --- | --- |
-| `INGEST_DATABASE_URL` | `init` 用于建库的 PostgreSQL 连接；账号需有建库权限 |
-| `PLATFORM_DATABASE_URL` | 业务库连接；`init` 在缺失时写入专用库连接并应用迁移 |
-| `INGEST_S3_ENDPOINT_URL`、`INGEST_S3_BUCKET`、`INGEST_S3_ACCESS_KEY`、`INGEST_S3_SECRET_KEY` | S3 原件和业务对象；可分别由 `PLATFORM_S3_ENDPOINT`、`PLATFORM_S3_BUCKET`、`PLATFORM_S3_ACCESS_KEY`、`PLATFORM_S3_SECRET_KEY` 覆盖 |
+| PostgreSQL | 主机 `127.0.0.1:55436`；账号 `ingestion_owner`；管理库 `postgres` |
+| 业务／测试库 | `historical_research_v2`／`historical_research_v2_test` |
+| 容器数据库连接 | 使用 `host.docker.internal:55436` 访问同一业务库 |
+| S3 | `http://127.0.0.1:58333`；bucket 为 `ingestion-acceptance`，region 为 `us-east-1` |
 | `PLATFORM_OPENSEARCH_URL` | 默认 `http://127.0.0.1:19260` |
 | `PLATFORM_PROCESSING_BACKEND` | 默认 `codex`；旧路径须显式使用 `--legacy` |
 | `PLATFORM_CODEX_ROOT` | 平台显式工作区；未设置时使用 `HRS_CODEX_ROOT`，再使用项目工作区配置或 `state/codex`。MCP、平台与独立工作台应指向同一根目录 |
 | `PLATFORM_RETRIEVAL_DEVICE` | 默认 `cuda`；GPU 检索通过主机 broker，不静默回退 CPU |
 | `PLATFORM_RETRIEVAL_ENDPOINT` | 默认 `http://127.0.0.1:18160/retrieval` |
+
+已有显式数据库连接、S3 地址／桶及其他覆盖变量仍兼容：`PLATFORM_*` 字段优先于对应 `INGEST_*` 别名。默认部署无需将这些派生值或固定值加入 `.env`；自定义数据库账号需具备建库和迁移权限，显式 URL 中的特殊字符需按 URL 规则编码。隔离测试继续使用 [CI 配置](../../.github/workflows/engineering.yml) 的显式连接与存储参数。
 
 GPU 检索需要根 README 指定的 `.cache/engineering-envs/research-platform` 环境和本地 BGE 权重，见 [模型说明](../../models/README.md)。CPU 检索须显式设置 `PLATFORM_RETRIEVAL_DEVICE=cpu`，并在运行 API 的 Python 环境安装 `retrieval` extra；BGE 权重和 OpenSearch 仍然需要。更改配置后重新启动相应进程。
 

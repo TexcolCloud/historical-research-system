@@ -21,6 +21,9 @@ def listening(port):
 
 
 def infrastructure():
+    from hrs_platform.core.config import load_environment
+
+    env = load_environment(ROOT)
     for compose in (
         "deploy/infrastructure/compose.storage.yml",
         "deploy/infrastructure/compose.search.yml",
@@ -29,6 +32,7 @@ def infrastructure():
             ["docker", "compose", "--env-file", ".env", "-f", compose, "up", "-d", "--wait"],
             cwd=ROOT,
             check=True,
+            env=env,
         )
 
 
