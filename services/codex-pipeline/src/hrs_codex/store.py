@@ -147,6 +147,9 @@ class Store:
     def scheduling_plan(self, document_id: str):
         return self.tasks.scheduling_plan(document_id)
 
+    def scheduling_snapshot(self, document_id: str):
+        return self.tasks.scheduling_snapshot(document_id)
+
     def upgrade_review_policy(self, document_id: str, protected_pages=()):
         return self.tasks.upgrade_review_policy(document_id, protected_pages)
 

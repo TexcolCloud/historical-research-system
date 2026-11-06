@@ -22,52 +22,10 @@ class TaskWorkflow:
         self.navigation = navigation
 
     def scheduling_plan(self, document_id: str) -> dict:
-        from hrs_codex.scheduling import scheduling_plan
-
+        """Commit the allocation used by dispatch; queries use scheduling_snapshot."""
         with self.context.repository.lock:
             doc = self.context.repository.read(document_id)
-            from hrs_codex.execution_policy import execution_policy
-
-            plan = scheduling_plan(doc, **execution_policy(self.context.repository.root))
-            from hrs_codex.runtime_control import RuntimeControl
-
-            control = RuntimeControl(self.context.repository.root, self.context.repository.ledger)
-            plan["runtime_control"] = control.snapshot()
-            from hrs_codex.runtime_control import model_for_stage
-
-            remaining = {}
-            for stage in ("verify", "review", "ocr", "navigation", "organization"):
-                model = model_for_stage(stage)
-                gate = control.gate(model)
-                allowance = remaining.setdefault(model, gate["limit"] if gate["allowed"] else 0)
-                plan["workers"][stage] = min(plan["workers"][stage], allowance)
-                remaining[model] -= plan["workers"][stage]
-            plan["technical_blocked"] = sum(
-                bool(task.get("technical_blocked")) for task in doc["tasks"]
-            )
-            if self.context.repository.ledger:
-                from collections import Counter
-                from statistics import median
-
-                ledger = self.context.repository.ledger
-                sessions = [
-                    session
-                    for session in ledger.sessions()
-                    if session["document_id"] == document_id
-                ]
-                plan["runtime_counts"] = dict(Counter(session["state"] for session in sessions))
-                plan["workspace_occupied"] = ledger.capacity_used()
-                for stage, metric in plan["metrics"].items():
-                    timings = [
-                        seconds
-                        for session in sessions
-                        if session["stage"] == stage
-                        for seconds in session.get("submission_timings", [])
-                    ]
-                    if timings:
-                        metric["phase_medians"]["submission_seconds"] = round(
-                            median(timings[-20:]), 3
-                        )
+            plan = self._scheduling_plan(doc)
             scheduler = doc.setdefault("scheduler", {})
             if (
                 scheduler.get("allocation") != plan["workers"]
@@ -76,6 +34,47 @@ class TaskWorkflow:
                 scheduler.update(allocation=plan["workers"], rebalanced_at=time.time())
                 self.context.repository.write(doc)
             return plan
+
+    def scheduling_snapshot(self, document_id: str) -> dict:
+        """Observe capacity without waiting for commands or writing allocation history."""
+        return self._scheduling_plan(self.context.repository.read(document_id))
+
+    def _scheduling_plan(self, doc: dict) -> dict:
+        from collections import Counter
+        from statistics import median
+
+        from hrs_codex.execution_policy import execution_policy
+        from hrs_codex.runtime_control import RuntimeControl, model_for_stage
+        from hrs_codex.scheduling import scheduling_plan
+
+        repository = self.context.repository
+        plan = scheduling_plan(doc, **execution_policy(repository.root))
+        control = RuntimeControl(repository.root, repository.ledger)
+        plan["runtime_control"] = control.snapshot()
+        remaining = {}
+        for stage in ("verify", "review", "ocr", "navigation", "organization"):
+            model = model_for_stage(stage)
+            gate = control.gate(model)
+            allowance = remaining.setdefault(model, gate["limit"] if gate["allowed"] else 0)
+            plan["workers"][stage] = min(plan["workers"][stage], allowance)
+            remaining[model] -= plan["workers"][stage]
+        plan["technical_blocked"] = sum(
+            bool(task.get("technical_blocked")) for task in doc["tasks"]
+        )
+        if repository.ledger:
+            sessions = [s for s in repository.ledger.sessions() if s["document_id"] == doc["id"]]
+            plan["runtime_counts"] = dict(Counter(session["state"] for session in sessions))
+            plan["workspace_occupied"] = repository.ledger.capacity_used()
+            for stage, metric in plan["metrics"].items():
+                timings = [
+                    seconds
+                    for session in sessions
+                    if session["stage"] == stage
+                    for seconds in session.get("submission_timings", [])
+                ]
+                if timings:
+                    metric["phase_medians"]["submission_seconds"] = round(median(timings[-20:]), 3)
+        return plan
 
     def upgrade_review_policy(self, document_id: str, protected_pages=()) -> dict:
         """Explicit resume migration; retain earlier decisions and all human-owned work."""

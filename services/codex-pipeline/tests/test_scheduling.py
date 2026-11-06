@@ -1,7 +1,24 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from test_store import document
 
 from hrs_codex.scheduling import scheduling_plan
+from hrs_codex.store import Store
+
+
+def test_scheduling_snapshot_neither_waits_for_processing_nor_writes_allocation(tmp_path):
+    store, doc_id = document(tmp_path, 3)
+    reader = Store(store.root)
+    reader.lock.timeout = 0.1
+    revision = store.checkpoints.revision(doc_id)
+    with ThreadPoolExecutor(max_workers=1) as pool, store.lock:
+        plan = pool.submit(reader.scheduling_snapshot, doc_id).result(timeout=2)
+    assert plan["workers"]["ocr"] > 0
+    assert store.checkpoints.revision(doc_id) == revision
+    assert "allocation" not in store.status(doc_id).get("scheduler", {})
+    assert store.scheduling_plan(doc_id)["workers"] == plan["workers"]
+    assert store.status(doc_id)["scheduler"]["allocation"] == plan["workers"]
 
 
 def test_review_backlog_receives_capacity_without_stopping_for_human_pages():

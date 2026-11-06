@@ -143,7 +143,7 @@ def create_server(root: Path) -> MCPServer:
     @contract_errors
     def scheduling_plan(document_id: str) -> dict:
         """Measured stage capacity and bounded batches; pending human pages never stop other pages."""
-        return store.scheduling_plan(document_id)
+        return store.scheduling_snapshot(document_id)
 
     @server.tool()
     @contract_errors
@@ -152,7 +152,7 @@ def create_server(root: Path) -> MCPServer:
         import time
 
         time.sleep(max(0, min(seconds, 30)))
-        return store.scheduling_plan(document_id)
+        return store.scheduling_snapshot(document_id)
 
     @server.tool()
     @contract_errors

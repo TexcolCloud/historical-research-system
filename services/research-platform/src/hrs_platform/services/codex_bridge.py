@@ -137,6 +137,12 @@ class CodexBridge:
                 continue
             try:
                 self.sync(run)
+            except Timeout:
+                # A contended projection is not a failed native run. Retain the
+                # last projection and pending changes; do not consume its retry budget.
+                failed.add(identity)
+                self.changes.retry_at[identity] = time.time() + 30
+                logger.warning("Codex projection deferred for busy workspace: %s", identity)
             except Exception as error:  # noqa: BLE001 - a failed projection must not stop other books
                 failed.add(identity)
                 self.changes.retry_at[identity] = time.time() + 30
@@ -386,7 +392,7 @@ class CodexBridge:
             doc = self.store.status(doc_id)
         input_sha = projection_input(doc, self.store.runtime_control.snapshot())
         navigation_sha = doc.get("navigation", {}).get("sha256")
-        scheduling = self.store.scheduling_plan(doc_id)
+        scheduling = self.store.scheduling_snapshot(doc_id)
         page_progress = document_progress(doc)
         key = fingerprint(
             {
