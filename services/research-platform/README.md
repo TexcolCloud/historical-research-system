@@ -15,12 +15,13 @@ uv run --no-sync --project services/research-platform --locked python -m hrs_pla
 
 启动器的 `status` 与 `doctor` 都只输出工作区、端口和 Codex 命令存在情况。上面的平台 CLI `doctor` 才会检查 SQL 迁移、S3 bucket、OpenSearch 和 Codex 登录；这些检查不执行模型推理，也不批准内容。
 
-[配置加载器](src/hrs_platform/core/config.py) 先读根 `.env`，再由同名进程环境变量覆盖。字段优先使用 `PLATFORM_*`，部分字段兼容 [模板](../../.env.platform.example) 的 `INGEST_*` 等名称。模板顶部的 legacy 提示不适用于完整 React 平台：独立 MCP 可以不使用 `.env`，本模块仍需要 SQL/S3 配置。
+[配置加载器](src/hrs_platform/core/config.py) 先读根 `.env`，再由同名进程环境变量覆盖。字段优先使用 `PLATFORM_*`，部分字段兼容 [模板](../../.env.platform.example) 的 `INGEST_*` 等名称。模板面向默认 Codex 完整平台，包含 SQL/S3 配置与原生工作区、检索可选项；独立 MCP 不依赖这些 SQL/S3 配置。
 
 | 配置 | 用途与默认行为 |
 | --- | --- |
 | `INGEST_DATABASE_URL` | `init` 用于建库的 PostgreSQL 连接；账号需有建库权限 |
 | `PLATFORM_DATABASE_URL` | 业务库连接；`init` 在缺失时写入专用库连接并应用迁移 |
+| `PLATFORM_TEST_DATABASE_URL`、`PLATFORM_DOCKER_DATABASE_URL` | `init` 在缺失时分别写入专用测试库和容器连接；保留已有值，不在模板重复填写凭据 |
 | `INGEST_S3_ENDPOINT_URL`、`INGEST_S3_BUCKET`、`INGEST_S3_ACCESS_KEY`、`INGEST_S3_SECRET_KEY` | S3 原件和业务对象；可分别由 `PLATFORM_S3_ENDPOINT`、`PLATFORM_S3_BUCKET`、`PLATFORM_S3_ACCESS_KEY`、`PLATFORM_S3_SECRET_KEY` 覆盖 |
 | `PLATFORM_OPENSEARCH_URL` | 默认 `http://127.0.0.1:19260` |
 | `PLATFORM_PROCESSING_BACKEND` | 默认 `codex`；旧路径须显式使用 `--legacy` |

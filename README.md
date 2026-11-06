@@ -45,7 +45,7 @@ if (-not (Test-Path -LiteralPath '.env')) {
 | `PLATFORM_PROCESSING_BACKEND=codex` | 默认原生处理路径；省略时也为 `codex` |
 | `PLATFORM_RETRIEVAL_DEVICE` | 默认 `cuda`；需要 CPU 时显式设为 `cpu` |
 
-模板保留了旧链路字段，**完整网页平台仍需要 `.env`**；原生识别与审核不依赖其中的 DeepSeek 配置。数据库 URL 中的特殊字符需要按 URL 规则编码。端口、数据库、模型及备份配置详见[平台 README](services/research-platform/README.md)。
+模板包含完整网页平台的 SQL/S3 配置，以及原生工作区和检索可选项；独立 MCP 不需要这份 `.env`。首次 `init` 会补写缺失的业务、测试及容器数据库 URL，后续保留生成值。原生识别与审核不依赖本地 OCR／视觉权重或 DeepSeek 密钥。数据库 URL 中的特殊字符需要按 URL 规则编码。端口、数据库、模型及备份配置详见[平台 README](services/research-platform/README.md)。
 
 已有环境应保留 Compose 项目名和凭据，它们关系到现有容器与卷的归属。
 
