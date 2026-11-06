@@ -15,7 +15,9 @@ export default function SourceFocus({
   onSelect?: (id: string) => void;
 }) {
   const [ratio, setRatio] = useState(1),
-    [zoom, setZoom] = useState(100);
+    [zoom, setZoom] = useState(() =>
+      issue.boxes.length && issue.image_precision !== "line" ? 175 : 100,
+    );
   const [begin, setBegin] = useState<number[] | null>(null);
   const [selected, setSelected] = useState({ id: issue.id, index: 0 });
   const index =

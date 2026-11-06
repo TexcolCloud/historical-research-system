@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import IssueEditor from "./IssueEditor.tsx";
@@ -149,4 +149,61 @@ test("one doubt can navigate every source box and a full-page box selects its cr
       .querySelector("rect")
       ?.getAttribute("x"),
   ).toBe("0.7");
+});
+
+test("choosing a doubt locates its text without scrolling again on a background revision", async () => {
+  const scroll = vi.fn();
+  const previous = HTMLElement.prototype.scrollTo;
+  HTMLElement.prototype.scrollTo = scroll;
+  const query = new QueryClient();
+  const issue: components["schemas"]["ReviewIssue"] = {
+    id: "selection",
+    run_id: "run",
+    page: 1,
+    revision: 1,
+    draft_conflict: false,
+    state: "pending",
+    text_sha256: "a".repeat(64),
+    text: "甲错乙。丙误丁。",
+    reasons: [],
+    kind: "page",
+    pages: [1],
+    images: [],
+    footnotes: [],
+    resolutions: [],
+    locations: [
+      location(),
+      {
+        ...location(),
+        id: "second",
+        anchor: { exact: "丙误丁", prefix: "甲错乙。", suffix: "。" },
+        focus: "误",
+        candidate: "丙误丁",
+      },
+    ],
+  };
+  const editor = (revision: number) => (
+    <QueryClientProvider client={query}>
+      <IssueEditor
+        issue={{ ...issue, revision }}
+        workflowTest={false}
+        onSaved={vi.fn()}
+      />
+    </QueryClientProvider>
+  );
+  try {
+    const view = render(editor(1));
+    expect(scroll).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "2 · 待核" }));
+    await waitFor(() => expect(scroll).toHaveBeenCalledOnce());
+    expect(scroll.mock.contexts[0]).toBe(
+      document.querySelector(".review-page-preview"),
+    );
+    scroll.mockClear();
+    view.rerender(editor(2));
+    expect(scroll).not.toHaveBeenCalled();
+  } finally {
+    HTMLElement.prototype.scrollTo = previous;
+    query.clear();
+  }
 });

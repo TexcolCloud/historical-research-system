@@ -216,7 +216,7 @@ test("a changed evidence version reports beside the action and reloads before re
   );
   await screen.findByText("正文。");
   await userEvent.click(
-    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+    screen.getByRole("button", { name: /确认跳转到 PDF 第 \d+ 页/ }),
   );
   const alert = await screen.findByRole("alert");
   expect(
@@ -230,7 +230,7 @@ test("a changed evidence version reports beside the action and reloads before re
   );
   await screen.findByText("正文。");
   await userEvent.click(
-    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+    screen.getByRole("button", { name: /确认跳转到 PDF 第 \d+ 页/ }),
   );
   expect(post).toHaveBeenLastCalledWith(
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
@@ -309,14 +309,14 @@ test("human task opens the candidate evidence and confirms it without a separate
     </QueryClientProvider>,
   );
   await screen.findByRole("heading", {
-    name: "这条目录是否对应右侧这篇正文？",
+    name: "确认这条目录跳到哪里",
   });
   await screen.findByText(/这是正文开头/);
   expect(screen.getByText(/目录记载.*3.*系统识别.*4/)).toBeDefined();
   expect(screen.queryByRole("combobox")).toBeNull();
   expect(post).not.toHaveBeenCalled();
   await userEvent.click(
-    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+    screen.getByRole("button", { name: /确认跳转到 PDF 第 \d+ 页/ }),
   );
   expect(post).toHaveBeenCalledWith(
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
@@ -408,7 +408,7 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
   await userEvent.click(screen.getByRole("button", { name: "确认目录跳转" }));
   await screen.findByText("正文开头。");
   await userEvent.click(
-    screen.getByRole("button", { name: "就是这篇，确认跳转" }),
+    screen.getByRole("button", { name: /确认跳转到 PDF 第 \d+ 页/ }),
   );
   expect(post).toHaveBeenCalledWith(
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",

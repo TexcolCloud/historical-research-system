@@ -1,11 +1,20 @@
 import { lazy, Suspense, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { BookOpen, LibraryBig, ClipboardCheck, CloudCheck } from "lucide-react";
+import {
+  BookOpen,
+  LibraryBig,
+  ClipboardCheck,
+  CloudCheck,
+  Compass,
+  Upload,
+} from "lucide-react";
 import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents.ts";
 import { useQuery } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
 import { RuntimeScopeContext, type RuntimeScope } from "./runtime-scope.ts";
 const UploadPanel = lazy(() => import("@/features/uploads/UploadPanel.tsx"));
+import type { UploadActivity } from "@/features/uploads/UploadPanel.tsx";
+import { Button } from "@/components/ui/button.tsx";
 
 export type WorkspaceContext = {
   upload: () => void;
@@ -17,6 +26,14 @@ export type WorkspaceContext = {
 
 export default function AppShell() {
   const location = useLocation();
+  const welcome = location.pathname === "/welcome";
+  const section = new URLSearchParams(location.search).get("tab");
+  const context =
+    location.pathname === "/reviews"
+      ? "待办"
+      : location.pathname.startsWith("/books/")
+        ? `书籍 / ${section === "review" ? "人工核对" : ["reader", "search", "navigation"].includes(section ?? "") ? "阅读资料" : "处理进展"}`
+        : "书籍";
   const connected = useWorkspaceEvents();
   const runtime = useQuery({
     queryKey: ["platform", "runtime"],
@@ -39,6 +56,10 @@ export default function AppShell() {
         : "content";
   const [open, setOpen] = useState(false);
   const [started, setStarted] = useState(false);
+  const [activity, setActivity] = useState<UploadActivity>({
+    total: 0,
+    pending: 0,
+  });
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   function upload() {
@@ -46,14 +67,18 @@ export default function AppShell() {
     setOpen(true);
   }
   return (
-    <div className="platform-workspace">
+    <div className={`platform-workspace${welcome ? " is-welcome" : ""}`}>
       <aside className="platform-sidebar">
-        <a href="/platform.html" className="platform-brand">
+        <Link
+          to="/welcome"
+          className="platform-brand"
+          aria-label="史料研究 · 产品介绍"
+        >
           <LibraryBig />
           <span>
-            史料研究<small>阅读 · 核对 · 研究</small>
+            史料研究<small>原件与出处</small>
           </span>
-        </a>
+        </Link>
         <nav aria-label="主要导航">
           <Link
             to="/"
@@ -71,30 +96,50 @@ export default function AppShell() {
             <ClipboardCheck size={19} />
             待办
           </NavLink>
+          <NavLink to="/welcome">
+            <Compass size={19} />
+            产品介绍
+          </NavLink>
         </nav>
         <p className="platform-sidebar-note">
-          从原始材料出发
+          本机工作空间
           <br />
-          让每一条认识都有出处
+          原件与处理记录始终保留
         </p>
       </aside>
       <div className="platform-body">
-        <header className="platform-topbar">
-          <span>
-            研究工作台 / {location.pathname === "/reviews" ? "待办" : "书籍"}
-          </span>
-          <span className="platform-sync">
-            <CloudCheck size={16} />
-            {connected ? "状态实时同步" : "正在重新连接"}
-          </span>
-        </header>
-        <main>
-          {scope === "workflow_only" && (
+        {!welcome && (
+          <header className="platform-topbar">
+            <span>
+              工作台 <span aria-hidden="true">/</span> {context}
+            </span>
+            <div className="platform-topbar-actions">
+              {started && (
+                <Button
+                  variant="outline"
+                  onClick={upload}
+                  aria-label="查看导入进展"
+                >
+                  <Upload size={16} />
+                  {activity.pending
+                    ? `导入进展 · ${activity.pending}`
+                    : "导入记录"}
+                </Button>
+              )}
+              <span className="platform-sync" data-connected={connected}>
+                <CloudCheck size={16} />
+                {connected ? "状态实时同步" : "正在重新连接"}
+              </span>
+            </div>
+          </header>
+        )}
+        <main className={welcome ? "platform-welcome-outlet" : undefined}>
+          {!welcome && scope === "workflow_only" && (
             <p role="note" className="platform-inline-status">
               流程验收工作区：本轮授权放行仅验证顺序和格式，不代表内容准确率通过。
             </p>
           )}
-          {scope === "unknown" && (
+          {!welcome && scope === "unknown" && (
             <p
               role={runtime.isError ? "alert" : "status"}
               className="platform-inline-status"
@@ -128,11 +173,25 @@ export default function AppShell() {
           </RuntimeScopeContext.Provider>
         </main>
       </div>
+      {welcome && started && !open && (
+        <Button
+          className="platform-upload-return"
+          variant="outline"
+          onClick={upload}
+        >
+          <Upload size={16} />
+          查看导入进展{activity.pending ? ` · ${activity.pending}` : ""}
+        </Button>
+      )}
       {started && (
         <Suspense
           fallback={open ? <p role="status">正在打开上传工具…</p> : null}
         >
-          <UploadPanel open={open} onOpenChange={setOpen} />
+          <UploadPanel
+            open={open}
+            onOpenChange={setOpen}
+            onActivityChange={setActivity}
+          />
         </Suspense>
       )}
     </div>

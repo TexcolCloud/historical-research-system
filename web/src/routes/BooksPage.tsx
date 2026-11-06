@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { BookOpen, Upload, Search, ArrowUpRight } from "lucide-react";
+import { BookOpen, Upload, Search, ArrowRight, Ellipsis } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
@@ -56,7 +56,7 @@ export default function BooksPage() {
     <>
       <div className="platform-heading">
         <div>
-          <p className="platform-eyebrow">你的研究，从这里开始</p>
+          <p className="platform-eyebrow">本机资料库</p>
           <h1>书籍</h1>
           <p>导入原件，核对内容，整理成可以阅读与研究的材料。</p>
         </div>
@@ -126,15 +126,13 @@ export default function BooksPage() {
                 className="platform-book"
                 onClick={() => navigate(bookWorkspaceHref(book))}
               >
-                <div className="platform-book-cover" aria-hidden="true">
-                  <BookOpen size={27} />
-                  <span>史料</span>
-                </div>
                 <div className="platform-book-copy">
                   <h2>{book.title}</h2>
                   <p>
                     {new Date(book.created_at).toLocaleDateString("zh-CN")} 导入
                   </p>
+                </div>
+                <div className="platform-book-state">
                   <span className="platform-status" data-state={book.state}>
                     {states[book.state] ?? book.state}
                   </span>
@@ -145,11 +143,26 @@ export default function BooksPage() {
                     <p>{book.navigation_pending_count} 项目录位置待确认</p>
                   )}
                 </div>
-                <ArrowUpRight size={18} />
+                <span className="platform-book-next">
+                  {(book.pending_count ?? 0) > 0 ||
+                  (book.navigation_pending_count ?? 0) > 0 ||
+                  book.state === "awaiting_review"
+                    ? "继续核对"
+                    : book.state === "ready"
+                      ? "阅读资料"
+                      : "查看进展"}
+                  <ArrowRight size={17} />
+                </span>
               </button>
-              <div className="platform-book-actions">
-                <DeleteBookButton book={book} />
-              </div>
+              <details className="platform-book-actions">
+                <summary aria-label={`更多操作：${book.title}`}>
+                  <Ellipsis size={20} />
+                  <span className="sr-only">更多操作</span>
+                </summary>
+                <div className="platform-book-menu">
+                  <DeleteBookButton book={book} />
+                </div>
+              </details>
             </article>
           ))}
         </section>

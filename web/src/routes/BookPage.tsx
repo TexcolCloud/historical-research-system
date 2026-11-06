@@ -85,13 +85,21 @@ export default function BookPage() {
       </section>
     );
   return (
-    <>
-      <Link to="/" className="platform-back">
-        ← 全部书籍
-      </Link>
+    <div
+      className={`book-workspace book-workspace-${tab}`}
+      data-state={book.state}
+      data-published={
+        book.state === "ready" || book.revision_pending ? "true" : "false"
+      }
+    >
       <div className="platform-heading book-heading">
         <div>
-          <h1 title={book.title}>{book.title}</h1>
+          <div className="book-heading-title">
+            <Link to="/" className="platform-back">
+              ← 全部书籍
+            </Link>
+            <h1 title={book.title}>{book.title}</h1>
+          </div>
           <p>
             {book.state === "failed"
               ? "自动处理已停止，请在处理进展中从断点恢复。"
@@ -110,7 +118,10 @@ export default function BookPage() {
             </p>
           )}
         </div>
-        <DeleteBookButton book={book} />
+        <details className="book-more-actions">
+          <summary>更多操作</summary>
+          <DeleteBookButton book={book} />
+        </details>
       </div>
       <Tabs value={tab} onValueChange={chooseTab}>
         <TabsList aria-label="书籍工作区" className="workspace-main-tabs">
@@ -184,6 +195,6 @@ export default function BookPage() {
           </>
         )}
       </Suspense>
-    </>
+    </div>
   );
 }

@@ -115,25 +115,47 @@ export default function RunDetails({ book }: { book: Book }) {
   return (
     <section className="platform-process">
       <div className="platform-process-heading">
-        <h2>
-          {paused
-            ? "自动处理已暂停"
-            : runtimeTitle
-              ? runtimeTitle
-              : run?.state === "queued"
-                ? "已排队，等待处理"
-                : done
-                  ? "本书处理完成"
-                  : failed
-                    ? "处理需要恢复"
-                    : book.state === "awaiting_review"
-                      ? "有内容需要你核对"
-                      : (book.pending_count ?? 0) > 0 ||
-                          (book.navigation_pending_count ?? 0) > 0
-                        ? "有内容需要你确认"
-                        : "书籍正在处理中"}
-        </h2>
-        <p>已完成结果会保留，关闭页面不影响后台处理。</p>
+        <div className="platform-process-summary">
+          <div>
+            <h2>
+              {paused
+                ? "自动处理已暂停"
+                : runtimeTitle
+                  ? runtimeTitle
+                  : run?.state === "queued"
+                    ? "已排队，等待处理"
+                    : done
+                      ? "本书处理完成"
+                      : failed
+                        ? "处理需要恢复"
+                        : book.state === "awaiting_review"
+                          ? "有内容需要你核对"
+                          : (book.pending_count ?? 0) > 0 ||
+                              (book.navigation_pending_count ?? 0) > 0
+                            ? "有内容需要你确认"
+                            : "书籍正在处理中"}
+            </h2>
+            <p>已完成结果会保留，关闭页面不影响后台处理。</p>
+          </div>
+          {run &&
+            !done &&
+            !(failed && run.codex_document_id) &&
+            !recoveryBusy &&
+            (run.codex_document_id || paused) && (
+              <Button
+                variant="outline"
+                disabled={control.isPending}
+                onClick={() => control.mutate(paused ? "resume" : "pause")}
+              >
+                {control.isPending
+                  ? "正在保存…"
+                  : paused
+                    ? "继续处理"
+                    : "暂停自动处理"}
+              </Button>
+            )}
+        </div>
+        {control.isError && <p role="alert">{control.error.message}</p>}
         {showRecovery && run && <RecoveryPanel run={run} />}
         {!showRecovery && <RuntimeControlNotice control={runtimeControl} />}
         {run?.codex_document_id && (
@@ -153,149 +175,149 @@ export default function RunDetails({ book }: { book: Book }) {
           <p role="note">本材料用于流程测试；授权放行不代表内容准确率验收。</p>
         )}
       </div>
-      <ol className="platform-process-steps">
-        {phases.map((phase, index) => {
-          const status = done
-            ? "done"
-            : (pageStatuses?.[index] ??
-              (run?.codex_document_id && index === 1 && active < 4
-                ? "current"
-                : index < active
-                  ? "done"
-                  : index === active
-                    ? "current"
-                    : "waiting"));
-          const needsHuman =
-            status === "current" &&
-            index === 3 &&
-            (book.state === "awaiting_review" ||
-              Boolean(pageProgress?.pending));
-          return (
-            <li key={phase.title} data-status={status}>
-              <span className="platform-process-icon">
-                {status === "done" ? (
-                  <Check size={20} />
-                ) : status === "current" &&
-                  !failed &&
-                  !paused &&
-                  !queued &&
-                  !runtimeWaiting &&
-                  book.state !== "awaiting_review" &&
-                  !needsHuman ? (
-                  <LoaderCircle size={20} className="platform-spin" />
+      {pageProgress && (
+        <ol className="platform-page-progress" aria-label="并行页面进度">
+          {[1, 2].map((index) => (
+            <li key={index} data-status={done ? "done" : pageStatuses?.[index]}>
+              <h3>{index === 1 ? "文字提取" : "原图核对"}</h3>
+              <div aria-label={index === 1 ? "逐页识别进度" : "逐页核验进度"}>
+                <p className="platform-progress-count" aria-hidden="true">
+                  <strong>
+                    {index === 1
+                      ? pageProgress.extracted
+                      : pageProgress.reviewed}
+                  </strong>
+                  <span>/ {pageProgress.total} 页</span>
+                </p>
+                <progress
+                  value={
+                    index === 1 ? pageProgress.extracted : pageProgress.reviewed
+                  }
+                  max={pageProgress.total || 1}
+                />
+                <p className="sr-only">
+                  {index === 1
+                    ? `已识别 ${pageProgress.extracted} / ${pageProgress.total} 页`
+                    : `已核验 ${pageProgress.reviewed} / ${pageProgress.total} 页`}
+                </p>
+                {index === 1 ? (
+                  <p>文字候选已保存，仍需对照原图核对。</p>
                 ) : (
-                  <Circle size={16} />
-                )}
-              </span>
-              <div>
-                <h3>
-                  {phase.title}
-                  <small>
-                    {status === "done"
-                      ? "已完成"
-                      : status === "waiting"
-                        ? "等待前序完成"
-                        : failed
-                          ? "需要恢复"
-                          : queued
-                            ? "排队中"
-                            : paused
-                              ? "已暂停"
-                              : needsHuman
-                                ? "等待核对"
-                                : "正在处理"}
-                  </small>
-                </h3>
-                <p>{phase.description}</p>
-                {pageProgress && (index === 1 || index === 2) && (
-                  <div
-                    aria-label={index === 1 ? "逐页识别进度" : "逐页核验进度"}
-                  >
-                    <progress
-                      value={
-                        index === 1
-                          ? pageProgress.extracted
-                          : pageProgress.reviewed
-                      }
-                      max={pageProgress.total}
-                    />
-                    <p>
-                      {index === 1 ? "已识别" : "已核验"}{" "}
-                      {index === 1
-                        ? pageProgress.extracted
-                        : pageProgress.reviewed}{" "}
-                      / {pageProgress.total} 页
-                    </p>
-                    {index === 2 && (
-                      <p>
-                        {pageProgress.machine_reviewed != null && (
-                          <>其中机器核验 {pageProgress.machine_reviewed} 页；</>
-                        )}
-                        机器或人工最终通过 {pageProgress.approved}{" "}
-                        页，待人工处理 {pageProgress.pending} 页。
-                      </p>
+                  <p>
+                    {pageProgress.machine_reviewed != null && (
+                      <>其中机器核验 {pageProgress.machine_reviewed} 页；</>
                     )}
-                  </div>
+                    机器或人工最终通过 {pageProgress.approved} 页，待人工处理{" "}
+                    {pageProgress.pending} 页。
+                  </p>
                 )}
-                {!pageProgress &&
-                  status === "current" &&
-                  index === 2 &&
-                  run?.progress && (
-                    <div aria-label="逐页核验进度">
-                      <progress
-                        value={run.progress.completed}
-                        max={run.progress.total}
-                      />
-                      <p>
-                        初轮已核验 {run.progress.completed} /{" "}
-                        {run.progress.total} 页
-                      </p>
-                      <p>初轮结束后继续汇总与复核；已处理不代表内容已通过。</p>
-                    </div>
-                  )}
               </div>
             </li>
-          );
-        })}
-      </ol>
-      {book.run_id && (
-        <StructurePanel runId={book.run_id} revision={book.revision} />
+          ))}
+        </ol>
       )}
-      {runs.isError && <p role="alert">{runs.error.message}</p>}
       {((book.pending_count ?? 0) > 0 ||
         (book.navigation_pending_count ?? 0) > 0) && (
         <div className="workspace-next-action">
-          <strong>
-            {book.pending_count ?? 0} 页正文待核对 ·{" "}
-            {book.navigation_pending_count ?? 0} 项目录待确认
-          </strong>
+          <div>
+            <strong>
+              {book.pending_count ?? 0} 页正文待核对 ·{" "}
+              {book.navigation_pending_count ?? 0} 项目录待确认
+            </strong>
+            <p>你可以先完成待办，其他页面按当前运行状态继续处理。</p>
+          </div>
           <a
             className="workspace-primary-link"
             href={`#${bookWorkspaceHref(book)}`}
           >
             开始人工核对 →
           </a>
-          <p>你可以先完成待办，其他页面按当前运行状态继续处理。</p>
         </div>
       )}
-      {run &&
-        !done &&
-        !(failed && run.codex_document_id) &&
-        !recoveryBusy &&
-        (run.codex_document_id || paused) && (
-          <Button
-            variant="outline"
-            disabled={control.isPending}
-            onClick={() => control.mutate(paused ? "resume" : "pause")}
-          >
-            {control.isPending
-              ? "正在保存…"
-              : paused
-                ? "继续处理"
-                : "暂停自动处理"}
-          </Button>
-        )}
-      {control.isError && <p role="alert">{control.error.message}</p>}
+      <details className="platform-stage-details">
+        <summary>查看完整处理阶段</summary>
+        <ol className="platform-process-steps">
+          {phases.map((phase, index) => {
+            const status = done
+              ? "done"
+              : (pageStatuses?.[index] ??
+                (run?.codex_document_id && index === 1 && active < 4
+                  ? "current"
+                  : index < active
+                    ? "done"
+                    : index === active
+                      ? "current"
+                      : "waiting"));
+            const needsHuman =
+              status === "current" &&
+              index === 3 &&
+              (book.state === "awaiting_review" ||
+                Boolean(pageProgress?.pending));
+            return (
+              <li key={phase.title} data-status={status}>
+                <span className="platform-process-icon">
+                  {status === "done" ? (
+                    <Check size={20} />
+                  ) : status === "current" &&
+                    !failed &&
+                    !paused &&
+                    !queued &&
+                    !runtimeWaiting &&
+                    book.state !== "awaiting_review" &&
+                    !needsHuman ? (
+                    <LoaderCircle size={20} className="platform-spin" />
+                  ) : (
+                    <Circle size={16} />
+                  )}
+                </span>
+                <div>
+                  <strong className="platform-stage-title">
+                    {phase.title}
+                    <small>
+                      {status === "done"
+                        ? "已完成"
+                        : status === "waiting"
+                          ? "等待前序完成"
+                          : failed
+                            ? "需要恢复"
+                            : queued
+                              ? "排队中"
+                              : paused
+                                ? "已暂停"
+                                : needsHuman
+                                  ? "等待核对"
+                                  : "正在处理"}
+                    </small>
+                  </strong>
+                  <p>{phase.description}</p>
+                  {!pageProgress &&
+                    status === "current" &&
+                    index === 2 &&
+                    run?.progress && (
+                      <div aria-label="逐页核验进度">
+                        <progress
+                          value={run.progress.completed}
+                          max={run.progress.total}
+                        />
+                        <p>
+                          初轮已核验 {run.progress.completed} /{" "}
+                          {run.progress.total} 页
+                        </p>
+                        <p>
+                          初轮结束后继续汇总与复核；已处理不代表内容已通过。
+                        </p>
+                      </div>
+                    )}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </details>
+      {book.run_id && (
+        <StructurePanel runId={book.run_id} revision={book.revision} />
+      )}
+      {runs.isError && <p role="alert">{runs.error.message}</p>}
       {pageProgress && pageProgress.pending > 0 && (
         <p>
           {pageProgress.pending} 页待你核对。

@@ -59,8 +59,7 @@ export default function NavigationPanel({
   );
   const activeId = readingOnly
     ? null
-    : (selectedEntry?.id ??
-      (reviewOnly ? attention[0]?.id : null));
+    : (selectedEntry?.id ?? (reviewOnly ? attention[0]?.id : null));
   const editor = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
   useEffect(() => {
@@ -166,8 +165,8 @@ export default function NavigationPanel({
     setRestart((v) => v + 1);
   }
   return (
-    <section className="platform-navigation">
-      <h2>{reviewOnly ? "核对目录跳转" : "原书目录"}</h2>
+    <section className="platform-navigation" data-review-only={reviewOnly}>
+      {!reviewOnly && <h2>原书目录</h2>}
       {!reviewOnly && (
         <p>
           {readingOnly ? (

@@ -92,7 +92,7 @@ test("directory editing stays inside the chosen entry and waiting evidence is no
   ).toBe("/toc.png");
   await screen.findByText("本页正文。");
   const confirm = within(editor).getByRole("button", {
-    name: "就是这篇，确认跳转",
+    name: /确认跳转到 PDF 第 \d+ 页/,
   });
   expect(confirm.hasAttribute("disabled")).toBe(false);
   expect(

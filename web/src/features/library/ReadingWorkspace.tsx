@@ -31,18 +31,21 @@ export default function ReadingWorkspace({ book }: { book: Book }) {
       >
         <Button
           variant={section === "text" ? "default" : "outline"}
+          aria-pressed={section === "text"}
           onClick={() => choose("text")}
         >
           {published ? "正式阅读" : "阅读底稿"}
         </Button>
         <Button
           variant={section === "directory" ? "default" : "outline"}
+          aria-pressed={section === "directory"}
           onClick={() => choose("directory")}
         >
           原书目录
         </Button>
         <Button
           variant={section === "search" ? "default" : "outline"}
+          aria-pressed={section === "search"}
           onClick={() => choose("search")}
         >
           检索本书

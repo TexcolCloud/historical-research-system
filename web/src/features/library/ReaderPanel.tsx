@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   useLocation,
@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 import { useQuery, useQueryClient, queryOptions } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button.tsx";
+import { PanelLeftClose, PanelLeftOpen, BookOpen } from "lucide-react";
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import { client } from "@/client/api.ts";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
@@ -81,7 +82,23 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
   const [original, setOriginal] = useState(false),
     [page, setPage] = useState<number | null>(null);
   const [mappingFailures, setMappingFailures] = useState<string[]>([]);
+  const [navigationOpen, setNavigationOpen] = useState(
+    () => !window.matchMedia("(max-width: 760px)").matches,
+  );
+  const [navigationView, setNavigationView] = useState<
+    "original" | "chapters" | null
+  >(null);
+  const navigationToggle = useRef<HTMLButtonElement>(null);
+  const article = useRef<HTMLElement>(null);
+  const [bodyHasTitle, setBodyHasTitle] = useState(false);
   const navigation = useQuery(readingNavigationOptions(bookId));
+  const visibleNavigation =
+    navigationView ??
+    (navigation.isPending ||
+    navigation.isError ||
+    navigation.data?.entries.length
+      ? "original"
+      : "chapters");
   const chapters = useQuery({
     queryKey: ["platform", "chapters", bookId],
     queryFn: async ({ signal }) => {
@@ -103,6 +120,39 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
     chapters.data?.[0]?.id ||
     "";
   const chapter = useQuery({ ...chapterOptions(id), enabled: Boolean(id) });
+  const sourcePages = useMemo(
+    () => [...new Set(chapter.data?.pages ?? [])].sort((a, b) => a - b),
+    [chapter.data?.pages],
+  );
+  const continuousPages = sourcePages.every(
+    (value, at) => at === 0 || value === sourcePages[at - 1] + 1,
+  );
+  const pageSummary =
+    sourcePages.length > 1 && continuousPages
+      ? `PDF 第 ${sourcePages[0]}–${sourcePages.at(-1)} 页`
+      : sourcePages.length > 3
+        ? `PDF 第 ${sourcePages.slice(0, 3).join("、")} 等 ${sourcePages.length} 页`
+        : `PDF 第 ${sourcePages.join("、")} 页`;
+  useLayoutEffect(() => {
+    // Compare the rendered heading, including inline Markdown and escaped entities.
+    // Only suppress our metadata heading; the source DOM and offsets stay untouched.
+    const heading = article.current
+      ?.querySelector(".prose h1")
+      ?.cloneNode(true);
+    if (heading instanceof Element)
+      for (const reference of heading.querySelectorAll(
+        "a.footnote-reference[data-note-jump]",
+      ))
+        reference.remove();
+    const plain = (value: string) => value.replace(/\s+/gu, " ").trim();
+    setBodyHasTitle(
+      Boolean(
+        heading &&
+        chapter.data &&
+        plain(heading.textContent ?? "") === plain(chapter.data.title),
+      ),
+    );
+  }, [chapter.data]);
   const target = useMemo(() => requestedReadingTarget(params), [params]);
   const invalidTarget =
     !target &&
@@ -186,8 +236,13 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       section: "text",
       chapter: id,
     });
+    if (params.has("returnTo")) next.set("returnTo", returnTo);
     setParams(next);
     setPage(null);
+    if (window.matchMedia("(max-width: 760px)").matches) {
+      setNavigationOpen(false);
+      navigationToggle.current?.focus();
+    }
   }
   if (chapters.isError || chapter.isError)
     return (
@@ -211,94 +266,156 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       </section>
     );
   return (
-    <div className="platform-reader-grid">
-      <nav aria-label="章节目录">
-        <h2>原书目录</h2>
-        {navigation.isPending && <p role="status">正在读取原书目录…</p>}
-        {navigation.isError && (
-          <p role="alert">
-            {navigation.error.message}
-            <Button variant="outline" onClick={() => void navigation.refetch()}>
-              重新读取目录
-            </Button>
-          </p>
-        )}
-        <ol className="reader-source-toc">
-          {(navigation.data?.entries ?? []).map((entry) => (
-            <li
-              key={entry.id}
-              style={{
-                paddingInlineStart: `${Math.max(0, entry.level - 1) * 0.75}rem`,
-              }}
-            >
-              {entry.reading_target && !entry.needs_confirmation ? (
-                <Link
-                  to={readingHref(bookId, entry.reading_target, {
-                    returnTo: `/books/${bookId}?tab=reader&section=directory&tocEntry=${encodeURIComponent(entry.id)}`,
-                  })}
-                  aria-current={
-                    target?.chapter_id === entry.reading_target.chapter_id &&
-                    target.start === entry.reading_target.start
-                      ? "location"
-                      : undefined
-                  }
-                >
-                  {entry.title}
-                  <small>书内页 {entry.target_label}</small>
-                </Link>
-              ) : (
-                <>
-                  <span>
-                    {entry.title}
-                    <small>
-                      {entry.target_label} · {navigationStatusLabel(entry)}
-                    </small>
-                  </span>
-                  {entry.needs_confirmation && (
-                    <Link
-                      className="reader-toc-management"
-                      to={`/books/${bookId}?tab=review&task=navigation&entry=${encodeURIComponent(entry.id)}`}
-                    >
-                      核对位置
-                    </Link>
-                  )}
-                  {!entry.needs_confirmation &&
-                    (entry.target_image || entry.target_url) && (
-                      <a
-                        className="reader-toc-management"
-                        href={
-                          entry.target_image ?? entry.target_url ?? undefined
-                        }
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        查看对应原图
-                      </a>
-                    )}
-                </>
-              )}
-            </li>
-          ))}
-        </ol>
-        <h2>章节</h2>
-        {chapters.data?.map((item) => (
-          <button
-            key={item.id}
-            aria-current={item.id === id ? "true" : undefined}
-            onPointerEnter={() =>
-              void query.prefetchQuery(chapterOptions(item.id))
-            }
-            onClick={() => go(item.id)}
+    <div className="platform-reader-grid" data-navigation-open={navigationOpen}>
+      <nav aria-label="章节目录" hidden={!navigationOpen}>
+        <div className="reader-navigation-heading">
+          <h2>本书导航</h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="关闭导航"
+            onClick={() => {
+              setNavigationOpen(false);
+              navigationToggle.current?.focus();
+            }}
           >
-            {item.title}
-            <small>
-              原件 {item.pages[0]}–{item.pages.at(-1)} 页
-            </small>
-          </button>
-        ))}
+            <PanelLeftClose size={18} />
+          </Button>
+        </div>
+        <div
+          className="reader-navigation-tabs"
+          role="group"
+          aria-label="导航方式"
+        >
+          <Button
+            variant={visibleNavigation === "original" ? "default" : "ghost"}
+            aria-pressed={visibleNavigation === "original"}
+            onClick={() => setNavigationView("original")}
+          >
+            原书目录
+          </Button>
+          <Button
+            variant={visibleNavigation === "chapters" ? "default" : "ghost"}
+            aria-pressed={visibleNavigation === "chapters"}
+            onClick={() => setNavigationView("chapters")}
+          >
+            章节
+          </Button>
+        </div>
+        <div hidden={visibleNavigation !== "original"}>
+          {navigation.isPending && <p role="status">正在读取原书目录…</p>}
+          {navigation.isError && (
+            <p role="alert">
+              {navigation.error.message}
+              <Button
+                variant="outline"
+                onClick={() => void navigation.refetch()}
+              >
+                重新读取目录
+              </Button>
+            </p>
+          )}
+          <ol className="reader-source-toc">
+            {(navigation.data?.entries ?? []).map((entry) => (
+              <li
+                key={entry.id}
+                style={{
+                  paddingInlineStart: `${Math.max(0, entry.level - 1) * 0.75}rem`,
+                }}
+              >
+                {entry.reading_target && !entry.needs_confirmation ? (
+                  <Link
+                    to={readingHref(bookId, entry.reading_target, {
+                      returnTo: `/books/${bookId}?tab=reader&section=directory&tocEntry=${encodeURIComponent(entry.id)}`,
+                    })}
+                    aria-current={
+                      target?.chapter_id === entry.reading_target.chapter_id &&
+                      target.start === entry.reading_target.start
+                        ? "location"
+                        : undefined
+                    }
+                  >
+                    {entry.title}
+                    <small>书内页 {entry.target_label}</small>
+                  </Link>
+                ) : (
+                  <>
+                    <span>
+                      {entry.title}
+                      <small>
+                        {entry.target_label} · {navigationStatusLabel(entry)}
+                      </small>
+                    </span>
+                    {entry.needs_confirmation && (
+                      <Link
+                        className="reader-toc-management"
+                        to={`/books/${bookId}?tab=review&task=navigation&entry=${encodeURIComponent(entry.id)}`}
+                      >
+                        核对位置
+                      </Link>
+                    )}
+                    {!entry.needs_confirmation &&
+                      (entry.target_image || entry.target_url) && (
+                        <a
+                          className="reader-toc-management"
+                          href={
+                            entry.target_image ?? entry.target_url ?? undefined
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          查看对应原图
+                        </a>
+                      )}
+                  </>
+                )}
+              </li>
+            ))}
+          </ol>
+          {!navigation.isPending &&
+            !navigation.isError &&
+            !navigation.data?.entries.length && (
+              <p className="reader-navigation-empty">
+                本书没有可用的原书目录。可切换到章节阅读。
+              </p>
+            )}
+        </div>
+        <div
+          className="reader-chapter-list"
+          hidden={visibleNavigation !== "chapters"}
+        >
+          {chapters.data?.map((item) => (
+            <button
+              key={item.id}
+              aria-current={item.id === id ? "true" : undefined}
+              onPointerEnter={() =>
+                void query.prefetchQuery(chapterOptions(item.id))
+              }
+              onClick={() => go(item.id)}
+            >
+              {item.title}
+              <small>
+                原件 {item.pages[0]}–{item.pages.at(-1)} 页
+              </small>
+            </button>
+          ))}
+        </div>
       </nav>
       <div className="platform-reading">
-        <div className="platform-review-actions">
+        <div className="reader-toolbar">
+          <Button
+            ref={navigationToggle}
+            variant="ghost"
+            onClick={() => setNavigationOpen(!navigationOpen)}
+            aria-expanded={navigationOpen}
+          >
+            {navigationOpen ? (
+              <PanelLeftClose size={18} />
+            ) : (
+              <PanelLeftOpen size={18} />
+            )}
+            目录
+          </Button>
           {params.has("returnTo") && (
             <Link to={returnTo} className="reading-return-link">
               {returnLabel}
@@ -356,10 +473,17 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
               : "platform-reading-columns single"
           }
         >
-          <article>
+          <article ref={article}>
             {chapter.data ? (
               <>
-                <h1>{chapter.data.title}</h1>
+                <div className="reading-provenance">
+                  <BookOpen size={16} aria-hidden="true" />
+                  <details className="reading-page-details">
+                    <summary>{pageSummary}</summary>
+                    <p>完整 PDF 页码：{sourcePages.join("、")}</p>
+                  </details>
+                </div>
+                {!bodyHasTitle && <h1>{chapter.data.title}</h1>}
                 <RenderedMarkdown
                   markdown={chapter.data.reading_text ?? chapter.data.text}
                   footnotes={

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, ClipboardCheck } from "lucide-react";
+import { ArrowUpRight, ClipboardCheck, CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { readBooks } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
@@ -22,12 +22,17 @@ export default function ReviewsPage() {
     <>
       <div className="platform-heading">
         <div>
-          <p className="platform-eyebrow">需要你关注的内容</p>
+          <p className="platform-eyebrow">待你处理</p>
           <h1>待办</h1>
           <p>
             内容核对和处理异常按书籍集中显示，已通过的部分不会重复要求确认。
           </p>
         </div>
+        {books.data && (
+          <span className="platform-list-count">
+            {pending.length} 本资料需要处理
+          </span>
+        )}
       </div>
       {books.isError ? (
         <div role="alert">
@@ -46,8 +51,16 @@ export default function ReviewsPage() {
       ) : (
         <section className="platform-collection" aria-label="按书籍整理的待办">
           {pending.map((book) => (
-            <article className="platform-collection-row" key={book.id}>
-              <ClipboardCheck size={24} />
+            <article
+              className="platform-collection-row"
+              key={book.id}
+              data-state={book.state}
+            >
+              {book.state === "failed" ? (
+                <CircleAlert size={24} />
+              ) : (
+                <ClipboardCheck size={24} />
+              )}
               <div>
                 <h2>
                   <Link to={bookWorkspaceHref(book)}>{book.title}</Link>
