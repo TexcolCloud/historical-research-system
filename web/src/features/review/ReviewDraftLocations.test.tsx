@@ -29,6 +29,7 @@ function issueFixture(): components["schemas"]["ReviewIssue"] {
     images: [],
     state: "pending",
     revision: 1,
+    draft_conflict: false,
     text_sha256: "a".repeat(64),
     kind: "page",
     text: "😀甲错乙，丙错丁。",

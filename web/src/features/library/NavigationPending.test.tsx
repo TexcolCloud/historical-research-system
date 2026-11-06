@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import NavigationPanel from "./NavigationPanel";
 import { client } from "@/client/api";
+import { RuntimeScopeContext } from "@/app/runtime-scope.ts";
 import { respondWith } from "@/test/responses";
 import { queryKeys } from "@/client/query-keys";
 
@@ -49,11 +50,30 @@ function mount(value: ReturnType<typeof report>, reviewOnly = false) {
   const query = new QueryClient();
   render(
     <QueryClientProvider client={query}>
-      <NavigationPanel runId="run" bookId="book" reviewOnly={reviewOnly} />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel runId="run" bookId="book" reviewOnly={reviewOnly} />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   return query;
 }
+
+test("unknown workspace scope keeps directory evidence readable and blocks a final no-link decision", async () => {
+  respondWith(() => report([entry("待确认目录", "not_found", true)]));
+  const post = vi.spyOn(client, "POST");
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <NavigationPanel runId="run" bookId="book" reviewOnly />
+    </QueryClientProvider>,
+  );
+  const button = await screen.findByRole("button", {
+    name: "保留目录文字，不设置跳转",
+  });
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(screen.getByText("待确认目录 9")).toBeDefined();
+  await userEvent.click(button);
+  expect(post).not.toHaveBeenCalled();
+});
 
 test("a complete not-found mapping opens the human task without an explicit entry URL", async () => {
   mount(
@@ -121,7 +141,9 @@ test("an explicit final no-link decision updates the book count and advances to 
   query.setQueryData(queryKeys.readingNavigation("book"), published);
   render(
     <QueryClientProvider client={query}>
-      <NavigationPanel runId="run" bookId="book" reviewOnly />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel runId="run" bookId="book" reviewOnly />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await userEvent.click(
@@ -162,15 +184,61 @@ test("a missing explicit entry falls back to the real remaining human task inste
   respondWith(() => report([entry("实际待核对", "not_found", true)]));
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NavigationPanel
-        runId="run"
-        bookId="book"
-        reviewOnly
-        entryId="old-entry"
-      />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel
+          runId="run"
+          bookId="book"
+          reviewOnly
+          entryId="old-entry"
+        />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   const editor = await screen.findByRole("region", { name: "目录跳转核对" });
   expect(within(editor).getByText("实际待核对 9")).toBeDefined();
   expect(screen.queryByText("当前没有需要核对的目录")).toBeNull();
+});
+
+test("an external final decision closes an automatically selected task when the queue becomes empty", async () => {
+  const initial = report([
+    entry("第一条", "not_found", true),
+    entry("下一条", "not_found", true),
+  ]);
+  const afterFirst = report([
+    entry("第一条", "unlinked_manual", false),
+    entry("下一条", "not_found", true),
+  ]);
+  vi.spyOn(client, "POST").mockResolvedValue({
+    data: afterFirst,
+    response: new Response(),
+  });
+  const query = mount(initial, true);
+  await userEvent.click(
+    await screen.findByRole("button", { name: "保留目录文字，不设置跳转" }),
+  );
+  await screen.findByText("下一条 9");
+  await act(async () => {
+    query.setQueryData(
+      queryKeys.navigation("run"),
+      report([
+        entry("第一条", "unlinked_manual", false),
+        entry("下一条", "unlinked_manual", false),
+      ]),
+    );
+  });
+  await screen.findByRole("heading", { name: "当前目录核对完成" });
+  expect(screen.queryByRole("region", { name: "目录跳转核对" })).toBeNull();
+});
+
+test("an explicit reader entry can still reopen a completed directory mapping", async () => {
+  respondWith(() => report([entry("重新核对的条目", "unlinked_manual", false)]));
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel runId="run" bookId="book" reviewOnly entryId="重新核对的条目" />
+      </RuntimeScopeContext.Provider>
+    </QueryClientProvider>,
+  );
+  const editor = await screen.findByRole("region", { name: "目录跳转核对" });
+  expect(within(editor).getByText("重新核对的条目 9")).toBeDefined();
 });

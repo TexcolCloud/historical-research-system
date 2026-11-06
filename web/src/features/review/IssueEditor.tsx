@@ -6,15 +6,18 @@ import { useReviewSession } from "./useReviewSession.ts";
 import ReviewFocus from "./ReviewFocus.tsx";
 import SourceFocus from "./SourceFocus.tsx";
 import { useState } from "react";
+import type { RuntimeScope } from "@/app/runtime-scope.ts";
 
 type Issue = components["schemas"]["ReviewIssue"];
 export default function IssueEditor({
   issue,
   onSaved,
   workflowTest,
+  runtimeScope = workflowTest ? "workflow_only" : "content",
 }: {
   issue: Issue;
   workflowTest: boolean;
+  runtimeScope?: RuntimeScope;
   onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void;
 }) {
   const [unmapped, setUnmapped] = useState<string[]>([]);
@@ -35,6 +38,7 @@ export default function IssueEditor({
     submission,
     busy,
     completed,
+    draftConflict,
     recheckPage,
     setActive,
     finish,
@@ -46,7 +50,7 @@ export default function IssueEditor({
     cancelEdit,
     saveDraft,
     setBoxes,
-  } = useReviewSession(issue, onSaved);
+  } = useReviewSession(issue, onSaved, runtimeScope);
   return (
     <div className="platform-review-content guided-review">
       <article>
@@ -61,6 +65,17 @@ export default function IssueEditor({
               : "整页核对"}
           </span>
         </header>
+        {draftConflict && (
+          <section className="review-draft-conflict" role="note">
+            <p>
+              机器重新核对后，底稿或疑点已更新，原草稿已保留。请结合当前原件和新底稿重新核对，再提交本页。
+            </p>
+            <details>
+              <summary>查看机器重试后的新底稿</summary>
+              <pre>{issue.text}</pre>
+            </details>
+          </section>
+        )}
         {issue.draft_text && !draft.isSuccess && (
           <p className="review-save-status">
             已恢复草稿，尚未提交本页审核结果。
@@ -79,15 +94,18 @@ export default function IssueEditor({
                 busy ||
                 draft.isPending ||
                 draft.isError ||
+                runtimeScope === "unknown" ||
                 issue.state !== "pending"
               }
               onClick={() => submission.mutate()}
             >
-              {submission.isPending
-                ? "正在提交…"
-                : workflowTest
-                  ? "按授权提交流程测试结果"
-                  : "提交本页并继续"}
+              {runtimeScope === "unknown"
+                ? "确认工作区范围后再提交"
+                : submission.isPending
+                  ? "正在提交…"
+                  : workflowTest
+                    ? "按授权提交流程测试结果"
+                    : "提交本页并继续"}
             </Button>
             <Button variant="outline" disabled={busy} onClick={recheckPage}>
               重新检查当前页

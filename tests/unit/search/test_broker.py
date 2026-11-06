@@ -97,14 +97,17 @@ def isolated(tmp_path, monkeypatch):
     return module.RetrievalBroker(tmp_path), context, modes
 
 
-@pytest.mark.parametrize("body", [
-    {"operation": "vision", "texts": ["source"]},
-    {"operation": "embed", "texts": []},
-    {"operation": "embed", "texts": ["source"] * 65},
-    {"operation": "embed", "texts": [object()]},
-    {"operation": "embed", "texts": ["x" * 40001]},
-    {"operation": "rerank", "texts": ["source"], "query": ""},
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"operation": "vision", "texts": ["source"]},
+        {"operation": "embed", "texts": []},
+        {"operation": "embed", "texts": ["source"] * 65},
+        {"operation": "embed", "texts": [object()]},
+        {"operation": "embed", "texts": ["x" * 40001]},
+        {"operation": "rerank", "texts": ["source"], "query": ""},
+    ],
+)
 def test_invalid_batches_never_start_a_worker(isolated, body):
     broker, context, modes = isolated
     with pytest.raises(ValueError):
@@ -132,7 +135,9 @@ def test_embed_and_rerank_reuse_one_owned_spawned_bge_worker(isolated):
     assert context.child.closed
     assert [item["operation"] for item in context.parent.sent] == ["embed", "rerank"]
     assert broker.active is None
-    events = [json.loads(line) for line in (broker.folder / "events.jsonl").read_text().splitlines()]
+    events = [
+        json.loads(line) for line in (broker.folder / "events.jsonl").read_text().splitlines()
+    ]
     assert [event["operation"] for event in events] == ["embed", "rerank"]
     broker.unload()
 
@@ -163,7 +168,9 @@ def test_spawn_uses_an_explicit_existing_model_location(isolated, tmp_path, monk
     outside.mkdir()
     monkeypatch.chdir(outside)
     configured = str(selected.relative_to(tmp_path) if relative else selected)
-    monkeypatch.setattr(module, "load_environment", lambda root: {"PLATFORM_MODELS_ROOT": configured})
+    monkeypatch.setattr(
+        module, "load_environment", lambda root: {"PLATFORM_MODELS_ROOT": configured}
+    )
     broker = module.RetrievalBroker(tmp_path)
     broker.retrieve({"operation": "embed", "texts": ["source"]})
     assert context.processes[0].options["args"][1] == selected
@@ -184,8 +191,14 @@ def test_cancellation_and_shutdown_never_touch_an_unrelated_process(isolated):
 
     context.parent.before_poll = cancel_during_wait
     with pytest.raises(RuntimeError, match="cancelled"):
-        broker.retrieve({"operation": "embed", "texts": ["source"],
-                         "task_id": task_id, "request_id": request_id})
+        broker.retrieve(
+            {
+                "operation": "embed",
+                "texts": ["source"],
+                "task_id": task_id,
+                "request_id": request_id,
+            }
+        )
     owned = context.processes[0]
     assert owned.actions == ["start", "terminate", ("join", 20), "close"]
     assert context.parent.closed
@@ -206,7 +219,15 @@ def test_shutdown_escalates_only_its_owned_worker_and_is_idempotent(isolated):
     broker.closing.set()
     broker.unload()
     broker.unload()
-    assert owned.actions == ["start", "terminate", ("join", 20), "kill", ("join", 10), "close"]
+    assert owned.actions == [
+        "start",
+        ("join", 2),
+        "terminate",
+        ("join", 20),
+        "kill",
+        ("join", 10),
+        "close",
+    ]
     assert context.parent.closed
 
 
@@ -214,7 +235,9 @@ def test_http_exposes_only_bge_health_retrieval_and_cancellation(isolated, monke
     broker, context, _ = isolated
     monkeypatch.setattr(module, "RetrievalBroker", lambda: broker)
     handlers, replies, servers = {}, [], []
-    monkeypatch.setattr(module.signal, "signal", lambda number, callback: handlers.setdefault(number, callback))
+    monkeypatch.setattr(
+        module.signal, "signal", lambda number, callback: handlers.setdefault(number, callback)
+    )
 
     class Server:
         def __init__(self, address, handler):
@@ -251,8 +274,13 @@ def test_http_exposes_only_bge_health_retrieval_and_cancellation(isolated, monke
     monkeypatch.setattr(module, "ThreadingHTTPServer", Server)
     module.main()
     assert [(path, status) for path, status, _ in replies] == [
-        ("/health", 200), ("/retrieval", 200), ("/cancel-retrieval", 200),
-        ("/cancel-tasks", 200), ("/v1/chat/completions", 404), ("/ocr", 404), ("/models", 404),
+        ("/health", 200),
+        ("/retrieval", 200),
+        ("/cancel-retrieval", 200),
+        ("/cancel-tasks", 200),
+        ("/v1/chat/completions", 404),
+        ("/ocr", 404),
+        ("/models", 404),
     ]
     assert replies[0][2]["model"] == "BGE-M3"
     assert broker.closing.is_set() and servers[0].closed

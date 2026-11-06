@@ -115,3 +115,41 @@ test("restored upload credentials reuse the existing server session", async () =
   });
   uppy.destroy();
 });
+
+test("an expired permit renews its existing owner identity and keeps the tus object", async () => {
+  const session = "f617857e-221e-4679-a11c-c7b689f7f2d0";
+  const create = vi.fn().mockResolvedValue({
+    session_id: session,
+    book_id: "same-book",
+    token: "same-owner-token",
+    endpoint: "/uploads/",
+    expires_at: "2099-01-01T00:00:00Z",
+  });
+  const { uppy, prepare } = createBookUploader(create);
+  const id = uppy.addFile({ name: "恢复.pdf", data: new Blob(["%PDF-1.4"]) });
+  uppy.setFileState(id, { tus: { uploadUrl: "/uploads/retained-object" } });
+  uppy.emit("restored", {
+    hrsUpload: {
+      grants: {
+        [id]: {
+          session_id: session,
+          book_id: "same-book",
+          token: "same-owner-token",
+          endpoint: "/uploads/",
+          expires_at: "2000-01-01T00:00:00Z",
+        },
+      },
+      identities: {},
+    },
+  });
+  await prepare([id]);
+  expect(create).toHaveBeenCalledWith(
+    { filename: "恢复.pdf", byte_length: 8 },
+    { requestId: session, token: "same-owner-token" },
+  );
+  expect(uppy.getFile(id).meta.book_id).toBe("same-book");
+  expect(uppy.getFile(id).tus?.uploadUrl).toBe("/uploads/retained-object");
+  await prepare([id]);
+  expect(create).toHaveBeenCalledTimes(1);
+  uppy.destroy();
+});

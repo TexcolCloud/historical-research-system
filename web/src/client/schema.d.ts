@@ -583,6 +583,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/native-workbench": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Native Workbench */
+        post: operations["native_workbench_api_v2_native_workbench_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1094,8 +1111,17 @@ export interface components {
             /** Basis */
             basis?: string[];
         };
+        /** NativeWorkbenchRequest */
+        NativeWorkbenchRequest: {
+            /** Document Id */
+            document_id: string;
+            /** Workspace Id */
+            workspace_id: string;
+        };
         /** NavigationDecision */
         NavigationDecision: {
+            /** Decision Scope */
+            decision_scope?: ("content" | "workflow_test") | null;
             /** Decision Id */
             decision_id?: string | null;
             /** Expected Sha256 */
@@ -1368,6 +1394,8 @@ export interface components {
         };
         /** ReviewDecision */
         ReviewDecision: {
+            /** Decision Scope */
+            decision_scope?: ("content" | "workflow_test") | null;
             /**
              * Decision Id
              * Format: uuid
@@ -1420,10 +1448,19 @@ export interface components {
             text_sha256: string;
             /** Text */
             text: string;
+            /** Review Input Sha256 */
+            review_input_sha256?: string | null;
             /** Proposed Text */
             proposed_text?: string | null;
             /** Draft Text */
             draft_text?: string | null;
+            /**
+             * Draft Conflict
+             * @default false
+             */
+            draft_conflict: boolean;
+            /** Draft Base Text Sha256 */
+            draft_base_text_sha256?: string | null;
             /** Reasons */
             reasons: (string | {
                 [key: string]: unknown;
@@ -3119,6 +3156,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    native_workbench_api_v2_native_workbench_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NativeWorkbenchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -10,6 +10,7 @@ from hrs.library.catalog import Library
 from hrs.library.errors import ServiceError
 from hrs.library.footnotes import export_footnotes
 from hrs.library.runs.outputs import Outputs, fingerprint
+from hrs.processing.acceptance import publication_acceptance
 from hrs.storage import models as db
 
 
@@ -27,12 +28,42 @@ class Exports:
         dependencies = [chapter["content"]["sha256"] for chapter in chapters]
         run_id = chapters[0]["run_id"]
         with self.engine.connect() as connection:
-            result = (
-                connection.scalar(select(db.runs.c.result).where(db.runs.c.id == str(run_id))) or {}
+            run = (
+                connection.execute(
+                    select(db.runs.c.result, db.runs.c.conversion).where(
+                        db.runs.c.id == str(run_id)
+                    )
+                )
+                .mappings()
+                .one()
             )
-        workflow_test = result.get("content_acceptance") == "workflow_test"
+        groups = [json.loads(self.library.review.read_cached(row["content"])) for row in chapters]
+        workflow_test = (run["result"] or {}).get("content_acceptance") == "workflow_test" or any(
+            group.get("acceptance", {}).get("content_acceptance") == "workflow_test"
+            or publication_acceptance(
+                {"publication": group.get("acceptance", {}).get("publication")}
+            )
+            == "workflow_test"
+            or any(
+                part.get("source", {}).get("approval_type") == "workflow_test"
+                for part in group.get("parts", [])
+            )
+            for group in groups
+        )
+        if (
+            not workflow_test
+            and run["conversion"]
+            and any(not group.get("acceptance") for group in groups)
+        ):
+            bundle = json.loads(self.library.review.read_cached(run["conversion"]))
+            evidence = bundle.get("files", {}).get("codex-evidence.json")
+            if evidence:
+                workflow_test = (
+                    publication_acceptance(json.loads(self.library.review.read_cached(evidence)))
+                    == "workflow_test"
+                )
         dependencies = {"chapters": dependencies, "workflow_test": workflow_test}
-        key = "export:book-reading-v4-parenthesized-notes:" + fingerprint(dependencies)
+        key = "export:book-reading-v6-note-cross-references:" + fingerprint(dependencies)
         saved = self.outputs.get(run_id, key, dependencies)
         if saved is None:
             content = (
@@ -43,7 +74,10 @@ class Exports:
             for index, row in enumerate(chapters, 1):
                 chapter = self.library.chapter(row["id"])
                 content += export_footnotes(
-                    chapter["reading_text"], chapter["reading_footnotes"], f"c{index}"
+                    chapter["reading_text"],
+                    chapter["reading_footnotes"],
+                    f"c{index}",
+                    parts=chapter.get("reading_parts"),
                 )
             saved = self.outputs.objects.put_bytes(
                 content.encode("utf-8"), "text/markdown; charset=utf-8", run_id=run_id

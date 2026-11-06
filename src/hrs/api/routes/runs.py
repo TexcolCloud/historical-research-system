@@ -71,10 +71,10 @@ def recovery(settings: SettingsDep, engine: EngineDep, run_id: UUID):
 
 
 @router.post("/api/v2/runs/{run_id}/retry", response_model=RunSummary)
-def retry(engine: EngineDep, run_id: UUID, request: RecoveryRequest):
+def retry(settings: SettingsDep, engine: EngineDep, run_id: UUID, request: RecoveryRequest):
     if books.get_run(engine, run_id)["kind"] == "cards":
         raise ServiceError(410, "史料卡制作已停用，历史结果与证据仍保留。")
-    return retry_run(engine, run_id, request.request_id)
+    return retry_run(settings, engine, run_id, request.request_id)
 
 
 @router.get("/api/v2/runs/{run_id}/executions", response_model=list[ExecutionNode])

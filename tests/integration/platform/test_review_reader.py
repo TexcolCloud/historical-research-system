@@ -14,7 +14,7 @@ from .test_review import seed
 def test_clean_conversion_pages_remain_readable_while_the_book_awaits_review(platform, tmp_path):
     settings, engine = platform
     settings = settings.model_copy(update={"cache_root": tmp_path})
-    run, _ = seed(engine)
+    run, _ = seed(engine, settings=settings)
     objects = objects_for(settings)
     raw = "待核对页。正常正文页①。\n\n① 不包括其它地区。"
     files = {
@@ -59,7 +59,7 @@ def test_clean_conversion_pages_remain_readable_while_the_book_awaits_review(pla
 def test_committed_ocr_draft_and_images_are_readable_before_full_visual_review(platform, tmp_path):
     settings, engine = platform
     settings = settings.model_copy(update={"cache_root": tmp_path})
-    run, _ = seed(engine)
+    run, _ = seed(engine, settings=settings)
     with engine.begin() as connection:
         connection.execute(
             update(db.runs)

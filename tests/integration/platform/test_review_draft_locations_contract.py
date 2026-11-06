@@ -92,7 +92,7 @@ def test_reading_legacy_draft_retains_text_but_exposes_only_hash_bound_positions
     platform, monkeypatch, hash_state
 ):
     settings, engine = platform
-    _, ids = seed(engine)
+    _, ids = seed(engine, settings=settings)
     review = Review(settings, engine)
     original, draft = "😀甲错乙。", "😀甲对乙。"
     locations = original_locations()
@@ -139,7 +139,7 @@ def test_simultaneous_draft_saves_are_idempotent_or_reject_the_stale_edit(
     platform, monkeypatch, same_request
 ):
     settings, engine = platform
-    run, ids = seed(engine)
+    run, ids = seed(engine, settings=settings)
     review = Review(settings, engine)
     originals = original_locations()
     monkeypatch.setattr(review, "get", lambda _: {"locations": originals})

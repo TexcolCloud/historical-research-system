@@ -11,10 +11,10 @@ import math
 import time
 from pathlib import Path
 
+from hrs.processing.contracts import SOL, TERRA
+from hrs.processing.execution_policy import configured_policy
 from hrs.processing.ledger import Ledger, encode
 
-TERRA = "gpt-6.1-terra"
-SOL = "gpt-6.1-sol"
 FAILURE_LIMIT = 6
 WAIT_LIMIT_SECONDS = 1800
 RECOVERY_WINDOW_SECONDS = 30
@@ -23,9 +23,6 @@ PRESSURE_CODES = frozenset({"rate_limit", "capacity", "service_unavailable"})
 PERMANENT_CODES = frozenset({"quota_exhausted", "authentication"})
 FAILURE_CODES = PRESSURE_CODES | PERMANENT_CODES | {"transport", "timeout", "tool_error", "unknown"}
 
-
-def model_for_stage(stage):
-    return TERRA if stage == "ocr" else SOL
 
 
 class RuntimeControl:
@@ -39,8 +36,6 @@ class RuntimeControl:
             raise ValueError("Runtime control requires a writable ledger workspace")
 
     def _capacity(self):
-        from hrs.processing.execution_policy import configured_policy
-
         return configured_policy(self.root)["capacity"]
 
     @staticmethod
@@ -447,3 +442,12 @@ class RuntimeControl:
                     else:
                         connection.execute("DELETE FROM runtime_admissions WHERE owner=?", (owner,))
         return self.snapshot(now=now)
+
+
+def effective_policy(root):
+    """Apply durable account admission limits to the configured worker policy."""
+    result = configured_policy(root)
+    if (Path(root) / "ledger.sqlite3").exists():
+        account = RuntimeControl(root).snapshot()["account"]
+        result["capacity"] = min(result["capacity"], account["limit"])
+    return result

@@ -25,7 +25,11 @@ class Navigation:
             raise ServiceError(
                 409, "旧执行链已退役，原件与历史结果保留；请将原件导入原生流程后继续操作。"
             )
-        return Store(resolve_workspace(self.settings.codex_root)), doc_id
+        from hrs.library.native_workspace import require_workspace
+
+        store = Store(resolve_workspace(self.settings.codex_root))
+        require_workspace(self.engine, run, store)
+        return store, doc_id
 
     def status(self, run_id):
         store, doc_id = self.native(run_id)

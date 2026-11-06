@@ -7,8 +7,9 @@ import shutil
 import time
 from uuid import uuid4
 
-from hrs.processing.checkpoints import atomic_json
+from hrs.processing.acceptance import publication_acceptance, workspace_scope
 from hrs.processing.hashing import digest, file_digest
+from hrs.processing.snapshots import atomic_json
 from hrs.processing.workflow_rules import (
     new_task,
     require_active,
@@ -331,7 +332,10 @@ class PublicationWorkflow:
                     content_verified=False,
                     workflow_test_pages=test_pages,
                 )
-            if (self.context.repository.root / ".workflow-test-authorization.json").exists():
+            if (
+                publication_acceptance(doc, include_active=False) == "workflow_test"
+                or workspace_scope(self.context.repository.root) == "workflow_only"
+            ):
                 publication.update(validation_scope="workflow_only", content_verified=False)
             atomic_json(directory / "publication.json", publication)
             doc.update(state="published", publication=publication)

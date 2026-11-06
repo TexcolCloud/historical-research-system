@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import NavigationPanel from "./NavigationPanel.tsx";
+import { RuntimeScopeContext } from "@/app/runtime-scope.ts";
 import { respondWith } from "@/test/responses.ts";
 afterEach(() => {
   cleanup();
@@ -74,7 +75,9 @@ test("directory editing stays inside the chosen entry and waiting evidence is no
   render(
     <MemoryRouter>
       <QueryClientProvider client={new QueryClient()}>
-        <NavigationPanel runId="run" bookId="book" />
+        <RuntimeScopeContext.Provider value="content">
+          <NavigationPanel runId="run" bookId="book" />
+        </RuntimeScopeContext.Provider>
       </QueryClientProvider>
     </MemoryRouter>,
   );

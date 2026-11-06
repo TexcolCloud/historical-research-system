@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from hrs.library.books import get_run
 from hrs.library.projection.facts import PROJECTION_POLICY
 from hrs.library.structure import describe_structure, project_structure
+from hrs.processing.acceptance import publication_acceptance
 from hrs.storage import models as db
 
 
@@ -104,6 +105,10 @@ class NativePublication:
         rows = []
         for position, group in enumerate(groups):
             group["navigation"] = doc.get("navigation", {})
+            group["acceptance"] = {
+                "content_acceptance": publication_acceptance(doc),
+                "publication": doc["publication"],
+            }
             group["structure"] = project_structure(structure, group["parts"])
             ref = self.objects.put_bytes(
                 json.dumps(group, ensure_ascii=False).encode(), run_id=run["id"]

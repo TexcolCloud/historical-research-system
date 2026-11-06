@@ -8,9 +8,9 @@ from sqlalchemy import func, insert, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs.library.errors import ServiceError
+from hrs.library.object_ownership import owned_objects
 from hrs.library.records import text_digest as digest
 from hrs.storage import models as db
-from hrs.storage.service import objects_for
 
 
 class StageInputMismatch(ValueError):
@@ -23,7 +23,7 @@ def fingerprint(value):
 
 class Outputs:
     def __init__(self, settings, engine):
-        self.engine, self.objects = engine, objects_for(settings, engine)
+        self.engine, self.objects = engine, owned_objects(settings, engine)
 
     def get(self, run_id, step, dependency=None):
         with self.engine.connect() as connection:

@@ -34,10 +34,10 @@ class Dispatch:
 
     def reserve(self, document_id, *, active_session_tokens=()):
         """Lease concrete work before allocating shared capacity to speculative warmup."""
-        from hrs.processing.execution_policy import execution_policy
+        from hrs.processing.runtime_control import effective_policy
         from hrs.processing.scheduling import ready_tasks
 
-        policy = execution_policy(self.store.root)
+        policy = effective_policy(self.store.root)
         with self.store.lock:
             for token in active_session_tokens:
                 if self.session(token, allow_closed=True)["document_id"] != document_id:
@@ -152,7 +152,7 @@ class Dispatch:
 
     def make_room(self, stage, plan):
         """Waiting warm agents yield globally; active original reads and task leases do not."""
-        from hrs.processing.runtime_control import model_for_stage
+        from hrs.processing.contracts import model_for_stage
         from hrs.processing.scheduling import ready_tasks
 
         model = model_for_stage(stage)
@@ -196,7 +196,7 @@ class Dispatch:
             self.end_session(retained, "capacity_for_ready_work")
 
     def new_session(self, document_id, stage, plan, *, prewarm=False):
-        from hrs.processing.runtime_control import model_for_stage
+        from hrs.processing.contracts import model_for_stage
 
         model = model_for_stage(stage)
         if prewarm and any(
@@ -499,8 +499,7 @@ class Dispatch:
 
     def fail_runtime(self, token, worker_id, code, *, details):
         """One transaction handles observed failures and MCP reports for the same lease."""
-        from hrs.processing.contracts import TECHNICAL_FAILURE_CODES
-        from hrs.processing.runtime_control import model_for_stage
+        from hrs.processing.contracts import TECHNICAL_FAILURE_CODES, model_for_stage
 
         if code not in TECHNICAL_FAILURE_CODES:
             raise ValueError("Use a supported technical failure code")
@@ -570,7 +569,7 @@ class Dispatch:
 
     def runtime_stop_reason(self, document_id):
         """Stop an owned idle coordinator once all remaining automatic work is blocked."""
-        from hrs.processing.runtime_control import model_for_stage
+        from hrs.processing.contracts import model_for_stage
 
         with self.store.lock:
             self.expire()

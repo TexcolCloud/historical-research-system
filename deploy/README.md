@@ -15,7 +15,9 @@
 
 根 `.env` 的数据库密码与 S3 凭据供存储和上传使用。默认桶为 `ingestion-acceptance`，region 为 `us-east-1`；默认地址、端口和数据库连接由统一配置推导。已有显式覆盖继续生效。
 
-隔离验收可显式设置 `INGEST_S3_UPLOAD_ENDPOINT`、`PLATFORM_UPLOAD_PORT` 和 `PLATFORM_TUS_HOOK_URL`，同时使用独立 Compose 项目和匹配的测试桶／凭据，使上传与 API 指向同一隔离存储。默认部署无需填写这些覆盖项。
+隔离验收可显式设置 `INGEST_S3_UPLOAD_ENDPOINT`、`PLATFORM_UPLOAD_PORT` 和 `PLATFORM_TUS_HOOK_URL`，同时使用独立 Compose 项目和匹配的测试桶／凭据，使上传与 API 指向同一隔离存储。上传控制地址默认随 `PLATFORM_UPLOAD_PORT` 推导；显式 `PLATFORM_TUS_CONTROL_URL` 优先。默认部署无需填写这些覆盖项。
+
+检索 `PLATFORM_RETRIEVAL_ENDPOINT` 为回环地址时默认由应用管理 broker 的启动和回收，非回环地址默认作为外部服务。复用已有回环服务时显式设置 `PLATFORM_RETRIEVAL_MODE=external`，应用不会停止借用的服务。`status` 显示实际工作区与端点，配置不一致时先修正连接，不要重新导入。
 
 数据库初始化由 Python 启动入口管理，创建缺失的专用数据库并执行历史迁移。容器初始化密码只在空数据目录首次启动时应用，修改环境变量不会重置已有角色或数据库。
 
@@ -40,7 +42,9 @@ docker compose --env-file .env -f deploy/compose.upload.yml stop tusd
 uv run --no-sync --locked python -m hrs backup
 ```
 
-独立保存 S3 业务对象和私有配置后，再按维护需要停止存储和检索服务：
+新的协调备份包含 SQL、原生工作区和完整 `hrs/v2/` S3 对象归档，并在全部哈希验证通过后写入本地完整清单。把整个备份目录与私有 `.env` 分别安全保管。自定义 PostgreSQL 容器使用 `PLATFORM_POSTGRES_CONTAINER`；恢复必须指定新数据库后缀、空桶和不存在的原生根目录，步骤见[维护与恢复](../README.md#维护与恢复)。OpenSearch 可重建，不能把未校验的挂载目录视为完整备份。
+
+备份完成后，再按维护需要停止存储和检索服务：
 
 ```powershell
 docker compose --env-file .env -f deploy/compose.storage.yml stop

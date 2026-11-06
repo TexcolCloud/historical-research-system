@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from hrs.api.main import create_app
+from hrs.processing.store import Store
+from hrs.processing.workspace import identity
 from hrs.storage import models as schema
 from hrs.storage.db import migrate
 
@@ -39,6 +41,10 @@ def test_duplicate_finish_commits_one_run_without_temporal(platform):
             for table in (schema.runs, schema.outbox, schema.events):
                 assert connection.scalar(select(func.count()).select_from(table)) == 1
             assert connection.scalar(select(schema.outbox.c.delivered)) is False
+            assert (
+                connection.scalar(select(schema.runs.c.result))["codex_workspace_id"]
+                == identity(Store(settings.codex_root))["workspace_id"]
+            )
 
 
 def test_upload_rejects_bad_ownership_and_unfinished_object(platform):

@@ -32,7 +32,7 @@ def test_checkpoint_validation_restarts_after_a_concurrent_commit(tmp_path):
 def test_a_transient_snapshot_sharing_conflict_does_not_break_status(tmp_path, monkeypatch):
     import json
 
-    from hrs.processing.checkpoints import atomic_json, read_snapshot
+    from hrs.processing.snapshots import atomic_json, read_snapshot
 
     document = {"id": "b" * 24, "title": "committed"}
     # JSON remains an import/export contract, not the live task database.

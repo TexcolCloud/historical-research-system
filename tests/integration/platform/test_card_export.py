@@ -16,7 +16,7 @@ def test_candidate_export_keeps_full_contract_exact_quote_pages_and_survives_cac
 ):
     settings, engine = platform
     settings = settings.model_copy(update={"cache_root": tmp_path})
-    run, _ = seed(engine)
+    run, _ = seed(engine, settings=settings)
     objects = objects_for(settings)
     candidate = {
         "title": "技术导出测试",

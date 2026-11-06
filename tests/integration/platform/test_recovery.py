@@ -4,6 +4,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, insert, select
 
 from hrs.api.main import create_app
+from hrs.processing.store import Store
+from hrs.processing.workspace import identity as workspace_identity
+from hrs.processing.workspace import resolve_workspace
 from hrs.storage import models as db
 
 
@@ -21,6 +24,7 @@ def test_recovery_errors_explain_the_action_without_showing_internal_english():
 
 def test_repeated_retry_only_starts_one_new_attempt_and_preserves_published_book(platform):
     settings, engine = platform
+    workspace_id = workspace_identity(Store(resolve_workspace(settings.codex_root)))["workspace_id"]
     book, run = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
         connection.execute(insert(db.books).values(id=book, title="恢复协议测试", state="ready"))
@@ -30,7 +34,11 @@ def test_repeated_retry_only_starts_one_new_attempt_and_preserves_published_book
                 book_id=book,
                 state="failed",
                 stage="indexing",
-                result={"published": True, "codex_document_id": "retained-native-checkpoint"},
+                result={
+                    "published": True,
+                    "codex_document_id": "retained-native-checkpoint",
+                    "codex_workspace_id": workspace_id,
+                },
                 source={"sha256": "a" * 64},
             )
         )
@@ -73,7 +81,11 @@ def test_native_recovery_preflight_failure_is_durable_and_can_be_retried(
                 book_id=book,
                 state="failed",
                 stage="ocr",
-                result={"processing_backend": "codex", "codex_document_id": identity},
+                result={
+                    "processing_backend": "codex",
+                    "codex_document_id": identity,
+                    "codex_workspace_id": workspace_identity(bridge.store)["workspace_id"],
+                },
             )
         )
 
@@ -118,8 +130,8 @@ def test_native_intake_failure_retries_saved_pdf_before_a_document_id_exists(pla
     from pypdf import PdfWriter
 
     from hrs.library.books import get_run
+    from hrs.library.object_ownership import owned_objects
     from hrs.library.processing_bridge import CodexBridge
-    from hrs.storage.service import objects_for
 
     settings, engine = platform
     settings = settings.model_copy(update={"codex_root": tmp_path / "intake-native"})
@@ -127,7 +139,7 @@ def test_native_intake_failure_retries_saved_pdf_before_a_document_id_exists(pla
     writer.add_blank_page(width=200, height=300)
     content = BytesIO()
     writer.write(content)
-    source = objects_for(settings, engine).put_bytes(content.getvalue(), "application/pdf")
+    source = owned_objects(settings, engine).put_bytes(content.getvalue(), "application/pdf")
     book, run = str(uuid4()), str(uuid4())
     with engine.begin() as connection:
         connection.execute(
@@ -142,6 +154,9 @@ def test_native_intake_failure_retries_saved_pdf_before_a_document_id_exists(pla
                 source=source,
                 result={
                     "processing_backend": "codex",
+                    "codex_workspace_id": workspace_identity(Store(settings.codex_root))[
+                        "workspace_id"
+                    ],
                     "bridge_failures": 1,
                     "bridge_not_before": 9999999999,
                 },

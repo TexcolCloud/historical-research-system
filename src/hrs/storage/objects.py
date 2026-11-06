@@ -6,6 +6,7 @@ import hashlib
 import mimetypes
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -21,6 +22,36 @@ def file_digest(path):
             digest.update(part)
             length += len(part)
     return digest.hexdigest(), length
+
+
+def object_reference(digest, length, media_type):
+    return {
+        "key": f"hrs/v2/objects/{digest[:2]}/{digest}",
+        "sha256": digest,
+        "byte_length": length,
+        "media_type": media_type,
+    }
+
+
+@contextmanager
+def file_snapshot(path, media_type=None):
+    """Read a producer path once; the bounded snapshot owns hash and transfer bytes."""
+    digest, length = hashlib.sha256(), 0
+    with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as snapshot:
+        with Path(path).open("rb") as source:
+            while part := source.read(1024 * 1024):
+                snapshot.write(part)
+                digest.update(part)
+                length += len(part)
+        snapshot.seek(0)
+        yield (
+            snapshot,
+            object_reference(
+                digest.hexdigest(),
+                length,
+                media_type or mimetypes.guess_type(str(path))[0] or "application/octet-stream",
+            ),
+        )
 
 
 class S3Objects:
@@ -54,37 +85,29 @@ class S3Objects:
         self.client.head_bucket(Bucket=self.bucket)
 
     def put_file(self, path, media_type=None):
+        with file_snapshot(path, media_type) as (snapshot, reference):
+            return self._upload_snapshot(snapshot, reference)
+
+    def _upload_snapshot(self, snapshot, reference):
         from boto3.s3.transfer import TransferConfig
 
-        path = Path(path)
-        digest, length = file_digest(path)
-        key = f"hrs/v2/objects/{digest[:2]}/{digest}"
-        reference = {
-            "key": key,
-            "sha256": digest,
-            "byte_length": length,
-            "media_type": media_type
-            or mimetypes.guess_type(path.name)[0]
-            or "application/octet-stream",
-        }
-        self.client.upload_file(
-            str(path),
+        self.client.upload_fileobj(
+            snapshot,
             self.bucket,
-            key,
-            ExtraArgs={"ContentType": reference["media_type"], "Metadata": {"sha256": digest}},
+            reference["key"],
+            ExtraArgs={
+                "ContentType": reference["media_type"],
+                "Metadata": {"sha256": reference["sha256"]},
+            },
             Config=TransferConfig(multipart_threshold=8 * 1024 * 1024, max_concurrency=2),
         )
         self.verify(reference)
         return reference
 
     def put_bytes(self, content, media_type="application/json"):
+        content = bytes(content)
         digest = hashlib.sha256(content).hexdigest()
-        reference = {
-            "key": f"hrs/v2/objects/{digest[:2]}/{digest}",
-            "sha256": digest,
-            "byte_length": len(content),
-            "media_type": media_type,
-        }
+        reference = object_reference(digest, len(content), media_type)
         self.client.put_object(
             Bucket=self.bucket,
             Key=reference["key"],

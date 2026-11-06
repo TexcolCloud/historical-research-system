@@ -10,6 +10,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs.library.contracts import UploadSession
 from hrs.library.errors import ServiceError
+from hrs.processing.store import Store
+from hrs.processing.workspace import identity, resolve_workspace
 from hrs.storage import models as db
 
 
@@ -37,7 +39,9 @@ def create_upload(engine, settings, request, request_id=None, upload_token=None)
 
         require_active(connection, book_id)
         existing = (
-            connection.execute(select(db.uploads).where(db.uploads.c.id == session_id))
+            connection.execute(
+                select(db.uploads).where(db.uploads.c.id == session_id).with_for_update()
+            )
             .mappings()
             .one_or_none()
         )
@@ -50,12 +54,22 @@ def create_upload(engine, settings, request, request_id=None, upload_token=None)
                 )
             ):
                 raise ServiceError(409, "同一上传请求不能改用另一个文件或令牌。")
+            # The same scoped owner may renew an unfinished permit without
+            # replacing its book, token or existing resumable tus objects.
+            expires_at = existing["expires_at"]
+            if existing["state"] != "received" and expires_at <= datetime.now(UTC):
+                expires_at = expires
+                connection.execute(
+                    update(db.uploads)
+                    .where(db.uploads.c.id == session_id)
+                    .values(expires_at=expires_at)
+                )
             return UploadSession(
                 session_id=session_id,
                 book_id=book_id,
                 token=token,
                 endpoint=settings.upload_endpoint,
-                expires_at=existing["expires_at"],
+                expires_at=expires_at,
             )
         connection.execute(
             insert(db.uploads).values(
@@ -101,6 +115,11 @@ def handle_tus(engine, settings, hook, authorization):
                 "HTTPResponse": {"StatusCode": 410, "Body": "本书已删除，上传已终止。"},
             }
         return {}
+    workspace_id = (
+        identity(Store(resolve_workspace(settings.codex_root)))["workspace_id"]
+        if hook.Type == "post-finish"
+        else None
+    )
     with engine.begin() as connection:
         session = (
             connection.execute(
@@ -156,7 +175,10 @@ def handle_tus(engine, settings, hook, authorization):
                 upload_id=session_id,
                 state="queued",
                 stage="verify_upload",
-                result={"processing_backend": settings.processing_backend},
+                result={
+                    "processing_backend": settings.processing_backend,
+                    "codex_workspace_id": workspace_id,
+                },
                 source={"upload_key": key, "byte_length": upload.Size},
             )
         )

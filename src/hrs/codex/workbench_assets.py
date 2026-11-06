@@ -15,6 +15,50 @@ SCRIPT = r"""
     indicator.textContent = text;
   }
 
+  function reviewCompletion(form) {
+    const doubts = [...form.querySelectorAll('[data-review-doubt]')];
+    const blocked = form.dataset.approvalReady !== 'true' || Boolean(form.dataset.stale || form.dataset.scopeStale || form.dataset.submitting);
+    if (!doubts.length) {
+      for (const button of form.querySelectorAll('[data-final-decision]')) button.disabled = blocked || button.dataset.targetReady === 'false';
+      return;
+    }
+    const completed = doubts.filter(node => node.querySelector('input[type=radio]:checked')).length;
+    const counter = form.querySelector('[data-review-completion]');
+    if (counter) counter.textContent = `已处理 ${completed} / ${doubts.length} 处疑点，全部处理后提交本页。`;
+    const final = form.querySelector('button[name=verdict][value=approved]');
+    if (final) final.disabled = completed !== doubts.length || blocked;
+  }
+
+  for (const form of document.querySelectorAll('form[data-approval-ready]')) reviewCompletion(form);
+  document.addEventListener('change', event => {
+    const form = event.target.form;
+    if (!form) return;
+    reviewCompletion(form);
+    if (event.target.type === 'radio') {
+      const next = [...form.querySelectorAll('[data-review-doubt]')].find(node => !node.querySelector('input[type=radio]:checked'));
+      if (next) { next.open = true; next.querySelector('summary')?.focus(); }
+    }
+  });
+  document.addEventListener('click', event => {
+    const button = event.target.closest('[data-locate-anchor]');
+    if (!button) return;
+    const textarea = button.form?.elements.markdown;
+    if (!textarea) return;
+    const anchor = JSON.parse(button.dataset.locateAnchor);
+    const focus = button.dataset.locateFocus;
+    const positions = [];
+    for (let at = textarea.value.indexOf(anchor.exact); at !== -1; at = textarea.value.indexOf(anchor.exact, at + 1)) {
+      if ((!anchor.prefix || textarea.value.slice(0, at).endsWith(anchor.prefix)) &&
+          (!anchor.suffix || textarea.value.slice(at + anchor.exact.length).startsWith(anchor.suffix))) positions.push(at);
+    }
+    if (positions.length !== 1) { message('当前草稿已无法唯一定位这处文字，请结合整页核对。'); textarea.focus(); return; }
+    const offset = focus && anchor.exact.split(focus).length === 2 ? anchor.exact.indexOf(focus) : 0;
+    const start = positions[0] + offset;
+    textarea.focus();
+    textarea.setSelectionRange(start, start + (focus || anchor.exact).length);
+    textarea.scrollIntoView?.({block: 'center'});
+  });
+
   document.addEventListener('input', (event) => {
     if (event.target.form) event.target.form.dataset.dirty = 'true';
   });
@@ -26,12 +70,20 @@ SCRIPT = r"""
       const incoming = page.querySelector(`[data-live-section="${key}"]`);
       if (!incoming) continue;
       // An open human form remains the operator's working copy, even when clean.
-      if (key === 'review-content' && current.querySelector('form')) {
-        const before = current.querySelector('[name=input_sha256]')?.value;
-        const after = incoming.querySelector('[name=input_sha256]')?.value;
+      if (['review-content', 'navigation-content'].includes(key) && current.querySelector('form[method=post]')) {
+        const before = current.querySelector('[name=input_sha256], [name=expected_sha256]')?.value;
+        const after = incoming.querySelector('[name=input_sha256], [name=expected_sha256]')?.value;
+        const currentScope = current.querySelector('[name=decision_scope]')?.value;
+        const incomingScope = incoming.querySelector('[name=decision_scope]')?.value;
+        if (currentScope !== incomingScope) {
+          const form = current.querySelector('form[method=post]');
+          form.dataset.scopeStale = 'true';
+          message('工作区范围已变化。当前输入保留，请刷新确认范围后再提交。');
+          reviewCompletion(form);
+        }
         if (before !== after) {
           message('待审页面已更新。当前编辑内容保留，请复制修改后刷新核对。');
-          current.querySelector('form').dataset.stale = 'true';
+          current.querySelector('form[method=post]').dataset.stale = 'true';
           for (const button of current.querySelectorAll('button[name=verdict]')) {
             button.disabled = true;
           }
@@ -124,6 +176,7 @@ SCRIPT = r"""
       alert.hidden = false;
       if (!form.dataset.stale) buttons.forEach(button => { button.disabled = false; });
       delete form.dataset.submitting;
+      reviewCompletion(form);
     }
   });
 

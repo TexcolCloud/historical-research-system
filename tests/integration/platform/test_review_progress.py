@@ -11,7 +11,7 @@ from hrs.api.main import create_app
 from hrs.library.books import get_run
 from hrs.library.processing_bridge import CodexBridge
 from hrs.processing.application import prepare
-from hrs.processing.checkpoints import atomic_json
+from hrs.processing.snapshots import atomic_json
 from hrs.storage import models as db
 
 from .test_codex_bridge import finish

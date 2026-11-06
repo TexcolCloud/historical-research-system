@@ -5,9 +5,11 @@ from __future__ import annotations
 import re
 import time
 
+from hrs.processing.acceptance import decision_scope as resolve_decision_scope
 from hrs.processing.hashing import digest
 from hrs.processing.workflow_rules import (
     new_task,
+    require_active,
 )
 
 
@@ -73,8 +75,12 @@ class NavigationWorkflow:
         target_page: int | None,
         target_anchor: str = "",
         decision_id: str | None = None,
+        decision_scope: str | None = None,
     ) -> dict:
-        request_sha = digest([entry_id, expected_sha256, target_page, target_anchor])
+        request_values = [entry_id, expected_sha256, target_page, target_anchor]
+        if decision_scope is not None:
+            request_values.append(decision_scope)
+        request_sha = digest(request_values)
         with self.context.repository.lock:
             doc = self.context.repository.read(document_id)
             nav = doc.get("navigation") or {}
@@ -86,6 +92,8 @@ class NavigationWorkflow:
                     if receipt["request_sha256"] != request_sha:
                         raise ValueError("Decision identity belongs to a different request")
                     return nav
+            require_active(doc, allow_paused=True)
+            scope = resolve_decision_scope(self.context.repository.root, decision_scope)
             if nav.get("sha256") != expected_sha256:
                 raise ValueError("Navigation changed; reload before confirming")
             entry = next(e for e in nav["entries"] if e["id"] == entry_id)
@@ -117,6 +125,16 @@ class NavigationWorkflow:
                 "approval_type": "human_navigation",
                 "content_approval": False,
                 "final": True,
+                **(
+                    {
+                        "approval_type": "workflow_test",
+                        "content_verified": False,
+                        "human_approval": False,
+                        "origin": "user_authorized_workflow_test",
+                    }
+                    if scope == "workflow_test"
+                    else {}
+                ),
             }
             if decision_id:
                 doc.setdefault("navigation_receipts", {})[decision_id] = {

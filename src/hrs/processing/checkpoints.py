@@ -1,47 +1,15 @@
 """Atomic document snapshots and verified compare-before-commit transactions."""
 
 import json
-import os
-import time
 from contextlib import contextmanager
 from pathlib import Path
-from uuid import uuid4
 
 from filelock import FileLock
 
-
-def read_snapshot(path: Path) -> bytes:
-    """Windows replacement can briefly deny an open; never return a stale snapshot."""
-    for attempt in range(50):
-        try:
-            return path.read_bytes()
-        except PermissionError:
-            if attempt == 49:
-                raise
-            time.sleep(0.01)
-    raise AssertionError("Unreachable snapshot retry state")
-
-
-def atomic_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        # Windows readers may briefly hold a sharing handle to the old snapshot.
-        for attempt in range(50):
-            try:
-                temporary.replace(path)
-                break
-            except PermissionError:
-                if attempt == 49:
-                    raise
-                time.sleep(0.01)
-    finally:
-        temporary.unlink(missing_ok=True)
+from hrs.processing.hashing import digest
+from hrs.processing.ledger import Ledger
+from hrs.processing.migration import migrate
+from hrs.processing.snapshots import read_snapshot
 
 
 class Checkpoints:
@@ -52,8 +20,6 @@ class Checkpoints:
         # One process lock serializes local document mutations; split by
         # document only if measured local queue contention warrants it.
         self.lock = FileLock(self.root / ".store.lock", timeout=30)
-        from hrs.processing.ledger import Ledger
-
         path = self.root / "ledger.sqlite3"
         if path.exists():
             # Opening an established WAL reader must not wait behind a model command.
@@ -92,8 +58,6 @@ class Checkpoints:
             )
 
     def migrate(self, validate):
-        from hrs.processing.migration import migrate
-
         return migrate(self, validate)
 
     def ids(self):
@@ -111,8 +75,6 @@ class Checkpoints:
     def revision(self, document_id):
         if self.ledger:
             return self.ledger.revision(document_id)
-        from hrs.processing.hashing import digest
-
         return digest(read_snapshot(self.directory(document_id) / "document.json"))
 
     def events_after(self, sequence, limit=1000):

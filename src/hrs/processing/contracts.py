@@ -49,3 +49,11 @@ class TaskReceipt(TypedDict):
     approval_type: str
     human_approval: bool
     created_at: float
+
+
+TERRA = "gpt-6.1-terra"
+SOL = "gpt-6.1-sol"
+
+
+def model_for_stage(stage):
+    return TERRA if stage == "ocr" else SOL

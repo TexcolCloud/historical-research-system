@@ -11,7 +11,10 @@ from hrs.codex.mcp import prepare
 from hrs.library.books import get_run
 from hrs.library.catalog import Library
 from hrs.library.exports import Exports
-from hrs.library.processing_bridge import CodexBridge, article_groups
+from hrs.library.processing_bridge import CodexBridge
+from hrs.library.projection.facts import projection_input
+from hrs.library.projection.publication import article_groups
+from hrs.processing.workspace import identity as workspace_identity
 from hrs.storage import models as db
 
 
@@ -73,7 +76,11 @@ def test_bridge_consumes_native_changes_instead_of_rescanning_every_book(
                 state="running",
                 stage="ocr",
                 source=bridge.objects.put_file(source),
-                result={"codex_document_id": identity, "processing_backend": "codex"},
+                result={
+                    "codex_document_id": identity,
+                    "processing_backend": "codex",
+                    "codex_workspace_id": workspace_identity(bridge.store)["workspace_id"],
+                },
             )
         )
     calls = []
@@ -109,7 +116,11 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(
                 state="running",
                 stage="ocr",
                 source=bridge.objects.put_file(source),
-                result={"codex_document_id": doc_id, "processing_backend": "codex"},
+                result={
+                    "codex_document_id": doc_id,
+                    "processing_backend": "codex",
+                    "codex_workspace_id": workspace_identity(bridge.store)["workspace_id"],
+                },
             )
         )
     original = "Synthetic[^1]\n\n[^1]: A source-owned footnote.\n"
@@ -313,19 +324,23 @@ def test_native_deletion_keeps_shared_workspace_until_last_owner_stops(platform,
                     book_id=book_id,
                     state="running",
                     stage="ocr",
-                    result={"codex_document_id": doc_id, "processing_backend": "codex"},
+                    result={
+                        "codex_document_id": doc_id,
+                        "processing_backend": "codex",
+                        "codex_workspace_id": workspace_identity(bridge.store)["workspace_id"],
+                    },
                 )
             )
     bridge.store.request_run(doc_id)
     running = bridge.store.claim_run("synthetic-owned-runner")
-    request_deletion(engine, owners[0][0])
+    request_deletion(settings, engine, owners[0][0])
     bridge.delete_pending()
     assert receipt(engine, owners[0][0])["state"] == "completed"
     assert not (bridge.store.root / "platform-intake" / owners[0][1]).exists()
     assert (bridge.store.root / "platform-intake" / owners[1][1]).exists()
     assert bridge.store.document_directory(doc_id).exists()
     assert not bridge.store.status(doc_id)["run_request"].get("cancel_requested")
-    request_deletion(engine, owners[1][0])
+    request_deletion(settings, engine, owners[1][0])
     bridge.delete_pending()
     assert receipt(engine, owners[1][0])["state"] == "pending"
     assert bridge.store.status(doc_id)["run_request"]["cancel_requested"]
@@ -359,7 +374,11 @@ def test_native_table_continuation_preserves_notes_and_original_offsets(platform
                 book_id=book_id,
                 state="running",
                 stage="ocr",
-                result={"processing_backend": "codex", "codex_document_id": doc_id},
+                result={
+                    "processing_backend": "codex",
+                    "codex_document_id": doc_id,
+                    "codex_workspace_id": workspace_identity(bridge.store)["workspace_id"],
+                },
             )
         )
     first = "<table><tr><th>Area</th><th>Count</th></tr><tr><td>A</td><td>25</td></tr></table>"
@@ -418,7 +437,11 @@ def test_unchanged_bridge_tick_avoids_revalidation_and_projection(platform, tmp_
                 book_id=book_id,
                 state="running",
                 stage="ocr",
-                result={"codex_document_id": doc_id, "processing_backend": "codex"},
+                result={
+                    "codex_document_id": doc_id,
+                    "processing_backend": "codex",
+                    "codex_workspace_id": workspace_identity(bridge.store)["workspace_id"],
+                },
             )
         )
     bridge.sync(get_run(engine, run_id))
@@ -465,7 +488,11 @@ def test_confirmation_receipt_commits_while_projection_prepares_objects(
                 book_id=book_id,
                 state="running",
                 stage="ocr",
-                result={"codex_document_id": doc_id, "processing_backend": "codex"},
+                result={
+                    "codex_document_id": doc_id,
+                    "processing_backend": "codex",
+                    "codex_workspace_id": workspace_identity(bridge.store)["workspace_id"],
+                },
             )
         )
     finish(bridge.store, doc_id, "ocr", {"markdown": "Synthetic retained page"})
@@ -543,7 +570,11 @@ def test_partial_native_projection_writes_only_changed_page_markdown(
                 book_id=book_id,
                 state="running",
                 stage="ocr",
-                result={"codex_document_id": doc_id, "processing_backend": "codex"},
+                result={
+                    "codex_document_id": doc_id,
+                    "processing_backend": "codex",
+                    "codex_workspace_id": workspace_identity(bridge.store)["workspace_id"],
+                },
             )
         )
     finish(bridge.store, doc_id, "ocr", {"markdown": "First[^1]\n\n[^1]: Source note."})
@@ -584,6 +615,6 @@ def test_projection_signature_changes_when_coordinator_lease_expires(monkeypatch
         "run_request": {"state": "running", "lease_expires_at": 110},
     }
     monkeypatch.setattr("hrs.library.processing_bridge.time.time", lambda: 105)
-    active = CodexBridge.projection_input(doc)
+    active = projection_input(doc)
     monkeypatch.setattr("hrs.library.processing_bridge.time.time", lambda: 115)
-    assert CodexBridge.projection_input(doc) != active
+    assert projection_input(doc) != active

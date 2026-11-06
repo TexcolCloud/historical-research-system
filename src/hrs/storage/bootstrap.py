@@ -17,13 +17,22 @@ def bootstrap(root=None):
     admin = url.set(drivername="postgresql", database="postgres").render_as_string(
         hide_password=False
     )
+    settings = Settings.load(root)
+    targets = [make_url(settings.database_url.get_secret_value())]
+    if env.get("PLATFORM_TEST_DATABASE_URL"):
+        targets.append(make_url(env["PLATFORM_TEST_DATABASE_URL"]))
+    local_names = {
+        target.database
+        for target in targets
+        if target.database and (target.host, target.port or 5432) == (url.host, url.port or 5432)
+    }
     with psycopg.connect(admin, autocommit=True) as connection:
-        for name in ("historical_research_v2", "historical_research_v2_test"):
+        for name in sorted(local_names):
             if not connection.execute(
                 "SELECT 1 FROM pg_database WHERE datname=%s", (name,)
             ).fetchone():
                 connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-    engine = engine_for(Settings.load(root))
+    engine = engine_for(settings)
     try:
         migrate(engine)
     finally:

@@ -6,12 +6,13 @@ import re
 import shutil
 import socket
 import subprocess
-import sys
 import threading
+from pathlib import Path
 
 from filelock import FileLock
 
 from hrs.config import load_environment, project_root
+from hrs.search.service import broker_health, retrieval_service
 
 ROOT = project_root()
 CONTROL = ROOT / ".cache/platform-diagnostics"
@@ -39,8 +40,10 @@ def infrastructure():
 
 def command(action, *, build=False, existing_services=False):
     from hrs.config import Settings
-    from hrs.processing.store import Store, atomic_json
+    from hrs.processing.snapshots import atomic_json
+    from hrs.processing.store import Store
     from hrs.processing.workspace import identity, resolve_workspace, running_workbench
+    from hrs.runtime import discover_servers
 
     CONTROL.mkdir(parents=True, exist_ok=True)
     record = CONTROL / "codex-platform.json"
@@ -64,18 +67,50 @@ def command(action, *, build=False, existing_services=False):
         raise ValueError(
             "Native launcher requires PLATFORM_PROCESSING_BACKEND=codex; only the native Codex execution path is supported"
         )
-    store = Store(resolve_workspace(settings.codex_root))
+    native_root = resolve_workspace(settings.codex_root)
     if action in {"status", "doctor"}:
+        metadata = native_root / ".workspace.json"
+        configured = json.loads(metadata.read_text("utf-8")) if metadata.is_file() else {}
+        servers = discover_servers(ROOT)
+        running = [row for row in servers if row["available"]]
+        configured_id = configured.get("workspace_id")
+        for row in running:
+            row["workspace_matches"] = (
+                row["runtime"]["workspace_id"] == configured_id
+                and Path(row["runtime"]["root"]).resolve() == native_root
+            )
+        retrieval = {
+            "mode": settings.retrieval_mode,
+            "endpoint": settings.retrieval_endpoint,
+            "broker_required": settings.retrieval_device == "cuda",
+            "reachable": False,
+        }
+        if settings.retrieval_device == "cuda":
+            try:
+                broker_health(settings.retrieval_endpoint)
+                retrieval["reachable"] = True
+            except (OSError, ValueError, RuntimeError) as error:
+                retrieval["error_type"] = type(error).__name__
         status = {
             "backend": "codex",
-            "workspace_id": identity(store)["workspace_id"],
-            "ui": listening(18170),
-            "standalone_workbench": bool(running_workbench(store)),
-            "retrieval": listening(18160),
+            "workspace_id": configured_id,
+            "configured_root": str(native_root),
+            "ui": any(row["available"] or row.get("record") for row in servers),
+            "runtime_available": bool(running),
+            "servers": servers,
+            "workspace_matches": all(row["workspace_matches"] for row in running)
+            if running
+            else None,
+            "standalone_workbench": bool(running_workbench(Store(native_root)))
+            if metadata.is_file()
+            else False,
+            "retrieval": retrieval["reachable"],
+            "retrieval_status": retrieval,
             "codex_cli": bool(shutil.which("codex")),
         }
         print(json.dumps(status))
         return
+    store = Store(native_root)
     if listening(18170):
         raise RuntimeError(
             "Port 18170 already has an owner; stop its launcher before starting this one"
@@ -94,70 +129,50 @@ def command(action, *, build=False, existing_services=False):
             )
         if not (settings.web_dist / "index.html").is_file():
             raise RuntimeError("Build web before starting the UI (--build)")
-        broker = None
-        if not listening(18160) and settings.retrieval_device == "cuda":
-            with (CONTROL / "codex-retrieval.log").open("ab") as log:
-                broker = subprocess.Popen(
-                    [sys.executable, "-m", "hrs.search.broker"],
-                    cwd=ROOT,
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=log,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        with retrieval_service(settings):
+            from uuid import uuid4
+
+            import uvicorn
+
+            from hrs.api.main import create_app
+            from hrs.api.server import Server
+
+            stop_file = CONTROL / (uuid4().hex + ".stop")
+            done = threading.Event()
+            watcher = None
+            try:
+                server = Server(
+                    uvicorn.Config(
+                        create_app(settings=settings),
+                        host="127.0.0.1",
+                        port=18170,
+                        timeout_graceful_shutdown=5,
+                    )
                 )
-        from uuid import uuid4
+                atomic_json(
+                    record,
+                    {
+                        "pid": os.getpid(),
+                        "stop_file": stop_file.name,
+                        "workspace_id": identity(store)["workspace_id"],
+                        "root": str(store.root),
+                        "url": "http://127.0.0.1:18170",
+                    },
+                )
 
-        import uvicorn
+                def shutdown_watch():
+                    while not done.wait(0.5):
+                        if stop_file.exists():
+                            server.should_exit = True
+                            return
 
-        from hrs.api.main import create_app
-        from hrs.api.server import Server
-
-        stop_file = CONTROL / (uuid4().hex + ".stop")
-        server = Server(
-            uvicorn.Config(
-                create_app(settings=settings),
-                host="127.0.0.1",
-                port=18170,
-                timeout_graceful_shutdown=5,
-            )
-        )
-        atomic_json(
-            record,
-            {
-                "pid": os.getpid(),
-                "stop_file": stop_file.name,
-                "workspace_id": identity(store)["workspace_id"],
-                "url": "http://127.0.0.1:18170",
-            },
-        )
-        done = threading.Event()
-
-        def shutdown_watch():
-            while not done.wait(0.5):
-                if stop_file.exists():
-                    server.should_exit = True
-                    return
-
-        watcher = threading.Thread(target=shutdown_watch, daemon=True)
-        watcher.start()
-        print("Research workbench: http://127.0.0.1:18170", flush=True)
-        try:
-            server.run()
-        finally:
-            done.set()
-            watcher.join(timeout=2)
-            record.unlink(missing_ok=True)
-            stop_file.unlink(missing_ok=True)
-            if broker:
-                broker.terminate()
-                broker.wait(timeout=30)
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["init", "up", "stop", "status", "doctor"])
-    parser.add_argument("--build", action="store_true")
-    arguments = parser.parse_args()
-    command(arguments.action, build=arguments.build)
+                watcher = threading.Thread(target=shutdown_watch, daemon=True)
+                watcher.start()
+                print("Research workbench: http://127.0.0.1:18170", flush=True)
+                server.run()
+            finally:
+                done.set()
+                if watcher is not None:
+                    watcher.join(timeout=2)
+                record.unlink(missing_ok=True)
+                stop_file.unlink(missing_ok=True)

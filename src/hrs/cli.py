@@ -38,6 +38,7 @@ MAINTENANCE_COMMANDS = {
 
 def _models(action):
     from hrs.config import load_environment, project_root, resolve_path
+    from hrs.search.artifacts import inspect_artifacts
     from hrs.search.settings import MODEL_REVISIONS
 
     project = project_root()
@@ -52,10 +53,7 @@ def _models(action):
 
         for name, revision in MODEL_REVISIONS.items():
             snapshot_download(repo_id=name, revision=revision, local_dir=paths[name])
-    report = {
-        name: {"path": str(path), "present": (path / "config.json").is_file()}
-        for name, path in paths.items()
-    }
+    report = inspect_artifacts(root)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if not all(item["present"] for item in report.values()):
         raise SystemExit(1)
@@ -114,6 +112,10 @@ def main():
     model_parser.add_argument("action", choices=("prepare", "check"))
     subparsers.add_parser("contracts", help="Export the public OpenAPI contract")
     subparsers.add_parser("check-test-infra", help="Wait for isolated CI object storage")
+    bundle_parser = subparsers.add_parser(
+        "bundle", help="Build a complete source deployment bundle"
+    )
+    bundle_parser.add_argument("--destination", required=True, help="New output ZIP path")
     # Show independently usable native/maintenance commands in the top-level help.
     for name in sorted(NATIVE_COMMANDS | MAINTENANCE_COMMANDS | aliases.keys()):
         subparsers.add_parser(name)
@@ -132,4 +134,10 @@ def main():
         from hrs.api.export_openapi import main as export_contract
 
         return export_contract()
+    if args.command == "bundle":
+        from hrs.config import project_root
+        from hrs.release import bundle
+
+        print(json.dumps(bundle(project_root(), args.destination), ensure_ascii=False, indent=2))
+        return
     return _test_infrastructure()

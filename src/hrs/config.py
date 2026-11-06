@@ -1,11 +1,35 @@
 import os
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, ConfigDict, SecretStr, model_validator
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
+
+DEFAULT_RETRIEVAL_ENDPOINT = "http://127.0.0.1:18160/retrieval"
+
+
+def retrieval_bind(endpoint: str) -> tuple[str, int]:
+    """Managed inference stays loopback-only and uses the configured endpoint port."""
+    parsed = urlparse(endpoint)
+    try:
+        port = parsed.port or 80
+    except ValueError:
+        raise ValueError("Invalid retrieval endpoint port.") from None
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != "/retrieval"
+        or parsed.query
+        or parsed.fragment
+        or not 1 <= port <= 65535
+    ):
+        raise ValueError("Managed retrieval requires a loopback HTTP /retrieval endpoint.")
+    return "127.0.0.1", port
 
 
 def project_root(root: str | Path | None = None) -> Path:
@@ -39,6 +63,14 @@ def load_environment(root: Path) -> dict[str, str]:
         "INGEST_S3_REGION": "us-east-1",
     }.items():
         env.setdefault(key, value)
+    if not env.get("PLATFORM_TUS_CONTROL_URL"):
+        try:
+            upload_port = int(env.get("PLATFORM_UPLOAD_PORT") or "18171")
+        except ValueError:
+            raise ValueError("Invalid upload port configuration.") from None
+        if not 1 <= upload_port <= 65535:
+            raise ValueError("Invalid upload port configuration.")
+        env["PLATFORM_TUS_CONTROL_URL"] = f"http://127.0.0.1:{upload_port}/uploads/"
     if env.get("INGEST_DATABASE_URL") or env.get("INGEST_DEV_DB_PASSWORD"):
         try:
             ingest = (
@@ -87,7 +119,8 @@ class Settings(BaseModel):
     opensearch_url: str = "http://127.0.0.1:19260"
     opensearch_index: str = "hrs-platform-v2-chunks"
     retrieval_device: Literal["cpu", "cuda"] = "cuda"
-    retrieval_endpoint: str = "http://127.0.0.1:18160/retrieval"
+    retrieval_endpoint: str = DEFAULT_RETRIEVAL_ENDPOINT
+    retrieval_mode: Literal["managed", "external"] = "managed"
     auto_cards_enabled: bool = False
     processing_backend: Literal["codex"] = "codex"
     codex_root: Path | None = None
@@ -96,17 +129,47 @@ class Settings(BaseModel):
     @classmethod
     def resolve_paths(cls, values):
         if isinstance(values, dict) and values.get("project_root") is not None:
-            root = Path(values["project_root"])
+            root = Path(values["project_root"]).expanduser().resolve()
             result = {
                 "models_root": root / "models/document-retrieval",
                 "web_dist": root / "web/dist",
                 **values,
             }
+            result["project_root"] = root
+            if "retrieval_mode" not in result:
+                endpoint = urlparse(result.get("retrieval_endpoint", DEFAULT_RETRIEVAL_ENDPOINT))
+                result["retrieval_mode"] = (
+                    "managed" if endpoint.hostname in {"127.0.0.1", "localhost"} else "external"
+                )
             for key in ("models_root", "web_dist", "cache_root", "codex_root"):
                 if result.get(key) is not None:
                     result[key] = resolve_path(root, result[key])
             return result
         return values
+
+    @model_validator(mode="after")
+    def validate_retrieval_endpoint(self):
+        if self.retrieval_mode == "managed":
+            retrieval_bind(self.retrieval_endpoint)
+        else:
+            parsed = urlparse(self.retrieval_endpoint)
+            try:
+                valid_port = parsed.port is None or 1 <= parsed.port <= 65535
+            except ValueError:
+                valid_port = False
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or not valid_port
+            ):
+                raise ValueError(
+                    "External retrieval requires an HTTP(S) endpoint without credentials."
+                )
+        return self
 
     @classmethod
     def load(cls, root=None):

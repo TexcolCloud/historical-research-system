@@ -14,7 +14,7 @@ from .test_review import seed
 
 def test_resolution_draft_is_durable_but_deferred_doubt_cannot_release_page(platform):
     settings, engine = platform
-    run, ids = seed(engine)
+    run, ids = seed(engine, settings=settings)
     review = Review(settings, engine)
     body = {
         "text": "甲待辨乙",

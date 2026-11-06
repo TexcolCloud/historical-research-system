@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from hrs.processing.checkpoints import atomic_json, read_snapshot
+from hrs.processing.snapshots import atomic_json, read_snapshot
 
 DEFAULTS = {"capacity": 7, "batch_pages": 2, "overlap_reading": False}
 MAX_CAPACITY = 64
@@ -28,30 +28,9 @@ def configured_policy(root):
     return validate(values)
 
 
-def execution_policy(root):
-    result = configured_policy(root)
-    if (Path(root) / "ledger.sqlite3").exists():
-        from hrs.processing.runtime_control import RuntimeControl
-
-        account = RuntimeControl(root).snapshot()["account"]
-        result["capacity"] = min(result["capacity"], account["limit"])
-    return result
-
-
 def configure_execution(root, *, capacity, batch_pages=8, overlap_reading=True):
     values = validate(
         {"capacity": capacity, "batch_pages": batch_pages, "overlap_reading": overlap_reading}
     )
     atomic_json(Path(root) / "execution-policy.json", values)
     return values
-
-
-def record_pressure(root, code):
-    """Called under the workspace command lock; reduce new admissions across books."""
-    if (Path(root) / "ledger.sqlite3").exists():
-        from uuid import uuid4
-
-        from hrs.processing.runtime_control import RuntimeControl
-
-        return RuntimeControl(root).failure(code, "legacy:" + uuid4().hex, scope="account")
-    raise ValueError("Runtime control requires a writable ledger workspace")

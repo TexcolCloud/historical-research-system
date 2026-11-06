@@ -4,7 +4,6 @@ from pathlib import Path
 
 from filelock import FileLock
 
-from hrs.processing.checkpoints import atomic_json as atomic_json
 from hrs.processing.dispatch import Dispatch
 from hrs.processing.hashing import digest as digest
 from hrs.processing.hashing import file_digest as file_digest
@@ -12,6 +11,7 @@ from hrs.processing.human_review_workflow import HumanReviewWorkflow
 from hrs.processing.navigation_workflow import NavigationWorkflow
 from hrs.processing.publication_workflow import PublicationWorkflow
 from hrs.processing.run_workflow import RunWorkflow
+from hrs.processing.snapshots import atomic_json as atomic_json
 from hrs.processing.source_import import SourceImport
 from hrs.processing.task_inspection import TaskInspection
 from hrs.processing.task_workflow import TaskWorkflow
@@ -202,6 +202,7 @@ class Store:
         target_page: int | None,
         target_anchor: str = "",
         decision_id: str | None = None,
+        decision_scope: str | None = None,
     ):
         return self.navigation.navigation_decision(
             document_id,
@@ -210,6 +211,7 @@ class Store:
             target_page=target_page,
             target_anchor=target_anchor,
             decision_id=decision_id,
+            decision_scope=decision_scope,
         )
 
     def pause_document(self, document_id: str):
@@ -273,7 +275,8 @@ class Store:
         markdown: str,
         note: str = "本地确认",
         verdict: str,
-        decision_scope: str = "content",
+        decision_scope: str | None = None,
+        resolutions: list[dict] | None = None,
     ):
         return self.human.record_human_review(
             document_id,
@@ -284,6 +287,7 @@ class Store:
             note=note,
             verdict=verdict,
             decision_scope=decision_scope,
+            resolutions=resolutions,
         )
 
     def record_recovery_failure(self, document_id, expected_request, detail):

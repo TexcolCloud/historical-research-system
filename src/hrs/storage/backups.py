@@ -1,16 +1,8 @@
-"""Coordinated SQL and native checkpoints; restore only into new destinations.
+"""PostgreSQL dump/restore transport; destinations never overwrite an existing database."""
 
-This protects database recovery while the immutable S3 bucket is retained. It is
-not a substitute for an independent backup of the S3 storage volume or bucket.
-"""
-
-import json
 import os
 import re
-import socket
 import subprocess
-import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -18,9 +10,6 @@ from psycopg import sql
 from sqlalchemy.engine import make_url
 
 from hrs.config import load_environment
-from hrs.storage.service import objects_for
-
-DATABASES = ("historical_research_v2", "hrs_temporal_v2", "hrs_temporal_visibility_v2")
 
 
 def connection_details(settings):
@@ -90,93 +79,3 @@ def restore_database(settings, name, source):
         raise RuntimeError(
             f"Restore failed. The new database {name} is retained for inspection; existing databases are untouched."
         )
-
-
-def require_quiesced(settings):
-    result = subprocess.run(
-        ["docker", "ps", "--format", "{{.Names}}"], capture_output=True, text=True, check=True
-    )
-    active = set(result.stdout.splitlines())
-    project = load_environment(settings.project_root).get("COMPOSE_PROJECT_NAME") or "hrs-platform"
-    if active & {f"{project}-tusd-1"}:
-        raise RuntimeError("Stop uploads before a coordinated backup.")
-    for port in (18160, 18170):
-        with socket.socket() as probe:
-            probe.settimeout(1)
-            if probe.connect_ex(("127.0.0.1", port)) == 0:
-                raise RuntimeError("Drain the host API/GPU launcher before a coordinated backup.")
-
-
-def backup(settings):
-    require_quiesced(settings)
-    storage = objects_for(settings)
-    settings.cache_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="database-backup-", dir=settings.cache_root) as folder:
-        references = {}
-        names = (make_url(settings.database_url.get_secret_value()).database,)
-        for name in names:
-            path = Path(folder) / (name + ".dump")
-            dump_database(settings, name, path)
-            references[name] = storage.put_file(path, "application/vnd.postgresql.dump")
-        manifest = {
-            "schema_version": 2,
-            "kind": "quiesced-platform-databases",
-            "created_at": datetime.now(UTC).isoformat(),
-            "databases": references,
-            "required_object_store": {
-                "bucket": settings.s3_bucket,
-                "prefix": "hrs/v2/",
-                "must_be_retained": True,
-            },
-            "scope": "Database recovery only; independent S3 volume/bucket backup is required for storage disaster recovery.",
-        }
-        if settings.processing_backend == "codex":
-            from hrs.processing.backup import snapshot_workspace
-            from hrs.processing.store import Store
-            from hrs.processing.workspace import resolve_workspace
-
-            path = Path(folder) / "native-workspace.zip"
-            checkpoint = snapshot_workspace(Store(resolve_workspace(settings.codex_root)), path)
-            manifest["native_workspace"] = storage.put_file(path, "application/zip")
-            manifest["native_document_ids"] = checkpoint["documents"]
-            manifest["scope"] = (
-                "SQL and native originals/checkpoints; independent S3 volume/bucket backup remains required."
-            )
-        return storage.put_bytes(json.dumps(manifest, ensure_ascii=False).encode("utf-8"))
-
-
-def restore(settings, manifest_reference, suffix, *, native_destination=None):
-    if not re.fullmatch(r"[a-z0-9_]{1,20}", suffix):
-        raise ValueError("Use a short lowercase restore suffix.")
-    storage = objects_for(settings)
-    manifest = json.loads(storage.read_bytes(manifest_reference))
-    names = set(manifest.get("databases", {}))
-    native = (
-        manifest.get("schema_version") == 2 and manifest.get("native_workspace") and len(names) == 1
-    )
-    if manifest.get("kind") != "quiesced-platform-databases" or not (
-        names == set(DATABASES) or native
-    ):
-        raise ValueError("The manifest is not a complete coordinated platform database backup.")
-    if manifest.get("native_workspace") and (
-        native_destination is None or Path(native_destination).exists()
-    ):
-        raise ValueError(
-            "Supply an absent native restore directory for the coordinated checkpoint backup."
-        )
-    settings.cache_root.mkdir(parents=True, exist_ok=True)
-    restored = {}
-    with tempfile.TemporaryDirectory(prefix="database-restore-", dir=settings.cache_root) as folder:
-        for number, (original, reference) in enumerate(manifest["databases"].items()):
-            path = storage.materialize(reference, Path(folder) / "database.dump")
-            destination = f"hrs_restore_{suffix}_{number}"
-            restore_database(settings, destination, path)
-            restored[original] = destination
-        if manifest.get("native_workspace"):
-            from hrs.processing.backup import restore_workspace
-
-            path = storage.materialize(
-                manifest["native_workspace"], Path(folder) / "native-workspace.zip"
-            )
-            restored["native_workspace"] = str(restore_workspace(path, native_destination))
-    return restored

@@ -14,25 +14,27 @@ from sqlalchemy import func, insert, or_, select, update
 
 from hrs.codex.execution import create_runner
 from hrs.library.books import get_run
+from hrs.library.native_workspace import WrongWorkspace, require_workspace, workspace_runs
+from hrs.library.object_ownership import owned_objects
 from hrs.library.projection.artifacts import ProjectionArtifacts
 from hrs.library.projection.changes import NativeChanges
 from hrs.library.projection.commit import ProjectionCommit
 from hrs.library.projection.facts import (
     NAVIGATION_REVIEW_POLICY,
     PROJECTION_POLICY,
+    REVIEW_AUTHORITY_POLICY,
     projection_input,
     projection_state,
 )
 from hrs.library.projection.publication import NativePublication
-from hrs.library.projection.publication import article_groups as article_groups
 from hrs.library.review import Review
 from hrs.library.runs.outputs import Outputs, fingerprint
 from hrs.processing.application import prepare
 from hrs.processing.progress import page_progress as document_progress
 from hrs.processing.store import Store
+from hrs.processing.workspace import identity as workspace_identity
 from hrs.processing.workspace import resolve_workspace
 from hrs.storage import models as db
-from hrs.storage.service import objects_for
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +43,10 @@ class CodexBridge:
     def __init__(self, settings, engine):
         self.settings, self.engine = settings, engine
         self.store = Store(resolve_workspace(settings.codex_root))
+        # Establish immutable workspace identity before the background/read path starts.
+        workspace_identity(self.store)
         self.executor = create_runner(self.store)
-        self.objects = objects_for(settings, engine)
+        self.objects = owned_objects(settings, engine)
         self.outputs, self.review = Outputs(settings, engine), Review(settings, engine)
         self.stop_event = threading.Event()
         self.thread = None
@@ -50,9 +54,7 @@ class CodexBridge:
         self.changes = NativeChanges(self.store.checkpoints)
         self.runtime_projection_sha = None
         self.artifacts = ProjectionArtifacts(self.store, self.objects, self.review, engine)
-        self.commit = ProjectionCommit(
-            engine, workflow_test=(self.store.root / ".workflow-test-authorization.json").exists()
-        )
+        self.commit = ProjectionCommit(engine)
         self.publication = NativePublication(settings, engine, self.objects)
 
     def start(self):
@@ -88,6 +90,7 @@ class CodexBridge:
                     .where(
                         db.outbox.c.delivered.is_(False),
                         db.runs.c.kind == "book",
+                        workspace_runs(self.store),
                         db.outbox.c.kind.in_(["start_book", "review_changed", "retry_run"]),
                         or_(
                             db.runs.c.result["processing_backend"].astext == "codex",
@@ -106,6 +109,8 @@ class CodexBridge:
                 run = get_run(self.engine, event["run_id"])
                 if identity := (run["result"] or {}).get("codex_document_id"):
                     self.changes.pending.setdefault(identity, set())
+            except WrongWorkspace:
+                continue
             except Exception as error:  # noqa: BLE001 - retain each independent run's recoverable failure
                 self.failure(event["run_id"], error)
         runtime_sha = fingerprint(self.store.runtime_control.snapshot())
@@ -123,12 +128,20 @@ class CodexBridge:
                 .where(
                     db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
                     db.runs.c.result["codex_document_id"].astext.is_not(None),
+                    workspace_runs(self.store),
                 )
             )
             if changed is not None:
                 query = query.where(db.runs.c.result["codex_document_id"].astext.in_(changed))
             runs = connection.execute(query).mappings().all()
         failed = set()
+        scoped_runs = []
+        for run in runs:
+            try:
+                scoped_runs.append(require_workspace(self.engine, run, self.store))
+            except WrongWorkspace:
+                continue
+        runs = scoped_runs
         for run in runs:
             identity = run["result"]["codex_document_id"]
             if not self.due(run):
@@ -167,6 +180,14 @@ class CodexBridge:
         for book_id in books:
             deletion = BookCleanup(self.settings, self.engine)
             runs = deletion.runs(book_id)
+            try:
+                for run in runs:
+                    if (run["result"] or {}).get("processing_backend") == "codex" or (
+                        run["result"] or {}
+                    ).get("codex_document_id"):
+                        require_workspace(self.engine, run, self.store)
+            except WrongWorkspace:
+                continue
             native_ids = {
                 r["result"]["codex_document_id"]
                 for r in runs
@@ -174,17 +195,28 @@ class CodexBridge:
             }
             unshared, waiting = [], False
             for doc_id in native_ids:
-                with self.engine.connect() as connection:
-                    shared = connection.scalar(
-                        select(func.count())
-                        .select_from(db.runs)
-                        .join(db.books)
-                        .where(
-                            db.runs.c.result["codex_document_id"].astext == doc_id,
-                            db.runs.c.book_id != book_id,
-                            db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
+                with self.engine.begin() as connection:
+                    owners = (
+                        connection.execute(
+                            select(db.runs)
+                            .join(db.books)
+                            .where(
+                                db.runs.c.result["codex_document_id"].astext == doc_id,
+                                db.runs.c.book_id != book_id,
+                                db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
+                            )
                         )
+                        .mappings()
+                        .all()
                     )
+                    shared = False
+                    for owner in owners:
+                        try:
+                            require_workspace(self.engine, owner, self.store, connection=connection)
+                        except WrongWorkspace:
+                            continue
+                        shared = True
+                        break
                 if not shared and self.store.document_directory(doc_id).exists():
                     result = self.store.cancel_document(doc_id)
                     waiting |= result["state"] == "running"
@@ -200,6 +232,10 @@ class CodexBridge:
                 deletion.deletion_failed(book_id)
 
     def failure(self, run_id, error):
+        try:
+            require_workspace(self.engine, get_run(self.engine, run_id), self.store)
+        except WrongWorkspace:
+            return
         logger.warning("Codex bridge run %s: %s", run_id, type(error).__name__)
         with self.engine.begin() as connection:
             result = (
@@ -248,7 +284,7 @@ class CodexBridge:
             )
 
     def dispatch(self, event):
-        run = get_run(self.engine, event["run_id"])
+        run = require_workspace(self.engine, get_run(self.engine, event["run_id"]), self.store)
         if event["kind"] == "retry_run" and (run["result"] or {}).get("codex_document_id"):
             from hrs.library.runs.recovery import resume_native
 
@@ -269,7 +305,15 @@ class CodexBridge:
                 )
         elif not self.due(run):
             return
-        if event["kind"] in {"start_book", "retry_run"} and not (run["result"] or {}).get(
+        if (
+            event["kind"] in {"start_book", "retry_run"}
+            and not (run["result"] or {}).get("codex_document_id")
+            and (run["result"] or {}).get("native_attach_document_id")
+        ):
+            from hrs.library.native_workbench import complete_attachment
+
+            complete_attachment(self.settings, self.engine, run, self.store, self.objects)
+        elif event["kind"] in {"start_book", "retry_run"} and not (run["result"] or {}).get(
             "codex_document_id"
         ):
             directory = self.store.root / "platform-intake" / run["id"]
@@ -344,42 +388,117 @@ class CodexBridge:
             if doc["pages"][row["page"] - 1]["state"] != "pending":
                 continue
             packet = self.store.human_packet(doc["id"], row["page"])
-            body = self.review.read_json(row["content"])
+            receipt = row["receipt"]
+            if receipt.get("application_state") in {"rejected", "applied"}:
+                continue
+            body = self.review.read_json(receipt.get("review_content") or row["content"])
             if body.get("codex_revision", 1) != doc.get("revision", 1):
                 continue
-            if body.get("codex_input_sha256") != packet["input_sha256"]:
-                raise ValueError(
-                    "Native review input changed; the old platform decision cannot replace it"
+            if (receipt.get("codex_input_sha256") or body.get("codex_input_sha256")) != packet[
+                "input_sha256"
+            ]:
+                self.reject_decision(
+                    run, row, "原生核对底稿已经变化，原决定保留；请重新核对当前页。"
                 )
+                applied = True
+                continue
             text = (
                 self.objects.read_bytes(row["replacement"]).decode("utf-8")
                 if row["replacement"]
                 else body["text"]
             )
-            scope = (
-                "workflow_test"
-                if (self.store.root / ".workflow-test-authorization.json").exists()
-                else "content"
+            scope = receipt.get("decision_scope") or (
+                "workflow_test" if receipt.get("workflow_test") else "content"
             )
-            self.store.record_human_review(
-                doc["id"],
-                row["page"],
-                input_sha256=packet["input_sha256"],
-                markdown=text,
-                verdict="approved",
-                decision_scope=scope,
-                note="用户授权流程测试放行，未证明内容准确率"
-                if scope == "workflow_test"
-                else "本地确认",
-            )
+            try:
+                self.store.record_human_review(
+                    doc["id"],
+                    row["page"],
+                    input_sha256=packet["input_sha256"],
+                    markdown=text,
+                    verdict="approved",
+                    decision_scope=scope,
+                    resolutions=receipt.get("resolutions"),
+                    note="用户授权流程测试放行，未证明内容准确率"
+                    if scope == "workflow_test"
+                    else "本地确认",
+                )
+            except ValueError as error:
+                self.reject_decision(run, row, str(error))
+                applied = True
+                continue
+            with self.engine.begin() as connection:
+                connection.execute(
+                    update(db.review_decisions)
+                    .where(db.review_decisions.c.id == receipt["decision_id"])
+                    .values(receipt={**receipt, "application_state": "applied"})
+                )
             applied = True
         return applied
 
-    @staticmethod
-    def projection_input(doc):
-        return projection_input(doc)
+    def reject_decision(self, run, issue, reason):
+        """Retain a stale decision while reopening a source-bound human handoff."""
+        receipt = issue["receipt"]
+        draft = issue["draft"]
+        replacement = receipt.get("replacement") or issue["replacement"]
+        if replacement:
+            draft = {
+                **replacement,
+                "base_text_sha256": issue["text_sha256"],
+                "base_content": receipt.get("review_content") or issue["content"],
+                **(
+                    {"previous_draft": draft}
+                    if draft and draft["sha256"] != replacement["sha256"]
+                    else {}
+                ),
+            }
+        with self.engine.begin() as connection:
+            connection.execute(
+                select(db.runs.c.id).where(db.runs.c.id == run["id"]).with_for_update()
+            )
+            connection.execute(
+                update(db.review_decisions)
+                .where(db.review_decisions.c.id == receipt["decision_id"])
+                .values(
+                    receipt={
+                        **receipt,
+                        "application_state": "rejected",
+                        "application_error": reason,
+                    }
+                )
+            )
+            connection.execute(
+                update(db.review_issues)
+                .where(db.review_issues.c.id == issue["id"])
+                .values(
+                    state="pending",
+                    revision=db.review_issues.c.revision + 1,
+                    replacement=None,
+                    draft=draft,
+                )
+            )
+            connection.execute(
+                update(db.runs)
+                .where(db.runs.c.id == run["id"])
+                .values(
+                    revision=db.runs.c.revision + 1,
+                    pending_count=1
+                    + connection.scalar(
+                        select(func.count())
+                        .select_from(db.review_issues)
+                        .where(
+                            db.review_issues.c.run_id == run["id"],
+                            db.review_issues.c.state == "pending",
+                            db.review_issues.c.id != issue["id"],
+                        )
+                    ),
+                    state="awaiting_review",
+                    stage="review",
+                )
+            )
 
     def sync(self, run):
+        run = require_workspace(self.engine, run, self.store)
         if not self.due(run) or run["result"].get("codex_recovery", {}).get("state") in {
             "checking",
             "waiting",
@@ -417,6 +536,7 @@ class CodexBridge:
         run = self.publication.index_if_needed(run, doc)
         if self.apply_decisions(run, doc):
             doc = self.store.status(doc_id)
+            run = get_run(self.engine, run["id"])
         input_sha = projection_input(doc, self.store.runtime_control.snapshot())
         navigation_sha = doc.get("navigation", {}).get("sha256")
         scheduling = self.store.scheduling_snapshot(doc_id)
@@ -424,6 +544,7 @@ class CodexBridge:
         key = fingerprint(
             {
                 "projection_policy": PROJECTION_POLICY,
+                "review_authority_policy": REVIEW_AUTHORITY_POLICY,
                 "navigation_review_policy": NAVIGATION_REVIEW_POLICY,
                 "page_progress": page_progress,
                 "pages": doc["pages"],
@@ -446,7 +567,7 @@ class CodexBridge:
             run, doc, scheduling, pending, publication_sha, navigation_sha
         )
         if doc["organization"]:
-            self.publish_chapters(run, doc)
+            self.publication.publish_chapters(run, doc)
         prepared_issues = self.artifacts.issues(run, doc, pending, boundaries)
         self.project_nodes(run, doc, state)
         self.commit.apply(
@@ -520,9 +641,6 @@ class CodexBridge:
                 )
             )
         self.outputs.nodes(run["id"], records)
-
-    def publish_chapters(self, run, doc):
-        return self.publication.publish_chapters(run, doc)
 
     @staticmethod
     def due(run):

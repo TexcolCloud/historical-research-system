@@ -95,6 +95,9 @@ def test_recovery_report_uses_current_blocking_scope_instead_of_generic_retry(
             "result": {"codex_document_id": doc["id"]},
         },
     )
+    monkeypatch.setattr(
+        "hrs.library.native_workspace.require_workspace", lambda engine, run, store: run
+    )
     report = native_report(SimpleNamespace(codex_root=tmp_path), None, "run")
     assert report["state"] == "blocked"
     assert report["retry_at"] is None

@@ -9,9 +9,9 @@ from importlib.metadata import version
 import pypdfium2 as pdfium
 from PIL import Image, ImageOps
 
-from hrs.processing.checkpoints import atomic_json
 from hrs.processing.hashing import file_digest
 from hrs.processing.render import _atomic_bytes
+from hrs.processing.snapshots import atomic_json
 from hrs.processing.store import Store
 
 

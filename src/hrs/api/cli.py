@@ -22,11 +22,23 @@ def main():
         ],
     )
     parser.add_argument(
-        "--manifest-reference", help="JSON S3 reference returned by backup; contains no credentials"
+        "--manifest-reference",
+        help="Backup manifest path or JSON receipt; historical S3 references remain readable",
+    )
+    parser.add_argument("--destination", help="New independent local backup directory")
+    parser.add_argument(
+        "--additional-native-root",
+        action="append",
+        default=[],
+        help="Additional stopped native workspace required by SQL; repeat for multiple roots",
+    )
+    parser.add_argument(
+        "--restore-bucket", help="Empty object-store bucket for independent restoration"
     )
     parser.add_argument("--restore-suffix", help="New isolated destination database suffix")
     parser.add_argument(
-        "--restore-native-root", help="Absent isolated directory for native checkpoint restore"
+        "--restore-native-root",
+        help="Absent restore directory; multiple workspaces restore under workspace-ID subdirectories",
     )
     parser.add_argument("--run-id", help="Published book run to reindex without repeating OCR")
     parser.add_argument(
@@ -121,21 +133,37 @@ def main():
         return
     if args.command in {"backup", "restore"}:
         import json
+        from pathlib import Path
 
-        from hrs.storage.backups import backup, restore
+        from hrs.backups import backup, restore
 
         if args.command == "restore" and (not args.manifest_reference or not args.restore_suffix):
             parser.error("restore requires --manifest-reference and --restore-suffix")
-        result = (
-            backup(Settings.load())
-            if args.command == "backup"
-            else restore(
+        if args.command == "restore" and args.additional_native_root:
+            parser.error("--additional-native-root is a backup option")
+        if args.command == "backup":
+            result = backup(
                 Settings.load(),
-                json.loads(args.manifest_reference),
+                destination=args.destination,
+                native_roots=args.additional_native_root,
+            )
+        else:
+            reference = args.manifest_reference
+            if not reference.lstrip().startswith(("{", '"')) and Path(reference).is_file():
+                selected = reference
+            else:
+                selected = json.loads(reference)
+            settings = Settings.load()
+            if args.restore_bucket:
+                if isinstance(selected, dict) and "key" in selected:
+                    parser.error("Historical S3 references require their original retained bucket.")
+                settings = settings.model_copy(update={"s3_bucket": args.restore_bucket})
+            result = restore(
+                settings,
+                selected,
                 args.restore_suffix,
                 native_destination=args.restore_native_root,
             )
-        )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     if args.command == "doctor":

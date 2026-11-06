@@ -25,19 +25,21 @@ def create_app(settings=None, engine=None):
     @asynccontextmanager
     async def lifespan(app):
         bridge = None
-        if owned_engine and settings.processing_backend == "codex":
-            from hrs.library.processing_bridge import CodexBridge
-
-            bridge = CodexBridge(settings, engine)
-            app.state.codex_bridge = bridge
-            bridge.start()
         try:
+            if owned_engine and settings.processing_backend == "codex":
+                from hrs.library.processing_bridge import CodexBridge
+
+                bridge = CodexBridge(settings, engine)
+                app.state.codex_bridge = bridge
+                bridge.start()
             yield
         finally:
-            if bridge:
-                bridge.stop()
-            if owned_engine:
-                engine.dispose()
+            try:
+                if bridge:
+                    bridge.stop()
+            finally:
+                if owned_engine:
+                    engine.dispose()
 
     from hrs import __version__
 

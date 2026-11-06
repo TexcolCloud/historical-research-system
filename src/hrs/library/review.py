@@ -7,15 +7,17 @@ from sqlalchemy import func, insert, select, update
 
 from hrs.library.errors import ServiceError
 from hrs.library.footnotes import resolve_footnotes
+from hrs.library.object_ownership import owned_objects
 from hrs.library.records import text_digest as digest
+from hrs.processing.acceptance import decision_scope as resolve_decision_scope
+from hrs.processing.workspace import resolve_workspace
 from hrs.storage import models as db
-from hrs.storage.service import objects_for
 
 
 class Review:
     def __init__(self, settings, engine):
         self.settings, self.engine = settings, engine
-        self.objects = objects_for(settings, engine)
+        self.objects = owned_objects(settings, engine)
 
     def read_json(self, reference):
         return json.loads(self.objects.read_bytes(reference))
@@ -277,18 +279,31 @@ class Review:
         draft_text = self.objects.read_bytes(row["draft"]).decode("utf-8") if row["draft"] else None
         draft_locations = (row["draft"] or {}).get("review_locations")
         draft_locations_hash = (row["draft"] or {}).get("review_locations_text_sha256")
-        if draft_text is None or draft_locations_hash != digest(draft_text):
+        draft_base = (row["draft"] or {}).get("base_text_sha256")
+        draft_conflict = bool(
+            draft_text is not None and draft_base and draft_base != row["text_sha256"]
+        )
+        if draft_text is None or draft_locations_hash != digest(draft_text) or draft_conflict:
             draft_locations, draft_locations_hash = None, None
+        resolutions = [] if draft_conflict else (row["draft"] or {}).get("review_resolutions", [])
+        if body.get("codex_input_sha256"):
+            current_ids = {location["id"] for location in body["locations"]}
+            resolutions = [
+                resolution for resolution in resolutions if resolution["id"] in current_ids
+            ]
         return {
             **row,
             **body,
+            "review_input_sha256": body.get("codex_input_sha256"),
             "footnotes": resolve_footnotes(
                 body["text"], [{"text": body["text"], "source": {"pages": body["pages"]}}]
             ),
             "draft_text": draft_text,
+            "draft_conflict": draft_conflict,
+            "draft_base_text_sha256": draft_base,
             "draft_locations": draft_locations,
             "draft_locations_text_sha256": draft_locations_hash,
-            "resolutions": (row["draft"] or {}).get("review_resolutions", []),
+            "resolutions": resolutions,
             "images": [f"/api/v2/runs/{row['run_id']}/artifacts/{name}" for name in body["images"]],
         }
 
@@ -301,7 +316,19 @@ class Review:
             raise ServiceError(404, "核对问题不存在。")
         return run_id
 
+    def require_workspace(self, run_id):
+        from hrs.library.books import get_run
+        from hrs.library.native_workspace import require_workspace
+        from hrs.processing.store import Store
+
+        return require_workspace(
+            self.engine,
+            get_run(self.engine, run_id),
+            Store(resolve_workspace(self.settings.codex_root)),
+        )
+
     def save_draft(self, issue_id, request):
+        self.require_workspace(self.issue_run(issue_id))
         from hrs.library.draft_locations import normalize_draft_locations
 
         locations = None
@@ -344,6 +371,11 @@ class Review:
                 raise ServiceError(404, "核对问题不存在。")
             if row["state"] != "pending":
                 raise ServiceError(409, "本项已审核，不能再保存草稿。")
+            reference = {
+                **reference,
+                "base_text_sha256": row["text_sha256"],
+                "base_content": row["content"],
+            }
             if row["revision"] == request.expected_revision + 1 and row["draft"] == reference:
                 return {"revision": row["revision"], **receipt}
             if row["revision"] != request.expected_revision:
@@ -364,10 +396,12 @@ class Review:
             raise ServiceError(
                 409, "旧执行链已退役，原件、历史结果和草稿保留；请将原件导入原生流程后继续核对。"
             )
+        self.require_workspace(run["id"])
         issue_id = str(issue_id)
-        request_hash = digest(
-            json.dumps(request.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
-        )
+        payload = request.model_dump(mode="json")
+        if payload.get("decision_scope") is None:
+            payload.pop("decision_scope", None)
+        request_hash = digest(json.dumps(payload, sort_keys=True, ensure_ascii=False))
         if (request.action == "correct") != (request.text is not None):
             raise ServiceError(422, "修改并确认需要提交正文；直接放行不能附带未确认的修改。")
         replacement = (
@@ -393,6 +427,12 @@ class Review:
                 if existing["issue_id"] != issue_id or existing["request_sha256"] != request_hash:
                     raise ServiceError(409, "同一决定标识不能用于不同内容。")
                 return existing["receipt"]
+            try:
+                scope = resolve_decision_scope(
+                    resolve_workspace(self.settings.codex_root), request.decision_scope
+                )
+            except ValueError as error:
+                raise ServiceError(409, str(error)) from error
             # Lock the parent first for consistent ordering across simultaneous decisions.
             run_id = connection.scalar(
                 select(db.review_issues.c.run_id).where(db.review_issues.c.id == issue_id)
@@ -493,6 +533,11 @@ class Review:
                         "resolved_text_sha256": digest(request.text)
                         if request.text is not None
                         else issue["text_sha256"],
+                        "decision_scope": scope,
+                        "review_content": issue["content"],
+                        "replacement": replacement,
+                        "codex_input_sha256": issue["content"].get("codex_input_sha256"),
+                        "application_state": "pending",
                         **(
                             {
                                 "reviewer": "user-authorized-workflow-test",
@@ -500,11 +545,7 @@ class Review:
                                 "workflow_test": True,
                                 "content_verified": False,
                             }
-                            if (run["result"] or {}).get("codex_document_id")
-                            and self.settings.codex_root
-                            and (
-                                self.settings.codex_root / ".workflow-test-authorization.json"
-                            ).exists()
+                            if scope == "workflow_test"
                             else {}
                         ),
                     },

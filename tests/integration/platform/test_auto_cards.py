@@ -19,5 +19,5 @@ def test_card_retry_api_returns_gone_without_creating_work(monkeypatch):
 
     monkeypatch.setattr(runs.books, "get_run", lambda *_: {"kind": "cards"})
     with pytest.raises(ServiceError) as error:
-        runs.retry(None, "card-run", SimpleNamespace(request_id="request"))
+        runs.retry(None, None, "card-run", SimpleNamespace(request_id="request"))
     assert error.value.status_code == 410

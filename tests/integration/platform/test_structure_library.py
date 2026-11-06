@@ -13,7 +13,7 @@ from .test_structure_views import table
 
 
 def seed_structure_book(settings, engine):
-    run, issues = seed(engine, native=False)
+    run, issues = seed(engine, native=False, settings=settings)
     library = Library(settings, engine)
     objects = library.review.objects
 

@@ -9,7 +9,11 @@ from hrs.library.review import Review, digest
 from hrs.storage import models as db
 
 
-def seed(engine, *, native=True):
+def seed(engine, *, native=True, settings):
+    from hrs.processing.store import Store
+    from hrs.processing.workspace import identity, resolve_workspace
+
+    workspace_id = identity(Store(resolve_workspace(settings.codex_root)))["workspace_id"]
     book, upload, run = [str(uuid4()) for _ in range(3)]
     ids = [str(uuid4()) for _ in range(2)]
     with engine.begin() as conn:
@@ -37,7 +41,14 @@ def seed(engine, *, native=True):
                 pending_count=2,
                 result={
                     "review_initialized": True,
-                    **({"codex_document_id": "technical-fixture"} if native else {}),
+                    **(
+                        {
+                            "codex_document_id": "technical-fixture",
+                            "codex_workspace_id": workspace_id,
+                        }
+                        if native
+                        else {}
+                    ),
                 },
             )
         )
@@ -60,7 +71,7 @@ def seed(engine, *, native=True):
 
 def test_confirmation_only_updates_one_issue_and_replays_receipt(platform, monkeypatch):
     settings, engine = platform
-    run, ids = seed(engine)
+    run, ids = seed(engine, settings=settings)
     review = Review(settings, engine)
 
     def forbidden(*args, **kwargs):
@@ -90,7 +101,7 @@ def test_confirmation_only_updates_one_issue_and_replays_receipt(platform, monke
 
 def test_stale_or_changed_confirmation_is_rejected_and_last_issue_releases_gate(platform):
     settings, engine = platform
-    run, ids = seed(engine)
+    run, ids = seed(engine, settings=settings)
     with TestClient(create_app(settings, engine)) as client:
         for index, identity in enumerate(ids):
             request = {
@@ -112,7 +123,7 @@ def test_stale_or_changed_confirmation_is_rejected_and_last_issue_releases_gate(
 
 def test_saved_draft_is_durable_without_releasing_any_review_scope(platform):
     settings, engine = platform
-    run, ids = seed(engine)
+    run, ids = seed(engine, settings=settings)
     with TestClient(create_app(settings, engine)) as client:
         url = f"/api/v2/reviews/{ids[0]}/draft"
         request = {"expected_revision": 1, "text": "用户尚未确认的草稿"}
@@ -137,7 +148,7 @@ def test_legacy_confirmation_requires_migration_without_changing_retained_work(
     from hrs.library.errors import ServiceError
 
     settings, engine = platform
-    run, ids = seed(engine, native=False)
+    run, ids = seed(engine, native=False, settings=settings)
     review = Review(settings, engine)
     monkeypatch.setattr(
         review.objects,

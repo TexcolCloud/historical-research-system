@@ -9,7 +9,7 @@ from urllib.request import urlopen
 from uuid import uuid4
 
 from hrs.config import project_root
-from hrs.processing.checkpoints import atomic_json, read_snapshot
+from hrs.processing.snapshots import atomic_json, read_snapshot
 from hrs.processing.store import Store
 
 PROJECT = project_root()

@@ -2,7 +2,17 @@
 
 from fastapi import APIRouter
 
-from hrs.api.routes import books, cards, events, health, library, reviews, runs, uploads
+from hrs.api.routes import (
+    books,
+    cards,
+    events,
+    health,
+    library,
+    native_workbench,
+    reviews,
+    runs,
+    uploads,
+)
 
 api_router = APIRouter()
 api_router.include_router(books.router)
@@ -13,3 +23,4 @@ api_router.include_router(library.router)
 api_router.include_router(uploads.router)
 api_router.include_router(events.router)
 api_router.include_router(health.router)
+api_router.include_router(native_workbench.router)

@@ -110,7 +110,7 @@ def _main() -> None:
             "document_id": doc["id"],
             "run_request": request,
             "workspace": identity(store),
-            "workbench": ensure_workbench(store),
+            "workbench": ensure_workbench(store, document_id=doc["id"]),
         }
     elif args.command == "run":
         from hrs.processing.runner import Runner
