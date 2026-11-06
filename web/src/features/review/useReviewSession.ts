@@ -15,6 +15,7 @@ import {
   type ReviewLocation,
 } from "@/editor/review-highlights.ts";
 import type { Resolution } from "./ReviewFocus.tsx";
+import type { RuntimeScope } from "@/app/runtime-scope.ts";
 
 type EditorMode =
   | { kind: "read" }
@@ -25,28 +26,53 @@ type Issue = components["schemas"]["ReviewIssue"];
 export function useReviewSession(
   issue: Issue,
   onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void,
+  runtimeScope: RuntimeScope = "content",
 ) {
   const query = useQueryClient(),
     draftKey = ["platform", "review-edit", issue.id];
   const cached = query.getQueryData<
-    string | { text: string; locations: ReviewLocation[] }
+    | string
+    | {
+        text: string;
+        locations: ReviewLocation[];
+        baseTextSha?: string;
+        baseReviewInput?: string;
+      }
   >(draftKey);
+  const reviewInput =
+    ("review_input_sha256" in issue &&
+      typeof issue.review_input_sha256 === "string" &&
+      issue.review_input_sha256) ||
+    issue.text_sha256;
+  const draftConflict =
+    ("draft_conflict" in issue && issue.draft_conflict === true) ||
+    (typeof cached === "object" &&
+      (cached.baseTextSha !== issue.text_sha256 ||
+        cached.baseReviewInput !== reviewInput));
+  const [conflictUntouched, setConflictUntouched] = useState(
+    Boolean(draftConflict),
+  );
+  const conflictUntouchedRef = useRef(conflictUntouched);
+  conflictUntouchedRef.current = conflictUntouched;
   const [text, setText] = useState(
     (typeof cached === "string" ? cached : cached?.text) ??
       issue.draft_text ??
       issue.text,
   );
   const [resolutions, setResolutions] = useState<Resolution[]>(
-    issue.resolutions ?? [],
+    draftConflict ? [] : (issue.resolutions ?? []),
   );
   const baseLocations = useMemo(
     () => readLocations(issue.locations ?? [], issue.text, issue.text_sha256),
     [issue.locations, issue.text, issue.text_sha256],
   );
   const [textLocations, setTextLocations] = useState(() => {
-    if (cached && typeof cached !== "string") return cached.locations;
+    if (cached && typeof cached !== "string" && !draftConflict)
+      return cached.locations;
     const restored =
-      text === issue.draft_text && issue.draft_locations_text_sha256
+      !draftConflict &&
+      text === issue.draft_text &&
+      issue.draft_locations_text_sha256
         ? readLocations(
             issue.draft_locations ?? [],
             text,
@@ -62,6 +88,7 @@ export function useReviewSession(
     () =>
       baseLocations.find(
         (l) =>
+          draftConflict ||
           !issue.resolutions?.some(
             (r) => r.id === l.id && r.action !== "defer",
           ),
@@ -146,13 +173,27 @@ export function useReviewSession(
       return data;
     },
     onSuccess: (data) =>
-      query.setQueryData(queryKeys.issue(issue.id), {
-        ...issue,
-        revision: data.revision,
-        draft_text: data.draft_text,
-        resolutions: data.resolutions,
-        draft_locations: data.locations,
-        draft_locations_text_sha256: data.locations_text_sha256,
+      query.setQueryData<Issue>(queryKeys.issue(issue.id), (current) => {
+        if (
+          current &&
+          (current.text_sha256 !== issue.text_sha256 ||
+            ("review_input_sha256" in current &&
+              "review_input_sha256" in issue &&
+              current.review_input_sha256 !== issue.review_input_sha256) ||
+            current.revision > data.revision)
+        )
+          return current;
+        return {
+          ...issue,
+          draft_conflict: false,
+          revision: data.revision,
+          draft_text: data.draft_text,
+          resolutions: data.resolutions,
+          draft_locations: data.locations
+            ? serializeReviewLocations(data.locations)
+            : data.locations,
+          draft_locations_text_sha256: data.locations_text_sha256,
+        };
       }),
   });
   function saveDraft(
@@ -172,7 +213,8 @@ export function useReviewSession(
     if (
       (text === savedText.current &&
         JSON.stringify(resolutions) === savedResolutions.current) ||
-      draft.isError
+      draft.isError ||
+      conflictUntouched
     )
       return;
     const timer = setTimeout(() => {
@@ -181,12 +223,14 @@ export function useReviewSession(
         .catch(() => undefined);
     }, 800);
     return () => clearTimeout(timer);
-  }, [text, resolutions, textLocations, draft.isError]);
+  }, [text, resolutions, textLocations, draft.isError, conflictUntouched]);
   useEffect(
     () => () => {
       if (
-        latestText.current !== savedText.current ||
-        JSON.stringify(latestResolutions.current) !== savedResolutions.current
+        !conflictUntouchedRef.current &&
+        (latestText.current !== savedText.current ||
+          JSON.stringify(latestResolutions.current) !==
+            savedResolutions.current)
       )
         void saveRef.current(latestText.current).catch(() => undefined);
     },
@@ -194,6 +238,7 @@ export function useReviewSession(
   );
 
   function changeText(value: string) {
+    setConflictUntouched(false);
     const nextLocations = moveReviewLocations(text, value, textLocations);
     const retained = resolutions.filter((r) => {
       const location = textLocations.find((l) => l.id === r.id),
@@ -225,7 +270,12 @@ export function useReviewSession(
     setTextLocations(nextLocations);
     latestLocations.current = nextLocations;
     setPageReviewed(false);
-    query.setQueryData(draftKey, { text: value, locations: nextLocations });
+    query.setQueryData(draftKey, {
+      text: value,
+      locations: nextLocations,
+      baseTextSha: issue.text_sha256,
+      baseReviewInput: reviewInput,
+    });
     draft.reset();
   }
   function beginEdit() {
@@ -252,6 +302,8 @@ export function useReviewSession(
     query.setQueryData(draftKey, {
       text: previous.text,
       locations: previous.locations,
+      baseTextSha: issue.text_sha256,
+      baseReviewInput: reviewInput,
     });
     setResolutions(previous.resolutions);
     latestResolutions.current = previous.resolutions;
@@ -267,6 +319,7 @@ export function useReviewSession(
   async function finish(action: Resolution["action"]) {
     if (finishing) return;
     setFinishing(true);
+    setConflictUntouched(false);
     const decisions = current
       ? [
           ...resolutions.filter((r) => r.id !== current.id),
@@ -317,6 +370,8 @@ export function useReviewSession(
   const submission = useMutation({
     mutationKey: ["platform", "review-write", issue.run_id],
     mutationFn: async () => {
+      if (runtimeScope === "unknown")
+        throw new Error("工作区范围未确认，请重新确认后提交；当前草稿保留。");
       await saveDraft(text);
       const action = changed ? "correct" : "confirm";
       if (
@@ -334,9 +389,16 @@ export function useReviewSession(
           ...(changed ? { text } : {}),
           ...(locations.length ? { resolutions } : {}),
         };
+      const decision = {
+        ...request.current,
+        decision_scope:
+          runtimeScope === "workflow_only"
+            ? ("workflow_test" as const)
+            : ("content" as const),
+      };
       const { data, response } = await client.POST(
         "/api/v2/reviews/{issue_id}/decisions",
-        { params: { path: { issue_id: issue.id } }, body: request.current },
+        { params: { path: { issue_id: issue.id } }, body: decision },
       );
       if (!data)
         throw new Error(
@@ -369,6 +431,7 @@ export function useReviewSession(
     submission,
     busy,
     completed,
+    draftConflict,
     recheckPage,
     setActive,
     finish,

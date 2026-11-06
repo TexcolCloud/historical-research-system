@@ -1,20 +1,13 @@
-"""Pin immutable objects to their producing run before publishing references."""
+"""S3 configuration, immutable read caching and database advisory object locks."""
 
-import hashlib
-import mimetypes
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from contextvars import ContextVar
 from threading import Lock
 
-from sqlalchemy import select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import text
 
-from hrs.storage import models as db
-from hrs.storage.objects import S3Objects, file_digest
-
-storage_heartbeat = ContextVar("storage_heartbeat", default=None)
+from hrs.storage.objects import S3Objects
 
 
 @contextmanager
@@ -26,8 +19,6 @@ def object_lock(engine, key):
         while not connection.scalar(
             text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": key}
         ):
-            if heartbeat := storage_heartbeat.get():
-                heartbeat()
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     "Object storage operation is still in progress; retry this stage."
@@ -58,66 +49,15 @@ def cached_bytes(objects, reference):
     return value
 
 
-class OwnedObjects(S3Objects):
-    def __init__(self, *, engine, **options):
-        super().__init__(**options)
-        self.engine = engine
-
-    def _owned(self, run_id, reference, write):
-        if run_id is None:
-            # Backups/standalone tooling have no book lifecycle. Production book
-            # writers pass run_id; legacy references remain readable.
-            return write()
-        from hrs.library.deletion import require_active
-
-        with object_lock(self.engine, reference["key"]):
-            # A durable pin precedes I/O. Failed uploads leave a deletable pin,
-            # never an unowned file. Book state locks protect only this short commit.
-            with self.engine.begin() as connection:
-                book = connection.scalar(
-                    select(db.runs.c.book_id).where(db.runs.c.id == str(run_id))
-                )
-                require_active(connection, book)
-                connection.execute(
-                    pg_insert(db.object_owners)
-                    .values(run_id=str(run_id), key=reference["key"], reference=reference)
-                    .on_conflict_do_nothing()
-                )
-            return write()
-
-    def put_bytes(self, content, media_type="application/json", *, run_id=None):
-        sha = hashlib.sha256(content).hexdigest()
-        reference = {
-            "key": f"hrs/v2/objects/{sha[:2]}/{sha}",
-            "sha256": sha,
-            "byte_length": len(content),
-            "media_type": media_type,
-        }
-        return self._owned(
-            run_id, reference, lambda: super(OwnedObjects, self).put_bytes(content, media_type)
-        )
-
-    def put_file(self, path, media_type=None, *, run_id=None):
-        sha, size = file_digest(path)
-        reference = {
-            "key": f"hrs/v2/objects/{sha[:2]}/{sha}",
-            "sha256": sha,
-            "byte_length": size,
-            "media_type": media_type
-            or mimetypes.guess_type(str(path))[0]
-            or "application/octet-stream",
-        }
-        return self._owned(
-            run_id, reference, lambda: super(OwnedObjects, self).put_file(path, media_type)
-        )
+def object_options(settings):
+    return {
+        "endpoint": settings.s3_endpoint,
+        "bucket": settings.s3_bucket,
+        "access_key": settings.s3_access_key.get_secret_value(),
+        "secret_key": settings.s3_secret_key.get_secret_value(),
+        "region": settings.s3_region,
+    }
 
 
-def objects_for(settings, engine=None):
-    return OwnedObjects(
-        engine=engine,
-        endpoint=settings.s3_endpoint,
-        bucket=settings.s3_bucket,
-        access_key=settings.s3_access_key.get_secret_value(),
-        secret_key=settings.s3_secret_key.get_secret_value(),
-        region=settings.s3_region,
-    )
+def objects_for(settings):
+    return S3Objects(**object_options(settings))

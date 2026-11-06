@@ -17,6 +17,7 @@ export default function NavigationReview({
   report: latestReport,
   runId,
   busy,
+  approvalReady = true,
   onDecide,
   onCancel,
   error,
@@ -27,6 +28,7 @@ export default function NavigationReview({
   report: Report;
   runId: string;
   busy: boolean;
+  approvalReady?: boolean;
   onDecide: (choice: NavigationChoice | null, sha: string) => void;
   onCancel: () => void;
   error?: string;
@@ -122,6 +124,7 @@ export default function NavigationReview({
             <Button
               disabled={
                 busy ||
+                !approvalReady ||
                 !candidate ||
                 opening === null ||
                 evidence.isFetching ||
@@ -195,7 +198,7 @@ export default function NavigationReview({
             <p>这条目录仍会显示，但不能点击跳转；正文和原图均保留。</p>
             <Button
               variant="outline"
-              disabled={busy}
+              disabled={busy || !approvalReady}
               onClick={() => onDecide(null, sha)}
             >
               {busy ? "正在保存…" : "保留目录文字，不设置跳转"}

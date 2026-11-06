@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Historical Research Platform",
-    "version": "0.2.0"
+    "version": "0.2.1"
   },
   "paths": {
     "/api/v2/books": {
@@ -1815,6 +1815,45 @@
           }
         }
       }
+    },
+    "/api/v2/native-workbench": {
+      "post": {
+        "tags": [
+          "workbench"
+        ],
+        "summary": "Native Workbench",
+        "operationId": "native_workbench_api_v2_native_workbench_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeWorkbenchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3036,8 +3075,43 @@
         "type": "object",
         "title": "HistoricalDate"
       },
+      "NativeWorkbenchRequest": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{24}$",
+            "title": "Document Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Workspace Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "workspace_id"
+        ],
+        "title": "NativeWorkbenchRequest"
+      },
       "NavigationDecision": {
         "properties": {
+          "decision_scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "content",
+                  "workflow_test"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Scope"
+          },
           "decision_id": {
             "anyOf": [
               {
@@ -3724,6 +3798,21 @@
       },
       "ReviewDecision": {
         "properties": {
+          "decision_scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "content",
+                  "workflow_test"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Scope"
+          },
           "decision_id": {
             "type": "string",
             "format": "uuid",
@@ -3860,6 +3949,17 @@
             "type": "string",
             "title": "Text"
           },
+          "review_input_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Input Sha256"
+          },
           "proposed_text": {
             "anyOf": [
               {
@@ -3881,6 +3981,22 @@
               }
             ],
             "title": "Draft Text"
+          },
+          "draft_conflict": {
+            "type": "boolean",
+            "title": "Draft Conflict",
+            "default": false
+          },
+          "draft_base_text_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Base Text Sha256"
           },
           "reasons": {
             "items": {

@@ -6,9 +6,9 @@ from contextlib import ExitStack
 
 from filelock import FileLock
 
-from hrs.processing.checkpoints import atomic_json, read_snapshot
 from hrs.processing.hashing import digest, file_digest
 from hrs.processing.ledger import Ledger
+from hrs.processing.snapshots import atomic_json, read_snapshot
 
 
 def migrate(repository, validate):

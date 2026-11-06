@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import time
 
+from hrs.processing.acceptance import decision_scope as resolve_decision_scope
 from hrs.processing.hashing import digest
 from hrs.processing.workflow_rules import (
     new_task,
@@ -243,7 +243,8 @@ class HumanReviewWorkflow:
         markdown: str,
         note: str = "本地确认",
         verdict: str,
-        decision_scope: str = "content",
+        decision_scope: str | None = None,
+        resolutions: list[dict] | None = None,
     ) -> dict:
         """Record an explicit local form submission. Deliberately not exposed through MCP."""
         if verdict not in {"approved", "pending"} or not reviewer.strip() or not note.strip():
@@ -252,19 +253,31 @@ class HumanReviewWorkflow:
             )
         if not isinstance(markdown, str):
             raise ValueError("Human review requires full page Markdown")
-        if decision_scope not in {"content", "workflow_test"}:
-            raise ValueError("Unknown decision scope")
-        if decision_scope == "workflow_test":
-            authorization = self.context.repository.root / ".workflow-test-authorization.json"
-            if not authorization.exists() or not json.loads(authorization.read_text("utf-8")).get(
-                "enabled"
-            ):
-                raise ValueError("Workflow-test release requires explicit workspace authorization")
+        if resolutions is not None and (
+            not isinstance(resolutions, list)
+            or any(
+                not isinstance(item, dict)
+                or not isinstance(item.get("id"), str)
+                or item.get("action") not in {"keep", "adopt", "edit", "defer"}
+                for item in resolutions
+            )
+            or len({item["id"] for item in resolutions}) != len(resolutions)
+            or (verdict == "approved" and any(item["action"] == "defer" for item in resolutions))
+        ):
+            raise ValueError("Review resolutions require distinct issue IDs and final actions")
+        # A draft preserves work without granting approval, including when permission
+        # needs repair. Final decisions must bind to a valid current scope.
+        decision_scope = (
+            resolve_decision_scope(self.context.repository.root, decision_scope)
+            if verdict == "approved"
+            else "draft"
+        )
         with self.context.verified(document_id) as doc:
             require_active(doc, allow_paused=True)
             packet = self.packet(doc, page)
             if digest(packet) != input_sha256:
                 raise ValueError("Review input changed; reload before deciding")
+            previous = next(t for t in doc["tasks"] if t["task_id"] == packet["pending_task_id"])
             task = new_task("human_review", page)
             receipt = {
                 "task_id": task["task_id"],
@@ -284,12 +297,19 @@ class HumanReviewWorkflow:
                     origin="user_authorized_workflow_test",
                     content_verified=False,
                 )
+            elif decision_scope == "draft":
+                receipt.update(
+                    approval_type="human_draft", origin="local_human_draft", human_approval=False
+                )
             result = {
                 "input_sha256": input_sha256,
                 "markdown": markdown,
                 "verdict": verdict,
                 "note": note.strip(),
-                "issues": [note.strip()] if verdict == "pending" else [],
+                "issues": previous["result"].get("issues", [note.strip()])
+                if verdict == "pending"
+                else [],
+                **({"resolutions": resolutions} if resolutions is not None else {}),
             }
             task.update(
                 state="completed" if verdict == "approved" else "pending",
@@ -298,7 +318,6 @@ class HumanReviewWorkflow:
                 result=result,
                 receipt={**receipt, "result_sha256": digest(result)},
             )
-            previous = next(t for t in doc["tasks"] if t["task_id"] == packet["pending_task_id"])
             previous["state"] = "superseded"
             task["review_of"] = previous["task_id"]
             doc["tasks"].append(task)

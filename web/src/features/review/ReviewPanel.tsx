@@ -1,8 +1,7 @@
 import { queryKeys } from "@/client/query-keys.ts";
 import { useEffect, useState } from "react";
 import IssueEditor from "./IssueEditor.tsx";
-import { useOutletContext } from "react-router-dom";
-import type { WorkspaceContext } from "@/app/AppShell.tsx";
+import { useRuntimeScope } from "@/app/runtime-scope.ts";
 import {
   useIsMutating,
   useQuery,
@@ -36,15 +35,16 @@ export default function ReviewPanel({
   stage,
   state,
   bookId,
+  requestedPage,
 }: {
   runId: string;
   stage?: string;
   state?: string;
   bookId?: string;
+  requestedPage?: number;
 }) {
   const query = useQueryClient();
-  const workflowTest =
-    useOutletContext<WorkspaceContext>()?.workflowTest ?? false;
+  const runtimeScope = useRuntimeScope();
   const busy =
     useIsMutating({ mutationKey: ["platform", "review-write", runId] }) > 0;
   const [selected, setSelected] = useState<string | null>(null),
@@ -60,7 +60,9 @@ export default function ReviewPanel({
   });
   const currentId = issues.data?.some((issue) => issue.id === selected)
     ? selected!
-    : (issues.data?.[0]?.id ?? "");
+    : (issues.data?.find((issue) => issue.page === requestedPage)?.id ??
+      issues.data?.[0]?.id ??
+      "");
   const current = useQuery({
     ...issueOptions(currentId),
     enabled: Boolean(currentId),
@@ -164,9 +166,10 @@ export default function ReviewPanel({
             </p>
           ) : current.data ? (
             <IssueEditor
-              key={current.data.id}
+              key={`${current.data.id}:${("review_input_sha256" in current.data && current.data.review_input_sha256) || current.data.text_sha256}`}
               issue={current.data}
-              workflowTest={workflowTest}
+              workflowTest={runtimeScope === "workflow_only"}
+              runtimeScope={runtimeScope}
               onSaved={saved}
             />
           ) : (

@@ -7,18 +7,18 @@ from tests.unit.processing.test_store import document
 
 
 def test_new_workspaces_enable_speed_policy_without_upgrading_existing_workspaces(tmp_path):
-    from hrs.processing.execution_policy import execution_policy
     from hrs.processing.ledger import Ledger
+    from hrs.processing.runtime_control import effective_policy
     from hrs.processing.store import Store
 
     fresh = Store(tmp_path / "fresh")
-    assert execution_policy(fresh.root)["overlap_reading"] is True
-    assert execution_policy(fresh.root)["batch_pages"] == 8
+    assert effective_policy(fresh.root)["overlap_reading"] is True
+    assert effective_policy(fresh.root)["batch_pages"] == 8
     existing = tmp_path / "existing"
     existing.mkdir()
     Ledger(existing / "ledger.sqlite3")
     old = Store(existing)
-    assert execution_policy(old.root) == {"capacity": 7, "batch_pages": 2, "overlap_reading": False}
+    assert effective_policy(old.root) == {"capacity": 7, "batch_pages": 2, "overlap_reading": False}
     assert not (old.root / "execution-policy.json").exists()
 
 

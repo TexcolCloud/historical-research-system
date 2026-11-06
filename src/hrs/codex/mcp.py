@@ -109,11 +109,13 @@ def create_server(root: Path) -> MCPServer:
 
     @server.tool()
     @contract_errors
-    def open_workbench() -> dict:
-        """Start or reuse this workspace's loopback dashboard and native Codex executor."""
+    def open_workbench(
+        document_id: str | None = None, page: int | None = None, entry_id: str | None = None
+    ) -> dict:
+        """Open this workspace's reading platform or SQL-free fallback. Select a human content page or directory entry."""
         from hrs.codex.workbench_lifecycle import ensure_workbench
 
-        return ensure_workbench(store)
+        return ensure_workbench(store, document_id=document_id, page=page, entry_id=entry_id)
 
     @server.tool()
     @contract_errors
@@ -124,7 +126,7 @@ def create_server(root: Path) -> MCPServer:
         return {
             "document_id": document["id"],
             "run_request": request,
-            "workbench": open_workbench(),
+            "workbench": open_workbench(document["id"]),
         }
 
     @server.tool()
@@ -132,7 +134,11 @@ def create_server(root: Path) -> MCPServer:
     def resume_document(document_id: str) -> dict:
         """Explicitly retry technical run failures; human drafts and content issues remain protected."""
         request = store.request_run(document_id, resume=True)
-        return {"document_id": document_id, "run_request": request, "workbench": open_workbench()}
+        return {
+            "document_id": document_id,
+            "run_request": request,
+            "workbench": open_workbench(document_id),
+        }
 
     @server.tool()
     @contract_errors
@@ -201,7 +207,7 @@ def create_server(root: Path) -> MCPServer:
         """Explicitly reopen published machine pages, preserving the active published version and human decisions."""
         result = store.begin_revision(document_id, reason, pages=pages)
         store.request_run(document_id)
-        return {"revision": result, "workbench": open_workbench()}
+        return {"revision": result, "workbench": open_workbench(document_id)}
 
     @server.tool()
     @contract_errors
@@ -494,7 +500,7 @@ def create_server(root: Path) -> MCPServer:
     ) -> dict:
         """Route an explicit original-image audit dispute to humans, retaining versions and machine provenance."""
         result = store.request_human_review(document_id, page, issue, evidence, worker_id)
-        return {"handoff": result, "workbench": open_workbench()}
+        return {"handoff": result, "workbench": open_workbench(document_id, page)}
 
     @server.tool()
     @contract_errors

@@ -7,7 +7,9 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 
 import httpx
+import pytest
 import uvicorn
+from fastapi.testclient import TestClient
 
 from hrs.api import main
 from hrs.api.routes import events
@@ -16,7 +18,49 @@ from hrs.config import Settings
 from hrs.library import processing_bridge
 
 
-def test_open_sse_connections_drain_before_application_resources_stop(tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize("failure", ["construct", "start", "stop"])
+def test_startup_and_cleanup_failures_release_owned_engine(tmp_path, monkeypatch, failure):
+    settings = Settings(
+        database_url="postgresql+psycopg://unused:unused@127.0.0.1/unused",
+        s3_endpoint="http://127.0.0.1:1",
+        s3_bucket="unused",
+        s3_access_key="unused",
+        s3_secret_key="unused",
+        project_root=tmp_path,
+        cache_root=tmp_path / "cache",
+    )
+    events_seen = []
+
+    class Bridge:
+        def __init__(self, *args):
+            if failure == "construct":
+                raise RuntimeError("construct failed")
+
+        def start(self):
+            events_seen.append("start")
+            if failure == "start":
+                raise RuntimeError("start failed")
+
+        def stop(self):
+            events_seen.append("stop")
+            if failure == "stop":
+                raise RuntimeError("stop failed")
+
+    monkeypatch.setattr(
+        main, "engine_for", lambda _: SimpleNamespace(dispose=lambda: events_seen.append("dispose"))
+    )
+    monkeypatch.setattr(processing_bridge, "CodexBridge", Bridge)
+    with (
+        pytest.raises(RuntimeError, match=f"{failure} failed"),
+        TestClient(main.create_app(settings)),
+    ):
+        pass
+    assert events_seen == (["dispose"] if failure == "construct" else ["start", "stop", "dispose"])
+
+
+def test_open_sse_connections_drain_before_application_resources_stop(
+    tmp_path, monkeypatch, caplog
+):
     settings = Settings(
         database_url="postgresql+psycopg://unused:unused@127.0.0.1/unused",
         s3_endpoint="http://127.0.0.1:1",

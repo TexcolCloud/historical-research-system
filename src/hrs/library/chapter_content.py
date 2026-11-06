@@ -9,7 +9,7 @@ from copy import deepcopy
 from functools import lru_cache
 
 from hrs.library.footnotes import resolve_footnotes
-from hrs.library.reading_locations import text_digest
+from hrs.library.records import text_digest
 from hrs.library.structure import reading_view
 from hrs.storage.objects import S3Objects
 
@@ -39,6 +39,7 @@ def read_content(storage, reference):
         "text_sha256": text_digest(text),
         "reading_segments": reading["segments"],
         "reading_text": reading["text"],
+        "reading_parts": reading["parts"],
         "reading_footnotes": reading["footnotes"],
         "footnotes": reading["footnotes"]
         if reading["text"] == text

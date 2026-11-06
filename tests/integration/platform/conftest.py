@@ -10,8 +10,10 @@ from hrs.storage.db import migrate
 
 
 @pytest.fixture
-def platform():
-    settings = Settings.load()
+def platform(tmp_path):
+    settings = Settings.load().model_copy(
+        update={"codex_root": tmp_path / "native", "cache_root": tmp_path / "cache"}
+    )
     url = make_url(load_environment(settings.project_root)["PLATFORM_TEST_DATABASE_URL"])
     if url.database != "historical_research_v2_test":
         raise RuntimeError("Tests require the dedicated platform test database.")

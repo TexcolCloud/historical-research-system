@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import NavigationPanel from "./NavigationPanel.tsx";
 import { client } from "@/client/api.ts";
+import { RuntimeScopeContext } from "@/app/runtime-scope.ts";
 import { respondWith } from "@/test/responses.ts";
 afterEach(() => {
   cleanup();
@@ -56,12 +57,14 @@ test("published reading directory uses its frozen report and source-bound text l
   });
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NavigationPanel
-        runId="new-run"
-        bookId="book"
-        published
-        bookState="awaiting_review"
-      />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel
+          runId="new-run"
+          bookId="book"
+          published
+          bookState="awaiting_review"
+        />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   const link = await screen.findByRole("link", { name: "阅读正文 →" });
@@ -101,7 +104,14 @@ test("an unlinked published entry still reaches its existing individual human ma
   }));
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NavigationPanel runId="run" bookId="book" published bookState="ready" />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel
+          runId="run"
+          bookId="book"
+          published
+          bookState="ready"
+        />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   const item = (await screen.findByText("未找到的条目")).closest("li")!;
@@ -123,7 +133,9 @@ test("an incomplete directory does not claim processing is running for a paused 
   }));
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NavigationPanel runId="run" bookId="book" bookState="paused" />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel runId="run" bookId="book" bookState="paused" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByText(
@@ -197,7 +209,9 @@ test("a changed evidence version reports beside the action and reloads before re
     }));
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NavigationPanel runId="run" bookId="book" reviewOnly />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel runId="run" bookId="book" reviewOnly />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByText("正文。");
@@ -289,7 +303,9 @@ test("human task opens the candidate evidence and confirms it without a separate
   });
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NavigationPanel runId="run" bookId="book" reviewOnly />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel runId="run" bookId="book" reviewOnly />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByRole("heading", {
@@ -307,6 +323,7 @@ test("human task opens the candidate evidence and confirms it without a separate
     expect.objectContaining({
       body: {
         decision_id: expect.any(String),
+        decision_scope: "content",
         expected_sha256: report.sha256,
         target_page: 5,
         target_anchor: "第一章",
@@ -378,7 +395,9 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
   });
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NavigationPanel runId="run" bookId="book" />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel runId="run" bookId="book" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByText(/需要确认目录跳转/);
@@ -396,6 +415,7 @@ test("a conflicting printed page stays unlinked until a source-bound navigation 
     expect.objectContaining({
       body: {
         decision_id: expect.any(String),
+        decision_scope: "content",
         expected_sha256: report.sha256,
         target_page: 3,
         target_anchor: "1936年",
@@ -464,7 +484,9 @@ test("confirmed directory entries can be reopened without turning a preview into
   });
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <NavigationPanel runId="run" bookId="book" />
+      <RuntimeScopeContext.Provider value="content">
+        <NavigationPanel runId="run" bookId="book" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await userEvent.click(
@@ -483,6 +505,7 @@ test("confirmed directory entries can be reopened without turning a preview into
     expect.objectContaining({
       body: {
         decision_id: expect.any(String),
+        decision_scope: "content",
         expected_sha256: report.sha256,
         target_page: null,
         target_anchor: "",

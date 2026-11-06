@@ -5,8 +5,47 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReviewPanel from "@/features/review/ReviewPanel.tsx";
 import { client } from "@/client/api.ts";
+import { RuntimeScopeContext } from "@/app/runtime-scope.ts";
 import { respondWith } from "@/test/responses.ts";
 afterEach(cleanup);
+test("a native handoff selects its physical page instead of the first unrelated doubt", async () => {
+  const issues = [1, 7].map((page) => ({
+    id: `issue-${page}`,
+    run_id: "run",
+    page,
+    revision: 1,
+    state: "pending",
+    text_sha256: "d".repeat(64),
+    text: `候选页 ${page}`,
+    images: [],
+    pages: [page],
+    kind: "page",
+    reasons: [],
+    locations: [],
+    resolutions: [],
+  }));
+  respondWith((request) => {
+    const path = new URL(request.url).pathname;
+    return path === "/api/v2/reviews"
+      ? issues
+      : issues.find((issue) => path.endsWith(issue.id));
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="run" requestedPage={7} />
+      </RuntimeScopeContext.Provider>
+    </QueryClientProvider>,
+  );
+  expect(
+    await screen.findByRole("heading", { name: "原件第 7 页" }),
+  ).toBeDefined();
+  expect(
+    screen
+      .getByRole("button", { name: "原件第 7 页" })
+      .getAttribute("aria-current"),
+  ).toBe("true");
+});
 test("located doubts highlight text, show source region, and require an explicit per-doubt decision", async () => {
   const location = {
     id: "doubt-1",
@@ -50,7 +89,9 @@ test("located doubts highlight text, show source region, and require an explicit
     }));
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <ReviewPanel runId="located-run" />
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="located-run" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByText("疑点 1 / 1");
@@ -140,7 +181,9 @@ test("adopting a full-anchor proposal replaces only the focused error without du
     }));
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <ReviewPanel runId="scope-run" />
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="scope-run" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByText("疑点 1 / 1");
@@ -193,7 +236,9 @@ test("autosave preserves unfinished work across page navigation without submitti
   const post = vi.spyOn(client, "POST");
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <ReviewPanel runId="draft-run" />
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="draft-run" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByText("原文");
@@ -227,7 +272,9 @@ test.each([
     });
     render(
       <QueryClientProvider client={query}>
-        <ReviewPanel runId="pending-run" stage={stage} state="processing" />
+        <RuntimeScopeContext.Provider value="content">
+          <ReviewPanel runId="pending-run" stage={stage} state="processing" />
+        </RuntimeScopeContext.Provider>
       </QueryClientProvider>,
     );
     await screen.findByRole("heading", { name: "文字提取与原图核对进行中" });
@@ -287,7 +334,9 @@ test("confirmation uses the returned next issue immediately without a whole-page
   });
   render(
     <QueryClientProvider client={query}>
-      <ReviewPanel runId="run" />
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="run" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByText("第一页正文");
@@ -336,7 +385,9 @@ test("map review explains the image carrier without rendering local file URLs as
   });
   render(
     <QueryClientProvider client={query}>
-      <ReviewPanel runId="run" />
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="run" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByText("图1 行动图");

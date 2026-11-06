@@ -258,6 +258,7 @@ class NavigationReport(BaseModel):
 
 
 class NavigationDecision(BaseModel):
+    decision_scope: Literal["content", "workflow_test"] | None = None
     decision_id: str | None = Field(default=None, min_length=1, max_length=128)
     expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_page: int | None = Field(default=None, ge=1)
@@ -295,6 +296,7 @@ class ReviewResolution(BaseModel):
 
 
 class ReviewDecision(BaseModel):
+    decision_scope: Literal["content", "workflow_test"] | None = None
     model_config = ConfigDict(extra="forbid")
     decision_id: UUID
     expected_revision: int = Field(ge=1)
@@ -341,8 +343,11 @@ class ReviewIssueSummary(BaseModel):
 
 class ReviewIssue(ReviewIssueSummary):
     text: str
+    review_input_sha256: str | None = None
     proposed_text: str | None = None
     draft_text: str | None = None
+    draft_conflict: bool = False
+    draft_base_text_sha256: str | None = None
     reasons: list[str | dict]
     kind: str
     pages: list[int]

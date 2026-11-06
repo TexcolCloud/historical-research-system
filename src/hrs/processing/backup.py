@@ -1,12 +1,14 @@
 """Quiesced native snapshots; restore only into an absent, isolated directory."""
 
+import hashlib
 import json
+import shutil
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZIP_STORED, ZipFile
 
-from hrs.processing.hashing import digest, file_digest
+from hrs.processing.hashing import file_digest
 
 
 def snapshot_workspace(store, destination: Path) -> dict:
@@ -54,10 +56,8 @@ def snapshot_workspace(store, destination: Path) -> dict:
         return manifest
 
 
-def restore_workspace(source: Path, destination: Path) -> Path:
-    destination = Path(destination).resolve()
-    if destination.exists():
-        raise ValueError("Native restore destination must not exist")
+def verify_workspace_snapshot(source: Path) -> dict:
+    """Validate every retained byte before a coordinated restore creates targets."""
     with ZipFile(source) as archive:
         manifest = json.loads(archive.read("backup-manifest.json"))
         if manifest.get("kind") != "quiesced-codex-workspace" or manifest.get(
@@ -70,14 +70,28 @@ def restore_workspace(source: Path, destination: Path) -> Path:
         }:
             raise ValueError("Native backup members differ from the manifest")
         for name, expected in manifest["files"].items():
-            target = (destination / name).resolve()
-            if not target.is_relative_to(destination) or target == destination:
+            member = Path(name)
+            if member.is_absolute() or ".." in member.parts or "\\" in name or ":" in name:
                 raise ValueError("Native backup path escapes restore directory")
-            if digest(archive.read(name)) != expected:
+            measured = hashlib.sha256()
+            with archive.open(name) as stream:
+                while chunk := stream.read(1024 * 1024):
+                    measured.update(chunk)
+            if measured.hexdigest() != expected:
                 raise ValueError("Native backup evidence hash mismatch")
-        destination.mkdir(parents=True)
+        return manifest
+
+
+def restore_workspace(source: Path, destination: Path) -> Path:
+    destination = Path(destination).resolve()
+    if destination.exists():
+        raise ValueError("Native restore destination must not exist")
+    manifest = verify_workspace_snapshot(source)
+    destination.mkdir(parents=True)
+    with ZipFile(source) as archive:
         for name in manifest["files"]:
             target = destination / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(archive.read(name))
+            with archive.open(name) as stream, target.open("xb") as output:
+                shutil.copyfileobj(stream, output, length=1024 * 1024)
     return destination

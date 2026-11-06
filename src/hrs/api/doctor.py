@@ -4,13 +4,13 @@ import asyncio
 import json
 import shutil
 import subprocess
-from urllib.request import urlopen
 
 from sqlalchemy import text
 
 from hrs.processing.workspace import resolve_workspace
+from hrs.search.artifacts import inspect_artifacts
 from hrs.search.compute import search_client
-from hrs.search.settings import MODEL_REVISIONS
+from hrs.search.service import broker_health
 from hrs.storage.db import engine_for
 from hrs.storage.service import objects_for
 
@@ -61,24 +61,16 @@ async def inspect(settings, *, gpu=True):
         return {"logged_in": True, "workspace_exists": True, "runtime": "native-subagents"}
 
     def models():
-        for name, revision in MODEL_REVISIONS.items():
-            directory = settings.models_root / name.split("/")[-1] / revision
-            if (
-                not (directory / "config.json").is_file()
-                or not (directory / "tokenizer.json").is_file()
-            ):
-                raise RuntimeError("Registered retrieval model artifacts are missing")
-            if not any(directory.glob("*.safetensors")) and not any(
-                directory.glob("pytorch_model*.bin")
-            ):
-                raise RuntimeError("Registered retrieval model weights are missing")
+        report = inspect_artifacts(settings.models_root)
+        if not all(row["present"] for row in report.values()):
+            raise RuntimeError("Registered retrieval model artifacts are missing or incomplete")
         return {"artifacts_present": True, "inference_checked": False}
 
     def broker():
-        endpoint = settings.retrieval_endpoint.rsplit("/", 1)[0] + "/health"
-        with urlopen(endpoint, timeout=5) as response:
-            result = json.load(response)
-        return {"status": result.get("status", "ok"), "inference_checked": False}
+        result = broker_health(settings.retrieval_endpoint, timeout=5)
+        if result.get("gpu_available") is False:
+            raise RuntimeError("The configured retrieval GPU is unavailable")
+        return {"service": result["service"], "inference_checked": False}
 
     checks = [
         check("PostgreSQL", database),

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
 import { updateBooks } from "@/features/books/book-cache.ts";
 import { Button } from "@/components/ui/button.tsx";
+import { useRuntimeScope } from "@/app/runtime-scope.ts";
 import NavigationReview, {
   type NavigationChoice,
 } from "./NavigationReview.tsx";
@@ -32,6 +33,7 @@ export default function NavigationPanel({
   published?: boolean;
 }) {
   const query = useQueryClient();
+  const runtimeScope = useRuntimeScope();
   const readingOnly = published && !reviewOnly;
   const report = useQuery(
     readingOnly ? readingNavigationOptions(bookId) : navigationOptions(runId),
@@ -50,9 +52,14 @@ export default function NavigationPanel({
         : ["running", "processing", "queued"].includes(bookState ?? "")
           ? "目录尚未全部核对，新发现的项目会自动列出。"
           : "目录尚未全部核对，请在处理进展中查看剩余页面的状态。";
+  const selectedEntry = entries.find(
+    (entry) =>
+      entry.id === selected &&
+      (!reviewOnly || entry.needs_confirmation || entry.id === entryId),
+  );
   const activeId = readingOnly
     ? null
-    : (entries.find((entry) => entry.id === selected)?.id ??
+    : (selectedEntry?.id ??
       (reviewOnly ? attention[0]?.id : null));
   const editor = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
@@ -86,19 +93,26 @@ export default function NavigationPanel({
       sha: string;
       id: string;
     }) => {
+      if (runtimeScope === "unknown")
+        throw new Error("工作区范围未确认，请重新确认后提交目录决定。");
       const signature = JSON.stringify([id, sha, choice]);
       if (pendingDecision.current?.signature !== signature)
         pendingDecision.current = { signature, id: crypto.randomUUID() };
+      const body = {
+        decision_id: pendingDecision.current.id,
+        expected_sha256: sha,
+        target_page: choice?.page ?? null,
+        target_anchor: choice?.anchor ?? "",
+        decision_scope:
+          runtimeScope === "workflow_only"
+            ? ("workflow_test" as const)
+            : ("content" as const),
+      };
       const { data, response } = await client.POST(
         "/api/v2/runs/{run_id}/navigation/{entry_id}/decision",
         {
           params: { path: { run_id: runId, entry_id: id } },
-          body: {
-            decision_id: pendingDecision.current.id,
-            expected_sha256: sha,
-            target_page: choice?.page ?? null,
-            target_anchor: choice?.anchor ?? "",
-          },
+          body,
         },
       );
       if (!data)
@@ -309,6 +323,7 @@ export default function NavigationPanel({
                       report={report.data!}
                       runId={runId}
                       busy={decision.isPending}
+                      approvalReady={runtimeScope !== "unknown"}
                       error={decision.error?.message}
                       reloading={report.isFetching}
                       onReload={async () => {

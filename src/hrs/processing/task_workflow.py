@@ -48,12 +48,12 @@ class TaskWorkflow:
         from collections import Counter
         from statistics import median
 
-        from hrs.processing.execution_policy import execution_policy
-        from hrs.processing.runtime_control import RuntimeControl, model_for_stage
+        from hrs.processing.contracts import model_for_stage
+        from hrs.processing.runtime_control import RuntimeControl, effective_policy
         from hrs.processing.scheduling import scheduling_plan
 
         repository = self.context.repository
-        plan = scheduling_plan(doc, **execution_policy(repository.root))
+        plan = scheduling_plan(doc, **effective_policy(repository.root))
         control = RuntimeControl(repository.root, repository.ledger)
         plan["runtime_control"] = control.snapshot()
         remaining = {}
@@ -123,7 +123,8 @@ class TaskWorkflow:
     ) -> dict:
         if code not in TECHNICAL_FAILURE_CODES:
             raise ValueError("Use a supported technical failure code")
-        from hrs.processing.runtime_control import RuntimeControl, model_for_stage
+        from hrs.processing.contracts import model_for_stage
+        from hrs.processing.runtime_control import RuntimeControl
 
         repository = self.context.repository
         with repository.lock, repository.ledger.connect(write=True):
@@ -252,10 +253,10 @@ class TaskWorkflow:
         ):
             require_active(doc)
             if scheduled:
-                from hrs.processing.execution_policy import execution_policy
+                from hrs.processing.runtime_control import effective_policy
                 from hrs.processing.scheduling import scheduling_plan
 
-                plan = scheduling_plan(doc, **execution_policy(self.context.repository.root))
+                plan = scheduling_plan(doc, **effective_policy(self.context.repository.root))
                 if plan["cooldown_until"] > time.time():
                     return None
                 ledger = self.context.repository.ledger
@@ -297,7 +298,8 @@ class TaskWorkflow:
             inputs = self.context.inputs(doc, task)
             if inputs.get("prior_worker_id") == worker_id:
                 raise ValueError("Review and correction verification require a separate subagent")
-            from hrs.processing.runtime_control import RuntimeControl, model_for_stage
+            from hrs.processing.contracts import model_for_stage
+            from hrs.processing.runtime_control import RuntimeControl
 
             control = RuntimeControl(self.context.repository.root, self.context.repository.ledger)
             model = (session or {}).get("actual_model", model_for_stage(stage))
@@ -320,7 +322,7 @@ class TaskWorkflow:
                 "started_at": time.time(),
                 "input_sha256": digest(inputs),
             }
-            from hrs.processing.runtime_control import model_for_stage
+            from hrs.processing.contracts import model_for_stage
 
             claim["actual_model"] = (session or {}).get("actual_model", model_for_stage(stage))
             if task.get("source_reading"):
@@ -508,7 +510,8 @@ class TaskWorkflow:
                 session.setdefault("submissions", {})[session.pop("submission_sha256")] = outcome
             with self.context.repository.ledger.connect(write=True):
                 self.commit(doc, session)
-                from hrs.processing.runtime_control import RuntimeControl, model_for_stage
+                from hrs.processing.contracts import model_for_stage
+                from hrs.processing.runtime_control import RuntimeControl
 
                 RuntimeControl(
                     self.context.repository.root, self.context.repository.ledger

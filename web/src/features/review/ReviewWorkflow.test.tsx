@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReviewPanel from "./ReviewPanel.tsx";
 import { client } from "@/client/api.ts";
+import { RuntimeScopeContext } from "@/app/runtime-scope.ts";
 import { respondWith } from "@/test/responses.ts";
 
 afterEach(() => {
@@ -61,7 +62,9 @@ test("a pending draft save cannot claim that page judgments are already complete
   });
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <ReviewPanel runId="run" />
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="run" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await userEvent.click(
@@ -117,7 +120,9 @@ test("terminal human review separates judgment, editing and final page submissio
   const post = vi.spyOn(client, "POST");
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <ReviewPanel runId="run" />
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="run" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   await screen.findByRole("button", { name: "识别正确，保留" });
@@ -209,7 +214,9 @@ test("successive edits keep prior decisions and save both final readings", async
     }));
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <ReviewPanel runId="run" />
+      <RuntimeScopeContext.Provider value="content">
+        <ReviewPanel runId="run" />
+      </RuntimeScopeContext.Provider>
     </QueryClientProvider>,
   );
   for (let i = 0; i < 2; i++) {

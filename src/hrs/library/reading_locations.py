@@ -1,11 +1,8 @@
 """Resolve published source coordinates without changing canonical Markdown."""
 
-import hashlib
 import re
 
-
-def text_digest(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+from hrs.library.records import text_digest
 
 
 def part_ranges(chapter):

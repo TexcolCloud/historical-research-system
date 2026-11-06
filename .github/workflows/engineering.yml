@@ -23,6 +23,30 @@ env:
   PLATFORM_OPENSEARCH_INDEX: platform-ci-chunks
 
 jobs:
+  model-adapters:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.6'
+          enable-cache: true
+      - name: Install CPU adapter dependencies without model weights
+        run: uv sync --locked --group dev --extra retrieval
+      - name: Require the model adapter dependencies
+        run: uv run --no-sync --locked python -c "from hrs.search.models import LocalModels"
+      - name: Verify bounded batches, OOM recovery and complete input validation
+        run: uv run --no-sync --locked pytest tests/integration/platform/test_retrieval_batching.py -q --junitxml=reports/model-adapters.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: model-adapter-checks
+          path: reports/model-adapters.xml
+          retention-days: 14
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30

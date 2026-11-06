@@ -7,7 +7,7 @@ from .test_review import seed
 
 def test_immutable_evidence_conflict_is_not_a_model_validation_failure(platform):
     settings, engine = platform
-    run, _ = seed(engine)
+    run, _ = seed(engine, settings=settings)
     outputs = Outputs(settings, engine)
     outputs.put(run, "fixed", {"value": "original"}, {"input": "fixed"})
     with pytest.raises(RuntimeError, match="conflicts"):
@@ -23,7 +23,7 @@ def test_execution_projection_reuses_unchanged_objects_and_emits_only_changes(
     from hrs.storage import models as db
 
     settings, engine = platform
-    run, _ = seed(engine)
+    run, _ = seed(engine, settings=settings)
     outputs = Outputs(settings, engine)
     rows = [
         dict(
@@ -66,7 +66,7 @@ def test_execution_window_has_true_counts_and_bounded_history(platform):
     from hrs.storage import models as db
 
     settings, engine = platform
-    run, _ = seed(engine)
+    run, _ = seed(engine, settings=settings)
     with engine.begin() as connection:
         connection.execute(
             insert(db.execution_nodes),

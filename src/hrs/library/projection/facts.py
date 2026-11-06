@@ -8,13 +8,14 @@ from hrs.processing.progress import PAGE_PROGRESS_POLICY
 from hrs.processing.scheduling import scheduling_plan
 
 PROJECTION_POLICY = "codex-platform-v9-page-fragments"
+REVIEW_AUTHORITY_POLICY = "codex-review-authority-v2"
 
 
 def runtime_control_for_document(doc, control):
     """Project shared runtime pressure only onto this document's remaining work."""
     if not control:
         return None
-    from hrs.processing.runtime_control import SOL, model_for_stage
+    from hrs.processing.contracts import SOL, model_for_stage
 
     policy = doc.get("processing_policy", {})
     models = (
@@ -58,6 +59,7 @@ def projection_input(doc, runtime_control=None):
     return fingerprint(
         {
             "policy": PROJECTION_POLICY,
+            "review_authority_policy": REVIEW_AUTHORITY_POLICY,
             "page_progress_policy": PAGE_PROGRESS_POLICY,
             "navigation_review_policy": NAVIGATION_REVIEW_POLICY,
             "navigation_pending_count": sum(

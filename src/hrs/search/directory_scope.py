@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from hrs.library.errors import ServiceError
 from hrs.library.footnotes import resolve_footnotes
-from hrs.library.review import digest
+from hrs.library.records import text_digest as digest
 from hrs.search.chunks import context_blocks, source_excerpt
 
 LINKED_CONTEXT = {

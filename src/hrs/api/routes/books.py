@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
 
-from hrs.api.deps import EngineDep, ExportsDep, LibraryDep, ReviewDep
+from hrs.api.deps import EngineDep, ExportsDep, LibraryDep, ReviewDep, SettingsDep
 from hrs.api.files import download
 from hrs.api.schemas import (
     BookSummary,
@@ -33,8 +33,8 @@ def get_book(engine: EngineDep, book_id: UUID):
 
 
 @router.delete("/api/v2/books/{book_id}", response_model=DeletionReceipt, status_code=202)
-def delete_book(engine: EngineDep, book_id: UUID):
-    return request_deletion(engine, book_id)
+def delete_book(settings: SettingsDep, engine: EngineDep, book_id: UUID):
+    return request_deletion(settings, engine, book_id)
 
 
 @router.get("/api/v2/books/{book_id}/runs", response_model=list[RunSummary])

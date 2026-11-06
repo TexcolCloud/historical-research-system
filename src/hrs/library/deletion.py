@@ -8,6 +8,9 @@ books are retained. Cleanup is retryable and never reports success before I/O.
 from sqlalchemy import insert, select, update
 
 from hrs.library.errors import ServiceError
+from hrs.library.native_workspace import require_workspace
+from hrs.processing.store import Store
+from hrs.processing.workspace import resolve_workspace
 from hrs.storage import models as db
 
 DELETING = {"deleting", "delete_failed", "deleted"}
@@ -41,8 +44,9 @@ def receipt(engine, book_id):
     return {"book_id": row["book_id"], "state": row["state"], "error": row["error"]}
 
 
-def request_deletion(engine, book_id):
+def request_deletion(settings, engine, book_id):
     book_id = str(book_id)
+    store = Store(resolve_workspace(settings.codex_root))
     with engine.begin() as connection:
         book = (
             connection.execute(select(db.books).where(db.books.c.id == book_id).with_for_update())
@@ -51,6 +55,13 @@ def request_deletion(engine, book_id):
         )
         if book is None:
             raise ServiceError(404, "书籍不存在。")
+        runs = connection.execute(
+            select(db.runs).where(db.runs.c.book_id == book_id).with_for_update()
+        ).mappings()
+        for run in runs:
+            result = run["result"] or {}
+            if result.get("processing_backend") == "codex" or result.get("codex_document_id"):
+                require_workspace(engine, run, store, connection=connection)
         prior = (
             connection.execute(
                 select(db.book_deletions).where(db.book_deletions.c.book_id == book_id)

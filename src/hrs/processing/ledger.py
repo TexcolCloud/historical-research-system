@@ -323,7 +323,7 @@ class Ledger:
 
     def model_capacity_used(self, model, excluding_session=None, *, now=None):
         """Count model reservations and unmanaged leases from one ledger snapshot."""
-        from hrs.processing.runtime_control import model_for_stage
+        from hrs.processing.contracts import model_for_stage
 
         now = time.time() if now is None else now
         with self.connect() as connection:

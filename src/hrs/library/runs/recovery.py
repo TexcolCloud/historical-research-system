@@ -23,7 +23,18 @@ def recovery_reason(failure):
     return "恢复检查未能完成。请展开故障详情查看原因，修复后再点击“从断点恢复”。"
 
 
-def retry_run(engine, run_id, request_id):
+def retry_run(settings, engine, run_id, request_id):
+    from hrs.library.books import get_run
+    from hrs.library.native_workspace import require_workspace
+    from hrs.processing.store import Store
+    from hrs.processing.workspace import resolve_workspace
+
+    current = get_run(engine, run_id)
+    if current["kind"] != "cards" and (
+        (current["result"] or {}).get("processing_backend") == "codex"
+        or (current["result"] or {}).get("codex_document_id")
+    ):
+        require_workspace(engine, current, Store(resolve_workspace(settings.codex_root)))
     run_id = str(run_id)
     key = f"retry:{run_id}:{request_id}"
     with engine.begin() as connection:
@@ -132,6 +143,9 @@ def native_report(settings, engine, run_id):
     identity = (run["result"] or {}).get("codex_document_id")
     if not identity:
         if (run["result"] or {}).get("processing_backend") == "codex":
+            from hrs.library.native_workspace import require_workspace
+
+            require_workspace(engine, run, Store(resolve_workspace(settings.codex_root)))
             return {
                 "state": "available",
                 "reason": "原件准备尚未完成。恢复后将重新校验已保存的上传文件，再建立原生处理检查点。",
@@ -147,6 +161,10 @@ def native_report(settings, engine, run_id):
             "action": "导入原件到原生流程",
             "unfinished_tasks": 0,
         }
+    from hrs.library.native_workspace import require_workspace
+
+    store = Store(resolve_workspace(settings.codex_root))
+    require_workspace(engine, run, store)
     saved = (run["result"] or {}).get("codex_recovery", {})
     try:
         store = Store(resolve_workspace(settings.codex_root))
@@ -236,8 +254,10 @@ def resume_native(bridge, event, run):
     """Dispatch one durable recovery request; never hold SQL locks across readiness or evidence I/O."""
     import time
 
+    from hrs.library.native_workspace import require_workspace
     from hrs.processing.recovery import RecoveryWait, plan
 
+    run = require_workspace(bridge.engine, run, bridge.store)
     with bridge.engine.connect() as connection:
         if connection.scalar(select(db.outbox.c.delivered).where(db.outbox.c.id == event["id"])):
             return

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from filelock import FileLock
 
-from hrs.processing.checkpoints import atomic_json
+from hrs.processing.snapshots import atomic_json
 from hrs.processing.store import Store
 
 

@@ -98,6 +98,9 @@ def form_from_page(body):
         for name, value in re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', text)
     }
     fields.update(
+        {name: "keep" for name in re.findall(r'<input type="radio" name="([^"]+)"', text)}
+    )
+    fields.update(
         reviewer="Synthetic test reviewer",
         note="Synthetic fixture only; not a real-source human verdict",
         markdown="1940年。",
@@ -146,7 +149,7 @@ def test_local_form_preserves_drafts_rejects_stale_actions_and_resumes_publicati
         assert store.human_packet(doc_id, 1)["markdown"] == draft["markdown"]
         assert request(server, "POST", action, form)[0] == 409
         task = store.status(doc_id)["tasks"][-1]
-        assert task["receipt"]["approval_type"] == "human"
+        assert task["receipt"]["approval_type"] == "human_draft"
         assert task["receipt"]["human_approval"] is False
         with pytest.raises(ValueError, match="human draft"):
             store.retry_task(doc_id, task["task_id"])

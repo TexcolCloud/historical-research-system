@@ -77,13 +77,17 @@ export function createBookUploader(
       const file = uppy.getFile(id);
       if (!file) continue;
       let grant = grants.get(id);
-      if (!grant) {
+      if (!grant || !(Date.parse(grant.expires_at) > Date.now())) {
         let identity = identities.get(id);
         if (!identity) {
-          identity = {
-            requestId: crypto.randomUUID(),
-            token: crypto.randomUUID() + crypto.randomUUID(),
-          };
+          // Restored grants may predate identity persistence. Their scoped
+          // session/token already identify the same unfinished server upload.
+          identity = grant
+            ? { requestId: grant.session_id, token: grant.token }
+            : {
+                requestId: crypto.randomUUID(),
+                token: crypto.randomUUID() + crypto.randomUUID(),
+              };
           identities.set(id, identity);
           persist();
         }

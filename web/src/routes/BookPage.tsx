@@ -166,6 +166,7 @@ export default function BookPage() {
                 runId={book.run_id}
                 stage={book.stage ?? undefined}
                 state={book.state}
+                requestedPage={Number(params.get("reviewPage")) || undefined}
               />
             )}
           </section>

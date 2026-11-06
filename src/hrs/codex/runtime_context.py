@@ -55,9 +55,9 @@ def account_route():
 
 
 def command(executable, root, document_id, logs, model, project):
-    from hrs.processing.execution_policy import execution_policy
+    from hrs.processing.runtime_control import effective_policy
 
-    policy = execution_policy(root)
+    policy = effective_policy(root)
     runtime = root / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     (runtime / ".hrs-runtime-root").touch()

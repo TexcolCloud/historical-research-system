@@ -349,4 +349,9 @@ def reading_view(chapter):
         cursor = end
     preserve(cursor, len(text))
     reading = "".join(p["text"] for p in parts)
-    return {"text": reading, "footnotes": resolve_footnotes(reading, parts), "segments": segments}
+    return {
+        "text": reading,
+        "footnotes": resolve_footnotes(reading, parts),
+        "segments": segments,
+        "parts": parts,
+    }

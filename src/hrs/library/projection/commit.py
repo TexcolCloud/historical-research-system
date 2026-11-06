@@ -3,20 +3,21 @@
 import time
 
 from sqlalchemy import func, insert, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs.library.projection.facts import (
     NAVIGATION_REVIEW_POLICY,
     PROJECTION_POLICY,
+    REVIEW_AUTHORITY_POLICY,
     runtime_control_for_document,
 )
+from hrs.processing.acceptance import publication_acceptance
 from hrs.processing.navigation import navigation_requires_confirmation
 from hrs.storage import models as db
 
 
 class ProjectionCommit:
-    def __init__(self, engine, *, workflow_test=False):
-        self.engine, self.workflow_test = engine, workflow_test
+    def __init__(self, engine):
+        self.engine = engine
 
     def apply(
         self,
@@ -51,19 +52,40 @@ class ProjectionCommit:
             if current_revision != run["revision"]:
                 # A human decision arrived while objects were prepared. Retry from it next tick.
                 return
-            if prepared_issues:
-                statement = pg_insert(db.review_issues).values(prepared_issues)
+            for issue in prepared_issues:
+                current = (
+                    connection.execute(
+                        select(db.review_issues)
+                        .where(db.review_issues.c.id == issue["id"])
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if current is None:
+                    connection.execute(insert(db.review_issues).values(**issue))
+                    continue
+                if current["state"] == "pending" and current["content"] == issue["content"]:
+                    continue
+                # A SQL draft can arrive while source artifacts are being prepared.
+                # Preserve the locked current draft, not the earlier snapshot.
+                draft = current["draft"]
+                if draft:
+                    draft = {
+                        "base_text_sha256": current["text_sha256"],
+                        "base_content": current["content"],
+                        **draft,
+                    }
                 connection.execute(
-                    statement.on_conflict_do_update(
-                        index_elements=["id"],
-                        set_={
-                            "content": statement.excluded.content,
-                            "text_sha256": statement.excluded.text_sha256,
-                            "revision": db.review_issues.c.revision + 1,
-                        },
-                        where=(db.review_issues.c.state == "pending")
-                        & db.review_issues.c.draft.is_(None)
-                        & db.review_issues.c.content.is_distinct_from(statement.excluded.content),
+                    update(db.review_issues)
+                    .where(db.review_issues.c.id == issue["id"])
+                    .values(
+                        content=issue["content"],
+                        text_sha256=issue["text_sha256"],
+                        state="pending",
+                        draft=draft,
+                        replacement=None,
+                        revision=current["revision"] + 1,
                     )
                 )
             connection.execute(
@@ -116,6 +138,7 @@ class ProjectionCommit:
                     ],
                 },
                 "codex_projection_policy": PROJECTION_POLICY,
+                "codex_review_authority_policy": REVIEW_AUTHORITY_POLICY,
                 "review_initialized": True,
                 "published": bool(doc.get("publication") or doc.get("active_publication")),
                 "codex_revision_pending": bool(
@@ -132,7 +155,7 @@ class ProjectionCommit:
                     "completed": page_progress["reviewed"],
                     "total": len(doc["pages"]),
                 },
-                "content_acceptance": "workflow_test" if self.workflow_test else "machine_or_human",
+                "content_acceptance": publication_acceptance(doc),
             }
             connection.execute(
                 update(db.runs)

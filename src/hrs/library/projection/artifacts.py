@@ -113,6 +113,7 @@ class ProjectionArtifacts:
                 "source": doc["source"],
                 "policy": doc.get("processing_policy"),
                 "publication": doc["publication"],
+                "active_publication": doc.get("active_publication"),
                 "task_files": task_files,
                 **({"tasks": doc["tasks"]} if doc["state"] == "published" else {}),
             },
@@ -169,11 +170,18 @@ class ProjectionArtifacts:
             }
             data = json.dumps(content, ensure_ascii=False).encode()
             old = previous_issues.get(issue_id)
-            if old and (old["state"] != "pending" or old["draft"] is not None):
-                continue
-            if old and old["content"]["sha256"] == hashlib.sha256(data).hexdigest():
+            if (
+                old
+                and old["state"] == "pending"
+                and old["content"]["sha256"] == hashlib.sha256(data).hexdigest()
+            ):
                 continue
             ref = self.objects.put_bytes(data, run_id=run["id"])
+            ref = {
+                **ref,
+                "codex_input_sha256": packet["input_sha256"],
+                "codex_revision": doc.get("revision", 1),
+            }
             prepared_issues.append(
                 dict(
                     id=issue_id,

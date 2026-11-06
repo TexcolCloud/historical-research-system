@@ -11,7 +11,7 @@ from .test_review import seed
 
 def test_lists_return_all_pages_without_duplicates(platform):
     settings, engine = platform
-    run, _ = seed(engine)
+    run, _ = seed(engine, settings=settings)
     with engine.begin() as connection:
         book = connection.scalar(select(db.runs.c.book_id).where(db.runs.c.id == run))
         connection.execute(

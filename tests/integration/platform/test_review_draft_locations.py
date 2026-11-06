@@ -16,7 +16,7 @@ def test_two_location_draft_roundtrip_retains_identity_and_pending(platform):
     from hrs.processing.review_locations import locate_issues
 
     settings, engine = platform
-    run, ids = seed(engine)
+    run, ids = seed(engine, settings=settings)
     review = Review(settings, engine)
     original = "😀甲错乙，丙错丁。"
     final = "😀甲对乙，丙正丁。"

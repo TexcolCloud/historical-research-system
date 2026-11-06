@@ -4,10 +4,10 @@ import { BookOpen, LibraryBig, ClipboardCheck, CloudCheck } from "lucide-react";
 import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents.ts";
 import { useQuery } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
+import { RuntimeScopeContext, type RuntimeScope } from "./runtime-scope.ts";
 const UploadPanel = lazy(() => import("@/features/uploads/UploadPanel.tsx"));
 
 export type WorkspaceContext = {
-  workflowTest?: boolean;
   upload: () => void;
   filter: string;
   setFilter: (value: string) => void;
@@ -18,8 +18,25 @@ export type WorkspaceContext = {
 export default function AppShell() {
   const location = useLocation();
   const connected = useWorkspaceEvents();
-  const runtime = useQuery({queryKey: ["platform", "runtime"], retry: false,
-    queryFn: async () => (await client.GET("/api/v2/runtime")).data ?? null});
+  const runtime = useQuery({
+    queryKey: ["platform", "runtime"],
+    retry: false,
+    queryFn: async () => {
+      const { data } = await client.GET("/api/v2/runtime");
+      if (
+        !data ||
+        !["content", "workflow_only"].includes(data.validation_scope)
+      )
+        throw new Error("工作区范围未确认，已保存的草稿和正文仍可查看。");
+      return data;
+    },
+  });
+  const scope: RuntimeScope =
+    runtime.isError || !runtime.data
+      ? "unknown"
+      : runtime.data.validation_scope === "workflow_only"
+        ? "workflow_only"
+        : "content";
   const [open, setOpen] = useState(false);
   const [started, setStarted] = useState(false);
   const [filter, setFilter] = useState("all");
@@ -72,21 +89,43 @@ export default function AppShell() {
           </span>
         </header>
         <main>
-          {runtime.data?.validation_scope === "workflow_only" && (
-            <p role="note" className="platform-inline-status">流程验收工作区：本轮授权放行仅验证顺序和格式，不代表内容准确率通过。</p>
+          {scope === "workflow_only" && (
+            <p role="note" className="platform-inline-status">
+              流程验收工作区：本轮授权放行仅验证顺序和格式，不代表内容准确率通过。
+            </p>
           )}
-          <Outlet
-            context={
-              {
-                workflowTest: runtime.data?.validation_scope === "workflow_only",
-                upload,
-                filter,
-                setFilter,
-                search,
-                setSearch,
-              } satisfies WorkspaceContext
-            }
-          />
+          {scope === "unknown" && (
+            <p
+              role={runtime.isError ? "alert" : "status"}
+              className="platform-inline-status"
+            >
+              {runtime.isError
+                ? "工作区范围未确认，可继续阅读、核对和保存草稿，确认范围后才能提交终审。"
+                : "正在确认工作区范围，可继续阅读和保存草稿。"}
+              {runtime.isError && (
+                <button
+                  type="button"
+                  disabled={runtime.isFetching}
+                  onClick={() => void runtime.refetch()}
+                >
+                  重新确认工作区
+                </button>
+              )}
+            </p>
+          )}
+          <RuntimeScopeContext.Provider value={scope}>
+            <Outlet
+              context={
+                {
+                  upload,
+                  filter,
+                  setFilter,
+                  search,
+                  setSearch,
+                } satisfies WorkspaceContext
+              }
+            />
+          </RuntimeScopeContext.Provider>
         </main>
       </div>
       {started && (
