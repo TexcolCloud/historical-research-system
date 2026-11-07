@@ -6,10 +6,10 @@
 
 | 配置 | Compose 默认项目名 | 服务与主机端口 | 持久卷 |
 | --- | --- | --- | --- |
-| [compose.storage.yml](compose.storage.yml) | `historical-ingestion-acceptance` | PostgreSQL `55436`、S3 `58333` | `postgres-data`、`s3-data` |
+| [compose.storage.yml](compose.storage.yml) | `historical-ingestion-acceptance` | PostgreSQL `55436`、S3 `18333` | `postgres-data`、`s3-data` |
 | [compose.search.yml](compose.search.yml) | `historical-retrieval` | OpenSearch `19260` | `index-data`、`index-recovery` |
 | [compose.upload.yml](compose.upload.yml) | `hrs-platform` | tusd `18171` | 上传对象写入 S3 |
-| [compose.test.yml](compose.test.yml) | `hrs-platform-ci` | 隔离 PostgreSQL `55439`、S3 `58339`、OpenSearch `19269` | 不挂载业务卷 |
+| [compose.test.yml](compose.test.yml) | `hrs-platform-ci` | 隔离 PostgreSQL `55439`、S3 `18339`、OpenSearch `19269` | 不挂载业务卷 |
 
 端口只绑定本机回环地址。各配置保留原项目名和卷名；`.env` 中已有的 `COMPOSE_PROJECT_NAME` 覆盖也须保留。不要通过更改项目名或 `down -v` 处理连接故障，它们会改变既有数据的归属。
 

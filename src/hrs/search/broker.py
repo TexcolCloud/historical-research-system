@@ -18,6 +18,8 @@ from filelock import FileLock, Timeout
 
 from hrs.config import (
     DEFAULT_RETRIEVAL_ENDPOINT,
+    data_root,
+    diagnostics_root,
     load_environment,
     project_root,
     resolve_path,
@@ -112,7 +114,7 @@ class RetrievalBroker:
         self.models_root = resolve_path(
             self.root, self.env.get("PLATFORM_MODELS_ROOT", "models/document-retrieval")
         )
-        self.folder = self.root / "state/retrieval"
+        self.folder = data_root(self.root) / "retrieval"
         self.folder.mkdir(parents=True, exist_ok=True)
         self.closing = threading.Event()
         self.task_lock = threading.RLock()
@@ -317,7 +319,7 @@ def main(argv=()):
         server = ThreadingHTTPServer(retrieval_bind(options.endpoint), Handler)
         server.daemon_threads = True
         process = psutil.Process(os.getpid())
-        receipt = broker.root / ".cache/platform-diagnostics/brokers" / (str(os.getpid()) + ".json")
+        receipt = diagnostics_root(broker.root) / "brokers" / (str(os.getpid()) + ".json")
         atomic_json(
             receipt,
             {

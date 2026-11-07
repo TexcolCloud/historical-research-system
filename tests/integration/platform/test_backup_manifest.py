@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 
 from hrs import backups
-from hrs.config import Settings
+from hrs.config import Settings, data_root
 from hrs.processing.application import prepare
 from hrs.processing.store import Store
 from hrs.processing.workspace import identity
@@ -123,6 +123,20 @@ def test_complete_backup_restores_objects_after_source_bucket_is_gone(
     assert after.status(document["id"])["pages"] == store.status(document["id"])["pages"]
     after.verify_evidence(after.status(document["id"]))
     assert result["object_store"]["verified"] is True
+
+
+def test_default_backup_destination_uses_the_external_project_data_home(source_backup, monkeypatch):
+    settings, _, _, _, _ = source_backup
+    monkeypatch.delenv("HRS_DATA_ROOT")
+    user_data = settings.project_root.parent / "user-data"
+    monkeypatch.setenv("LOCALAPPDATA", str(user_data))
+    monkeypatch.setenv("XDG_DATA_HOME", str(user_data))
+    receipt = backups.backup(settings)
+    destination = Path(receipt["manifest"]).parent
+    assert destination.parent == data_root(settings.project_root) / "backups"
+    assert not destination.is_relative_to(settings.project_root)
+    assert destination.is_dir() and (destination / "manifest.json").is_file()
+    assert not (settings.project_root / "backups").exists()
 
 
 def test_restore_refuses_occupied_bucket_before_creating_database(

@@ -39,7 +39,7 @@ MAINTENANCE_COMMANDS = {
 def _models(action):
     from hrs.config import load_environment, project_root, resolve_path
     from hrs.search.artifacts import inspect_artifacts
-    from hrs.search.settings import MODEL_REVISIONS
+    from hrs.search.settings import MODEL_REVISIONS, MODEL_WEIGHTS
 
     project = project_root()
     root = resolve_path(
@@ -52,7 +52,19 @@ def _models(action):
         from huggingface_hub import snapshot_download
 
         for name, revision in MODEL_REVISIONS.items():
-            snapshot_download(repo_id=name, revision=revision, local_dir=paths[name])
+            snapshot_download(
+                repo_id=name,
+                revision=revision,
+                local_dir=paths[name],
+                allow_patterns=[
+                    "config.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                    "sentencepiece.bpe.model",
+                    "special_tokens_map.json",
+                    MODEL_WEIGHTS[name],
+                ],
+            )
     report = inspect_artifacts(root)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if not all(item["present"] for item in report.values()):
@@ -66,7 +78,7 @@ def _test_infrastructure():
     from hrs.storage.service import objects_for
 
     settings = Settings.load()
-    if settings.s3_endpoint != "http://127.0.0.1:58339" or settings.s3_bucket != "platform-ci":
+    if settings.s3_endpoint != "http://127.0.0.1:18339" or settings.s3_bucket != "platform-ci":
         raise ValueError("This check requires the isolated CI storage endpoint and bucket.")
     objects = objects_for(settings)
     for attempt in range(45):

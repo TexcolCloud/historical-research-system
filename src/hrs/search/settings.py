@@ -8,6 +8,11 @@ MODEL_REVISIONS = {
     "BAAI/bge-reranker-v2-m3": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",
 }
 
+MODEL_WEIGHTS = {
+    "BAAI/bge-m3": "pytorch_model.bin",
+    "BAAI/bge-reranker-v2-m3": "model.safetensors",
+}
+
 
 class RetrievalSettings(BaseModel):
     models_root: Path

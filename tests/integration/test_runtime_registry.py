@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from hrs import app as launcher
 from hrs import runtime
 from hrs.api import server as serving
-from hrs.config import Settings
+from hrs.config import Settings, diagnostics_root
 
 
 def wait_until(predicate, timeout=5):
@@ -120,7 +120,7 @@ def test_api_admission_and_custom_port_receipt_keep_status_tied_to_the_running_w
         monkeypatch.setattr(Settings, "load", lambda root: selected)
         monkeypatch.setattr(launcher, "ROOT", settings.project_root)
         monkeypatch.setattr(
-            launcher, "CONTROL", settings.project_root / ".cache/platform-diagnostics"
+            launcher, "CONTROL", diagnostics_root(settings.project_root)
         )
         launcher.command("status")
         status = json.loads(capsys.readouterr().out)

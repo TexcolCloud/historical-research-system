@@ -121,7 +121,7 @@ def render_document(source: Path, destination: Path) -> dict:
                     try:
                         image = bitmap.to_pil()
                         pages.append(
-                            _save_page(image, pages_directory / f"{number + 1:06d}.png", number + 1)
+                            _save_page(image, pages_directory / f"{number + 1:05d}.png", number + 1)
                         )
                         pages[-1]["extraction_plan"] = plan
                     finally:
@@ -132,7 +132,7 @@ def render_document(source: Path, destination: Path) -> dict:
         with Image.open(retained) as document:
             for number, frame in enumerate(ImageSequence.Iterator(document), start=1):
                 image = ImageOps.exif_transpose(frame)
-                pages.append(_save_page(image, pages_directory / f"{number:06d}.png", number))
+                pages.append(_save_page(image, pages_directory / f"{number:05d}.png", number))
                 pages[-1]["extraction_plan"] = image_plan()
     if not pages:
         raise ValueError("Source document did not contain any pages.")

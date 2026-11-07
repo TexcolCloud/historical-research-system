@@ -15,6 +15,18 @@ npm --prefix web ci
 
 Python 环境统一为根 `.venv`；API、MCP 和 BGE 子进程使用同一解释器。`retrieval` extra 安装 PyTorch/Transformers，普通无模型开发测试可不安装该 extra。
 
+运行数据与源码分开保存。新安装默认使用 Windows 的 `%USERPROFILE%/.local/share/HistoricalResearchSystem/<项目标识>/`，避开应用包对 AppData 的重定向；Linux 使用 `$XDG_DATA_HOME/HistoricalResearchSystem/<项目标识>/`（未设置时为 `~/.local/share`）。项目标识由项目绝对路径生成，同一项目的 API、CLI 和 MCP 共用目录，不同项目互相隔离。需要自定义位置时，可选设置 `HRS_DATA_ROOT`；相对路径以项目根为准，初始化不会向 `.env` 追加配置。
+
+| 数据 | 默认位置与用途 |
+| --- | --- |
+| 原生任务与证据 | 数据根下 `native/`：SQLite 账本、原件、页图、审核决定和发布版本，属于持久数据 |
+| 临时导入 | 数据根下 `cache/intake/`：处理成功或异常后回收；启动时定向清理超过 24 小时且未被占用的导入临时目录 |
+| 运行记录与备份 | 数据根下 `diagnostics/`、`retrieval/`、`backups/`，与源码分开管理 |
+| 平台业务对象 | S3：上传内容、发布页图、Markdown 和文章对象；PostgreSQL 保存引用及阅读投影 |
+| 检索模型 | 既有 `models/document-retrieval/` 或显式模型目录，只需固定版本的 BGE-M3 和 BGE reranker |
+
+默认 S3 是本机 Docker 中的 SeaweedFS，实际字节保存在 Docker 数据卷。独立 MCP 仍能在没有 SQL/S3 服务时处理资料，因此原生工作区是必要的本地持久存储；S3 接入不等于可以直接删除它。阅读使用有界内存缓存，导出流式读取 S3，不再积累整书下载副本。
+
 ## 首次启动
 
 已有 `.env` 时保留原文件。首次安装复制模板并填写三项凭据：
@@ -32,9 +44,9 @@ if (-not (Test-Path -LiteralPath '.env')) {
 | `INGEST_S3_SECRET_KEY` | 专用 S3 私有密钥 |
 | `COMPOSE_PROJECT_NAME` | 新安装留空；已有部署保留原值，维持容器和卷身份 |
 
-地址、端口、库名与数据库 URL 由代码提供默认值或在内存推导，初始化不向 `.env` 添加字段。现有显式 `PLATFORM_*`、`INGEST_*` 覆盖仍可用；主机 SQL 默认 `127.0.0.1:55436`，S3 默认 `127.0.0.1:58333`、桶 `ingestion-acceptance`，OpenSearch 默认 `127.0.0.1:19260`。部署和隔离测试见 [deploy](deploy/README.md)。
+地址、端口、库名与数据库 URL 由代码提供默认值或在内存推导，初始化不向 `.env` 添加字段。现有显式 `PLATFORM_*`、`INGEST_*` 覆盖仍可用；主机 SQL 默认 `127.0.0.1:55436`，S3 默认 `127.0.0.1:18333`、桶 `ingestion-acceptance`，OpenSearch 默认 `127.0.0.1:19260`。S3 默认使用低于 Windows 动态端口范围的端口，避免原 `58333` 在系统重启后被保留。部署和隔离测试见 [deploy](deploy/README.md)。
 
-准备固定版本的 BGE-M3 与 reranker，然后启动：
+准备固定版本的 BGE-M3 与 reranker，然后启动；模型准备仅下载实际加载的权重和分词器，不下载 ONNX 等其他推理格式：
 
 ```powershell
 uv run --no-sync --locked python -m hrs models prepare
@@ -77,11 +89,11 @@ uv run --no-sync --locked python -m hrs workbench --port 0
 
 正常情况下 MCP 由 Codex 启动，无需另开一份。将示例文件替换为真实路径。`start` 返回文档 ID、工作区 ID 与本机网址；独立界面网址可能含访问令牌，不要公开。同一工作区的平台在线时直接打开 React 工作台；已有 MCP 文档通过幂等附接进入同一书籍队列，不重复识别。平台离线时使用不依赖 SQL 的独立核对界面，也支持疑点定位和目录终审。
 
-API 与独立 MCP 共用工作区选择：显式 `--root`（或直接提供的 API 设置）> 进程 `PLATFORM_CODEX_ROOT` > 进程 `HRS_CODEX_ROOT` > 根 `.env` 的 `PLATFORM_CODEX_ROOT` > 根 `.env` 的 `HRS_CODEX_ROOT` > 共享 JSON 配置。需要本机自定义目录时，可在被忽略的根 `.env` 中可选设置 `HRS_CODEX_ROOT`；dotenv 相对路径以项目根为准，CLI `--root` 和进程 `HRS_CODEX_ROOT` 的相对路径保持以当前目录为准。操作前核对 `workspace_id`，不要因连接到了另一个工作区而重复导入。已有工作区与证据路径在代码重构时保持原位。
+API 与独立 MCP 共用工作区选择：显式 `--root`（或直接提供的 API 设置）> 进程 `PLATFORM_CODEX_ROOT` > 进程 `HRS_CODEX_ROOT` > 根 `.env` 的 `PLATFORM_CODEX_ROOT` > 根 `.env` 的 `HRS_CODEX_ROOT` > 共享 JSON 中的非空 `root`。默认 JSON 的 `root: null` 表示自动选择：`state/codex` 已有账本、旧文档或工作区身份文件时沿用原路径，否则使用数据根下的 `native/`。需要本机自定义工作区时，可在被忽略的根 `.env` 中可选设置 `HRS_CODEX_ROOT`；dotenv 相对路径以项目根为准，CLI `--root` 和进程 `HRS_CODEX_ROOT` 的相对路径保持以当前目录为准。操作前核对 `workspace_id`，不要因连接到了另一个工作区而重复导入。升级不会自动移动、删除已有工作区或修改证据路径。
 
 ```powershell
-uv run --no-sync --locked python -m hrs --root state/codex document-status 'DOCUMENT_ID'
-uv run --no-sync --locked python -m hrs --root state/codex resume 'DOCUMENT_ID'
+uv run --no-sync --locked python -m hrs document-status 'DOCUMENT_ID'
+uv run --no-sync --locked python -m hrs resume 'DOCUMENT_ID'
 ```
 
 `resume` 从现有检查点继续；`run` 会执行真实模型，不是只读诊断。旧 JSON 工作区在停机备份后使用 `migrate-ledger` 校验迁移。详细阶段契约由 MCP 的 `workflow_instructions` 返回，发行资源位于 [workflow.md](src/hrs/codex/workflow.md)。
@@ -118,17 +130,16 @@ uv run --no-sync --locked python -m hrs stop
 uv run --no-sync --locked python -m hrs stop
 # 等待主机应用及所有独立工作台/执行器完全退出，再停止上传；SQL/S3 继续运行。
 docker compose --env-file .env -f deploy/compose.upload.yml stop tusd
-uv run --no-sync --locked python -m hrs backup | Set-Content -Encoding utf8 .cache/platform-backup-reference.json
+$backupReference = (& uv run --no-sync --locked python -m hrs backup | Out-String)
 ```
 
-该命令需要运行中的 SQL/S3 和对应 PostgreSQL 容器的 `pg_dump`。自定义容器指定 `PLATFORM_POSTGRES_CONTAINER`。默认写入新的 `backups/<时间>-<随机值>/`，也可用 `backup --destination <新目录>`。只有 SQL、原生归档和对象归档均校验通过才写入完整 `manifest.json`；未完成上传或仍在线的所属服务会阻止备份。完整目录可离线保管，恢复不依赖原桶存活。
+该命令需要运行中的 SQL/S3 和对应 PostgreSQL 容器的 `pg_dump`。自定义容器指定 `PLATFORM_POSTGRES_CONTAINER`。默认写入数据根下新的 `backups/<时间>-<随机值>/`，也可用 `backup --destination <新目录>`。只有 SQL、原生归档和对象归档均校验通过才写入完整 `manifest.json`；未完成上传或仍在线的所属服务会阻止备份。完整目录可离线保管，恢复不依赖原桶存活。
 
 同一 SQL 库保留了其他原生工作区的任务时，用可重复的 `backup --additional-native-root <原生根目录>` 明确纳入全部工作区；缺少原生检查点、身份重复或旧关联无法唯一确认时拒绝完整备份。系统不会只备份当前工作区却把整个 SQL 标为完整可恢复。
 
 恢复到新的数据库、空目标桶和不存在的新工作区：
 
 ```powershell
-$backupReference = Get-Content -Raw .cache/platform-backup-reference.json
 uv run --no-sync --locked python -m hrs restore --manifest-reference $backupReference --restore-suffix drill_example --restore-bucket hrs-restore-drill --restore-native-root state/codex-restore-drill
 ```
 

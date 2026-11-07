@@ -8,12 +8,25 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 from uuid import uuid4
 
-from hrs.config import project_root, read_environment, resolve_path
+from hrs.config import data_root, project_root, read_environment, resolve_path
 from hrs.processing.snapshots import atomic_json, read_snapshot
 from hrs.processing.store import Store
 
 PROJECT = project_root()
 CONFIG = PROJECT / ".codex/historical-workspace.json"
+
+
+def _has_authority(root: Path) -> bool:
+    # Selection must not open/migrate SQLite or require a previously generated
+    # identity. Store validates retained contents after the root is selected.
+    if any((root / name).is_file() for name in (".workspace.json", "ledger.sqlite3")):
+        return True
+    return any(
+        path.is_file()
+        and len(path.parent.name) == 24
+        and all(character in "0123456789abcdef" for character in path.parent.name)
+        for path in (root / "documents").glob("*/document.json")
+    )
 
 
 def resolve_workspace(explicit: Path | str | None = None) -> Path:
@@ -31,9 +44,14 @@ def resolve_workspace(explicit: Path | str | None = None) -> Path:
     config = (
         json.loads(CONFIG.read_text(encoding="utf-8"))
         if CONFIG.exists()
-        else {"root": "state/codex"}
+        else {}
     )
-    return (PROJECT / config["root"]).resolve()
+    if selected := config.get("root"):
+        return resolve_path(PROJECT, selected)
+    legacy = PROJECT / "state/codex"
+    if _has_authority(legacy):
+        return legacy.resolve()
+    return (data_root(PROJECT) / "native").resolve()
 
 
 def identity(store: Store) -> dict:

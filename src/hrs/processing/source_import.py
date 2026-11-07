@@ -62,6 +62,10 @@ class SourceImport:
                 if page.get("image_sha256", page.get("sha256", image_hash)) != image_hash:
                     raise ValueError("Page image hash mismatch")
                 target = directory / "pages" / f"{page['page']:05d}{image.suffix.lower()}"
+                # Reuse retained renders from before page filenames were unified.
+                legacy = directory / "pages" / f"{page['page']:06d}{image.suffix.lower()}"
+                if image == legacy.resolve():
+                    target = image
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if image != target.resolve():
                     shutil.copyfile(image, target)

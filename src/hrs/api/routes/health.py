@@ -1,8 +1,12 @@
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from hrs.api.deps import EngineDep, SettingsDep
 from hrs.api.schemas import RuntimeStatus
+from hrs.storage.objects import ObjectStorageError
+from hrs.storage.service import objects_for
 
 router = APIRouter(tags=["health"])
 
@@ -35,7 +39,11 @@ def live():
 
 
 @router.get("/health/ready")
-def ready(engine: EngineDep):
-    with engine.connect() as connection:
-        connection.execute(text("SELECT 1 FROM alembic_version"))
+def ready(engine: EngineDep, settings: SettingsDep):
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1 FROM alembic_version"))
+        objects_for(settings).check()
+    except (SQLAlchemyError, BotoCoreError, ClientError, ObjectStorageError):
+        raise HTTPException(503, "Required storage services are unavailable.") from None
     return {"status": "ready"}

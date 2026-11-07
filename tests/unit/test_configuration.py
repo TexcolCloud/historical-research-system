@@ -35,3 +35,4 @@ def test_deployment_and_resource_overrides_resolve_outside_checkout(tmp_path, mo
         ("codex_root", "evidence"),
     ):
         assert getattr(settings, field) == Path(deployment / relative)
+    assert settings.s3_endpoint == "http://127.0.0.1:58339"

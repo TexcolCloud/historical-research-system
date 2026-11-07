@@ -14,6 +14,7 @@ from sqlalchemy import func, insert, or_, select, update
 
 from hrs.codex.execution import create_runner
 from hrs.library.books import get_run
+from hrs.library.intake import cleanup_intake, intake_directory
 from hrs.library.native_workspace import WrongWorkspace, require_workspace, workspace_runs
 from hrs.library.object_ownership import owned_objects
 from hrs.library.projection.artifacts import ProjectionArtifacts
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 class CodexBridge:
     def __init__(self, settings, engine):
         self.settings, self.engine = settings, engine
+        cleanup_intake(settings.cache_root)
         self.store = Store(resolve_workspace(settings.codex_root))
         # Establish immutable workspace identity before the background/read path starts.
         workspace_identity(self.store)
@@ -316,27 +318,26 @@ class CodexBridge:
         elif event["kind"] in {"start_book", "retry_run"} and not (run["result"] or {}).get(
             "codex_document_id"
         ):
-            directory = self.store.root / "platform-intake" / run["id"]
-            directory.mkdir(parents=True, exist_ok=True)
-            path = directory / "original.pdf"
-            source = run["source"]
-            if source.get("upload_key"):
-                response = self.objects.client.get_object(
-                    Bucket=self.objects.bucket, Key=source["upload_key"]
-                )
-                body = response["Body"]
-                try:
-                    with path.open("wb") as stream:
-                        while chunk := body.read(1024 * 1024):
-                            stream.write(chunk)
-                finally:
-                    body.close()
-                if path.stat().st_size != source["byte_length"]:
-                    raise ValueError("Retained upload length differs from the upload receipt")
-            else:
-                path.write_bytes(self.objects.read_bytes(source))
-            doc = prepare(self.store, str(path), self.title(run["book_id"]))
-            retained = self.objects.put_file(path, "application/pdf", run_id=run["id"])
+            with intake_directory(self.settings.cache_root, run["id"]) as directory:
+                path = directory / "original.pdf"
+                source = run["source"]
+                if source.get("upload_key"):
+                    response = self.objects.client.get_object(
+                        Bucket=self.objects.bucket, Key=source["upload_key"]
+                    )
+                    body = response["Body"]
+                    try:
+                        with path.open("wb") as stream:
+                            while chunk := body.read(1024 * 1024):
+                                stream.write(chunk)
+                    finally:
+                        body.close()
+                    if path.stat().st_size != source["byte_length"]:
+                        raise ValueError("Retained upload length differs from the upload receipt")
+                else:
+                    path.write_bytes(self.objects.read_bytes(source))
+                doc = prepare(self.store, str(path), self.title(run["book_id"]))
+                retained = self.objects.put_file(path, "application/pdf", run_id=run["id"])
             self.store.request_run(doc["id"])
             with self.engine.begin() as connection:
                 current = (
