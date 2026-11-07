@@ -19,6 +19,7 @@ export type WorkspaceContext = {
 
 export default function AppShell() {
   const location = useLocation();
+  const researching = location.pathname === "/research";
   const reviewing =
     location.pathname === "/reviews" ||
     (location.pathname.startsWith("/books/") &&
@@ -65,11 +66,17 @@ export default function AppShell() {
           <span>史料研究</span>
         </Link>
         <nav aria-label="主要导航">
-          <Link to="/" aria-current={!reviewing ? "page" : undefined}>
+          <Link
+            to="/"
+            aria-current={!reviewing && !researching ? "page" : undefined}
+          >
             书籍
           </Link>
           <Link to="/reviews" aria-current={reviewing ? "page" : undefined}>
             待办
+          </Link>
+          <Link to="/research" aria-current={researching ? "page" : undefined}>
+            研究检索
           </Link>
         </nav>
         <div className="platform-header-actions">

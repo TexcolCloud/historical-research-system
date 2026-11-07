@@ -13,6 +13,11 @@ from hrs.processing.hashing import file_digest
 
 def snapshot_workspace(store, destination: Path) -> dict:
     with store.lock, TemporaryDirectory(prefix="hrs-ledger-backup-") as temporary:
+        if store.checkpoints.ledger:
+            from hrs.processing.research_workflow import ResearchWorkflow
+
+            if ResearchWorkflow(store).has_live_work():
+                raise ValueError("Stop the research executor before creating a workspace snapshot")
         documents = [store.checkpoints.read(row["id"]) for row in store.list_documents()]
         for document in documents:
             if document.get("run_request", {}).get("state") == "running" or any(

@@ -73,11 +73,14 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
   const returnParams = new URLSearchParams(
     returnTo.slice(returnTo.indexOf("?") + 1),
   );
-  const returnLabel =
-    returnParams.get("section") === "search" ||
-    returnParams.get("tab") === "search"
-      ? "返回检索结果"
-      : "返回目录";
+  const returnLabel = returnTo.startsWith("/research")
+    ? "返回研究检索"
+    : returnParams.get("tab") === "research"
+      ? "返回史料卡"
+      : returnParams.get("section") === "search" ||
+          returnParams.get("tab") === "search"
+        ? "返回检索结果"
+        : "返回目录";
   const location = useLocation(),
     navigate = useNavigate();
   // Drawer and query changes preserve the current reading position. Following a

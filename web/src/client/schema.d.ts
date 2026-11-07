@@ -617,6 +617,210 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/research/books/{book_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Overview */
+        get: operations["overview_api_v2_research_books__book_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/books/{book_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start */
+        post: operations["start_api_v2_research_books__book_id__runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/books/{book_id}/cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cards */
+        get: operations["cards_api_v2_research_books__book_id__cards_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/books/{book_id}/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Entities */
+        get: operations["entities_api_v2_research_books__book_id__entities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run */
+        get: operations["run_api_v2_research_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/runs/{run_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause */
+        post: operations["pause_api_v2_research_runs__run_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/runs/{run_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume */
+        post: operations["resume_api_v2_research_runs__run_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/cards/{card_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Card */
+        get: operations["card_api_v2_research_cards__card_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/entities/{entity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Entity */
+        get: operations["entity_api_v2_research_entities__entity_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/cards/{card_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decision */
+        post: operations["decision_api_v2_research_cards__card_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/cards/{card_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export */
+        get: operations["export_api_v2_research_cards__card_id__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search */
+        get: operations["search_api_v2_research_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -729,6 +933,38 @@ export interface components {
             no_argument_reason: string | null;
             /** Items */
             items: components["schemas"]["DraftItem"][];
+        };
+        /** CardItem */
+        CardItem: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "section" | "evidence" | "argument" | "issue" | "paper_use";
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** Text */
+            text: string;
+            /** Evidence Ids */
+            evidence_ids?: string[];
+            /**
+             * Epistemic State
+             * @default stated
+             * @enum {string}
+             */
+            epistemic_state: "stated" | "inferred" | "unknown" | "disputed";
+            /**
+             * Attribution
+             * @default
+             */
+            attribution: string;
+            /** Limitations */
+            limitations?: string[];
         };
         /** CardQuoteLocation */
         CardQuoteLocation: {
@@ -1130,6 +1366,23 @@ export interface components {
             /** Basis */
             basis?: string[];
         };
+        /** IdentityLink */
+        IdentityLink: {
+            /** Local Mention Id */
+            local_mention_id: string;
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Relation
+             * @default possible_same_as
+             * @enum {string}
+             */
+            relation: "possible_same_as" | "same_as";
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Reason */
+            reason: string;
+        };
         /** NativeWorkbenchRequest */
         NativeWorkbenchRequest: {
             /** Document Id */
@@ -1489,6 +1742,530 @@ export interface components {
              * Format: uuid
              */
             request_id: string;
+        };
+        /** RelationDraft */
+        RelationDraft: {
+            /** Id */
+            id: string;
+            /** Subject Id */
+            subject_id: string;
+            /** Predicate */
+            predicate: string;
+            /** Object Id */
+            object_id: string;
+            /**
+             * Role
+             * @default association
+             * @enum {string}
+             */
+            role: "support" | "limit" | "counter" | "background" | "association";
+            /** Reason */
+            reason: string;
+            /** Evidence Ids */
+            evidence_ids: string[];
+        };
+        /** ResearchBookResponse */
+        ResearchBookResponse: {
+            /** Book Id */
+            book_id: string;
+            /** Book Title */
+            book_title: string;
+            /** Indexed */
+            indexed: boolean;
+            /** Source Version */
+            source_version: string | null;
+            /** Runs */
+            runs: components["schemas"]["ResearchRunResponse"][];
+            /** Cards */
+            cards: components["schemas"]["ResearchCardSummary"][];
+            /** Cards Count */
+            cards_count: number;
+            /** Entities */
+            entities: components["schemas"]["ResearchEntityResponse"][];
+            /** Entities Count */
+            entities_count: number;
+            /**
+             * Needs Update
+             * @default false
+             */
+            needs_update: boolean;
+            /**
+             * Stale Cards Count
+             * @default 0
+             */
+            stale_cards_count: number;
+            /**
+             * Source Revision Pending
+             * @default false
+             */
+            source_revision_pending: boolean;
+        };
+        /** ResearchCardPage */
+        ResearchCardPage: {
+            /** Items */
+            items: components["schemas"]["ResearchCardSummary"][];
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+        };
+        /** ResearchCardResponse */
+        ResearchCardResponse: {
+            /** Id */
+            id: string;
+            /** Article Id */
+            article_id: string;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /**
+             * Document Type
+             * @default
+             */
+            document_type: string;
+            /**
+             * Source Layer
+             * @default
+             */
+            source_layer: string;
+            formation_date?: components["schemas"]["ResearchDate"];
+            event_date?: components["schemas"]["ResearchDate"];
+            /** Items */
+            items?: components["schemas"]["CardItem"][];
+            /** Evidence */
+            evidence: components["schemas"]["ResearchEvidenceResponse"][];
+            /** Mentions */
+            mentions: components["schemas"]["ResearchMentionResponse"][];
+            /** Events */
+            events: components["schemas"]["ResearchEventResponse"][];
+            /** Relations */
+            relations?: components["schemas"]["RelationDraft"][];
+            /** Identity Links */
+            identity_links?: components["schemas"]["IdentityLink"][];
+            /** Tags */
+            tags?: string[];
+            /** Limitations */
+            limitations?: string[];
+            /** Alternatives */
+            alternatives?: string[];
+            /** Questions */
+            questions?: string[];
+            /** No Argument Reason */
+            no_argument_reason?: string | null;
+            /** Book Id */
+            book_id: string;
+            /** Run Id */
+            run_id: string;
+            /** State */
+            state: string;
+            /** Version */
+            version: number;
+            /** Approval Type */
+            approval_type?: string | null;
+            /**
+             * Book Title
+             * @default
+             */
+            book_title: string;
+            checks: components["schemas"]["VerificationSubmission"];
+            human_decision?: components["schemas"]["ResearchHumanDecision"] | null;
+            /**
+             * Source Current
+             * @default true
+             */
+            source_current: boolean;
+            /**
+             * Needs Update
+             * @default false
+             */
+            needs_update: boolean;
+            /**
+             * Source Status
+             * @default current
+             * @enum {string}
+             */
+            source_status: "current" | "revision_pending" | "stale";
+            /**
+             * Research Current
+             * @default true
+             */
+            research_current: boolean;
+            /**
+             * Superseded
+             * @default false
+             */
+            superseded: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /** ResearchCardSummary */
+        ResearchCardSummary: {
+            /** Id */
+            id: string;
+            /** Book Id */
+            book_id: string;
+            /** Run Id */
+            run_id: string;
+            /** Article Id */
+            article_id: string;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /** State */
+            state: string;
+            /** Version */
+            version: number;
+            /** Approval Type */
+            approval_type: string | null;
+            /** Tags */
+            tags: string[];
+            /** Document Type */
+            document_type: string;
+            /** Source Layer */
+            source_layer: string;
+            /** Article Title */
+            article_title: string;
+            /** Evidence Count */
+            evidence_count: number;
+            /** Item Count */
+            item_count: number;
+            /** Entity Count */
+            entity_count: number;
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
+            /**
+             * Source Current
+             * @default true
+             */
+            source_current: boolean;
+            /**
+             * Needs Update
+             * @default false
+             */
+            needs_update: boolean;
+            /**
+             * Source Status
+             * @default current
+             * @enum {string}
+             */
+            source_status: "current" | "revision_pending" | "stale";
+            /**
+             * Research Current
+             * @default true
+             */
+            research_current: boolean;
+            /**
+             * Superseded
+             * @default false
+             */
+            superseded: boolean;
+        };
+        /** ResearchDate */
+        ResearchDate: {
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /** Normalized */
+            normalized?: string | null;
+            /**
+             * Certainty
+             * @default unknown
+             * @enum {string}
+             */
+            certainty: "stated" | "inferred" | "unknown" | "disputed";
+            /** Evidence Ids */
+            evidence_ids?: string[];
+        };
+        /** ResearchDecision */
+        ResearchDecision: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "accept" | "edit" | "reject";
+            /** Expected Version */
+            expected_version: number;
+            /** Text */
+            text?: string | null;
+        };
+        /** ResearchEntityPage */
+        ResearchEntityPage: {
+            /** Items */
+            items: components["schemas"]["ResearchEntityResponse"][];
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+        };
+        /** ResearchEntityResponse */
+        ResearchEntityResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Card Id */
+            card_id: string;
+            /** Book Id */
+            book_id: string;
+            /** Run Id */
+            run_id: string;
+            /** State */
+            state: string;
+            /**
+             * Identity Basis
+             * @default
+             */
+            identity_basis: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            date?: components["schemas"]["ResearchDate"] | null;
+            /**
+             * Card Title
+             * @default
+             */
+            card_title: string;
+            /** Mentions */
+            mentions?: components["schemas"]["ResearchEntityResponse"][];
+            /** Identity Links */
+            identity_links?: components["schemas"]["ResearchIdentityLinkResponse"][];
+            /** Evidence */
+            evidence?: components["schemas"]["ResearchEvidenceResponse"][];
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
+            /**
+             * Source Current
+             * @default true
+             */
+            source_current: boolean;
+            /**
+             * Needs Update
+             * @default false
+             */
+            needs_update: boolean;
+            /**
+             * Source Status
+             * @default current
+             * @enum {string}
+             */
+            source_status: "current" | "revision_pending" | "stale";
+            /**
+             * Research Current
+             * @default true
+             */
+            research_current: boolean;
+            /**
+             * Superseded
+             * @default false
+             */
+            superseded: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /** ResearchEventResponse */
+        ResearchEventResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            date?: components["schemas"]["ResearchDate"];
+            /** Participant Ids */
+            participant_ids?: string[];
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Entity Id */
+            entity_id: string;
+        };
+        /** ResearchEvidenceResponse */
+        ResearchEvidenceResponse: {
+            /** Id */
+            id: string;
+            /** Article Id */
+            article_id: string;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Quote */
+            quote: string;
+            /** Footnote Ids */
+            footnote_ids?: string[];
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
+            /** Pages */
+            pages?: number[];
+            /** Footnotes */
+            footnotes?: components["schemas"]["ResearchFootnoteResponse"][];
+            /** Text Sha256 */
+            text_sha256: string;
+            /** Book Id */
+            book_id?: string | null;
+            /** Publication Sha256 */
+            publication_sha256?: string | null;
+            /** Source Run Id */
+            source_run_id?: string | null;
+            /** Original Article Id */
+            original_article_id?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** ResearchFootnoteResponse */
+        ResearchFootnoteResponse: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            note: components["schemas"]["FootnoteDefinition"];
+            /** References */
+            references: components["schemas"]["FootnoteSpan"][];
+            /** Text */
+            text: string;
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
+        };
+        /** ResearchHumanDecision */
+        ResearchHumanDecision: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "accept" | "edit" | "reject";
+            /** At */
+            at: number;
+            /** Previous Version */
+            previous_version: number;
+        };
+        /** ResearchIdentityLinkResponse */
+        ResearchIdentityLinkResponse: {
+            /** Local Mention Id */
+            local_mention_id: string;
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Relation
+             * @default possible_same_as
+             * @enum {string}
+             */
+            relation: "possible_same_as" | "same_as";
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Reason */
+            reason: string;
+            /** Source Entity Id */
+            source_entity_id: string;
+            /** Card Id */
+            card_id: string;
+            /**
+             * Card Title
+             * @default
+             */
+            card_title: string;
+            /** Approval Type */
+            approval_type?: string | null;
+            /** Evidence */
+            evidence?: components["schemas"]["ResearchEvidenceResponse"][];
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** ResearchMentionResponse */
+        ResearchMentionResponse: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "person" | "organization" | "place" | "event";
+            /** Name */
+            name: string;
+            /** Identity Basis */
+            identity_basis: string;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Entity Id */
+            entity_id: string;
+        };
+        /** ResearchRunResponse */
+        ResearchRunResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Book Id */
+            book_id: string;
+            /** Source Run Id */
+            source_run_id: string;
+            /** Publication Sha256 */
+            publication_sha256: string;
+            /** Input Hash */
+            input_hash: string;
+            /** State */
+            state: string;
+            /** Version */
+            version: number;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Tasks */
+            tasks: components["schemas"]["ResearchTaskResponse"][];
+            /** Card Ids */
+            card_ids?: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        /** ResearchSearchResponse */
+        ResearchSearchResponse: {
+            /** Query */
+            query: string;
+            /**
+             * Backend
+             * @enum {string}
+             */
+            backend: "hybrid" | "lexical";
+            /** Available */
+            available: boolean;
+            /** Hits */
+            hits: components["schemas"]["SearchHit"][];
+            /** Evidence Status */
+            evidence_status: string;
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Cards */
+            cards: components["schemas"]["ResearchCardSummary"][];
+            /** Entities */
+            entities: components["schemas"]["ResearchEntityResponse"][];
+            /**
+             * Research Backend
+             * @constant
+             */
+            research_backend: "sql_literal";
+        };
+        /** ResearchTaskResponse */
+        ResearchTaskResponse: {
+            /** Task Id */
+            task_id: string;
+            /** Stage */
+            stage: string;
+            /** State */
+            state: string;
+            /** Error */
+            error?: string | null;
+            /** Message */
+            message?: string | null;
+        } & {
+            [key: string]: unknown;
         };
         /** ReviewAnchor */
         ReviewAnchor: {
@@ -2094,6 +2871,13 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** StartResearch */
+        StartResearch: {
+            /** Revision Of */
+            revision_of?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
         /** StructureItem */
         StructureItem: {
             /** Id */
@@ -2171,6 +2955,55 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VerificationSubmission */
+        VerificationSubmission: {
+            /** Input Hash */
+            input_hash: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "pending";
+            /** Checked Card Ids */
+            checked_card_ids: string[];
+            /**
+             * Checked Item Ids
+             * @description Checked card_id/item_id values from candidate.required_checks
+             */
+            checked_item_ids?: string[];
+            /**
+             * Checked Evidence Ids
+             * @description Checked card_id/evidence_id values from candidate.required_checks
+             */
+            checked_evidence_ids?: string[];
+            /**
+             * Checked Relation Ids
+             * @description Checked card_id/relation_id values from candidate.required_checks
+             */
+            checked_relation_ids?: string[];
+            /**
+             * Checked Identity Links
+             * @description Checked card_id/link_index values from candidate.required_checks
+             */
+            checked_identity_links?: string[];
+            /**
+             * Checked Research Disposition
+             * @default false
+             */
+            checked_research_disposition: boolean;
+            /**
+             * Checked Search Receipt Ids
+             * @description Every server search receipt ID in candidate.required_checks
+             */
+            checked_search_receipt_ids?: string[];
+            /** Issues */
+            issues?: string[];
+            /**
+             * Checked Mechanical Evidence Ids
+             * @description Every decoded mechanical evidence receipt ID in candidate.required_checks; semantic review remains separate
+             */
+            checked_mechanical_evidence_ids?: string[];
         };
         /** WorkspaceSnapshot */
         WorkspaceSnapshot: {
@@ -3324,6 +4157,400 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_api_v2_research_books__book_id__get: {
+        parameters: {
+            query?: {
+                include_cards?: boolean;
+                include_entities?: boolean;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchBookResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_api_v2_research_books__book_id__runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StartResearch"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cards_api_v2_research_books__book_id__cards_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchCardPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    entities_api_v2_research_books__book_id__entities_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                book_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchEntityPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_api_v2_research_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_api_v2_research_runs__run_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_api_v2_research_runs__run_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    card_api_v2_research_cards__card_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchCardResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    entity_api_v2_research_entities__entity_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchEntityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decision_api_v2_research_cards__card_id__decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchCardResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_api_v2_research_cards__card_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_api_v2_research_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                book_id?: string | null;
+                semantic?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchSearchResponse"];
                 };
             };
             /** @description Validation Error */

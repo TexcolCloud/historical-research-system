@@ -200,6 +200,32 @@ test("an outdated target exposes the original instead of highlighting another pu
   expect(await screen.findByAltText("原书第 7 页")).toBeTruthy();
 });
 
+test("an outdated research citation rejects highlighting and retains its exact research return route", async () => {
+  const returnTo = "/research?q=运输&book_id=book&card=old-card";
+  setup(
+    readingHref(
+      "book",
+      { ...target, run_id: "old-publication", text_sha256: "c".repeat(64) },
+      { returnTo },
+    ),
+  );
+  await screen.findByText(/定位依据已更新|无法精确对应/);
+  expect(document.querySelectorAll("mark[data-reading-focus]")).toHaveLength(0);
+  expect(await screen.findByAltText("原书第 7 页")).toBeTruthy();
+  expect(
+    screen.getByRole("link", { name: "返回研究检索" }).getAttribute("href"),
+  ).toBe(returnTo);
+});
+
+test("an external-book citation returns to its originating book's research card", async () => {
+  const returnTo = "/books/source-book?tab=research&card=source-card";
+  setup(readingHref("book", target, { returnTo }));
+  const link = await screen.findByRole("link", { name: "返回史料卡" });
+  expect(link.getAttribute("href")).toBe(returnTo);
+  await screen.findByLabelText("正文定位位置");
+  expect(document.querySelectorAll("mark[data-reading-focus]")).toHaveLength(1);
+});
+
 test.each([
   "/books/book?tab=reader&section=search&q=%E4%BA%BA%E7%89%A9",
   "/books/book?tab=search&q=%E4%BA%BA%E7%89%A9",

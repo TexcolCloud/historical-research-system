@@ -22,6 +22,7 @@ const ExecutionPanel = lazy(
 const NavigationPanel = lazy(
   () => import("@/features/library/NavigationPanel.tsx"),
 );
+const BookResearch = lazy(() => import("@/features/research/BookResearch.tsx"));
 export default function BookPage() {
   const { bookId = "" } = useParams();
   const [params, setParams] = useSearchParams();
@@ -109,6 +110,7 @@ export default function BookPage() {
             <TabsTrigger value="progress">处理进展</TabsTrigger>
             <TabsTrigger value="review">人工核对</TabsTrigger>
             <TabsTrigger value="reader">阅读资料</TabsTrigger>
+            <TabsTrigger value="research">史料卡</TabsTrigger>
           </TabsList>
         </Tabs>
         <details className="book-more-actions">
@@ -126,9 +128,11 @@ export default function BookPage() {
                 ? directoryTask
                   ? "目录确认"
                   : "正文核对"
-                : tab === "reader"
-                  ? "阅读资料"
-                  : "处理进展"}
+                : tab === "research"
+                  ? "史料卡"
+                  : tab === "reader"
+                    ? "阅读资料"
+                    : "处理进展"}
             </h1>
             {tab === "review" && (
               <span className="book-task-count">
@@ -189,7 +193,9 @@ export default function BookPage() {
         </div>
       </div>
       <Suspense fallback={<p role="status">正在打开工作区…</p>}>
-        {tab === "reader" ? (
+        {tab === "research" ? (
+          <BookResearch book={book} />
+        ) : tab === "reader" ? (
           <ReadingWorkspace book={book} />
         ) : tab === "review" && book.run_id ? (
           <section className="human-workspace">

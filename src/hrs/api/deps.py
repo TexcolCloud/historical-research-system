@@ -11,6 +11,7 @@ from hrs.library.catalog import Library
 from hrs.library.exports import Exports
 from hrs.library.review import Review
 from hrs.library.runs.outputs import Outputs
+from hrs.research.api import Research
 from hrs.search.search import Search
 
 
@@ -68,3 +69,15 @@ def get_search(settings: SettingsDep, engine: EngineDep) -> Search:
 
 
 SearchDep = Annotated[Search, Depends(get_search)]
+
+
+def get_research(request: Request) -> Research:
+    state = request.app.state
+    if state.research is None:
+        with state.research_lock:
+            if state.research is None:
+                state.research = Research(state.settings, state.engine)
+    return state.research
+
+
+ResearchDep = Annotated[Research, Depends(get_research)]

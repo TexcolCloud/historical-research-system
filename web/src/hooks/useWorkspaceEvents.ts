@@ -50,9 +50,20 @@ export function useWorkspaceEvents() {
           try {
             const value = JSON.parse(event.data);
             cursor = next;
+            const key = `${value.kind}:${value.book_id}:${value.run_id}`;
+            const previous = pending.get(key);
+            if (
+              value.kind === "research.changed" &&
+              previous &&
+              JSON.parse(previous).payload?.artifacts_changed === true
+            ) {
+              value.payload = { ...value.payload, artifacts_changed: true };
+            }
             pending.set(
-              `${value.kind}:${value.book_id}:${value.run_id}`,
-              event.data,
+              key,
+              value.kind === "research.changed"
+                ? JSON.stringify(value)
+                : event.data,
             );
             flush ??= window.setTimeout(deliver, 200);
           } catch {

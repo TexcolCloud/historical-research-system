@@ -75,6 +75,10 @@ def require_quiesced(settings, store):
     else:
         raise RuntimeError("Use a stopped loopback upload endpoint for coordinated backup.")
     if store.checkpoints.ledger:
+        from hrs.processing.research_workflow import ResearchWorkflow
+
+        if ResearchWorkflow(store).has_live_work():
+            raise RuntimeError("Research workers are still active; drain them before backup.")
         now = time.time()
         if any(
             row["state"] in {"starting", "idle", "busy", "cooldown"} and row["expires_at"] > now

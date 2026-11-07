@@ -1,0 +1,110 @@
+// @vitest-environment happy-dom
+import { afterEach, expect, test, vi } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import ResearchRunPanel from "./ResearchRun";
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+test("queue and running progress poll only the lightweight task until human review is needed", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const requests: string[] = [];
+  const states = ["ready", "running", "pending"];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return Response.json({
+        run_id: "run",
+        book_id: "book",
+        version: requests.length,
+        state: states[Math.min(requests.length - 1, 2)],
+        counts: {
+          articles_total: 1,
+          articles_completed: 0,
+          articles_pending: 0,
+        },
+        card_ids: [],
+      });
+    }),
+  );
+  const query = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={query}>
+      <ResearchRunPanel runId="run" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("研究任务等待处理");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10001);
+  });
+  expect(requests).toHaveLength(2);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5001);
+  });
+  await screen.findByText("研究任务待人工核验");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60000);
+  });
+  expect(requests).toEqual([
+    "/api/v2/research/runs/run",
+    "/api/v2/research/runs/run",
+    "/api/v2/research/runs/run",
+  ]);
+});
+
+test("a late running response cannot undo a successful pause", async () => {
+  let resolveLate!: (response: Response) => void;
+  let reads = 0;
+  const running = {
+    run_id: "run",
+    book_id: "book",
+    version: 1,
+    state: "running",
+    counts: { articles: 3, completed: 1, pending: 0 },
+    tasks: [],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/pause"))
+        return Response.json({ ...running, state: "paused", version: 3 });
+      if (++reads === 1) return Response.json(running);
+      return new Promise<Response>((resolve) => {
+        resolveLate = resolve;
+      });
+    }),
+  );
+  const query = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={query}>
+      <ResearchRunPanel runId="run" />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("button", { name: "暂停研究任务" });
+  act(() => {
+    void query.refetchQueries({ queryKey: ["research", "run", "run"] });
+  });
+  await vi.waitFor(() => expect(reads).toBe(2));
+  await userEvent.click(screen.getByRole("button", { name: "暂停研究任务" }));
+  await screen.findByText("研究任务已暂停");
+  await act(async () => {
+    resolveLate(Response.json({ ...running, version: 2 }));
+  });
+  expect(screen.getByText("研究任务已暂停")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "暂停研究任务" })).toBeNull();
+  expect(screen.getByRole("button", { name: "继续研究任务" })).toBeTruthy();
+  expect(query.getQueryData(["research", "run", "run"])).toMatchObject({
+    state: "paused",
+    version: 3,
+  });
+});

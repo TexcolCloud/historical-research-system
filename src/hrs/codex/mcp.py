@@ -561,8 +561,21 @@ def create_server(root: Path) -> MCPServer:
 
     @server.tool()
     @contract_errors
-    def search_library(query: str, limit: int = 20) -> list[dict]:
-        """Search published local text with page provenance; only reviewed documents are indexed."""
-        return store.search(query, limit=limit)
+    def search_library(query: str, limit: int = 20, book_id: str | None = None,
+                       semantic: bool = True) -> dict:
+        """Shared platform evidence search; unavailable infrastructure is explicitly labelled."""
+        try:
+            return research_evidence().search(query, book_id, semantic=semantic, limit=limit)
+        except Exception as error:  # noqa: BLE001 - direct standalone clients keep labelled literal lookup
+            if book_id is not None:
+                raise ToolError("Platform search is unavailable; book-scoped search requires its index") from error
+            return {"query": query, "backend": "local_literal_fallback", "available": False,
+                    "hits": store.search(query, limit=limit),
+                    "warning": "Hybrid retrieval is unavailable; these are local substring matches only",
+                    "error_type": type(error).__name__}
+
+    from hrs.codex.research_tools import register_research_tools
+
+    research_evidence = register_research_tools(server, store, contract_errors)
 
     return server

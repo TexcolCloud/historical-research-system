@@ -68,6 +68,11 @@ class BookCleanup:
                 )
                 for row in connection.execute(select(table).where(condition)).mappings():
                     yield from references(dict(row))
+            # Research task IDs belong to SQLite; source ownership is by book, not the old run_id column.
+            for table in (db.research_runs, db.research_cards, db.research_entities):
+                condition = table.c.book_id != book_id if others else table.c.book_id == book_id
+                for row in connection.execute(select(table).where(condition)).mappings():
+                    yield from references(dict(row))
 
     def closure(self, roots):
         found, pending = {}, list(roots)

@@ -55,7 +55,10 @@ def account_route():
     return result
 
 
-def command(executable, root, document_id, logs, model, project):
+def command(
+    executable, root, document_id, logs, model, project, *,
+    tools=None, roles=None, instructions=None, reasoning_effort=None,
+):
     from hrs.processing.runtime_control import effective_policy
 
     policy = effective_policy(root)
@@ -74,12 +77,20 @@ def command(executable, root, document_id, logs, model, project):
         "agents.max_threads": max(8, policy["capacity"]),
         "mcp_servers.historical_research.command": sys.executable,
         "mcp_servers.historical_research.args": ["-m", "hrs", "--root", str(root), "mcp"],
+        # Stdio MCP starts with a filtered environment. Forward names, never secret
+        # values in CLI arguments, so its platform adapters use this same deployment.
+        "mcp_servers.historical_research.env_vars": sorted(
+            name for name in os.environ
+            if name.startswith(("HRS_", "PLATFORM_", "INGEST_")) or name == "PYTHONUTF8"
+        ),
         "mcp_servers.historical_research.default_tools_approval_mode": "approve",
         "mcp_servers.historical_research.required": True,
-        "mcp_servers.historical_research.enabled_tools": TOOLS,
+        "mcp_servers.historical_research.enabled_tools": TOOLS if tools is None else tools,
     }
     if policy["overlap_reading"]:
         settings["model_reasoning_effort"] = "low"
+    if reasoning_effort is not None:
+        settings["model_reasoning_effort"] = reasoning_effort
     skill_roots = [
         Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "skills",
         Path.home() / ".agents/skills",
@@ -117,11 +128,27 @@ def command(executable, root, document_id, logs, model, project):
     for key, value in settings.items():
         arguments.extend(["-c", f"{key}={json.dumps(value)}"])
     arguments.extend(["-c", "skills.config=" + disabled_skills])
-    for name in ("historical_ocr", "historical_review", "historical_organization"):
-        path = runtime / f"{name}.toml"
-        selected_model = "gpt-6.1-terra" if name == "historical_ocr" else "gpt-6.1-sol"
+    role_settings = roles or {
+        name: {
+            "model": "gpt-6.1-terra" if name == "historical_ocr" else "gpt-6.1-sol",
+            "effort": "medium",
+            "instructions": "Use the assigned session_token with open_task_packet; its stage instructions are authoritative. Do not request the whole project workflow or development skills.",
+        }
+        for name in ("historical_ocr", "historical_review", "historical_organization")
+    }
+    for name, role in role_settings.items():
+        # Different coordinators may run different frozen policies concurrently.
+        from hrs.processing.hashing import digest
+
+        path = runtime / f"{name}-{digest(role)[:16]}.toml"
         path.write_text(
-            f'name = "{name}"\nmodel = "{selected_model}"\nmodel_reasoning_effort = "medium"\ndeveloper_instructions = "Use the assigned session_token with open_task_packet; its stage instructions are authoritative. Do not request the whole project workflow or development skills."\n',
+            "\n".join((
+                f"name = {json.dumps(name)}",
+                f"model = {json.dumps(role['model'])}",
+                f"model_reasoning_effort = {json.dumps(role['effort'])}",
+                f"developer_instructions = {json.dumps(role['instructions'])}",
+                "",
+            )),
             encoding="utf-8",
         )
         arguments.extend(
@@ -134,6 +161,6 @@ def command(executable, root, document_id, logs, model, project):
         )
     return (
         arguments,
-        coordinator_instructions(document_id, batch_pages=policy["batch_pages"]),
+        instructions if instructions is not None else coordinator_instructions(document_id, batch_pages=policy["batch_pages"]),
         runtime,
     )

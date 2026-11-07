@@ -1,8 +1,8 @@
 # Web Workbench
 
-React 工作台提供书架上传、处理进展、人工核对、全文阅读、目录、检索和 Markdown 导出。网页与独立 MCP 使用同一处理队列；历史卡片保留读取和导出。
+React 工作台提供书架上传、处理进展、人工核对、全文阅读、目录、研究卡片、人物事件检索和 Markdown 导出。网页与独立 MCP 使用同一处理契约；旧 `kind=cards` 历史卡片保留读取和导出，新研究使用独立任务队列。
 
-界面面向单人桌面使用，最低布局宽度为 1080px；`/#/` 直接进入书籍，书籍深链及 `/platform.html` 入口保留。书籍、核对与阅读之间切换不会销毁上传会话。
+界面面向单人桌面使用，最低布局宽度为 1080px；`/#/` 直接进入书籍，书籍深链及 `/platform.html` 入口保留。全库研究入口为 `/#/research`，单书史料卡使用 `/#/books/:bookId?tab=research`；`card`、`entity` 查询参数保留详情深链。书籍、核对、阅读与研究检索之间切换不会销毁上传会话。
 
 [项目快速开始](../README.md) · [API 契约](openapi.json)
 
@@ -28,7 +28,7 @@ Vite 使用 `http://127.0.0.1:18156`，端口占用时直接报错。指定其�
 
 ## API 契约
 
-[api.ts](src/client/api.ts) 使用 `openapi-fetch`，类型来自生成的 [schema.d.ts](src/client/schema.d.ts)。后端接口变更时，从根目录生成契约：
+[api.ts](src/client/api.ts) 使用 `openapi-fetch`，研究接口的 [api.ts](src/features/research/api.ts) 使用同源 `fetch` 并传递取消信号；两者类型均来自生成的 [schema.d.ts](src/client/schema.d.ts)。后端接口变更时，从根目录生成契约：
 
 ```powershell
 npm --prefix web/tooling/openapi ci
@@ -44,15 +44,15 @@ npm --prefix web run contracts
 | 位置 | 职责 |
 | --- | --- |
 | [app/](src/app/) | 路由装配、错误边界、共享外壳与上传会话 |
-| [routes/](src/routes/) | 书架、单书和待办入口 |
-| [features/](src/features/) | 上传、书籍、核对、阅读、目录、搜索与进展 |
+| [routes/](src/routes/) | 书架、单书、待办和全库研究入口 |
+| [features/](src/features/) | 上传、书籍、核对、阅读、目录、搜索、研究卡片/实体与进展 |
 | [hooks/](src/hooks/) | 工作区 SSE、断线刷新和查询缓存更新 |
 | [client/](src/client/) | 类型化 API、分页与缓存键 |
 | [components/](src/components/)、[editor/](src/editor/)、[styles/](src/styles/) | 共享界面、Markdown 编辑阅读与样式 |
 
-React Router 管理路由，TanStack Query 管理服务端状态；Uppy/tus 提供可恢复上传，Tiptap 编辑 Markdown，React Flow 展示执行关系。正文、原图、问题与执行详情按需加载。
+React Router 管理路由，TanStack Query 管理服务端状态；Uppy/tus 提供可恢复上传，Tiptap 编辑 Markdown，React Flow 展示执行关系。正文、原图、问题、研究与执行详情按需加载；研究清单分页读取摘要，证据与关系仅在打开详情后获取。
 
-样式按职责组织：`theme.css` 提供语义令牌和本地字体，`workbench.css` 拥有外壳、书籍与进展，`review-evidence.css` 拥有正文核对，`reader-navigation.css` 拥有目录、阅读和检索。字体许可见 [assets/README](src/assets/README.md)。
+样式按职责组织：`theme.css` 提供语义令牌和本地字体，`workbench.css` 拥有外壳、书籍与进展，`review-evidence.css` 拥有正文核对，`reader-navigation.css` 拥有目录、阅读和检索，`research.css` 拥有研究卡片和人物事件详情。字体许可见 [assets/README](src/assets/README.md)。
 
 ## 交互约定
 
@@ -61,8 +61,10 @@ React Router 管理路由，TanStack Query 管理服务端状态；Uppy/tus 提�
 - 当前疑点编辑为主要操作，整页编辑为次级操作；没有可靠位置时明确显示整页核对。
 - 目录预览不提交决定。用户核对正文起点后确认跳转，也可保留目录文字而不设置跳转；物理页序与印刷页码分别显示。
 - 提交失败保留输入，版本变化提示重新载入；成功回执与后台同步状态分开显示。
-- SSE 先读取快照与游标再接续事件；健康连接不额外轮询，断线只刷新可见的活动查询。
+- 书籍 SSE 先读取快照与游标再接续事件；健康连接不额外轮询，断线只刷新可见的活动查询。独立研究任务仅在排队或运行中轮询轻量进度，停止、待人工或完成后停止轮询，卡片清单按新增结果或决定刷新。
 - 未发布资料可查看底稿。修订待核验时继续读取已有发布版本，不能把候选当作已批准正文。
+- 研究卡分别展示提要、原文与脚注、使用边界和关系依据；引用共用阅读器的版本哈希与精确位置，旧依据不能高亮新正文，返回链接保留检索和卡片上下文。
+- 原文核验通过与人工确认分别标记。待人工卡由用户采用、修订提要或排除，无需审核人姓名或意见；迟到读取不能覆盖成功决定，提交冲突需重新读取。
 
 ## 检查与构建
 

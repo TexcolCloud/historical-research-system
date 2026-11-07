@@ -59,6 +59,15 @@ def test_wheel_mcp_preserves_resources_and_workspace_selection_outside_checkout(
             },
         )
         async with Client(parameters, mode="legacy", read_timeout_seconds=15) as client:
+            listing = await client.list_tools()
+            names = {tool.name for tool in listing.tools}
+            assert {
+                "research_status", "research_claim", "research_source", "research_candidate",
+                "research_packet_text", "research_candidate_text",
+                "research_search", "research_read_evidence", "research_original",
+                "research_entities", "research_related", "research_submit", "research_fail",
+            }.issubset(names)
+            assert not any("human" in name and name.startswith("research_") for name in names)
             result = await client.call_tool("workflow_instructions")
             assert not result.is_error
             assert result.content[0].text == instructions

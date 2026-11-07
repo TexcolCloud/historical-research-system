@@ -118,7 +118,18 @@ export function readingRange(target: ReadingTarget, chapter: ReadingChapter) {
 }
 
 export function safeReaderReturn(value: string | null, bookId: string) {
-  return value?.startsWith(`/books/${bookId}?`)
+  const researchPath = /^\/books\/[A-Za-z0-9_-]+\?([^#]*)$/.exec(value ?? "");
+  const researchParams = researchPath
+    ? new URLSearchParams(researchPath[1])
+    : null;
+  const sourceResearch =
+    researchParams?.get("tab") === "research" &&
+    Boolean(researchParams.get("card") || researchParams.get("entity"));
+  return value &&
+    (value.startsWith(`/books/${bookId}?`) ||
+      value === "/research" ||
+      value.startsWith("/research?") ||
+      sourceResearch)
     ? value
     : `/books/${bookId}?tab=reader&section=directory`;
 }

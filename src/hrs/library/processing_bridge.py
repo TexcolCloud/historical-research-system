@@ -58,15 +58,24 @@ class CodexBridge:
         self.artifacts = ProjectionArtifacts(self.store, self.objects, self.review, engine)
         self.commit = ProjectionCommit(engine)
         self.publication = NativePublication(settings, engine, self.objects)
+        from hrs.research.bridge import ResearchBridge
+
+        self.research = ResearchBridge(settings, engine, store=self.store, objects=self.objects)
 
     def start(self):
+        from hrs.research.execution import ResearchRunner
+
         self.executor.start()
+        self.research_executor = ResearchRunner(self.store)
+        self.research_executor.start()
         self.thread = threading.Thread(target=self.loop, name="codex-platform-bridge", daemon=True)
         self.thread.start()
 
     def stop(self):
         self.stop_event.set()
         self.executor.stop()
+        if getattr(self, "research_executor", None):
+            self.research_executor.stop()
         if self.thread:
             self.thread.join(timeout=10)
 
@@ -84,6 +93,11 @@ class CodexBridge:
             logger.info("Another process already owns this workspace's platform bridge")
 
     def tick(self):
+        # This independent queue progresses even when native publication has no changes.
+        try:
+            self.research.tick()
+        except Exception:  # noqa: BLE001 - research must not fail published source processing
+            logger.exception("Research bridge will retry retained work")
         with self.engine.connect() as connection:
             events = (
                 connection.execute(

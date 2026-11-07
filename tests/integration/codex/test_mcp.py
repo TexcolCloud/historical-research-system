@@ -224,8 +224,10 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
             assert "1939年" in Path(published["markdown_path"]).read_text("utf-8")
             assert "1938年" not in Path(published["markdown_path"]).read_text("utf-8")
             found = value(await client.call_tool("search_library", {"query": "1939"}))
-            assert found[0]["document_id"] == doc_id
-            assert found[0]["page"] == 1
+            assert found["backend"] == "local_literal_fallback"
+            assert found["available"] is False
+            assert found["hits"][0]["document_id"] == doc_id
+            assert found["hits"][0]["page"] == 1
             transport = value(
                 await client.call_tool(
                     "dispatch_work", {"document_id": doc_id, "active_session_tokens": []}
@@ -288,7 +290,7 @@ def test_stdio_pending_pdf_cannot_publish_and_retry_retains_decision(tmp_path):
             assert human_queue[0]["unresolved_attempts"] == 1
             rejected = await client.call_tool("publish_document", {"document_id": doc_id})
             assert rejected.is_error
-            assert value(await client.call_tool("search_library", {"query": "无法辨认"})) == []
+            assert value(await client.call_tool("search_library", {"query": "无法辨认"}))["hits"] == []
             assert await claim(client, doc_id, "organization", "fixture-organizer") is None
             retry = value(
                 await client.call_tool(

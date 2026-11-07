@@ -64,7 +64,7 @@ test("stopped books never claim automatic processing is still running", async ()
     screen.queryByText("系统按页自动处理，已有底稿可在阅读资料中查看。"),
   ).toBeNull();
 });
-test("three workspaces expose both human task types without making users navigate process stages", async () => {
+test("book workspaces expose both human task types and research cards without making users navigate process stages", async () => {
   respondWith(() => ({
     id: "book",
     title: "材料",
@@ -88,7 +88,8 @@ test("three workspaces expose both human task types without making users navigat
     within(screen.getByRole("tablist", { name: "书籍工作区" })).getAllByRole(
       "tab",
     ),
-  ).toHaveLength(3);
+  ).toHaveLength(4);
+  expect(screen.getByRole("tab", { name: "史料卡" })).toBeDefined();
   expect(screen.getByRole("tab", { name: /阅读资料/ })).toBeDefined();
   await userEvent.click(
     screen.getByRole("button", { name: "目录确认 · 2 项" }),
