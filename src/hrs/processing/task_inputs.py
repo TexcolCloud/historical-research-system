@@ -46,8 +46,16 @@ def task_inputs(repository, doc: dict, task: dict) -> dict:
                 inputs["corrections"] = page["candidate"]["corrections"]
     elif task["stage"] == "navigation":
         from hrs.processing.navigation import fingerprint, toc_evidence
+        from hrs.processing.navigation_coverage import context_sha256, parse_plan
 
         inputs["toc_sha256"] = fingerprint(toc_evidence(doc))
+        plan = parse_plan(doc, retry_unresolved=task.get("retry_unresolved", False))
+        inputs["coverage_contract_version"] = 2
+        inputs["toc_candidate_pages"] = plan["core"]
+        inputs["toc_context_pages"] = plan["context"]
+        inputs["coverage_contexts"] = {
+            str(number): context_sha256(doc, number) for number in plan["core"]
+        }
         inputs["pages"] = [
             {
                 "page": p["page"],
@@ -57,9 +65,8 @@ def task_inputs(repository, doc: dict, task: dict) -> dict:
                 "kind": p.get("observation", {}).get("kind", p.get("page_kind", "unknown")),
             }
             for p in doc["pages"]
-            if p.get("approved")
+            if p["page"] in plan["pages"]
         ]
-        inputs["previous_entries"] = (doc.get("navigation") or {}).get("source_entries", [])
     else:
         inputs["pages"] = [
             {

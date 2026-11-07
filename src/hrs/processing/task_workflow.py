@@ -411,7 +411,6 @@ class TaskWorkflow:
                     raise ValueError(
                         "Read the complete candidate with candidate_text before submitting a verdict"
                     )
-            page = doc["pages"][task["page"] - 1] if task["page"] is not None else None
             receipt: TaskReceipt = {
                 "task_id": task_id,
                 "worker_id": claim["worker_id"],
@@ -480,15 +479,6 @@ class TaskWorkflow:
                 result=result,
                 receipt={**receipt, "result_sha256": digest(result)},
             )
-            if (
-                stage in {"review", "verify"}
-                and page.get("approved")
-                and result.get("page_observation")
-            ):
-                from hrs.processing.navigation import observation
-
-                page["observation"] = observation(page, result["page_observation"])
-                page["page_kind"] = page["observation"]["kind"]
             self.navigation.refresh_document(doc)
             if all(p["state"] == "approved" for p in doc["pages"]):
                 navigation_pending = any(

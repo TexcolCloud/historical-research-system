@@ -130,9 +130,7 @@ def test_same_title_and_repeated_page_number_are_disambiguated_by_date():
     assert result["status"] == "matched"
     assert result["target"]["physical_page"] == 3
     assert result["candidates"][0]["physical_page"] == 3
-    without_dates = deepcopy(doc)
-    row = without_dates["navigation"]["source_entries"][0]
-    row["source_anchor"] = f"{title} 1"
+    without_dates = document([entry(title, "1")], deepcopy(doc["pages"][1:]))
     assert resolve_navigation(without_dates)["entries"][0]["status"] == "conflict"
 
 
@@ -280,6 +278,44 @@ def test_machine_verification_is_bound_to_current_evidence_and_human_decision_wi
     verification["target"] = selected
     doc["pages"][1]["image_sha256"] = "b" * 64
     assert resolve_navigation(doc)["entries"][0]["status"] == "conflict"
+
+
+def test_legacy_verified_link_uses_its_frozen_source_when_new_candidates_are_discovered():
+    title = "关于教育工作的决定"
+    doc = document(
+        [entry(title, "1")],
+        [
+            page(2, f"# {title}\n正文甲\n1", "text", "1", [title]),
+            page(3, f"# {title}\n正文乙\n1", "text", "1", [title]),
+        ],
+    )
+    row = resolve_navigation(doc)["entries"][0]
+    key = verification_key(row, row["candidates"])
+    doc["navigation"]["link_verifications"] = {
+        row["id"]: {
+            "source_sha256": row["source_sha256"],
+            "verification_key": key,
+            "target": row["candidates"][0],
+            "receipt": {"approval_type": "machine", "human_approval": False},
+        }
+    }
+    frozen = {k: deepcopy(v) for k, v in row.items() if not k.startswith("source_spans")}
+    doc["tasks"] = [
+        {
+            "state": "completed",
+            "inputs": {
+                "navigation_mode": "verify_links",
+                "entries": [{**frozen, "verification_key": key}],
+            },
+        }
+    ]
+    doc["pages"].append(page(4, f"# {title}\n新候选\n1", "text", "1", [title]))
+    current = resolve_navigation(doc)["entries"][0]
+    assert key != verification_key(current, current["candidates"])
+    assert current["status"] == "matched_verified" and current["target"]["physical_page"] == 2
+    frozen = doc["tasks"][0]["inputs"]["entries"][0]
+    frozen["source_image_sha256"] = "f" * 64
+    assert resolve_navigation(doc)["entries"][0]["status"] != "matched_verified"
 
 
 def test_classified_index_does_not_propagate_body_order_assumptions():

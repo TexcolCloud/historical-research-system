@@ -499,6 +499,8 @@ class CodexBridge:
             )
 
     def sync(self, run):
+        from hrs.search.chunks import CHUNK_RULE
+
         run = require_workspace(self.engine, run, self.store)
         if not self.due(run) or run["result"].get("codex_recovery", {}).get("state") in {
             "checking",
@@ -519,6 +521,9 @@ class CodexBridge:
             or run["result"].get("codex_indexed_projection_policy") != PROJECTION_POLICY
             or run["result"].get("codex_indexed_navigation_sha256")
             != snapshot.get("navigation", {}).get("sha256")
+            or run["result"].get("codex_indexed_chunk_rule") != CHUNK_RULE
+            or run["result"].get("codex_indexed_chapters_sha256")
+            != (run["result"].get("codex_reading_projection") or {}).get("chapters_sha256")
         )
         if unchanged and not indexing and time.monotonic() - self.verified_at.get(doc_id, 0) < 60:
             return
@@ -567,8 +572,9 @@ class CodexBridge:
         state, stage = projection_state(
             run, doc, scheduling, pending, publication_sha, navigation_sha
         )
-        if doc["organization"]:
-            self.publication.publish_chapters(run, doc)
+        publication_projection = (
+            self.publication.publish_chapters(run, doc) if doc["organization"] else None
+        )
         prepared_issues = self.artifacts.issues(run, doc, pending, boundaries)
         self.project_nodes(run, doc, state)
         self.commit.apply(
@@ -585,6 +591,7 @@ class CodexBridge:
             scheduling=scheduling,
             publication_sha=publication_sha,
             navigation_sha=navigation_sha,
+            publication_projection=publication_projection,
         )
 
     def project_nodes(self, run, doc, state):

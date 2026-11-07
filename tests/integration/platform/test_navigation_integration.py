@@ -1,4 +1,4 @@
-"""Navigation revisions retain canonical ranges and atomically change real search generations."""
+"""Navigation revisions retain canonical ranges and update metadata without re-embedding."""
 
 from uuid import uuid4
 
@@ -20,7 +20,7 @@ from hrs.storage import models as db
 from .test_codex_bridge import finish
 
 
-def test_navigation_metadata_reindexes_without_changing_body_or_footnotes(
+def test_navigation_metadata_updates_without_changing_body_refs_vectors_or_footnotes(
     platform, tmp_path, monkeypatch
 ):
     settings, engine = platform
@@ -105,13 +105,17 @@ def test_navigation_metadata_reindexes_without_changing_body_or_footnotes(
     tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0}, unk_token="[UNK]"))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
     monkeypatch.setattr(RetrievalCompute, "tokenizer", lambda *args: tokenizer)
+    model_calls = []
     monkeypatch.setattr(
         RetrievalCompute,
         "compute",
-        lambda self, operation, texts, **options: {
-            "vectors": [[1.0] + [0.0] * 1023 for _ in texts],
-            "identity": {"synthetic": True},
-        },
+        lambda self, operation, texts, **options: (
+            model_calls.append(operation)
+            or {
+                "vectors": [[1.0] + [0.0] * 1023 for _ in texts],
+                "identity": {"synthetic": True},
+            }
+        ),
     )
     indexer = BookIndexer(settings, engine)
     try:
@@ -128,6 +132,8 @@ def test_navigation_metadata_reindexes_without_changing_body_or_footnotes(
         )
         library = Library(settings, engine)
         before = library.chapter(library.chapters(book)[1]["id"])
+        previous_refs = [row["content"] for row in library.chapters(book)]
+        model_calls.clear()
         nav = Navigation(settings, engine).status(run)
         assert nav["entries"][0]["target_chapter_id"] == before["id"]
         entry = nav["entries"][0]
@@ -135,8 +141,10 @@ def test_navigation_metadata_reindexes_without_changing_body_or_footnotes(
             run, entry["id"], NavigationDecision(expected_sha256=nav["sha256"], target_page=None)
         )
         bridge.sync(get_run(engine, run))
-        second = indexer.index(run)
-        assert first["generation"] != second["generation"]
+        second = indexer.refresh_navigation(run)
+        assert first["generation"] == second["generation"]
+        assert model_calls == []
+        assert [row["content"] for row in library.chapters(book)] == previous_refs
         after = library.chapter(before["id"])
         assert (after["text"], after["parts"], after["footnotes"]) == (
             before["text"],

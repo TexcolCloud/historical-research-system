@@ -57,6 +57,25 @@ def reading_target(chapter, start, end, physical_page=None):
 
 def target_in_chapter(chapter, target):
     """Translate a verified page-local navigation target to its owning article."""
+    fragments = target.get("title_spans")
+    if fragments:
+        first = fragments[0]
+        if any(
+            first.get(key) != target.get(canonical)
+            for key, canonical in (
+                ("page", "physical_page"),
+                ("start", "start"),
+                ("anchor", "anchor"),
+                ("markdown_sha256", "markdown_sha256"),
+                ("image_sha256", "image_sha256"),
+            )
+        ):
+            return None
+        located = [_span_range(chapter, fragment) for fragment in fragments]
+        if any(value is None for value in located):
+            return None
+        start, end = located[0]
+        return reading_target(chapter, start, end, first["page"])
     page, page_start, anchor = (
         target.get("physical_page"),
         target.get("start"),
@@ -92,11 +111,68 @@ def target_in_chapter(chapter, target):
     return matches[0] if len(matches) == 1 else None
 
 
+def _span_range(chapter, span):
+    """Map one retained fragment only when its complete source coordinates still agree."""
+    anchor, page_start = span.get("anchor"), span.get("start")
+    if (
+        not isinstance(anchor, str)
+        or not anchor
+        or type(page_start) is not int
+        or span.get("end") != page_start + len(anchor)
+    ):
+        return None
+    matches = []
+    for left, _, part in part_ranges(chapter):
+        source = part["source"]
+        if source.get("page") != span.get("page"):
+            continue
+        if any(
+            not span.get(key) or span[key] != source.get(key)
+            for key in ("markdown_sha256", "image_sha256")
+        ):
+            continue
+        original_start, original_end = source.get("original_start"), source.get("original_end")
+        if not (
+            type(original_start) is int
+            and type(original_end) is int
+            and original_start <= page_start < span["end"] <= original_end
+        ):
+            continue
+        at = left + page_start - original_start
+        if chapter["text"][at : at + len(anchor)] == anchor:
+            matches.append((at, at + len(anchor)))
+    return matches[0] if len(matches) == 1 else None
+
+
 def toc_links(chapter, targets):
     """Only turn a uniquely retained directory source range into a link."""
     links = []
     for entry in chapter.get("navigation", {}).get("entries", []):
         target = targets.get(entry["id"])
+        if target and entry.get("source_spans"):
+            pages = {
+                page
+                for part in chapter["parts"]
+                for page in part["source"].get("pages", [part["source"].get("page")])
+            }
+            fragments = [span for span in entry["source_spans"] if span["page"] in pages]
+            located = [_span_range(chapter, span) for span in fragments]
+            if any(value is None for value in located):
+                continue
+            for span, (start, end) in zip(fragments, located, strict=True):
+                links.append(
+                    {
+                        "id": f"{entry['id']}:{span['page']}:{span['start']}"
+                        if len(entry["source_spans"]) > 1
+                        else entry["id"],
+                        "title": entry["title"],
+                        "level": entry["level"],
+                        "source_start": start,
+                        "source_end": end,
+                        "target": target,
+                    }
+                )
+            continue
         anchor = entry.get("source_anchor")
         if not target or not isinstance(anchor, str) or not anchor:
             continue

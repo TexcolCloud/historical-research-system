@@ -24,7 +24,6 @@ PERMANENT_CODES = frozenset({"quota_exhausted", "authentication"})
 FAILURE_CODES = PRESSURE_CODES | PERMANENT_CODES | {"transport", "timeout", "tool_error", "unknown"}
 
 
-
 class RuntimeControl:
     def __init__(self, root, ledger=None):
         self.root = Path(root)
@@ -343,6 +342,48 @@ class RuntimeControl:
                 "state": "probing" if probe_keys else "normal",
                 "probe": bool(probe_keys),
             }
+
+    def renew(self, model, owner, *, expires_at, now=None):
+        """Extend one live admission; a stale generation never changes a newer probe or budget."""
+        self._require_writable()
+        now = time.time() if now is None else now
+        self._key("model", model)
+        if (
+            not isinstance(owner, str)
+            or not owner
+            or type(expires_at) not in {int, float}
+            or not math.isfinite(expires_at)
+            or not now < expires_at <= now + 86400
+        ):
+            raise ValueError("Admission renewal requires an owner and bounded future deadline")
+        with self.ledger.connect(write=True) as connection:
+            self.ledger.ensure_runtime_schema(connection)
+            row = connection.execute(
+                "SELECT payload FROM runtime_admissions WHERE owner=?", (owner,)
+            ).fetchone()
+            admission = json.loads(row[0]) if row else None
+            if not admission or admission["model"] != model or admission["expires_at"] <= now:
+                return False
+            states = self._read(connection)
+            for key in admission["probe_keys"]:
+                state = states.get(key)
+                if (
+                    state
+                    and state["generation"] == admission["generations"].get(key)
+                    and state["state"] == "probing"
+                    and state["probe_owner"] == owner
+                    and state["probe_until"] > now
+                    and expires_at > state["probe_until"]
+                ):
+                    state["probe_until"] = expires_at
+                    self._save(connection, key, state)
+            if expires_at > admission["expires_at"]:
+                admission["expires_at"] = expires_at
+                connection.execute(
+                    "UPDATE runtime_admissions SET payload=? WHERE owner=?",
+                    (encode(admission), owner),
+                )
+            return True
 
     def success(self, model, owner, event_id, *, now=None):
         self._require_writable()

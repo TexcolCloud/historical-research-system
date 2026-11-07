@@ -22,6 +22,7 @@ NATIVE_COMMANDS = {
     "search",
     "migrate-ledger",
     "configure-execution",
+    "repair-structure",
 }
 MAINTENANCE_COMMANDS = {
     "api",

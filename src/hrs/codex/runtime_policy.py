@@ -37,6 +37,8 @@ Read returned candidate from start=0 to total_codepoints; use candidate_text for
 using task_id,lease_token and start=previous end,limit<=4000. Never approve partially read text.
 Approval accepts unchanged candidate: {verdict:'approved',issues:[],normalizations:[],page_observation:
 {kind:'text|toc|frontmatter|table|figure|unknown',printed_label:exact label or null,headings:[literal headings],sequence:'body|frontmatter|source-supported series'}}.
+Include the same semantic page_observation for corrections and pending verdicts too. It is NOT
+original_reading: never put image_receipt, observations or source_reading_sha256 in this field.
 Non-approval under review_failure=human goes directly pending, optionally suggested_markdown.
 Under bounded policy, clear uniquely located repairs with NO unresolved original observations use
 {verdict:'corrections',markdown:FULL corrected page,corrections:[{before:unique exact old span,
@@ -48,8 +50,13 @@ coordinates. Preserve unlocated uncertainty explicitly. Include original_details
     "verify": """Independently recheck the ENTIRE original and candidate, including unchanged text.
 Use the same original-first freeze_observations and complete candidate_text coverage as review.
 Submit only verdict='approved' with issues=[] or verdict='pending' with precise issues. Never repair
-or retry. Unresolved observations block approval. Include source-bound page_observation and actual
-crop receipts. Use the shared issue contract below for every issue. Never invent evidence.""",
+or retry. Unresolved observations block approval. For every verdict include source-bound page_observation:
+{kind:'text|toc|frontmatter|table|figure|unknown',printed_label:exact label or null,
+headings:[literal headings in the candidate],sequence:'body|frontmatter|source-supported series'}.
+This is semantic page structure, NOT original_reading: never put image_receipt, observations or
+source_reading_sha256 inside page_observation. Inspect the page type and printed label independently;
+correction verification must not silently discard the page's table-of-contents structure.
+Include actual crop receipts. Use the shared issue contract below for every issue. Never invent evidence.""",
     "organization": """The packet's approved_pages contains FULL frozen page texts and source hashes.
 Read ALL supplied pages; if next_after_page is not null use approved_pages_text(document_id,
 task_id,lease_token,after_page=next_after_page) until it is null. The bounded batches never omit
@@ -61,11 +68,28 @@ boundaries:[{page,start_text:unique literal article opening}] in source order. D
 article at every page. Optional reading_structure={titles:[{page,title,level}],tables:[{pages,
 members:[{page,original_html}],merged_html}]} must preserve every cell, value and row/column owner.
 Unverifiable structure stays separate, or submit pending with precise issues. Never infer verified identity.""",
-    "navigation": """Enumerate the complete frozen approved_page_catalog. Open TOC original images
-with task_id and lease_token, read approved_page_text, and submit {entries:[{source_page,source_anchor:
+    "navigation": """Parse ONLY toc_candidate_pages: at most THREE core physical directory pages.
+The frozen approved_page_catalog contains only core pages and adjacent toc_context_pages (at most
+FIVE pages total). Context is for page-boundary fragments, not another full directory batch.
+Open the core original images with task_id and lease_token, read approved_page_text, and submit {entries:[{source_page,source_anchor:
 unique literal TOC entry,title,target_label:exact printed target label,level:integer}]}. Printed target
 labels are not physical PDF numbers. Do not guess offsets, numbering resets or duplicate labels.
-Use only literal source anchors and titles; retain conflicts for humans.""",
+For a title or target label spanning adjacent physical pages, use source_spans:[{page,anchor:unique
+literal fragment}] in source order. For these cross-page entries omit redundant source_page/source_anchor;
+the server derives their first fragment, offsets and hashes. Every entry must touch a core page.
+Never synthesize an anchor that occurs on no physical original. Open every fragment's original.
+Inspect ALL toc_candidate_pages, including unknown gaps between directory pages. Classify them with
+page_observations:[{page,kind,printed_label,headings,sequence}] after opening their original images.
+Return page_coverage:[{page,status:'entries|continuation|empty|not_directory|unresolved',reason:source
+evidence}] for EVERY CORE toc_candidate_page only; do not claim whole context pages covered.
+Include cross-boundary entries touching the core even if their first fragment is on a context page.
+'entries' covers all visible core entries; 'continuation' needs
+source_spans crossing that page; 'empty' is only for a genuinely entry-free original. Do not mark
+an omitted or unreadable page empty. Uncertain page structure/entries use unresolved and retain the
+reason. Submit only the local entries, minimal literal anchors, labels, levels and needed fragments;
+do not repeat whole page texts, previous batches, computed hashes or offsets. The server merges
+source identities and preserves earlier human links. Use only literal source anchors and titles;
+retain conflicts for humans.""",
 }
 
 

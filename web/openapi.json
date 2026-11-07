@@ -1994,6 +1994,17 @@
             "title": "Navigation Pending Count",
             "default": 0
           },
+          "navigation_missing_page_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Navigation Missing Page Count"
+          },
           "revision_pending": {
             "type": "boolean",
             "title": "Revision Pending",
@@ -3189,6 +3200,31 @@
             "type": "string",
             "title": "Target Anchor",
             "default": ""
+          },
+          "target_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Title"
+          },
+          "target_spans": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NavigationSourceSpan"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Spans"
           }
         },
         "type": "object",
@@ -3251,6 +3287,24 @@
               }
             ],
             "title": "Source Image Sha256"
+          },
+          "source_spans": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationSourceSpan"
+            },
+            "type": "array",
+            "title": "Source Spans"
+          },
+          "source_spans_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Spans Sha256"
           },
           "target_label": {
             "type": "string",
@@ -3412,6 +3466,13 @@
               }
             ],
             "title": "Image"
+          },
+          "titles": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationTarget"
+            },
+            "type": "array",
+            "title": "Titles"
           }
         },
         "type": "object",
@@ -3420,6 +3481,36 @@
           "headings"
         ],
         "title": "NavigationPage"
+      },
+      "NavigationPageCoverage": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "status"
+        ],
+        "title": "NavigationPageCoverage"
       },
       "NavigationPageMapping": {
         "properties": {
@@ -3506,6 +3597,45 @@
             "title": "Coverage Complete",
             "default": false
           },
+          "pages_complete": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages Complete"
+          },
+          "toc_pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Toc Pages"
+          },
+          "missing_pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Missing Pages"
+          },
+          "unresolved_pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Unresolved Pages"
+          },
+          "page_coverage": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationPageCoverage"
+            },
+            "type": "array",
+            "title": "Page Coverage"
+          },
           "page_count": {
             "anyOf": [
               {
@@ -3552,6 +3682,58 @@
           "sha256"
         ],
         "title": "NavigationReport"
+      },
+      "NavigationSourceSpan": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page"
+          },
+          "anchor": {
+            "type": "string",
+            "title": "Anchor"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End"
+          },
+          "markdown_sha256": {
+            "type": "string",
+            "title": "Markdown Sha256"
+          },
+          "image_sha256": {
+            "type": "string",
+            "title": "Image Sha256"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "anchor",
+          "start",
+          "end",
+          "markdown_sha256",
+          "image_sha256"
+        ],
+        "title": "NavigationSourceSpan"
       },
       "NavigationTarget": {
         "properties": {
@@ -3632,6 +3814,24 @@
               }
             ],
             "title": "Group Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "title_spans": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationSourceSpan"
+            },
+            "type": "array",
+            "title": "Title Spans"
           }
         },
         "type": "object",

@@ -31,6 +31,11 @@ by 48,000 processed characters. Never reuse an OCR agent as its reviewer.
 Session page budgets count only that session's completions, never historical receipts
 with a reused display name. Coordinators derive worker IDs from stage + session token
 so names remain unique across restarts; earlier receipts remain unchanged.
+While a coordinator lease is live, dispatch heartbeats renew only its explicitly
+tracked busy native sessions and their matching unexpired task/admission leases.
+Tokens, frozen inputs and provider-pressure generations do not change. Paused,
+cancelled, closed, untracked or expired work is never revived by a heartbeat; when
+heartbeats stop, normal lease expiry still permits checkpoint recovery.
 Prewarmed reviewers wait on `wait_for_changes` without consuming a model turn per poll.
 Only native Codex subagents perform inference; Python threads supervise CLI processes.
 
@@ -331,25 +336,48 @@ from technical failures: use `report_task_failure` and `wait_for_work` for coold
 stop and report a technical failure after three repeated failures. Explicit pause
 stops owned execution and retains checkpoints; only explicit resume restarts it.
 
-Review approval should include `page_observation`:
+Review and verification results use a structured `page_observation`:
 `{"kind":"toc|text|frontmatter|table|figure|unknown","printed_label":"exact printed label or null",
 "headings":["literal heading in approved Markdown"],"sequence":"source-supported numbering series"}`.
 Preserve printed labels in OCR Markdown; missing labels stay null. Sequences distinguish
 front matter, main text and genuine numbering resets, never guessed global offsets.
+`kind` is explicit, including an explicit `unknown` when justified. Original-reading
+receipts (`observations`, image receipts and reading hashes) are a separate contract;
+never place that object in `page_observation`. Correction results retain a hash-bound
+structure proposal; successful independent verification binds valid structure to the
+approved text without discarding the earlier source evidence.
 
 An approved TOC queues `navigation`, using `historical_organization` (Sol), before
 whole-book organization. Claim its frozen approved-page snapshot; read
 `approved_page_text`. Open each directory `original_image` with task/lease. Return
 `{"input_sha256":"claimed hash","entries":[{"source_page":1,"source_anchor":"unique literal whole TOC entry",
 "title":"source title","target_label":"exact TOC page label","level":1,"sequence":"body"}]}`.
+For a title split across adjacent physical pages, use `source_spans:[{page,anchor},…]`
+instead of inventing a single-page anchor. Each fragment is a unique literal source
+range; the store binds its codepoint bounds, Markdown and image hashes. Numbering and
+running page furniture may separate fragments; intervening unrelated content may not.
+New parsing tasks declare their coverage contract. Return `page_coverage` for every
+TOC/candidate page, with status `entries`, `continuation`, `empty`, `not_directory`
+or `unresolved`. Empty/non-directory/unresolved conclusions require the inspected
+original and an explanation. A list of found entries alone does not establish full
+directory coverage; omitted visible page-label rows are rejected. An unresolved page
+remains visible as a metadata gap, without an automatic retry loop. An explicit update
+can request a fresh bounded parse. Supplementary parses merge source-bound entries;
+existing human decisions and earlier parsing receipts remain retained.
+Parsing contract version 2 freezes at most three core directory pages and their
+adjacent approved context pages (at most five pages total). Enumerate only this
+frozen catalog. Submit core-page entries and entries crossing a core/context
+boundary; report complete coverage only for core pages. The next task resumes
+remaining pages after each atomic merge. An unresolved boundary can be tried again
+when a newly approved neighbor changes its evidence; the same unresolved snapshot
+does not automatically loop. Retained claimed inputs are never resized.
 An optional `target_title` must describe a visible title variant with `title_relation`
 evidence. Optional `page_observations` require opening those originals under the
 navigation lease. For a TOC range such as `38—130`, `target_label` is the printed
 START label `38`, with optional `target_end_label="130"`; preserve the entire range
 in `source_anchor`. Never use a whole range as a single-page label. Open originals
 for any title alias and do not fabricate a date/author/title relationship.
-Optional `page_observations` require opening those originals under the
-navigation lease. Never rewrite TOC text or force article boundaries from TOC entries.
+Never rewrite TOC text or force article boundaries from TOC entries.
 
 The store ranks source-bound title/layout variants, dates and article openings,
 using reviewed page labels and segmented mappings as supporting evidence. Mappings
@@ -358,6 +386,11 @@ similarity alone never establishes a link. PDF bookmarks and existing BGE retrie
 provide bounded extra candidates through the platform's update-recommendations action.
 Human calibration reorders the same segment's candidates without granting other
 human decisions. All target anchors remain unique literal spans of approved text.
+Cross-page logical titles carry `title_spans`; the canonical target remains the first
+real fragment. Rule matching, semantic recall and manual title lookup share this
+catalog. Every source and target fragment page participates in original-first link
+verification, and any changed fragment invalidates its evidence. Ranking changes
+alone do not revoke a still-valid independent source/target verification.
 
 Ambiguous links with candidates receive one bounded independent Sol navigation pass
 per source/candidate snapshot. Its packet has navigation_mode="verify_links" and
@@ -377,8 +410,11 @@ waits until full page coverage before reporting not_found. Mapping conflicts do 
 approve content or block otherwise valid body publication. Human mapping choices
 are available only in the local UI, bound to the navigation/source/target hashes.
 Navigation metadata is versioned separately; corrections do not change canonical
-text, footnote ownership or character offsets. Index generations include the
-navigation snapshot through immutable chapter hashes. Default content search
+text, footnote ownership or character offsets. Publication stores book-level navigation
+and a compact source locator separately from immutable chapter content. A navigation-only
+update refreshes lexical/search navigation metadata without rechunking or recomputing
+canonical title/body vectors. Chapter-set hashes keep locator and index offsets bound
+to the same visible publication. Default content search
 excludes only explicitly tagged directory carriers; users may include directories.
 
 ## Human handoff

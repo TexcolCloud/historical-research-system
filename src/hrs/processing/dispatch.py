@@ -39,9 +39,13 @@ class Dispatch:
 
         policy = effective_policy(self.store.root)
         with self.store.lock:
+            tracked = []
             for token in active_session_tokens:
-                if self.session(token, allow_closed=True)["document_id"] != document_id:
+                session = self.session(token, allow_closed=True)
+                if session["document_id"] != document_id:
                     raise ValueError("Tracked native sessions must belong to this document")
+                tracked.append(session)
+            self.heartbeat(document_id, tracked)
             self.expire()
             plan = self.store.scheduling_plan(document_id)
             concrete = ready_tasks(self.store.checkpoints.read(document_id))
@@ -150,6 +154,62 @@ class Dispatch:
             ],
         }
 
+    def heartbeat(self, document_id, sessions):
+        """Renew declared busy claims under the still-live coordinator, before expiring slots."""
+        now = time.time()
+        with self.ledger.connect(write=True):
+            doc = self.store.checkpoints.read(document_id)
+            request = doc.get("run_request", {})
+            if (
+                request.get("state") != "running"
+                or not request.get("token")
+                or request.get("lease_expires_at", 0) <= now
+                or request.get("pause_requested")
+                or request.get("cancel_requested")
+            ):
+                return
+            for session in sessions:
+                if (
+                    session["state"] != "busy"
+                    or session["expires_at"] <= now
+                    or (
+                        session.get("coordinator_token")
+                        and session["coordinator_token"] != request.get("token")
+                    )
+                ):
+                    continue
+                task = next(
+                    (t for t in doc["tasks"] if t["task_id"] == session.get("task_id")), None
+                )
+                claim = (task or {}).get("claim", {})
+                if (
+                    not task
+                    or task["state"] != "leased"
+                    or claim.get("expires_at", 0) <= now
+                    or task["stage"] != session["stage"]
+                    or claim.get("lease_token") != session.get("lease_token")
+                    or claim.get("worker_id") != session.get("worker_id")
+                    or digest(task.get("inputs")) != claim.get("input_sha256")
+                ):
+                    continue
+                duration = session.get("lease_seconds") or (
+                    claim["expires_at"] - claim.get("reserved_at", claim["started_at"])
+                )
+                if not 0 < duration <= 86400:
+                    continue
+                deadline = min(now + duration, request["lease_expires_at"])
+                model = claim.get("actual_model") or session.get("actual_model")
+                if not model:
+                    continue
+                if not self.store.runtime_control.renew(
+                    model, session["session_token"], expires_at=deadline, now=now
+                ):
+                    continue
+                if deadline > claim["expires_at"]:
+                    claim["expires_at"] = deadline
+                    session.update(expires_at=deadline, lease_seconds=duration)
+                    self.store.tasks.commit(doc, session)
+
     def make_room(self, stage, plan):
         """Waiting warm agents yield globally; active original reads and task leases do not."""
         from hrs.processing.contracts import model_for_stage
@@ -217,6 +277,13 @@ class Dispatch:
             "max_tasks": plan["batch_size"],
             "actual_model": model,
         }
+        request = self.store.checkpoints.read(document_id).get("run_request", {})
+        if (
+            request.get("state") == "running"
+            and request.get("token")
+            and request.get("lease_expires_at", 0) > time.time()
+        ):
+            session["coordinator_token"] = request["token"]
         with self.store.lock:
             decision = self.store.runtime_control.admit(
                 model,

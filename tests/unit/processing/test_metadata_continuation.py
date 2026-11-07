@@ -32,12 +32,14 @@ def document(*, mode="verify_links", state="ready", published=True):
         ("superseded", False),
     ],
 )
-def test_metadata_remaining_is_bound_to_automatic_link_work(state, remaining):
+def test_metadata_remaining_is_bound_to_automatic_navigation_work(state, remaining):
     doc = document(state=state)
     before = deepcopy(doc)
     assert metadata_work_remaining(doc) is remaining
     assert doc == before
     doc["tasks"][0]["verification_inputs"]["navigation_mode"] = "parse_toc"
+    assert metadata_work_remaining(doc) is remaining
+    doc["tasks"][0]["stage"] = "organization"
     assert not metadata_work_remaining(doc)
 
 

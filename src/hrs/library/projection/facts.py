@@ -66,6 +66,12 @@ def projection_input(doc, runtime_control=None):
                 navigation_requires_confirmation(entry)
                 for entry in doc.get("navigation", {}).get("entries", [])
             ),
+            "navigation_missing_page_count": len(
+                set(
+                    doc.get("navigation", {}).get("missing_pages", [])
+                    + doc.get("navigation", {}).get("unresolved_pages", [])
+                )
+            ),
             "coordinator_active": doc.get("run_request", {}).get("state") == "running"
             and doc.get("run_request", {}).get("lease_expires_at", 0) > time.time(),
             "state": doc["state"],

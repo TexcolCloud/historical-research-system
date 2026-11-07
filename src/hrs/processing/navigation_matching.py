@@ -6,6 +6,14 @@ import unicodedata
 from difflib import SequenceMatcher
 
 from hrs.processing.hashing import digest
+from hrs.processing.navigation_spans import (
+    source_spans,
+    source_text,
+    spans_current,
+    spans_sha256,
+    target_spans,
+    validated_spans,
+)
 
 DATE = re.compile(
     r"([0-9〇零一二三四五六七八九]{4})年\s*([0-9〇零一二三四五六七八九十]{1,3})月\s*([0-9〇零一二三四五六七八九十]{1,3})日"
@@ -15,17 +23,27 @@ DIGITS = dict(zip("〇零一二三四五六七八九", "00123456789", strict=Tru
 
 def verification_key(entry, candidates):
     """Freeze source and candidate identities, independently of mutable ranking scores."""
-    return digest(
-        [
-            entry["id"],
-            entry["source_sha256"],
-            entry.get("source_image_sha256", ""),
-            sorted(
-                (c["physical_page"], c["anchor"], c["markdown_sha256"], c["image_sha256"])
-                for c in candidates[:3]
-            ),
-        ]
-    )
+    identity = [
+        entry["id"],
+        entry["source_sha256"],
+        entry.get("source_image_sha256", ""),
+        sorted(
+            (c["physical_page"], c["anchor"], c["markdown_sha256"], c["image_sha256"])
+            for c in candidates[:3]
+        ),
+    ]
+    # Retained single-page receipts keep their original identity and remain readable.
+    if len(source_spans(entry)) > 1 or any(len(target_spans(c)) > 1 for c in candidates[:3]):
+        identity.append(
+            [
+                source_spans(entry),
+                sorted(
+                    (c["physical_page"], c["anchor"], spans_sha256(target_spans(c)))
+                    for c in candidates[:3]
+                ),
+            ]
+        )
+    return digest(identity)
 
 
 def comparison_text(value):
@@ -98,8 +116,10 @@ def target_evidence(page, anchor):
 def retained_decision(doc, entry, decision):
     if not decision or decision.get("source_sha256") != entry["source_sha256"]:
         return False
-    source = doc["pages"][entry["source_page"] - 1].get("approved", {})
-    if source.get("sha256") != entry["source_sha256"]:
+    if not spans_current(doc, source_spans(entry)) or (
+        decision.get("source_spans_sha256")
+        and decision["source_spans_sha256"] != spans_sha256(source_spans(entry))
+    ):
         return False
     target = decision.get("target")
     if target is None:
@@ -107,20 +127,38 @@ def retained_decision(doc, entry, decision):
     number = target.get("physical_page")
     if type(number) is not int or not 1 <= number <= len(doc["pages"]):
         return False
-    page = doc["pages"][number - 1]
-    return page.get("approved", {}).get("sha256") == target.get("markdown_sha256") and (
-        not target.get("image_sha256") or page["image_sha256"] == target["image_sha256"]
-    )
+    return spans_current(doc, target_spans(target))
+
+
+def candidate_evidence(doc, target):
+    """Retain a cross-page logical title while rechecking every literal fragment."""
+    number, anchor = target.get("physical_page"), target.get("anchor")
+    if type(number) is not int or not 1 <= number <= len(doc["pages"]):
+        raise ValueError("Navigation target physical page is invalid")
+    if not spans_current(doc, target_spans(target)):
+        raise ValueError("Navigation target source changed")
+    result = target_evidence(doc["pages"][number - 1], anchor)
+    if target.get("title_spans"):
+        spans = validated_spans(doc, target["title_spans"], boundary=True)
+        if spans[0]["page"] != number or spans[0]["anchor"] != anchor:
+            raise ValueError("Navigation target must start at its first title fragment")
+        title = target.get("title", "")
+        if not title or comparison_text(title) != comparison_text(
+            "".join(s["anchor"] for s in spans)
+        ):
+            raise ValueError("Navigation logical title must match its literal fragments")
+        result.update(title=title, title_spans=spans)
+    return result
 
 
 def verified_target(doc, entry, verification, candidates):
-    """A machine receipt is valid only for the currently frozen candidate evidence."""
+    """Retain independent original evidence when candidate ranking changes around it."""
     if (
         not verification
         or verification.get("source_sha256") != entry["source_sha256"]
-        or verification.get("verification_key") != verification_key(entry, candidates[:3])
         or verification.get("receipt", {}).get("approval_type") != "machine"
         or verification.get("receipt", {}).get("human_approval") is not False
+        or not _verified_source_current(doc, entry, verification, candidates)
     ):
         return None
     target = verification.get("target")
@@ -129,17 +167,51 @@ def verified_target(doc, entry, verification, candidates):
     number = target.get("physical_page")
     if type(number) is not int or not 1 <= number <= len(doc["pages"]):
         return None
-    page = doc["pages"][number - 1]
     anchor = target.get("anchor")
     if (
         not anchor
-        or page.get("approved", {}).get("sha256") != target.get("markdown_sha256")
-        or page["image_sha256"] != target.get("image_sha256")
-        or page["approved"]["markdown"].count(anchor) != 1
-        or not any(c["physical_page"] == number and c["anchor"] == anchor for c in candidates[:3])
+        or not spans_current(doc, source_spans(entry))
+        or not spans_current(doc, target_spans(target))
     ):
         return None
-    return target_evidence(page, anchor)
+    try:
+        return candidate_evidence(doc, target)
+    except ValueError:
+        return None
+
+
+def _verified_source_current(doc, entry, verification, candidates):
+    """New receipts keep literal source scope; old receipts recover it from their frozen task."""
+    current = source_spans(entry)
+    frozen = verification.get("source_spans")
+    if frozen is None:
+        for task in doc.get("tasks", []):
+            inputs = task.get("inputs") or task.get("verification_inputs", {})
+            if task.get("state") != "completed" or inputs.get("navigation_mode") != "verify_links":
+                continue
+            row = next(
+                (
+                    e
+                    for e in inputs.get("entries", [])
+                    if e["id"] == entry["id"]
+                    and e.get("verification_key") == verification.get("verification_key")
+                ),
+                None,
+            )
+            if row is not None:
+                frozen = source_spans(row)
+                break
+    if frozen is None:
+        # Read compatibility for older minimal records without a retained task scope.
+        return verification.get("verification_key") == verification_key(entry, candidates[:3])
+    return (
+        spans_current(doc, frozen)
+        and spans_sha256(frozen) == spans_sha256(current)
+        and (
+            not verification.get("source_spans_sha256")
+            or verification["source_spans_sha256"] == spans_sha256(frozen)
+        )
+    )
 
 
 def page_mappings(doc):
@@ -230,11 +302,121 @@ def target_catalog(doc):
                     "opening": comparison_text(opening),
                 }
             )
+    catalog.extend(_cross_page_titles(doc, catalog))
     return catalog
 
 
+def _logical_titles(doc):
+    """Only retained TOC/organization titles may guide a physical-page continuation."""
+    values = {}
+    for entry in (doc.get("navigation") or {}).get("source_entries", []):
+        title = entry.get("target_title") or entry.get("title", "")
+        if 4 <= len(comparison_text(title)) <= 240 and spans_current(doc, source_spans(entry)):
+            values.setdefault(comparison_text(title), title)
+    organization = doc.get("organization") or {}
+    for row in organization.get("articles", []) + organization.get("reading_structure", {}).get(
+        "titles", []
+    ):
+        title = row.get("title", "")
+        if 4 <= len(comparison_text(title)) <= 240:
+            values.setdefault(comparison_text(title), title)
+    return values
+
+
+def _cross_page_titles(doc, catalog):
+    """Exact known titles may span page boundaries; suggestions still need native original review."""
+    titles = _logical_titles(doc)
+    if not titles:
+        return []
+    records = [*catalog, *_edge_title_records(doc, titles)]
+    by_page = {}
+    for record in records:
+        by_page.setdefault(record["target"]["physical_page"], []).append(record)
+    found = {}
+    for record in records:
+        first = record["target"]
+        prefix = comparison_text(first["anchor"])
+        possible = [
+            (normal, title)
+            for normal, title in titles.items()
+            if normal.startswith(prefix) and normal != prefix
+        ]
+        for normal, title in possible:
+            parts = [{"page": first["physical_page"], "anchor": first["anchor"]}]
+            combined = prefix
+            for number in range(
+                first["physical_page"] + 1, min(first["physical_page"] + 4, len(doc["pages"]) + 1)
+            ):
+                choices = []
+                for following in by_page.get(number, []):
+                    partial = comparison_text(following["target"]["anchor"])
+                    if partial and normal.startswith(combined + partial):
+                        proposed = [
+                            *parts,
+                            {"page": number, "anchor": following["target"]["anchor"]},
+                        ]
+                        try:
+                            spans = validated_spans(doc, proposed, boundary=True)
+                        except ValueError:
+                            continue
+                        choices.append((partial, proposed, spans))
+                if not choices:
+                    break
+                # Heading markup or a wrapped heading may expose several aliases at one opening.
+                # Prefer its longest exact literal prefix, never a later paragraph.
+                partial, parts, spans = max(choices, key=lambda c: (len(c[0]), -c[2][-1]["start"]))
+                combined += partial
+                if combined == normal:
+                    target = {**first, "title": title, "title_spans": spans}
+                    opening = "\n".join(
+                        doc["pages"][p["page"] - 1]["approved"]["markdown"][p["start"] :]
+                        for p in spans
+                    )
+                    found[(first["physical_page"], first["start"], normal)] = {
+                        "target": target,
+                        "title": normal,
+                        "dates": dates(opening[:800]),
+                        "opening": comparison_text(opening[:800]),
+                    }
+                    break
+    return list(found.values())
+
+
+def _edge_title_records(doc, titles):
+    """Recover plain title fragments only where a retained full title matches a page edge."""
+    records = []
+    for page in doc["pages"]:
+        if not page.get("approved") or page.get("observation", {}).get("kind") == "toc":
+            continue
+        text = page["approved"]["markdown"]
+        lines = [
+            match
+            for match in re.finditer(r"(?m)^.*\S.*$", text)
+            if not re.fullmatch(r"\s*\d{1,5}\s*", match.group())
+        ]
+        for edge in (lines[:4], lines[-4:]):
+            for left in range(len(edge)):
+                for right in range(left + 1, len(edge) + 1):
+                    anchor = text[edge[left].start() : edge[right - 1].end()].strip()
+                    anchor = re.sub(r"^ {0,3}#{1,6}[ \t]+", "", anchor)
+                    if anchor.startswith(("**", "__")):
+                        anchor = anchor[2:]
+                    if anchor.endswith(("**", "__")):
+                        anchor = anchor[:-2]
+                    partial = comparison_text(anchor)
+                    if not 1 <= len(partial) <= 240 or text.count(anchor) != 1:
+                        continue
+                    if any(
+                        normal != partial
+                        and (normal.startswith(partial) or normal.endswith(partial))
+                        for normal in titles
+                    ):
+                        records.append({"target": target_evidence(page, anchor), "title": partial})
+    return records
+
+
 def _context_terms(entry):
-    value = entry["source_anchor"].replace(entry["title"], "", 1)
+    value = source_text(entry).replace(entry["title"], "", 1)
     value = DATE.sub("", value)
     if value.rstrip().endswith(entry["source_label"]):
         value = value.rstrip()[: -len(entry["source_label"])]
@@ -273,7 +455,7 @@ def _ordered_neighbors(doc, entry):
 def candidates_for(doc, entry, mappings, supplemental=(), *, catalog=None):
     """Return ranked literal targets and a conservative automatic target, if proven."""
     desired = comparison_text(entry["target_title"])
-    source_dates = dates(entry["source_anchor"])
+    source_dates = dates(source_text(entry))
     context = _context_terms(entry)
     neighbors = _ordered_neighbors(doc, entry)
     candidates = []
@@ -337,6 +519,7 @@ def candidates_for(doc, entry, mappings, supplemental=(), *, catalog=None):
                 entry.get("sequence")
                 and page.get("observation", {}).get("sequence", "body") != entry["sequence"]
             )
+            or not spans_current(doc, target_spans(supplied))
         ):
             continue
         supplied_score = supplied.get("match_score", 0)
@@ -356,9 +539,13 @@ def candidates_for(doc, entry, mappings, supplemental=(), *, catalog=None):
             )
             existing["match_signals"].append(signal)
             continue
+        try:
+            evidence = candidate_evidence(doc, supplied)
+        except ValueError:
+            continue
         candidates.append(
             {
-                **target_evidence(page, anchor),
+                **evidence,
                 "match_score": round(0.3 + 0.2 * supplied_score, 4),
                 "match_method": method,
                 "match_signals": [signal],
@@ -420,6 +607,8 @@ def _rank_candidate(
         if exact
         else "标题近似，需核对"
     ]
+    if len(target_spans(target)) > 1:
+        signals.append("跨页标题片段，需原图核对")
     score = 0.5 if exact else 0.35 * similarity
     if label:
         score += 0.3
@@ -474,6 +663,7 @@ def _rank_candidate(
         group_id=mapping["id"] if mapping else None,
         # Internal proof flags are removed before crossing the navigation interface.
         _automatic=exact
+        and len(target_spans(target)) == 1
         and not date_conflict
         and (label or (not target.get("printed_label") and date_match)),
     )

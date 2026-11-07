@@ -11,6 +11,13 @@ from threading import RLock
 from hrs.library.errors import Problem
 from hrs.processing.hashing import digest
 from hrs.processing.navigation_matching import comparison_text, target_catalog
+from hrs.processing.navigation_spans import (
+    source_spans,
+    source_text,
+    spans_current,
+    spans_sha256,
+    target_spans,
+)
 from hrs.search.compute import EMBEDDING_IDENTITY, RetrievalCompute
 
 ENTRY_BUDGET = 12
@@ -27,13 +34,21 @@ def _body(page):
     )
 
 
-def _valid(candidate, entry, pages):
+def _valid(candidate, entry, doc):
+    pages = {p["page"]: p for p in doc["pages"]}
     page = pages.get(candidate.get("physical_page"))
     anchor = candidate.get("anchor")
     return (
         page is not None
         and _body(page)
         and candidate.get("source_sha256") == entry["source_sha256"]
+        and spans_current(doc, source_spans(entry))
+        and spans_current(doc, target_spans(candidate))
+        and (
+            candidate.get("source_spans_sha256") == spans_sha256(source_spans(entry))
+            or not candidate.get("source_spans_sha256")
+            and len(source_spans(entry)) == 1
+        )
         and candidate.get("markdown_sha256") == page["approved"]["sha256"]
         and candidate.get("image_sha256") == page["image_sha256"]
         and isinstance(anchor, str)
@@ -51,9 +66,13 @@ def _unmatched(doc, pages):
         if entry.get("status") not in {"conflict", "not_found", "unresolved", "waiting_evidence"}:
             continue
         source = pages.get(entry.get("source_page"), {}).get("approved")
-        if not source or source["sha256"] != entry.get("source_sha256"):
+        if (
+            not source
+            or source["sha256"] != entry.get("source_sha256")
+            or not spans_current(doc, source_spans(entry))
+        ):
             continue
-        if any(_valid(candidate, entry, pages) for candidate in previous.get(entry["id"], [])):
+        if any(_valid(candidate, entry, doc) for candidate in previous.get(entry["id"], [])):
             continue
         result.append(entry)
         if len(result) == ENTRY_BUDGET:
@@ -101,6 +120,7 @@ def _candidate(entry, target, method, score):
     return {
         **target,
         "source_sha256": entry["source_sha256"],
+        "source_spans_sha256": spans_sha256(source_spans(entry)),
         "match_method": method,
         "match_score": round(min(1.0, max(0.0, score)), 6),
         "match_signals": [
@@ -210,11 +230,11 @@ def supplemental_candidates(doc, source_path, settings, *, compute=None):
         # Injection need not be hashable; a per-call namespace prevents unsafe reuse.
         namespace = object()
     query_texts = [
-        (entry.get("target_title") or entry["title"]) + "\n" + entry.get("source_anchor", "")[:500]
+        (entry.get("target_title") or entry["title"]) + "\n" + source_text(entry)[:500]
         for entry in entries
     ]
     document_texts = [
-        row["target"]["anchor"]
+        (row["target"].get("title") or row["target"]["anchor"])
         + "\n"
         + pages[row["target"]["physical_page"]]["approved"]["markdown"][
             row["target"]["start"] : row["target"]["start"] + 700
@@ -234,7 +254,11 @@ def supplemental_candidates(doc, source_path, settings, *, compute=None):
                 candidates.append(_candidate(entry, row["target"], "semantic", score))
         unique = {}
         for candidate in candidates:
-            key = candidate["physical_page"], candidate["anchor"]
+            key = (
+                candidate["physical_page"],
+                candidate["anchor"],
+                spans_sha256(target_spans(candidate)),
+            )
             # An actual outline reference is retained when semantic recall finds
             # the same literal anchor; neither method supplies an approval.
             if key not in unique or candidate["match_method"] == "bookmark":

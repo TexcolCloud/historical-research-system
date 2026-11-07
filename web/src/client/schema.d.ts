@@ -665,6 +665,8 @@ export interface components {
              * @default 0
              */
             navigation_pending_count: number;
+            /** Navigation Missing Page Count */
+            navigation_missing_page_count?: number | null;
             /**
              * Revision Pending
              * @default false
@@ -1150,6 +1152,10 @@ export interface components {
              * @default
              */
             target_anchor: string;
+            /** Target Title */
+            target_title?: string | null;
+            /** Target Spans */
+            target_spans?: components["schemas"]["NavigationSourceSpan"][] | null;
         };
         /** NavigationEntry */
         NavigationEntry: {
@@ -1171,6 +1177,10 @@ export interface components {
             source_sha256?: string | null;
             /** Source Image Sha256 */
             source_image_sha256?: string | null;
+            /** Source Spans */
+            source_spans?: components["schemas"]["NavigationSourceSpan"][];
+            /** Source Spans Sha256 */
+            source_spans_sha256?: string | null;
             /** Target Label */
             target_label: string;
             /** Target End Label */
@@ -1209,6 +1219,17 @@ export interface components {
             printed_label?: string | null;
             /** Image */
             image?: string | null;
+            /** Titles */
+            titles?: components["schemas"]["NavigationTarget"][];
+        };
+        /** NavigationPageCoverage */
+        NavigationPageCoverage: {
+            /** Page */
+            page: number;
+            /** Status */
+            status: string;
+            /** Reason */
+            reason?: string | null;
         };
         /** NavigationPageMapping */
         NavigationPageMapping: {
@@ -1254,6 +1275,16 @@ export interface components {
              * @default false
              */
             coverage_complete: boolean;
+            /** Pages Complete */
+            pages_complete?: boolean | null;
+            /** Toc Pages */
+            toc_pages?: number[];
+            /** Missing Pages */
+            missing_pages?: number[];
+            /** Unresolved Pages */
+            unresolved_pages?: number[];
+            /** Page Coverage */
+            page_coverage?: components["schemas"]["NavigationPageCoverage"][];
             /** Page Count */
             page_count?: number | null;
             /** Approved Pages */
@@ -1262,6 +1293,23 @@ export interface components {
             page_mappings?: components["schemas"]["NavigationPageMapping"][];
             /** Assistance Warning */
             assistance_warning?: string | null;
+        };
+        /** NavigationSourceSpan */
+        NavigationSourceSpan: {
+            /** Page */
+            page: number;
+            /** Anchor */
+            anchor: string;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Markdown Sha256 */
+            markdown_sha256: string;
+            /** Image Sha256 */
+            image_sha256: string;
+            /** Image */
+            image?: string | null;
         };
         /** NavigationTarget */
         NavigationTarget: {
@@ -1290,6 +1338,10 @@ export interface components {
             match_method?: string | null;
             /** Group Id */
             group_id?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Title Spans */
+            title_spans?: components["schemas"]["NavigationSourceSpan"][];
         };
         /** PageProgress */
         PageProgress: {

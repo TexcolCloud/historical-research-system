@@ -78,7 +78,7 @@ class Navigation:
         with store.context.verified(doc_id) as doc:
             nav = doc.setdefault("navigation", {})
             nav.setdefault("supplemental_candidates", {}).update(suggestions)
-            store.navigation.refresh_document(doc)
+            store.navigation.refresh_document(doc, retry_unresolved=True)
             prepare_link_verification(doc, requested=True)
             queued = any(
                 t["state"] == "ready" and t.get("verification_inputs") for t in doc["tasks"]
@@ -132,11 +132,47 @@ def navigation_snapshot(root, doc_id, run_id, version):
     }
     result = {k: nav.get(k) for k in ("state", "entries", "page_labels", "version", "sha256")}
     result["page_mappings"] = nav.get("page_mappings", [])
-    result["coverage_complete"] = bool(nav.get("coverage_complete"))
+    for key in (
+        "coverage_complete",
+        "pages_complete",
+        "toc_pages",
+        "missing_pages",
+        "unresolved_pages",
+        "page_coverage",
+    ):
+        if key in nav:
+            result[key] = nav[key]
+    result.setdefault("coverage_complete", False)
     result["page_count"] = len(doc["pages"])
+
+    def span_image(span):
+        return {
+            **span,
+            "image": f"/api/v2/runs/{run_id}/artifacts/{doc['pages'][span['page'] - 1]['image']}",
+        }
+
+    def target_images(target):
+        if not target:
+            return target
+        return {
+            **target,
+            **(
+                {"title_spans": [span_image(s) for s in target["title_spans"]]}
+                if target.get("title_spans")
+                else {}
+            ),
+        }
+
     result["entries"] = [
         {
             **e,
+            **(
+                {"source_spans": [span_image(s) for s in e["source_spans"]]}
+                if e.get("source_spans")
+                else {}
+            ),
+            "target": target_images(e.get("target")),
+            "candidates": [target_images(c) for c in e.get("candidates", [])],
             "source_image": f"/api/v2/runs/{run_id}/artifacts/{doc['pages'][e['source_page'] - 1]['image']}",
             "target_url": f"/api/v2/runs/{run_id}/artifacts/original.pdf#page={e['target']['physical_page']}"
             if e.get("target")
@@ -168,10 +204,24 @@ def navigation_snapshot(root, doc_id, run_id, version):
                 )
                 if owner is not None:
                     entry["target_chapter_id"] = str(uuid5(UUID(str(run_id)), f"chapter:{owner}"))
+    from hrs.processing.navigation_matching import target_catalog
+
+    titles = {}
+    for row in target_catalog(doc):
+        target = row["target"]
+        titles.setdefault(target["physical_page"], []).append(
+            target_images(
+                {
+                    **target,
+                    "title": target.get("title") or target["anchor"],
+                }
+            )
+        )
     result["approved_pages"] = [
         {
             "page": p["page"],
             "headings": p.get("observation", {}).get("headings", []),
+            "titles": titles.get(p["page"], []),
             "printed_label": p.get("observation", {}).get("printed_label"),
             "image": f"/api/v2/runs/{run_id}/artifacts/{p['image']}",
         }

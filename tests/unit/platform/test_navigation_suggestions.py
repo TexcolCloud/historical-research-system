@@ -18,7 +18,7 @@ def page(number, text, *, kind="text", approved=True, headings=None):
 
 def document(*pages, count=1):
     return {
-        "pages": [page(1, "目录", kind="toc"), *pages],
+        "pages": [page(1, "目录\nMemo 1", kind="toc"), *pages],
         "navigation": {
             "entries": [
                 {
@@ -37,6 +37,17 @@ def document(*pages, count=1):
 
 def settings(tmp_path):
     return SimpleNamespace(models_root=tmp_path, retrieval_device="cpu", retrieval_endpoint="")
+
+
+def test_unlocated_source_is_not_repeatedly_sent_to_semantic_recall(tmp_path):
+    doc = document(page(2, "Memo", headings=["Memo"]))
+    doc["navigation"]["entries"][0]["source_anchor"] = "not retained in the original"
+    backend = Compute()
+    assert (
+        supplemental_candidates(doc, tmp_path / "missing.pdf", settings(tmp_path), compute=backend)
+        == {}
+    )
+    assert backend.calls == []
 
 
 class Compute:

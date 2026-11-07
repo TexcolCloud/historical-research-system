@@ -81,6 +81,8 @@ uv run --no-sync --locked python -m hrs doctor
 
 目录关联综合标题版式、日期、正文开头和有证据的分段页码映射；人工校准只影响候选推荐，不替其他条目作人工决定。目录页可“更新推荐”，利用 PDF 书签和已有 BGE 模型补充候选，再由独立 Sol 原图核验残余歧义。偏移或语义分数本身不授予关联。界面展示前三个候选及依据，支持分组查看和预取；`Alt+Enter` 确认已加载的当前候选，`Alt+←/→` 切换候选，输入框内不触发快捷确认。
 
+跨页目录和标题保留各物理页的文字片段、位置及证据哈希，全文标题可直接检索和跳转。目录完整性按页检查，遗漏页会独立显示，不以“已有条目全部关联”代替全目录验收。阅读定位使用独立的轻量投影；仅修改目录时保留章节正文引用，并增量更新检索导航信息。
+
 ## 独立 MCP 与命令行
 
 独立 MCP 使用同一 Python 包，不要求 SQL 服务、Docker 或 BGE 已运行。项目配置位于 [.codex/config.toml](.codex/config.toml)，对话入口见 [historical-research Skill](.agents/skills/historical-research/SKILL.md)。MCP 保存和校验证据，模型处理由原生子代理完成。
@@ -101,6 +103,8 @@ uv run --no-sync --locked python -m hrs resume 'DOCUMENT_ID'
 ```
 
 `resume` 从现有检查点继续；`run` 会执行真实模型，不是只读诊断。旧 JSON 工作区在停机备份后使用 `migrate-ledger` 校验迁移。详细阶段契约由 MCP 的 `workflow_instructions` 返回，发行资源位于 [workflow.md](src/hrs/codex/workflow.md)。
+
+历史版本曾丢失页码或目录分类时，先备份并确认工作区，用 `python -m hrs repair-structure DOCUMENT_ID` 预览恢复计划；加入 `--apply` 才应用并请求正常目录接续。停止所属执行器并等待租约结束后，可再加 `--replan-navigation` 将旧的未完成大目录任务转换为小批补解析，旧输入和记录保留。该维护操作从保留的原图审核证据恢复结构，保存逐页审计，不修改正文、旧审批或人工目录决定；有活跃执行租约时拒绝应用。
 
 ## 代码职责
 

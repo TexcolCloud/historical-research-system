@@ -8,7 +8,10 @@ import { client, type Book } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
 import RunDetails from "@/features/runs/RunDetails.tsx";
 import DeleteBookButton from "@/features/books/DeleteBookButton.tsx";
-import { bookWorkspaceTab } from "@/features/books/workspace.ts";
+import {
+  bookWorkspaceTab,
+  hasNavigationWork,
+} from "@/features/books/workspace.ts";
 const ReadingWorkspace = lazy(
   () => import("@/features/library/ReadingWorkspace.tsx"),
 );
@@ -43,9 +46,7 @@ export default function BookPage() {
   const requested = params.get("tab");
   const directoryTask =
     params.get("task") === "navigation" ||
-    (!params.get("task") &&
-      !book?.pending_count &&
-      (book?.navigation_pending_count ?? 0) > 0);
+    (!params.get("task") && !book?.pending_count && hasNavigationWork(book));
   const tab = ["navigation", "search"].includes(requested ?? "")
     ? "reader"
     : requested === "execution"
@@ -132,7 +133,7 @@ export default function BookPage() {
             {tab === "review" && (
               <span className="book-task-count">
                 {directoryTask
-                  ? `${book.navigation_pending_count ?? 0} 项待确认`
+                  ? `${book.navigation_pending_count ?? 0} 项待确认${book.navigation_missing_page_count ? ` · ${book.navigation_missing_page_count} 页待补全` : ""}`
                   : `${book.pending_count ?? 0} 页待核对`}
               </span>
             )}
@@ -149,6 +150,12 @@ export default function BookPage() {
                     ? "资料已入库，可阅读、检索和导出。"
                     : "系统按页自动处理，已有底稿可在阅读资料中查看。"}
           </p>
+          {(book.navigation_missing_page_count ?? 0) > 0 && (
+            <p role="status">
+              目录仍有 {book.navigation_missing_page_count}{" "}
+              页待补全。当前目录清单尚不代表全部条目。
+            </p>
+          )}
           {book.revision_pending && (
             <p role="note">
               新版本正在复核，阅读和检索继续使用此前发布的版本。
@@ -173,6 +180,9 @@ export default function BookPage() {
                 onClick={() => chooseReviewTask("navigation")}
               >
                 目录确认 · {book.navigation_pending_count ?? 0} 项
+                {book.navigation_missing_page_count
+                  ? ` · 补全 ${book.navigation_missing_page_count} 页`
+                  : ""}
               </Button>
             </div>
           )}

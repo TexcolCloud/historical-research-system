@@ -1,9 +1,11 @@
 """Local workbench operations against synthetic evidence, without launching models."""
 
 import json
+import select
 from http.client import HTTPConnection
 from urllib.parse import urlencode, urlparse
 
+import pytest
 from PIL import Image
 
 from hrs.processing.store import Store
@@ -23,6 +25,69 @@ def view(server, **query):
 
 def action(server, name):
     return "/" + name + "?" + urlparse(server.review_url).query
+
+
+@pytest.mark.parametrize("rejection", ["origin", "token", "host"])
+def test_rejected_post_consumes_bounded_body_before_closing_connection(tmp_path, rejection):
+    store = Store(tmp_path / "workspace")
+    body = urlencode({"source": "must-not-import", "title": "Rejected source"}).encode()
+    with running_server(store) as server:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+        path = "/import?token=wrong" if rejection == "token" else action(server, "import")
+        connection.putrequest("POST", path, skip_host=True)
+        connection.putheader("Host", "foreign.invalid" if rejection == "host" else server.authority)
+        connection.putheader(
+            "Origin",
+            "http://foreign.invalid" if rejection == "origin" else "http://" + server.authority,
+        )
+        connection.putheader("Content-Type", "application/x-www-form-urlencoded")
+        connection.putheader("Content-Length", str(len(body)))
+        connection.endheaders()
+        # Closing with unread POST data can discard the 409 response on Windows.
+        responded_before_body = bool(select.select([connection.sock], [], [], 0.1)[0])
+        connection.send(body)
+        response = connection.getresponse()
+        assert response.status == 409
+        response.read()
+        connection.close()
+        assert not responded_before_body
+    assert store.list_documents() == []
+
+
+@pytest.mark.parametrize("length", [None, "0", "-1", "2000001", "invalid"])
+def test_rejected_post_does_not_wait_for_unbounded_or_unframed_body(tmp_path, length):
+    store = Store(tmp_path / "workspace")
+    with running_server(store) as server:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+        connection.putrequest("POST", action(server, "import"))
+        if length is not None:
+            connection.putheader("Content-Length", length)
+        connection.endheaders()
+        response = connection.getresponse()
+        assert response.status == 409
+        response.read()
+        connection.close()
+    assert store.list_documents() == []
+
+
+def test_post_body_read_has_one_deadline_for_the_entire_form(tmp_path, monkeypatch):
+    from hrs.codex import workbench
+
+    ticks = iter([0.0, 0.0])
+    monkeypatch.setattr(workbench, "monotonic", lambda: next(ticks, 6.0))
+    store = Store(tmp_path / "workspace")
+    with running_server(store) as server:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+        connection.putrequest("POST", action(server, "import"))
+        connection.putheader("Origin", "http://" + server.authority)
+        connection.putheader("Content-Length", "100000")
+        connection.endheaders()
+        connection.send(b"source=must-not-import")
+        response = connection.getresponse()
+        assert response.status == 409
+        assert b"timed out" in response.read()
+        connection.close()
+    assert store.list_documents() == []
 
 
 def test_default_tasks_import_queues_without_claiming_execution_and_rejects_cross_origin(tmp_path):
