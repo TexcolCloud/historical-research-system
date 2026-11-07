@@ -12,7 +12,7 @@ import psutil
 import pytest
 
 from hrs import app as launcher
-from hrs.config import Settings
+from hrs.config import Settings, diagnostics_root
 from hrs.search import service
 
 
@@ -115,7 +115,7 @@ def test_normal_owned_shutdown_reaps_busy_worker_and_preserves_unrelated_process
             except httpx.HTTPError:
                 pass
         assert service.live_brokers(settings.project_root) == []
-        assert not list((settings.project_root / ".cache/platform-diagnostics").glob("*.stop"))
+        assert not list(diagnostics_root(settings.project_root).glob("*.stop"))
     finally:
         unrelated.terminate()
         unrelated.wait(timeout=5)
@@ -129,7 +129,7 @@ def test_app_assembly_failure_releases_the_actual_managed_broker(isolated_runtim
     settings.web_dist.mkdir(parents=True)
     (settings.web_dist / "index.html").write_text("<html></html>", "utf-8")
     monkeypatch.setattr(launcher, "ROOT", settings.project_root)
-    monkeypatch.setattr(launcher, "CONTROL", settings.project_root / ".cache/platform-diagnostics")
+    monkeypatch.setattr(launcher, "CONTROL", diagnostics_root(settings.project_root))
     monkeypatch.setattr(launcher, "listening", lambda port: False)
     monkeypatch.setattr(Settings, "load", lambda root: settings)
     monkeypatch.setattr(hrs.storage.bootstrap, "bootstrap", lambda root: None)
@@ -220,7 +220,7 @@ def test_broker_hard_crash_cannot_leave_a_busy_inference_worker(isolated_runtime
             except httpx.HTTPError:
                 pass
     assert service.live_brokers(settings.project_root) == []
-    assert not list((settings.project_root / ".cache/platform-diagnostics/brokers").glob("*.json"))
+    assert not list((diagnostics_root(settings.project_root) / "brokers").glob("*.json"))
 
 
 def test_parent_death_closes_the_busy_managed_broker(isolated_runtime):

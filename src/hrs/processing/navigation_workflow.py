@@ -24,6 +24,10 @@ class NavigationWorkflow:
             resolve_navigation,
             toc_evidence,
         )
+        from hrs.processing.navigation_verification import (
+            prepare_link_verification,
+            reconcile_link_tasks,
+        )
 
         for p in doc["pages"]:
             if (
@@ -45,6 +49,8 @@ class NavigationWorkflow:
                     p["observation"] = observation(p, p["observation"])
                 except ValueError:
                     p.pop("observation", None)
+        doc["navigation"] = resolve_navigation(doc)
+        reconcile_link_tasks(doc)
         toc = toc_evidence(doc)
         if (
             toc
@@ -55,14 +61,32 @@ class NavigationWorkflow:
             )
         ):
             doc["tasks"].append(new_task("navigation"))
-        doc["navigation"] = resolve_navigation(doc)
+        prepare_link_verification(doc)
+        if (
+            all(p.get("approved") for p in doc["pages"])
+            and not doc.get("organization")
+            and not any(
+                t["stage"] == "organization" and t["state"] != "superseded" for t in doc["tasks"]
+            )
+            and not any(
+                t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
+                for t in doc["tasks"]
+            )
+        ):
+            doc["tasks"].append(new_task("organization"))
 
     def refresh_navigation(self, document_id: str) -> dict:
         """Refresh source-bound derived metadata; never run recognition or grant content approval."""
         with self.context.verified(document_id) as doc:
-            before = (doc.get("navigation", {}).get("sha256"), len(doc["tasks"]))
+            before = (
+                doc.get("navigation", {}).get("sha256"),
+                [(task["task_id"], task["state"]) for task in doc["tasks"]],
+            )
             self.refresh_document(doc)
-            if before != (doc["navigation"]["sha256"], len(doc["tasks"])):
+            if before != (
+                doc["navigation"]["sha256"],
+                [(task["task_id"], task["state"]) for task in doc["tasks"]],
+            ):
                 self.context.repository.write(doc)
             return doc
 

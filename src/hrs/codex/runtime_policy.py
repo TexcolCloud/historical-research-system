@@ -69,13 +69,30 @@ Use only literal source anchors and titles; retain conflicts for humans.""",
 }
 
 
-def worker_instructions(stage):
+NAVIGATION_VERIFICATION = """This navigation task verifies ambiguous links; it does not parse a new TOC.
+The initial packet withholds directory text and candidate anchors. Open EVERY listed original_image
+with task_id and lease_token, inspect the source pixels first, then call navigation_candidates with
+original_readings:[{page,image_receipt,image_sha256,observations:[literal visible observations],
+unresolved:[genuine source uncertainty]}]. Observations freeze once and reveal the candidate entries.
+Read the frozen approved_pages_text batches only after original observations are frozen. Compare
+directory title, date, addressee and article opening against all supplied alternatives. Never infer a
+link from a page offset or semantic score alone. Submit {links:[{entry_id,target_page:physical number
+or null,target_anchor:exact frozen candidate anchor}]}, one result for EVERY supplied entry. A null
+target retains human uncertainty; it is not a human choice to unlink. Do not alter content, footnotes
+or article boundaries. Use an independent native Sol identity; never reuse the directory parser."""
+
+
+def worker_instructions(stage, mode=None):
     if stage not in STAGE:
         raise ValueError("Unknown native worker stage")
     return (
         COMMON
         + "\n"
-        + STAGE[stage]
+        + (
+            NAVIGATION_VERIFICATION
+            if stage == "navigation" and mode == "verify_links"
+            else STAGE[stage]
+        )
         + ("\n" + ISSUE_INSTRUCTIONS if stage in {"review", "verify"} else "")
     )
 

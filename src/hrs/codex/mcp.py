@@ -264,6 +264,10 @@ def create_server(root: Path) -> MCPServer:
             raise ValueError("Approved catalog requires this active organization/navigation lease")
         if after_page < 0 or not 1 <= limit <= 40:
             raise ValueError("Catalog needs after_page >= 0 and limit between 1 and 40")
+        if task["inputs"].get("navigation_mode") == "verify_links" and not task.get(
+            "navigation_original_reading"
+        ):
+            raise ValueError("Freeze navigation original observations before reading the catalog")
         rows = [p for p in task["inputs"]["pages"] if p["page"] > after_page]
         selected = rows[:limit]
         return {
@@ -287,7 +291,7 @@ def create_server(root: Path) -> MCPServer:
             task["snapshot_page_count"] = len(task["inputs"]["pages"])
             task["inputs"]["pages"] = (
                 [p for p in task["inputs"]["pages"] if p.get("kind") == "toc"]
-                if stage == "navigation"
+                if stage == "navigation" and task["inputs"].get("navigation_mode") != "verify_links"
                 else task["inputs"]["pages"][:20]
             )
             task["content_access"] = (
@@ -297,6 +301,19 @@ def create_server(root: Path) -> MCPServer:
         return source_packet(task)
 
     def source_packet(task):
+        if task:
+            task.pop("verification_inputs", None)
+            task.pop("navigation_reading_history", None)
+        if (
+            task
+            and task.get("inputs", {}).get("navigation_mode") == "verify_links"
+            and not task.get("navigation_original_reading")
+        ):
+            task["inputs"].pop("entries", None)
+            task["content_access"] = (
+                "Inspect every listed original_image with this task/lease, then call "
+                "navigation_candidates to freeze original_readings before candidate exposure."
+            )
         if task and task.get("source_first_required") and not task.get("source_reading"):
             for key in ("markdown", "original_markdown", "corrections"):
                 task["inputs"].pop(key, None)
@@ -320,6 +337,32 @@ def create_server(root: Path) -> MCPServer:
                         "Read the COMPLETE candidate through candidate_text in bounded ranges before submitting a verdict."
                     )
         return task
+
+    @server.tool()
+    @contract_errors
+    def navigation_candidates(
+        document_id: str,
+        task_id: str,
+        lease_token: str,
+        original_readings: list[dict],
+    ) -> dict:
+        """Freeze original-first observations, then expose this bounded link-verification set."""
+        import time
+
+        from hrs.processing.navigation_verification import freeze_link_observations
+
+        with store.context.verified_task(document_id, task_id) as doc:
+            task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
+            if (
+                task["inputs"].get("navigation_mode") != "verify_links"
+                or task["state"] != "leased"
+                or task["claim"]["lease_token"] != lease_token
+                or task["claim"]["expires_at"] <= time.time()
+            ):
+                raise ValueError("Navigation candidates require this active verification lease")
+            result = freeze_link_observations(doc, task, original_readings)
+            store.checkpoints.write(doc)
+            return result
 
     @server.tool()
     @contract_errors
@@ -353,7 +396,9 @@ def create_server(root: Path) -> MCPServer:
             task["snapshot_page_count"] = len(task["inputs"]["pages"])
             task["inputs"]["pages"] = task["inputs"]["pages"][:20]
         packet = {
-            "instructions": worker_instructions(stage),
+            "instructions": worker_instructions(
+                stage, task.get("inputs", {}).get("navigation_mode")
+            ),
             "task": task if task.get("state") == "preflight" else source_packet(task),
             "original": metadata,
         }

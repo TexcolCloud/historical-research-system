@@ -41,7 +41,7 @@ def test_three_credentials_load_without_mutating_configuration(tmp_path):
     env = load_environment(tmp_path)
 
     assert settings.processing_backend == "codex"
-    assert settings.s3_endpoint == "http://127.0.0.1:58333"
+    assert settings.s3_endpoint == "http://127.0.0.1:18333"
     assert settings.s3_bucket == "ingestion-acceptance"
     assert settings.s3_region == "us-east-1"
     assert make_url(settings.database_url.get_secret_value()).database == "historical_research_v2"

@@ -309,7 +309,8 @@ class Library:
         entries = [
             e
             for e in navigation.get("entries", [])
-            if e.get("status") in {"matched", "matched_manual"} and e.get("target")
+            if e.get("status") in {"matched", "matched_manual", "matched_verified"}
+            and e.get("target")
         ]
         if not entries:
             return {}

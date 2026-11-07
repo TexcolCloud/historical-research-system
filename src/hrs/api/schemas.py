@@ -216,6 +216,10 @@ class NavigationTarget(BaseModel):
     markdown_sha256: str
     image_sha256: str
     sequence: str = "body"
+    match_score: float | None = Field(default=None, ge=0, le=1)
+    match_signals: list[str] = Field(default_factory=list)
+    match_method: str | None = None
+    group_id: str | None = None
 
 
 class NavigationEntry(BaseModel):
@@ -226,6 +230,8 @@ class NavigationEntry(BaseModel):
     source_page: int
     source_anchor: str
     source_image: str
+    source_sha256: str | None = None
+    source_image_sha256: str | None = None
     target_label: str
     target_end_label: str | None = None
     status: str
@@ -237,6 +243,8 @@ class NavigationEntry(BaseModel):
     target_chapter_id: str | None = None
     reading_target: ReadingTarget | None = None
     candidates: list[NavigationTarget] = Field(default_factory=list)
+    group_id: str | None = None
+    match_method: str | None = None
 
 
 class NavigationPage(BaseModel):
@@ -244,6 +252,18 @@ class NavigationPage(BaseModel):
     headings: list[str]
     printed_label: str | None = None
     image: str | None = None
+
+
+class NavigationPageMapping(BaseModel):
+    id: str
+    sequence: str
+    physical_start: int
+    physical_end: int
+    printed_start: int
+    printed_end: int
+    offset: int
+    anchor_count: int
+    manual_anchor_count: int = 0
 
 
 class NavigationReport(BaseModel):
@@ -255,6 +275,8 @@ class NavigationReport(BaseModel):
     coverage_complete: bool = False
     page_count: int | None = Field(default=None, ge=0)
     approved_pages: list[NavigationPage] = Field(default_factory=list)
+    page_mappings: list[NavigationPageMapping] = Field(default_factory=list)
+    assistance_warning: str | None = None
 
 
 class NavigationDecision(BaseModel):

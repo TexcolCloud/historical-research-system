@@ -10,6 +10,7 @@ from filelock import FileLock, Timeout
 
 from hrs.processing.errors import LeaseConflict
 from hrs.processing.workflow_rules import (
+    metadata_work_remaining,
     request_continuation,
 )
 
@@ -43,7 +44,7 @@ class RunWorkflow:
             if doc.get("run_request", {}).get("cancel_requested"):
                 raise ValueError("This document is stopping for explicit deletion")
             existing = doc.get("run_request", {})
-            if doc["state"] == "published":
+            if doc["state"] == "published" and not metadata_work_remaining(doc):
                 return existing or request_continuation(doc)
             if (
                 resume
@@ -268,6 +269,8 @@ class RunWorkflow:
                     error=error,
                     not_before=now + 30 * (2 ** (request["technical_failures"] - 1)),
                 )
+            elif metadata_work_remaining(doc):
+                request.update(state="pending", error=None, not_before=0)
             elif doc["state"] == "published":
                 request.update(state="succeeded", error=None, not_before=0)
             elif continuation and all(p["state"] == "approved" for p in doc["pages"]):

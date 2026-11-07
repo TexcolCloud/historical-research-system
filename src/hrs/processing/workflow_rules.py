@@ -10,6 +10,17 @@ from hrs.processing.review_contract import validate_issues
 STAGES = {"ocr", "review", "verify", "navigation", "organization"}
 
 
+def metadata_work_remaining(doc: dict) -> bool:
+    """Publication stays readable while source-bound link verification continues."""
+    return any(
+        task["stage"] == "navigation"
+        and task["state"] in {"ready", "leased"}
+        and (task.get("inputs") or task.get("verification_inputs", {})).get("navigation_mode")
+        == "verify_links"
+        for task in doc["tasks"]
+    )
+
+
 def require_active(doc: dict, *, allow_paused: bool = False) -> None:
     if doc.get("run_request", {}).get("cancel_requested"):
         raise WorkflowStopped("Document cancellation requested; no further processing is allowed")
@@ -71,8 +82,8 @@ def request_continuation(doc: dict, *, resume: bool = False, followup: bool = Fa
             "history": [],
         }
         doc["run_request"] = request
-    if doc["state"] == "published":
-        request["state"] = "succeeded"
+    if request.get("cancel_requested"):
+        request["state"] = "cancelled"
         return request
     if request.get("pause_requested"):
         if not resume:
@@ -82,6 +93,9 @@ def request_continuation(doc: dict, *, resume: bool = False, followup: bool = Fa
             doc["state"] = (
                 "pending" if any(p["state"] == "pending" for p in doc["pages"]) else "processing"
             )
+    if doc["state"] == "published" and not metadata_work_remaining(doc):
+        request["state"] = "succeeded"
+        return request
     if request["state"] == "running":
         if resume and request["lease_expires_at"] <= time.time():
             request["history"].append(

@@ -6,6 +6,10 @@ from hrs.processing.hashing import digest
 def task_inputs(repository, doc: dict, task: dict) -> dict:
     if task["stage"] == "navigation" and task.get("inputs"):
         return task["inputs"]
+    if task["stage"] == "navigation" and task.get("verification_inputs"):
+        from copy import deepcopy
+
+        return deepcopy(task["verification_inputs"])
     inputs = {
         "document_id": doc["id"],
         "source_sha256": doc["source"]["sha256"],

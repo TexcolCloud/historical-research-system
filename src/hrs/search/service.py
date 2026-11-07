@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import psutil
 
-from hrs.config import load_environment
+from hrs.config import diagnostics_root, diagnostics_roots, load_environment
 
 SERVICE = "hrs-retrieval"
 PROTOCOL = 1
@@ -44,7 +44,13 @@ def live_brokers(project):
     """Read only receipts whose exact process identity is still alive."""
     project = Path(project).resolve()
     result = []
-    for path in sorted((project / ".cache/platform-diagnostics/brokers").glob("*.json")):
+    paths = (
+        path
+        for folder in diagnostics_roots(project)
+        for path in sorted((folder / "brokers").glob("*.json"))
+    )
+    seen = set()
+    for path in paths:
         try:
             row = json.loads(path.read_text("utf-8"))
             if Path(row["project_root"]).resolve() != project:
@@ -57,7 +63,10 @@ def live_brokers(project):
                 continue
         except (OSError, ValueError, KeyError, TypeError, psutil.Error):
             continue
-        result.append({**row, "record": str(path)})
+        key = (row["pid"], row["process_create_time"])
+        if key not in seen:
+            result.append({**row, "record": str(path)})
+            seen.add(key)
     return result
 
 
@@ -92,13 +101,14 @@ def _belongs_to_launcher(pid, launcher, created):
 
 
 def _remove_owned_receipt(project, pid, created):
-    path = project / ".cache/platform-diagnostics/brokers" / (str(pid) + ".json")
-    try:
-        row = json.loads(path.read_text("utf-8"))
-        if row.get("pid") == pid and abs(row["process_create_time"] - created) <= 0.01:
-            path.unlink(missing_ok=True)
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
+    for folder in diagnostics_roots(project):
+        path = folder / "brokers" / (str(pid) + ".json")
+        try:
+            row = json.loads(path.read_text("utf-8"))
+            if row.get("pid") == pid and abs(row["process_create_time"] - created) <= 0.01:
+                path.unlink(missing_ok=True)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
 
 
 @contextmanager
@@ -120,7 +130,7 @@ def retrieval_service(settings):
             raise RuntimeError("The managed retrieval endpoint uses a different model directory")
         yield {"owned": False, "health": running}
         return
-    folder = settings.project_root / ".cache/platform-diagnostics"
+    folder = diagnostics_root(settings.project_root)
     folder.mkdir(parents=True, exist_ok=True)
     stop_file = folder / ("retrieval-" + uuid4().hex + ".stop")
     owner = psutil.Process(os.getpid())

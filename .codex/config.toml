@@ -4,7 +4,7 @@ args = ["run", "--no-sync", "--locked", "python", "-m", "hrs", "mcp"]
 startup_timeout_sec = 60
 tool_timeout_sec = 120
 default_tools_approval_mode = "approve"
-env_vars = ["HRS_CODEX_ROOT", "PLATFORM_CODEX_ROOT"]
+env_vars = ["HRS_DATA_ROOT", "USERPROFILE", "XDG_DATA_HOME", "HRS_CODEX_ROOT", "PLATFORM_CODEX_ROOT"]
 
 [agents.historical_ocr]
 description = "Transcribe original historical page images."

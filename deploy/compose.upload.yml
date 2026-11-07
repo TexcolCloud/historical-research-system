@@ -14,7 +14,7 @@ services:
       - '-disable-download'
       - '-max-size=268435456'
       - '-s3-bucket=${INGEST_S3_BUCKET:-ingestion-acceptance}'
-      - '-s3-endpoint=${INGEST_S3_UPLOAD_ENDPOINT:-http://host.docker.internal:58333}'
+      - '-s3-endpoint=${INGEST_S3_UPLOAD_ENDPOINT:-http://host.docker.internal:18333}'
       - '-s3-object-prefix=hrs/v2/uploads/'
       - '-s3-part-size=8388608'
       - '-s3-concurrent-part-uploads=2'

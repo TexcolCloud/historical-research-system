@@ -33,7 +33,7 @@ class DirectoryScope:
         selected = entries[index]
         following = next((e for e in entries[index + 1 :] if e["level"] <= selected["level"]), None)
         if (
-            selected.get("status") not in {"matched", "matched_manual"}
+            selected.get("status") not in {"matched", "matched_manual", "matched_verified"}
             or not selected.get("reading_target")
             or (following and not following.get("reading_target"))
         ):

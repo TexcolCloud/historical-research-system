@@ -56,6 +56,38 @@ class Navigation:
             raise ServiceError(409, str(error)) from error
         return self.status(run_id)
 
+    def refresh(self, run_id):
+        """Recompute metadata and queue native link verification without granting content approval."""
+        from hrs.library.errors import Problem
+        from hrs.library.navigation_suggestions import supplemental_candidates
+        from hrs.processing.navigation_verification import prepare_link_verification
+
+        with self.engine.begin() as connection:
+            require_run_active(connection, str(run_id))
+        store, doc_id = self.native(run_id)
+        snapshot = store.status(doc_id)
+        store.verify_evidence(snapshot, pages=[])
+        warning = None
+        try:
+            suggestions = supplemental_candidates(
+                snapshot, store.artifact_path(snapshot, snapshot["source"]["path"]), self.settings
+            )
+        except (Problem, OSError, ValueError, RuntimeError):
+            suggestions = {}
+            warning = "本地检索暂不可用，已保留页码、标题和人工校准推荐。可稍后更新推荐。"
+        with store.context.verified(doc_id) as doc:
+            nav = doc.setdefault("navigation", {})
+            nav.setdefault("supplemental_candidates", {}).update(suggestions)
+            store.navigation.refresh_document(doc)
+            prepare_link_verification(doc, requested=True)
+            queued = any(
+                t["state"] == "ready" and t.get("verification_inputs") for t in doc["tasks"]
+            )
+            store.checkpoints.write(doc)
+        if queued:
+            store.request_run(doc_id)
+        return {**self.status(run_id), "assistance_warning": warning}
+
     def control(self, run_id, action):
         with self.engine.begin() as connection:
             require_run_active(connection, str(run_id))
@@ -99,6 +131,7 @@ def navigation_snapshot(root, doc_id, run_id, version):
         "sha256": "",
     }
     result = {k: nav.get(k) for k in ("state", "entries", "page_labels", "version", "sha256")}
+    result["page_mappings"] = nav.get("page_mappings", [])
     result["coverage_complete"] = bool(nav.get("coverage_complete"))
     result["page_count"] = len(doc["pages"])
     result["entries"] = [

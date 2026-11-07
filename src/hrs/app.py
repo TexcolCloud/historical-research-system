@@ -9,13 +9,14 @@ import subprocess
 import threading
 from pathlib import Path
 
+import psutil
 from filelock import FileLock
 
-from hrs.config import load_environment, project_root
+from hrs.config import diagnostics_root, diagnostics_roots, load_environment, project_root
 from hrs.search.service import broker_health, retrieval_service
 
 ROOT = project_root()
-CONTROL = ROOT / ".cache/platform-diagnostics"
+CONTROL = diagnostics_root(ROOT)
 
 
 def listening(port):
@@ -38,6 +39,22 @@ def infrastructure():
         )
 
 
+def _running_launcher(saved):
+    from hrs.runtime import live_servers
+
+    try:
+        process = psutil.Process(int(saved["pid"]))
+        if process.status() == psutil.STATUS_ZOMBIE:
+            return False
+        if saved.get("process_create_time") is not None:
+            return abs(process.create_time() - float(saved["process_create_time"])) <= 0.01
+        # Older launchers have no creation timestamp; their live API receipt
+        # supplies the independently checked process identity instead.
+        return any(row["pid"] == process.pid for row in live_servers(ROOT))
+    except (KeyError, TypeError, ValueError, psutil.Error):
+        return False
+
+
 def command(action, *, build=False, existing_services=False):
     from hrs.config import Settings
     from hrs.processing.snapshots import atomic_json
@@ -45,14 +62,20 @@ def command(action, *, build=False, existing_services=False):
     from hrs.processing.workspace import identity, resolve_workspace, running_workbench
     from hrs.runtime import discover_servers
 
-    CONTROL.mkdir(parents=True, exist_ok=True)
     record = CONTROL / "codex-platform.json"
     if action == "stop":
-        if record.exists():
-            saved = json.loads(record.read_text("utf8"))
+        records = dict.fromkeys(
+            (record, *(folder / "codex-platform.json" for folder in diagnostics_roots(ROOT)))
+        )
+        for previous in records:
+            if not previous.exists():
+                continue
+            saved = json.loads(previous.read_text("utf8"))
+            if not _running_launcher(saved):
+                continue
             if not re.fullmatch(r"[0-9a-f]{32}\.stop", saved["stop_file"]):
                 raise ValueError("Invalid native launcher control receipt")
-            (CONTROL / saved["stop_file"]).touch()
+            (previous.parent / saved["stop_file"]).touch()
             print("UI/bridge shutdown requested; Codex checkpoints remain in its workspace.")
         return
     if action == "init":
@@ -115,6 +138,7 @@ def command(action, *, build=False, existing_services=False):
         raise RuntimeError(
             "Port 18170 already has an owner; stop its launcher before starting this one"
         )
+    CONTROL.mkdir(parents=True, exist_ok=True)
     with FileLock(CONTROL / "codex-platform.lock", timeout=0):
         if not existing_services:
             infrastructure()
@@ -153,6 +177,7 @@ def command(action, *, build=False, existing_services=False):
                     record,
                     {
                         "pid": os.getpid(),
+                        "process_create_time": psutil.Process(os.getpid()).create_time(),
                         "stop_file": stop_file.name,
                         "workspace_id": identity(store)["workspace_id"],
                         "root": str(store.root),

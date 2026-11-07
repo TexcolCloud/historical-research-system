@@ -328,14 +328,6 @@ class HumanReviewWorkflow:
                 target["approved"] = {**receipt, "markdown": markdown, "sha256": digest(markdown)}
             self.navigation.refresh_document(doc)
             if all(p["state"] == "approved" for p in doc["pages"]):
-                if not any(
-                    t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
-                    for t in doc["tasks"]
-                ) and not any(
-                    t["stage"] == "organization" and t["state"] != "superseded"
-                    for t in doc["tasks"]
-                ):
-                    doc["tasks"].append(new_task("organization"))
                 doc["state"] = "processing"
                 request_continuation(doc, followup=True)
             else:

@@ -5,6 +5,16 @@ import re
 import unicodedata
 
 from hrs.processing.hashing import digest
+from hrs.processing.navigation_matching import (
+    candidates_for,
+    page_mappings,
+    retained_decision,
+    target_catalog,
+    verified_target,
+)
+from hrs.processing.navigation_matching import (
+    target_evidence as target_evidence,
+)
 
 KINDS = {"toc", "text", "frontmatter", "table", "figure", "unknown"}
 NAVIGATION_REVIEW_POLICY = "navigation-confirmation-v1"
@@ -158,26 +168,6 @@ def validate_proposal(doc, entries):
     return output
 
 
-def target_evidence(page, anchor):
-    text = page["approved"]["markdown"]
-    start = text.index(anchor)
-    line_start = text.rfind("\n", 0, start) + 1
-    ownership_start = (
-        line_start if re.fullmatch(r" {0,3}#{1,6}\s+| {0,3}\*\*", text[line_start:start]) else start
-    )
-    obs = page.get("observation", {})
-    return {
-        "physical_page": page["page"],
-        "printed_label": obs.get("printed_label"),
-        "sequence": obs.get("sequence", "body"),
-        "anchor": anchor,
-        "start": start,
-        "ownership_start": ownership_start,
-        "markdown_sha256": page["approved"]["sha256"],
-        "image_sha256": page["image_sha256"],
-    }
-
-
 def target_position(entry):
     target = entry["target"]
     return target["physical_page"], target.get("ownership_start", target["start"])
@@ -196,6 +186,8 @@ def resolve_navigation(doc):
         for p in doc["pages"]
         if p.get("approved") and p.get("observation") and p["observation"].get("printed_label")
     ]
+    mappings = page_mappings(doc)
+    catalog = target_catalog(doc)
     for source in prior.get("source_entries", []):
         row = dict(source)
         start_label, end_label = label_range(row["target_label"])
@@ -205,76 +197,62 @@ def resolve_navigation(doc):
                 target_label=start_label,
                 target_end_label=end_label,
             )
-        candidates, alternatives = [], []
-        for p in doc["pages"]:
-            obs = p.get("observation", {})
-            if not p.get("approved") or not obs.get("printed_label") or obs.get("kind") == "toc":
-                continue
-            if row.get("sequence") and obs.get("sequence") != row["sequence"]:
-                continue
-            text = p["approved"]["markdown"]
-            anchors = [
-                h
-                for h in obs.get("headings", [])
-                if normalized(h) == normalized(row["target_title"]) and text.count(h) == 1
-            ]
-            for anchor in anchors:
-                target = target_evidence(p, anchor)
-                (
-                    candidates
-                    if normalized(obs["printed_label"]) == normalized(row["target_label"])
-                    else alternatives
-                ).append(target)
-        row.update(
-            candidates=candidates or alternatives,
-            target=None,
-            status="matched"
-            if len(candidates) == 1
-            else "conflict"
-            if len(candidates) > 1 or alternatives
-            else "waiting_evidence",
+        candidates, target = candidates_for(
+            doc,
+            row,
+            mappings,
+            prior.get("supplemental_candidates", {}).get(row["id"], []),
+            catalog=catalog,
         )
-        if len(candidates) == 1:
-            row["target"] = candidates[0]
+        row.update(
+            candidates=candidates,
+            target=target,
+            status="matched" if target else "conflict" if candidates else "waiting_evidence",
+            match_method=(target or (candidates[0] if candidates else {})).get("match_method"),
+            group_id=(target or (candidates[0] if candidates else {})).get("group_id"),
+        )
         row["reason"] = (
-            "页码与正文标题一致"
+            "正文标题与页码或独立日期证据一致"
             if row["status"] == "matched"
-            else "存在重复目标或目录页码与正文不一致"
+            else "已按标题、日期、分段页码与校准证据推荐候选，仍需确认"
             if row["status"] == "conflict"
             else "目标页面尚未形成完整核验证据"
         )
         current_source = doc["pages"][row["source_page"] - 1].get("approved", {})
-        if current_source.get("sha256") != row["source_sha256"]:
+        if current_source.get("sha256") != row["source_sha256"] or (
+            row.get("source_image_sha256")
+            and doc["pages"][row["source_page"] - 1]["image_sha256"] != row["source_image_sha256"]
+        ):
             row.update(
                 status="waiting_evidence", target=None, reason="目录源版本已变化，等待重新关联"
             )
             entries.append(row)
             continue
-        decision = prior.get("decisions", {}).get(row["id"])
-        if decision:
-            p = (
-                doc["pages"][decision["target"]["physical_page"] - 1]
-                if decision.get("target")
-                else None
+        verification = prior.get("link_verifications", {}).get(row["id"])
+        if target := verified_target(doc, row, verification, candidates):
+            row.update(
+                status="matched_verified",
+                target=target,
+                match_method="original_review",
+                verification=verification,
+                reason="独立原图核验已确认目录与正文的对应位置",
             )
-            if decision.get("source_sha256") == row["source_sha256"] and (
-                p is None
-                or p.get("approved", {}).get("sha256") == decision["target"]["markdown_sha256"]
-            ):
-                row.update(
-                    status="matched_manual"
-                    if p
-                    else "unlinked_manual"
-                    if decision.get("final")
-                    else "unresolved",
-                    target=decision.get("target"),
-                    decision=decision,
-                    reason="用户确认的导航位置，不代表新增正文审批"
-                    if p
-                    else "用户确认不建立关联，原目录保留"
-                    if decision.get("final")
-                    else "用户选择暂不关联，原目录保留",
-                )
+        decision = prior.get("decisions", {}).get(row["id"])
+        if retained_decision(doc, row, decision):
+            row.update(
+                status="matched_manual"
+                if decision.get("target")
+                else "unlinked_manual"
+                if decision.get("final")
+                else "unresolved",
+                target=decision.get("target"),
+                decision=decision,
+                reason="用户确认的导航位置，不代表新增正文审批"
+                if decision.get("target")
+                else "用户确认不建立关联，原目录保留"
+                if decision.get("final")
+                else "用户选择暂不关联，原目录保留",
+            )
         if row["status"] == "waiting_evidence" and all(p.get("approved") for p in doc["pages"]):
             row["status"] = "not_found"
             row["reason"] = "本文件全部页面已核验，未找到页码与标题一致的目标"
@@ -283,6 +261,7 @@ def resolve_navigation(doc):
         **prior,
         "entries": entries,
         "page_labels": labels,
+        "page_mappings": mappings,
         "evidence_sha256": fingerprint(evidence),
         "state": "available"
         if entries
@@ -295,7 +274,7 @@ def resolve_navigation(doc):
             for p in doc["pages"]
             if p.get("approved")
         },
-        "policy": "source-bound-navigation-v2-literal-ranges",
+        "policy": "source-bound-navigation-v3-evidence-ranked",
     }
     identity = fingerprint({k: v for k, v in result.items() if k not in {"version", "sha256"}})
     result["version"] = prior.get("version", 0) + (identity != prior.get("sha256"))

@@ -521,6 +521,49 @@
         }
       }
     },
+    "/api/v2/runs/{run_id}/navigation/refresh": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Refresh Navigation",
+        "operationId": "refresh_navigation_api_v2_runs__run_id__navigation_refresh_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigationReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision": {
       "post": {
         "tags": [
@@ -3187,6 +3230,28 @@
             "type": "string",
             "title": "Source Image"
           },
+          "source_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sha256"
+          },
+          "source_image_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Image Sha256"
+          },
           "target_label": {
             "type": "string",
             "title": "Target Label"
@@ -3274,6 +3339,28 @@
             },
             "type": "array",
             "title": "Candidates"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "match_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Method"
           }
         },
         "type": "object",
@@ -3334,6 +3421,59 @@
         ],
         "title": "NavigationPage"
       },
+      "NavigationPageMapping": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "sequence": {
+            "type": "string",
+            "title": "Sequence"
+          },
+          "physical_start": {
+            "type": "integer",
+            "title": "Physical Start"
+          },
+          "physical_end": {
+            "type": "integer",
+            "title": "Physical End"
+          },
+          "printed_start": {
+            "type": "integer",
+            "title": "Printed Start"
+          },
+          "printed_end": {
+            "type": "integer",
+            "title": "Printed End"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "anchor_count": {
+            "type": "integer",
+            "title": "Anchor Count"
+          },
+          "manual_anchor_count": {
+            "type": "integer",
+            "title": "Manual Anchor Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sequence",
+          "physical_start",
+          "physical_end",
+          "printed_start",
+          "printed_end",
+          "offset",
+          "anchor_count"
+        ],
+        "title": "NavigationPageMapping"
+      },
       "NavigationReport": {
         "properties": {
           "state": {
@@ -3384,6 +3524,24 @@
             },
             "type": "array",
             "title": "Approved Pages"
+          },
+          "page_mappings": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationPageMapping"
+            },
+            "type": "array",
+            "title": "Page Mappings"
+          },
+          "assistance_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistance Warning"
           }
         },
         "type": "object",
@@ -3432,6 +3590,48 @@
             "type": "string",
             "title": "Sequence",
             "default": "body"
+          },
+          "match_score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Score"
+          },
+          "match_signals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Match Signals"
+          },
+          "match_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Method"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
           }
         },
         "type": "object",

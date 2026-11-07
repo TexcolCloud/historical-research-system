@@ -1,4 +1,6 @@
+import hashlib
 import os
+import sys
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -59,11 +61,36 @@ def read_environment(root: Path) -> dict[str, str]:
     }
 
 
+def data_root(root: str | Path | None = None) -> Path:
+    """Resolve one project-scoped runtime home without creating or moving data."""
+    project = project_root(root)
+    env = read_environment(project)
+    if selected := env.get("HRS_DATA_ROOT"):
+        return resolve_path(project, selected)
+    if sys.platform == "win32":
+        # AppData can be virtualized per launcher (for example a packaged Codex).
+        home = Path.home() / ".local/share"
+    else:
+        home = Path(env.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    identity = hashlib.sha256(os.path.normcase(str(project)).encode("utf-8")).hexdigest()[:12]
+    return (home.expanduser() / "HistoricalResearchSystem" / identity).resolve()
+
+
+def diagnostics_root(root: str | Path | None = None) -> Path:
+    return data_root(root) / "diagnostics"
+
+
+def diagnostics_roots(root: str | Path | None = None) -> tuple[Path, ...]:
+    """Read legacy service receipts as well; all new writes use diagnostics_root."""
+    project = project_root(root)
+    return tuple(dict.fromkeys((diagnostics_root(project), project / ".cache/platform-diagnostics")))
+
+
 def load_environment(root: Path) -> dict[str, str]:
     """Resolve local defaults and derived URLs without changing files or process state."""
     env = read_environment(root)
     for key, value in {
-        "INGEST_S3_ENDPOINT_URL": "http://127.0.0.1:58333",
+        "INGEST_S3_ENDPOINT_URL": "http://127.0.0.1:18333",
         "INGEST_S3_BUCKET": "ingestion-acceptance",
         "INGEST_S3_REGION": "us-east-1",
     }.items():
@@ -138,6 +165,7 @@ class Settings(BaseModel):
             result = {
                 "models_root": root / "models/document-retrieval",
                 "web_dist": root / "web/dist",
+                "cache_root": data_root(root) / "cache",
                 **values,
             }
             result["project_root"] = root
@@ -199,5 +227,4 @@ class Settings(BaseModel):
             if name not in values and env.get(source):
                 values[name] = env[source]
         values.setdefault("project_root", root)
-        values.setdefault("cache_root", root / ".cache" / "platform-compute")
         return cls.model_validate(values)

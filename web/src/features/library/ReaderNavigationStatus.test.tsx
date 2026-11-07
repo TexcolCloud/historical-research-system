@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import ReaderPanel from "./ReaderPanel";
 import { respondWith } from "@/test/responses";
+import { navigationCompleted } from "./navigation-status.ts";
 
 afterEach(cleanup);
 
@@ -58,6 +59,23 @@ test("reading distinguishes final no-link, automatic waiting, pending review and
             ...make("已关联但阅读版无映射", "matched", false),
             target_image: "/verified-original.png",
           },
+          {
+            ...make("机器原图核验的条目", "matched_verified", false),
+            target_image: "/machine-verified-original.png",
+          },
+          {
+            ...make("机器核验可阅读", "matched_verified", false),
+            reading_target: {
+              chapter_id: "chapter",
+              run_id: "run",
+              physical_page: 2,
+              start: 0,
+              end: 4,
+              text_sha256: "a".repeat(64),
+              image_sha256: "b".repeat(64),
+              anchor: "正式正文",
+            },
+          },
         ],
       };
     if (path.endsWith("/chapters")) return [chapter];
@@ -95,5 +113,14 @@ test("reading distinguishes final no-link, automatic waiting, pending review and
       .getAttribute("href"),
   ).toBe("/verified-original.png");
   expect(within(display).queryByRole("link", { name: "核对位置" })).toBeNull();
+  const verified = screen.getByText("机器原图核验的条目").closest("li")!;
+  expect(verified.textContent).toContain("原图核验已关联");
+  expect(within(verified).queryByRole("link", { name: "核对位置" })).toBeNull();
+  expect(
+    screen.getByRole("link", { name: /机器核验可阅读/ }).getAttribute("href"),
+  ).toContain("physicalPage=2");
+  expect(navigationCompleted(make("machine", "matched_verified", false))).toBe(
+    true,
+  );
   expect(screen.queryByText(/暂无可靠正文位置/)).toBeNull();
 });

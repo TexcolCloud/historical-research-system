@@ -30,6 +30,42 @@ def test_upload_port_derives_the_proxy_url_but_explicit_url_wins(environment, mo
     assert Settings.load().tus_control_url == "http://127.0.0.1:18180/custom/"
 
 
+def test_s3_default_uses_a_loopback_port_outside_windows_dynamic_range(environment):
+    assert Settings.load().s3_endpoint == "http://127.0.0.1:18333"
+
+
+@pytest.mark.parametrize("setting", ["INGEST_S3_ENDPOINT_URL", "PLATFORM_S3_ENDPOINT"])
+def test_explicit_s3_endpoints_keep_existing_deployments(environment, monkeypatch, setting):
+    with (environment / ".env").open("a", encoding="utf-8") as stream:
+        stream.write(f"{setting}=http://127.0.0.1:58333\n")
+    assert Settings.load().s3_endpoint == "http://127.0.0.1:58333"
+    monkeypatch.setenv(setting, "http://127.0.0.1:18340")
+    assert Settings.load().s3_endpoint == "http://127.0.0.1:18340"
+
+
+def test_s3_readiness_check_uses_the_isolated_ci_endpoint(environment, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from hrs.storage import service
+
+    calls = []
+    monkeypatch.setenv("PLATFORM_S3_ENDPOINT", "http://127.0.0.1:18339")
+    monkeypatch.setenv("PLATFORM_S3_BUCKET", "platform-ci")
+    monkeypatch.setattr(
+        service,
+        "objects_for",
+        lambda settings: SimpleNamespace(
+            bucket=settings.s3_bucket,
+            client=SimpleNamespace(head_bucket=lambda **options: calls.append(options)),
+        ),
+    )
+
+    cli._test_infrastructure()
+
+    assert calls == [{"Bucket": "platform-ci"}]
+    assert "Isolated test storage is ready." in capsys.readouterr().out
+
+
 def test_retrieval_mode_derives_from_endpoint_and_can_select_external_loopback(
     environment, monkeypatch
 ):
@@ -54,6 +90,39 @@ def test_models_check_rejects_half_downloaded_model_artifacts(environment, capsy
     report = json.loads(capsys.readouterr().out)
     assert all(not item["present"] for item in report.values())
     assert all("tokenizer.json" in item["missing"] for item in report.values())
+
+
+def test_models_prepare_downloads_only_pinned_runtime_files(environment, monkeypatch):
+    import huggingface_hub
+
+    from hrs.search import artifacts
+
+    downloads = []
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **options: downloads.append(options))
+    monkeypatch.setattr(
+        artifacts,
+        "inspect_artifacts",
+        lambda root: {name: {"present": True} for name in MODEL_REVISIONS},
+    )
+
+    cli._models("prepare")
+
+    tokenizer_files = {
+        "config.json", "tokenizer.json", "tokenizer_config.json",
+        "sentencepiece.bpe.model", "special_tokens_map.json",
+    }
+    expected_weights = {
+        "BAAI/bge-m3": "pytorch_model.bin",
+        "BAAI/bge-reranker-v2-m3": "model.safetensors",
+    }
+    assert len(downloads) == 2
+    for options in downloads:
+        model = options["repo_id"]
+        assert options["revision"] == MODEL_REVISIONS[model]
+        assert set(options["allow_patterns"]) == tokenizer_files | {expected_weights[model]}
+        assert options["local_dir"] == (
+            environment / "models/document-retrieval" / model.split("/")[-1] / MODEL_REVISIONS[model]
+        )
 
 
 def test_direct_relative_project_configuration_keeps_one_canonical_root(environment, monkeypatch):

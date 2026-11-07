@@ -1,6 +1,11 @@
 import { queryKeys } from "@/client/query-keys.ts";
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
 import { updateBooks } from "@/features/books/book-cache.ts";
 import { Button } from "@/components/ui/button.tsx";
@@ -17,6 +22,26 @@ import {
   navigationCompleted as linked,
   navigationStatusLabel,
 } from "./navigation-status";
+import { reviewPageOptions } from "@/features/review/review-page-query.ts";
+import type { components } from "@/client/schema.d.ts";
+
+function prefetchEntry(
+  query: QueryClient,
+  runId: string,
+  entry?: components["schemas"]["NavigationEntry"],
+) {
+  if (!entry) return;
+  const candidates = entry.target
+    ? [entry.target, ...(entry.candidates ?? [])]
+    : (entry.candidates ?? []);
+  for (const page of new Set(
+    candidates.slice(0, 3).map((candidate) => candidate.physical_page),
+  ))
+    void query.prefetchQuery({
+      ...reviewPageOptions(runId, page),
+      staleTime: 30_000,
+    });
+}
 export default function NavigationPanel({
   runId,
   bookId,
@@ -40,10 +65,23 @@ export default function NavigationPanel({
   );
   const [selected, setSelected] = useState<string | null>(entryId ?? null),
     [filter, setFilter] = useState(reviewOnly ? "attention" : "all"),
-    [message, setMessage] = useState(""),
+    [queueGroup, setQueueGroup] = useState("all"),
+    [message, setMessage] = useState<{
+      kind: "decision" | "recommendation";
+      text: string;
+    } | null>(null),
     [restart, setRestart] = useState(0);
   const entries = report.data?.entries ?? [],
     attention = entries.filter((e) => e.needs_confirmation);
+  const hasCandidate = (entry: (typeof entries)[number]) =>
+    Boolean(entry.target || entry.candidates?.length);
+  const inGroup = (entry: (typeof entries)[number]) =>
+    queueGroup === "recommended"
+      ? hasCandidate(entry)
+      : queueGroup === "search"
+        ? !hasCandidate(entry)
+        : true;
+  const queueEntries = attention.filter(inGroup);
   const incompleteMessage =
     bookState === "paused"
       ? "自动处理已暂停。请在处理进展中继续处理，新的目录项目将在核对后列出。"
@@ -55,11 +93,17 @@ export default function NavigationPanel({
   const selectedEntry = entries.find(
     (entry) =>
       entry.id === selected &&
-      (!reviewOnly || entry.needs_confirmation || entry.id === entryId),
+      (!reviewOnly ||
+        (entry.needs_confirmation && inGroup(entry)) ||
+        entry.id === entryId),
   );
   const activeId = readingOnly
     ? null
-    : (selectedEntry?.id ?? (reviewOnly ? attention[0]?.id : null));
+    : (selectedEntry?.id ?? (reviewOnly ? queueEntries[0]?.id : null));
+  const nextEntry = queueEntries.find((entry) => entry.id !== activeId);
+  useEffect(() => {
+    if (reviewOnly) prefetchEntry(query, runId, nextEntry);
+  }, [query, runId, reviewOnly, nextEntry]);
   const editor = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
   useEffect(() => {
@@ -82,6 +126,25 @@ export default function NavigationPanel({
   const pendingDecision = useRef<{ signature: string; id: string } | null>(
     null,
   );
+  function commitReport(data: components["schemas"]["NavigationReport"]) {
+    const committed =
+      query.setQueryData<components["schemas"]["NavigationReport"]>(
+        queryKeys.navigation(runId),
+        data,
+      ) ?? data;
+    updateBooks(
+      query,
+      (book) => book.id === bookId,
+      (book) => ({
+        ...book,
+        navigation_pending_count: committed.pending_count,
+      }),
+    );
+    void query.invalidateQueries({
+      queryKey: queryKeys.readingNavigation(bookId),
+    });
+    return committed;
+  }
   const decision = useMutation({
     mutationFn: async ({
       choice,
@@ -94,6 +157,7 @@ export default function NavigationPanel({
     }) => {
       if (runtimeScope === "unknown")
         throw new Error("工作区范围未确认，请重新确认后提交目录决定。");
+      await query.cancelQueries({ queryKey: queryKeys.navigation(runId) });
       const signature = JSON.stringify([id, sha, choice]);
       if (pendingDecision.current?.signature !== signature)
         pendingDecision.current = { signature, id: crypto.randomUUID() };
@@ -122,32 +186,89 @@ export default function NavigationPanel({
         );
       return data;
     },
-    onSuccess: (data, { choice, id }) => {
+    onSuccess: async (data, { choice, id }) => {
+      await query.cancelQueries({ queryKey: queryKeys.navigation(runId) });
+      const committed = commitReport(data);
       pendingDecision.current = null;
       const title = entries.find((e) => e.id === id)?.title ?? "这条目录";
-      setMessage(
-        choice
-          ? `已确认：《${title}》 → PDF 第 ${choice.page} 页。`
-          : `已确认：《${title}》保留目录文字，不设置跳转。`,
-      );
-      query.setQueryData(queryKeys.navigation(runId), data);
-      void query.invalidateQueries({
-        queryKey: queryKeys.readingNavigation(bookId),
+      const automatic = committed.entries.filter(
+        (entry) =>
+          entry.id !== id &&
+          ["matched", "matched_verified"].includes(entry.status) &&
+          entries.some(
+            (previous) =>
+              previous.id === entry.id && previous.needs_confirmation,
+          ),
+      ).length;
+      const group = entries.find((entry) => entry.id === id)?.group_id;
+      const updated = group
+        ? committed.entries.filter(
+            (entry) =>
+              entry.id !== id &&
+              entry.needs_confirmation &&
+              entry.group_id === group &&
+              entries.some(
+                (previous) =>
+                  previous.id === entry.id &&
+                  previous.needs_confirmation &&
+                  JSON.stringify(previous.candidates) !==
+                    JSON.stringify(entry.candidates),
+              ),
+          ).length
+        : 0;
+      setMessage({
+        kind: "decision",
+        text:
+          (choice
+            ? `已确认：《${title}》 → PDF 第 ${choice.page} 页。`
+            : `已确认：《${title}》保留目录文字，不设置跳转。`) +
+          (automatic
+            ? ` 另有 ${automatic} 条目录已由系统匹配，保留为机器关联。`
+            : "") +
+          (updated ? ` 同段另有 ${updated} 条目录候选已更新。` : ""),
       });
       setSelected(
         reviewOnly
-          ? (data.entries.find((e) => e.needs_confirmation)?.id ?? null)
+          ? (committed.entries.find((e) => e.needs_confirmation && inGroup(e))
+              ?.id ?? null)
           : null,
-      );
-      const navigation_pending_count = data.pending_count;
-      updateBooks(
-        query,
-        (book) => book.id === bookId,
-        (book) => ({ ...book, navigation_pending_count }),
       );
       // The next bridge event replaces these committed local counters after projection.
     },
   });
+  const recommendation = useMutation({
+    mutationFn: async () => {
+      if (runtimeScope === "unknown")
+        throw new Error("工作区范围未确认，暂不能更新目录推荐。");
+      await query.cancelQueries({ queryKey: queryKeys.navigation(runId) });
+      const { data, response } = await client.POST(
+        "/api/v2/runs/{run_id}/navigation/refresh",
+        {
+          params: { path: { run_id: runId } },
+        },
+      );
+      if (!data)
+        throw new Error(
+          response.status === 409
+            ? "当前任务暂不能更新推荐，请在处理进展中核对任务状态后重试。"
+            : "推荐更新未完成，已有目录与选择均已保留，请重试。",
+        );
+      return data;
+    },
+    onSuccess: async (data) => {
+      await query.cancelQueries({ queryKey: queryKeys.navigation(runId) });
+      const committed = commitReport(data);
+      setMessage({
+        kind: "recommendation",
+        text:
+          "目录推荐已更新，剩余待办见下方清单。此次更新未提交人工决定。" +
+          (committed.assistance_warning
+            ? ` ${committed.assistance_warning}`
+            : ""),
+      });
+    },
+  });
+  const busy = decision.isPending || recommendation.isPending;
   const visible = reviewOnly
     ? entries.filter((e) => e.id === activeId)
     : entries.filter((e) =>
@@ -183,8 +304,15 @@ export default function NavigationPanel({
       )}
       {message && (
         <p role="status" className="navigation-receipt">
-          {message}
-          {reviewOnly && attention.length > 0 ? " 已打开下一项目录。" : ""}
+          {message.text}
+          {message.kind === "decision" && reviewOnly && queueEntries.length > 0
+            ? " 已打开下一项目录。"
+            : ""}
+        </p>
+      )}
+      {reviewOnly && attention.length > 0 && queueEntries.length === 0 && (
+        <p role="status" className="navigation-queue-status">
+          当前组已完成，可切换其他分组。
         </p>
       )}
       {report.isPending && <p role="status">正在读取目录…</p>}
@@ -196,12 +324,64 @@ export default function NavigationPanel({
       )}
       {report.data && (
         <>
+          {reviewOnly && (
+            <div className="navigation-recommendation-tools">
+              <p>
+                先使用系统推荐，再核对仍有歧义的条目。更新推荐不会代替你的人工确认。
+              </p>
+              <Button
+                variant="outline"
+                disabled={busy || runtimeScope === "unknown"}
+                onClick={() => recommendation.mutate()}
+              >
+                {recommendation.isPending ? "正在更新推荐…" : "更新推荐"}
+              </Button>
+              {recommendation.isError && (
+                <p role="alert">{recommendation.error.message}</p>
+              )}
+            </div>
+          )}
           {reviewOnly ? (
-            <p className="navigation-queue-status">
-              {attention.length
-                ? `还有 ${attention.length} 项目录需要核对。确认跳转只改变目录导航，正文与原件保留。`
-                : "当前没有需要你确认的目录项目。"}
-            </p>
+            <div>
+              <p className="navigation-queue-status">
+                {attention.length
+                  ? `还有 ${attention.length} 项目录需要核对。确认跳转只改变目录导航，正文与原件保留。`
+                  : "当前没有需要你确认的目录项目。"}
+              </p>
+              {attention.length > 0 && (
+                <div
+                  className="navigation-task-groups"
+                  role="group"
+                  aria-label="目录待办分组"
+                >
+                  {[
+                    ["all", `全部待办 · ${attention.length}`],
+                    [
+                      "recommended",
+                      `有推荐候选 · ${attention.filter(hasCandidate).length}`,
+                    ],
+                    [
+                      "search",
+                      `需查找正文 · ${attention.filter((entry) => !hasCandidate(entry)).length}`,
+                    ],
+                  ].map(([value, label]) => (
+                    <Button
+                      key={value}
+                      variant={queueGroup === value ? "default" : "outline"}
+                      aria-pressed={queueGroup === value}
+                      disabled={busy}
+                      onClick={() => {
+                        setQueueGroup(value);
+                        setSelected(null);
+                        decision.reset();
+                      }}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
             <div
               className="workspace-section-tabs"
@@ -219,7 +399,7 @@ export default function NavigationPanel({
               ].map(([value, label]) => (
                 <Button
                   key={value}
-                  disabled={decision.isPending}
+                  disabled={busy}
                   variant={filter === value ? "default" : "outline"}
                   onClick={() => {
                     setFilter(value);
@@ -235,11 +415,13 @@ export default function NavigationPanel({
           {!visible.length && (
             <div className="workspace-empty">
               <h3>
-                {reviewOnly && message
-                  ? "当前目录核对完成"
-                  : filter === "attention"
-                    ? "当前没有需要核对的目录"
-                    : "暂无目录条目"}
+                {reviewOnly && attention.length > 0
+                  ? "当前分组没有待核对目录"
+                  : reviewOnly && message
+                    ? "当前目录核对完成"
+                    : filter === "attention"
+                      ? "当前没有需要核对的目录"
+                      : "暂无目录条目"}
               </h3>
               <p>
                 {report.data.coverage_complete
@@ -260,10 +442,12 @@ export default function NavigationPanel({
               <nav className="navigation-review-queue" aria-label="目录待办">
                 <header>
                   <h2>目录待办</h2>
-                  <p>{attention.length} 项需要确认</p>
+                  <p>
+                    当前组 {queueEntries.length} 项 · 共 {attention.length} 项
+                  </p>
                 </header>
                 <ol>
-                  {entries
+                  {(reviewOnly ? queueEntries : entries)
                     .filter(
                       (entry) =>
                         entry.needs_confirmation || entry.id === activeId,
@@ -276,7 +460,10 @@ export default function NavigationPanel({
                           aria-current={
                             entry.id === activeId ? "true" : undefined
                           }
-                          disabled={decision.isPending}
+                          disabled={busy}
+                          onPointerEnter={() =>
+                            prefetchEntry(query, runId, entry)
+                          }
                           onClick={() => choose(entry.id)}
                         >
                           <strong>{entry.title}</strong>
@@ -349,7 +536,7 @@ export default function NavigationPanel({
                         {!readingOnly && e.status !== "waiting_evidence" && (
                           <Button
                             variant="outline"
-                            disabled={decision.isPending}
+                            disabled={busy}
                             onClick={() => choose(e.id)}
                           >
                             {e.needs_confirmation ? "确认目录跳转" : "修改跳转"}
@@ -365,16 +552,16 @@ export default function NavigationPanel({
                         entry={e}
                         report={report.data!}
                         runId={runId}
-                        busy={decision.isPending}
+                        busy={busy}
+                        saving={decision.isPending}
                         approvalReady={runtimeScope !== "unknown"}
-                        error={decision.error?.message}
+                        error={decision.error?.message ?? report.error?.message}
                         reloading={report.isFetching}
                         onReload={async () => {
                           const result = await report.refetch();
-                          if (result.isSuccess) {
-                            decision.reset();
-                            setRestart((v) => v + 1);
-                          }
+                          if (!result.isSuccess) throw result.error;
+                          decision.reset();
+                          return result.data;
                         }}
                         onDecide={(choice, sha) =>
                           decision.mutate({ choice, sha, id: e.id })

@@ -175,6 +175,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/runs/{run_id}/navigation/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Navigation */
+        post: operations["refresh_navigation_api_v2_runs__run_id__navigation_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision": {
         parameters: {
             query?: never;
@@ -1150,6 +1167,10 @@ export interface components {
             source_anchor: string;
             /** Source Image */
             source_image: string;
+            /** Source Sha256 */
+            source_sha256?: string | null;
+            /** Source Image Sha256 */
+            source_image_sha256?: string | null;
             /** Target Label */
             target_label: string;
             /** Target End Label */
@@ -1173,6 +1194,10 @@ export interface components {
             reading_target?: components["schemas"]["ReadingTarget"] | null;
             /** Candidates */
             candidates?: components["schemas"]["NavigationTarget"][];
+            /** Group Id */
+            group_id?: string | null;
+            /** Match Method */
+            match_method?: string | null;
         };
         /** NavigationPage */
         NavigationPage: {
@@ -1184,6 +1209,30 @@ export interface components {
             printed_label?: string | null;
             /** Image */
             image?: string | null;
+        };
+        /** NavigationPageMapping */
+        NavigationPageMapping: {
+            /** Id */
+            id: string;
+            /** Sequence */
+            sequence: string;
+            /** Physical Start */
+            physical_start: number;
+            /** Physical End */
+            physical_end: number;
+            /** Printed Start */
+            printed_start: number;
+            /** Printed End */
+            printed_end: number;
+            /** Offset */
+            offset: number;
+            /** Anchor Count */
+            anchor_count: number;
+            /**
+             * Manual Anchor Count
+             * @default 0
+             */
+            manual_anchor_count: number;
         };
         /** NavigationReport */
         NavigationReport: {
@@ -1209,6 +1258,10 @@ export interface components {
             page_count?: number | null;
             /** Approved Pages */
             approved_pages?: components["schemas"]["NavigationPage"][];
+            /** Page Mappings */
+            page_mappings?: components["schemas"]["NavigationPageMapping"][];
+            /** Assistance Warning */
+            assistance_warning?: string | null;
         };
         /** NavigationTarget */
         NavigationTarget: {
@@ -1229,6 +1282,14 @@ export interface components {
              * @default body
              */
             sequence: string;
+            /** Match Score */
+            match_score?: number | null;
+            /** Match Signals */
+            match_signals?: string[];
+            /** Match Method */
+            match_method?: string | null;
+            /** Group Id */
+            group_id?: string | null;
         };
         /** PageProgress */
         PageProgress: {
@@ -2385,6 +2446,37 @@ export interface operations {
         };
     };
     navigation_api_v2_runs__run_id__navigation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavigationReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_navigation_api_v2_runs__run_id__navigation_refresh_post: {
         parameters: {
             query?: never;
             header?: never;

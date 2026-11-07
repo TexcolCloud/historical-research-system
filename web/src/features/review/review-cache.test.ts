@@ -5,7 +5,7 @@ import {
   issuesKey,
 } from "@/features/review/review-cache.ts";
 
-test("a saved decision immediately removes only its issue and preserves the prefetched next page", () => {
+test("a saved decision immediately removes only its issue and preserves the prefetched next page", async () => {
   const query = new QueryClient();
   const next = {
     id: "next",
@@ -30,7 +30,7 @@ test("a saved decision immediately removes only its issue and preserves the pref
     pending_count: 2,
     navigation_pending_count: 1,
   });
-  applyReviewReceipt(query, {
+  await applyReviewReceipt(query, {
     decision_id: "decision",
     issue_id: "first",
     run_id: "run",
@@ -49,7 +49,7 @@ test("a saved decision immediately removes only its issue and preserves the pref
   ).toBe(false);
 });
 
-test("an old decision receipt cannot roll a newer book and run revision back", () => {
+test("an old decision receipt cannot roll a newer book and run revision back", async () => {
   const query = new QueryClient();
   const current = {
     id: "book",
@@ -61,7 +61,7 @@ test("an old decision receipt cannot roll a newer book and run revision back", (
   query.setQueryData(["platform", "books"], [current]);
   query.setQueryData(["platform", "book", "book"], current);
   query.setQueryData(["platform", "run", "run"], { ...current, id: "run" });
-  applyReviewReceipt(query, {
+  await applyReviewReceipt(query, {
     decision_id: "decision",
     issue_id: "first",
     run_id: "run",

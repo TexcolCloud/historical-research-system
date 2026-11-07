@@ -11,6 +11,8 @@ import time
 from contextlib import closing, contextmanager
 from pathlib import Path
 
+from hrs.processing.workflow_rules import metadata_work_remaining
+
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -206,7 +208,7 @@ class Ledger:
             )
             request = document.get("run_request", {})
             if (
-                document.get("state") == "published"
+                (document.get("state") == "published" and not metadata_work_remaining(document))
                 or request.get("pause_requested")
                 or request.get("cancel_requested")
                 or request.get("state") in {"waiting_human", "paused", "cancelled", "succeeded"}

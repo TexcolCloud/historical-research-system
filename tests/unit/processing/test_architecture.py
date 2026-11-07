@@ -51,6 +51,8 @@ def test_domain_rules_do_not_depend_on_persistence_or_entrypoints():
         "task_results",
         "progress",
         "navigation",
+        "navigation_matching",
+        "navigation_verification",
         "organization",
         "review_locations",
         "review_contract",

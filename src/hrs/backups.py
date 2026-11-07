@@ -12,7 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 from zipfile import ZipFile
 
-from hrs.config import load_environment, resolve_path
+from hrs.config import data_root, load_environment, resolve_path
 from hrs.processing.backup import restore_workspace, snapshot_workspace, verify_workspace_snapshot
 from hrs.processing.snapshots import atomic_json
 from hrs.processing.store import Store
@@ -38,7 +38,11 @@ def require_quiesced(settings, store):
         if not row["available"]:
             return False
         root = Path(row["runtime"]["root"]).resolve()
-        return root == store.root or root.is_relative_to(settings.project_root.resolve())
+        return (
+            root == store.root
+            or root.is_relative_to(settings.project_root.resolve())
+            or root.is_relative_to(data_root(settings.project_root))
+        )
 
     if live_servers(settings.project_root) or any(
         belongs_here(row) for row in discover_servers(settings.project_root)
@@ -197,7 +201,7 @@ def backup(settings, *, destination=None, native_roots=None):
         Path(destination).expanduser().resolve()
         if destination
         else (
-            settings.project_root
+            data_root(settings.project_root)
             / "backups"
             / (datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8])
         )

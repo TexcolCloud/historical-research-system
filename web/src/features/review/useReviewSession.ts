@@ -1,6 +1,6 @@
 import { queryKeys } from "@/client/query-keys.ts";
 /** Owns draft serialization, evidence locations and final decision receipts. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
 import type { components } from "@/client/schema.d.ts";
@@ -10,12 +10,12 @@ import {
   suggestionEdit,
   moveReviewLocations,
   recoverReviewLocations,
-  serializeReviewLocations,
   sourceRanges,
   type ReviewLocation,
 } from "@/editor/review-highlights.ts";
 import type { Resolution } from "./ReviewFocus.tsx";
 import type { RuntimeScope } from "@/app/runtime-scope.ts";
+import { useReviewDraft } from "./useReviewDraft.ts";
 
 type EditorMode =
   | { kind: "read" }
@@ -25,7 +25,9 @@ type EditorMode =
 type Issue = components["schemas"]["ReviewIssue"];
 export function useReviewSession(
   issue: Issue,
-  onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void,
+  onSaved: (
+    receipt: components["schemas"]["ReviewReceipt"],
+  ) => void | Promise<void>,
   runtimeScope: RuntimeScope = "content",
 ) {
   const query = useQueryClient(),
@@ -52,8 +54,6 @@ export function useReviewSession(
   const [conflictUntouched, setConflictUntouched] = useState(
     Boolean(draftConflict),
   );
-  const conflictUntouchedRef = useRef(conflictUntouched);
-  conflictUntouchedRef.current = conflictUntouched;
   const [text, setText] = useState(
     (typeof cached === "string" ? cached : cached?.text) ??
       issue.draft_text ??
@@ -92,9 +92,7 @@ export function useReviewSession(
           !issue.resolutions?.some(
             (r) => r.id === l.id && r.action !== "defer",
           ),
-      )?.id ??
-      baseLocations[0]?.id ??
-      "",
+      )?.id ?? "",
   );
   const [boxes, setBoxes] = useState<Record<string, number[]>>({});
   const locations = useMemo(
@@ -106,7 +104,7 @@ export function useReviewSession(
       ),
     [textLocations, boxes],
   );
-  const current = locations.find((l) => l.id === active) ?? locations[0];
+  const current = locations.find((l) => l.id === active);
   const [editorMode, setEditorMode] = useState<EditorMode>({ kind: "read" });
   const editing = editorMode.kind !== "read";
   const wholePage = editorMode.kind === "page";
@@ -115,129 +113,89 @@ export function useReviewSession(
   const [pageReviewed, setPageReviewed] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const snapshot = useRef({ text, resolutions, locations: textLocations });
-  const latestText = useRef(text),
-    latestResolutions = useRef(resolutions),
-    latestLocations = useRef(textLocations);
-  const savedText = useRef(issue.draft_text ?? issue.text),
-    savedResolutions = useRef(JSON.stringify(issue.resolutions ?? [])),
-    savedLocationsSha = useRef(issue.draft_locations_text_sha256);
-  const revision = useRef(issue.revision),
-    queue = useRef<Promise<unknown>>(Promise.resolve());
-  latestText.current = text;
-  latestResolutions.current = resolutions;
-  latestLocations.current = textLocations;
-  const draft = useMutation({
-    mutationKey: ["platform", "review-write", issue.run_id],
-    mutationFn: async ({
-      value,
-      decisions,
-      positionSnapshot,
-    }: {
-      value: string;
-      decisions: Resolution[];
-      positionSnapshot: ReviewLocation[];
-    }) => {
-      if (
-        value === savedText.current &&
-        JSON.stringify(decisions) === savedResolutions.current
-      )
-        return {
-          revision: revision.current,
-          draft_text: value,
-          resolutions: decisions,
-          locations: positionSnapshot,
-          locations_text_sha256: savedLocationsSha.current,
-        };
-      const { data, response } = await client.PUT(
-        "/api/v2/reviews/{issue_id}/draft",
-        {
-          params: { path: { issue_id: issue.id } },
-          body: {
-            text: value,
-            expected_revision: revision.current,
-            resolutions: decisions,
-            locations: serializeReviewLocations(positionSnapshot),
-          },
-        },
-      );
-      if (!data)
-        throw new Error(
-          response.status === 409
-            ? "草稿版本已更新，本页输入尚未写入最新版本。请先复制本页文字，再刷新页面核对。"
-            : "草稿保存失败，本页输入仍在当前窗口。请重试保存后再离开。",
-        );
-      revision.current = data.revision;
-      savedText.current = data.draft_text;
-      savedResolutions.current = JSON.stringify(decisions);
-      savedLocationsSha.current = data.locations_text_sha256;
-      return data;
-    },
-    onSuccess: (data) =>
-      query.setQueryData<Issue>(queryKeys.issue(issue.id), (current) => {
-        if (
-          current &&
-          (current.text_sha256 !== issue.text_sha256 ||
-            ("review_input_sha256" in current &&
-              "review_input_sha256" in issue &&
-              current.review_input_sha256 !== issue.review_input_sha256) ||
-            current.revision > data.revision)
+  function restoreServer(value: Issue) {
+    const nextText = value.draft_text ?? value.text;
+    const source = readLocations(
+      value.locations ?? [],
+      value.text,
+      value.text_sha256,
+    );
+    const restored = value.draft_locations_text_sha256
+      ? readLocations(
+          value.draft_locations ?? [],
+          nextText,
+          value.draft_locations_text_sha256,
         )
-          return current;
-        return {
-          ...issue,
-          draft_conflict: false,
-          revision: data.revision,
-          draft_text: data.draft_text,
-          resolutions: data.resolutions,
-          draft_locations: data.locations
-            ? serializeReviewLocations(data.locations)
-            : data.locations,
-          draft_locations_text_sha256: data.locations_text_sha256,
-        };
-      }),
-  });
+      : [];
+    const nextLocations = recoverReviewLocations(
+      value.text,
+      nextText,
+      source,
+    ).map(
+      (location) =>
+        restored.find((saved) => saved.id === location.id) ?? location,
+    );
+    const decisions = value.resolutions ?? [];
+    setText(nextText);
+    setResolutions(decisions);
+    setTextLocations(nextLocations);
+    setBoxes({});
+    setActive((selected) =>
+      nextLocations.some(
+        (location) =>
+          location.id === selected &&
+          !decisions.some(
+            (decision) =>
+              decision.id === selected && decision.action !== "defer",
+          ),
+      )
+        ? selected
+        : (nextLocations.find(
+            (location) =>
+              !decisions.some(
+                (decision) =>
+                  decision.id === location.id && decision.action !== "defer",
+              ),
+          )?.id ?? ""),
+    );
+    setEditorMode({ kind: "read" });
+    setPageReviewed(false);
+    query.removeQueries({ queryKey: draftKey });
+    return { text: nextText, resolutions: decisions, locations: nextLocations };
+  }
+  const {
+    draft,
+    save,
+    revision,
+    remote,
+    readOnly,
+    resolveRemote,
+    markSubmitted,
+    refreshAfterConflict,
+    changed: changedDraft,
+  } = useReviewDraft(
+    issue,
+    { text, resolutions, locations: textLocations },
+    finishing,
+    conflictUntouched,
+    restoreServer,
+  );
   function saveDraft(
     value: string,
-    decisions = latestResolutions.current,
-    positionSnapshot = latestLocations.current,
+    decisions = resolutions,
+    positionSnapshot = textLocations,
   ) {
-    const next = queue.current
-      .catch(() => undefined)
-      .then(() => draft.mutateAsync({ value, decisions, positionSnapshot }));
-    queue.current = next;
-    return next;
+    return save({
+      text: value,
+      resolutions: decisions,
+      locations: positionSnapshot,
+    });
   }
-  const saveRef = useRef(saveDraft);
-  saveRef.current = saveDraft;
-  useEffect(() => {
-    if (
-      (text === savedText.current &&
-        JSON.stringify(resolutions) === savedResolutions.current) ||
-      draft.isError ||
-      conflictUntouched
-    )
-      return;
-    const timer = setTimeout(() => {
-      void saveRef
-        .current(text, resolutions, textLocations)
-        .catch(() => undefined);
-    }, 800);
-    return () => clearTimeout(timer);
-  }, [text, resolutions, textLocations, draft.isError, conflictUntouched]);
-  useEffect(
-    () => () => {
-      if (
-        !conflictUntouchedRef.current &&
-        (latestText.current !== savedText.current ||
-          JSON.stringify(latestResolutions.current) !==
-            savedResolutions.current)
-      )
-        void saveRef.current(latestText.current).catch(() => undefined);
-    },
-    [],
-  );
+  const finishingLock = useRef(false);
 
   function changeText(value: string) {
+    if (finishingLock.current || readOnly) return;
+    changedDraft();
     setConflictUntouched(false);
     const nextLocations = moveReviewLocations(text, value, textLocations);
     const retained = resolutions.filter((r) => {
@@ -264,11 +222,8 @@ export function useReviewSession(
       );
     });
     setText(value);
-    latestText.current = value;
     setResolutions(retained);
-    latestResolutions.current = retained;
     setTextLocations(nextLocations);
-    latestLocations.current = nextLocations;
     setPageReviewed(false);
     query.setQueryData(draftKey, {
       text: value,
@@ -279,6 +234,7 @@ export function useReviewSession(
     draft.reset();
   }
   function beginEdit() {
+    if (finishingLock.current || readOnly) return;
     snapshot.current = { text, resolutions, locations: textLocations };
     const range = current ? decisionRange(text, current) : null;
     setEditorMode(
@@ -286,7 +242,7 @@ export function useReviewSession(
     );
   }
   function changeFocus(value: string) {
-    if (!editRange) return;
+    if (!editRange || finishingLock.current || readOnly) return;
     changeText(
       text.slice(0, editRange.start) + value + text.slice(editRange.end),
     );
@@ -296,9 +252,9 @@ export function useReviewSession(
     });
   }
   function cancelEdit() {
+    if (finishingLock.current || readOnly) return;
     const previous = snapshot.current;
     setText(previous.text);
-    latestText.current = previous.text;
     query.setQueryData(draftKey, {
       text: previous.text,
       locations: previous.locations,
@@ -306,9 +262,7 @@ export function useReviewSession(
       baseReviewInput: reviewInput,
     });
     setResolutions(previous.resolutions);
-    latestResolutions.current = previous.resolutions;
     setTextLocations(previous.locations);
-    latestLocations.current = previous.locations;
     setEditorMode({ kind: "read" });
     void saveDraft(
       previous.text,
@@ -317,7 +271,8 @@ export function useReviewSession(
     ).catch(() => undefined);
   }
   async function finish(action: Resolution["action"]) {
-    if (finishing) return;
+    if (finishingLock.current || readOnly || issue.state !== "pending") return;
+    finishingLock.current = true;
     setFinishing(true);
     setConflictUntouched(false);
     const decisions = current
@@ -329,14 +284,14 @@ export function useReviewSession(
     try {
       await saveDraft(text, decisions);
       setResolutions(decisions);
-      latestResolutions.current = decisions;
       setEditorMode({ kind: "read" });
       setPageReviewed(true);
       const next = locations.find(
         (l) => !decisions.some((r) => r.id === l.id && r.action !== "defer"),
       );
-      if (next) setActive(next.id);
+      setActive(next?.id ?? "");
     } finally {
+      finishingLock.current = false;
       setFinishing(false);
     }
   }
@@ -348,19 +303,24 @@ export function useReviewSession(
       setEditorMode({ kind: "page", source: !editorMode.source });
   }
   function recheckPage() {
+    if (finishingLock.current || readOnly) return;
+    changedDraft();
     setPageReviewed(false);
-    if (current) {
+    const first = current ?? locations[0];
+    if (first) {
       setResolutions(
-        resolutions.filter((resolution) => resolution.id !== current.id),
+        resolutions.filter((resolution) => resolution.id !== first.id),
       );
-      setActive(current.id);
+      setActive(first.id);
     }
   }
-  const ready = locations.length
-    ? locations.every((l) =>
-        resolutions.some((r) => r.id === l.id && r.action !== "defer"),
-      )
-    : pageReviewed;
+  const ready =
+    !remote &&
+    (locations.length
+      ? locations.every((l) =>
+          resolutions.some((r) => r.id === l.id && r.action !== "defer"),
+        )
+      : pageReviewed);
   const originalLocation = baseLocations.find((l) => l.id === current?.id);
   const proposal = originalLocation
     ? suggestionEdit(issue.text, originalLocation)
@@ -370,6 +330,9 @@ export function useReviewSession(
   const submission = useMutation({
     mutationKey: ["platform", "review-write", issue.run_id],
     mutationFn: async () => {
+      if (readOnly || issue.state !== "pending")
+        throw new Error("本页已经提交，请继续核对下一页。");
+      if (remote) throw new Error("请先处理服务器草稿更新，本页输入已保留。");
       if (runtimeScope === "unknown")
         throw new Error("工作区范围未确认，请重新确认后提交；当前草稿保留。");
       await saveDraft(text);
@@ -400,17 +363,28 @@ export function useReviewSession(
         "/api/v2/reviews/{issue_id}/decisions",
         { params: { path: { issue_id: issue.id } }, body: decision },
       );
-      if (!data)
+      if (!data) {
+        if (response.status === 409) {
+          const fresh = await refreshAfterConflict();
+          throw new Error(
+            fresh && fresh.state !== "pending"
+              ? "本页已经提交，正在更新待核对清单；本地输入仍保留。"
+              : "服务器草稿已有更新。本页输入已保留，请核对最新草稿后继续。",
+          );
+        }
         throw new Error(
-          response.status === 409
-            ? "内容版本已更新，本页尚未提交。请先复制本页草稿，再刷新页面核对。"
-            : "尚未收到本页提交回执。草稿已保存，请重试提交以确认结果。",
+          "尚未收到本页提交回执。草稿已保存，请重试提交以确认结果。",
         );
+      }
       return data;
     },
-    onSuccess: onSaved,
+    onSuccess: async (receipt) => {
+      markSubmitted();
+      query.removeQueries({ queryKey: draftKey });
+      await onSaved(receipt);
+    },
   });
-  const busy = finishing || submission.isPending;
+  const busy = finishing || submission.isPending || readOnly;
   const completed = resolutions.filter(
     (r) => r.action !== "defer" && locations.some((l) => l.id === r.id),
   ).length;
@@ -432,6 +406,17 @@ export function useReviewSession(
     busy,
     completed,
     draftConflict,
+    remoteDraft: remote,
+    resolveRemote,
+    readOnly,
+    lastDoubt: !locations.some(
+      (location) =>
+        location.id !== current?.id &&
+        !resolutions.some(
+          (resolution) =>
+            resolution.id === location.id && resolution.action !== "defer",
+        ),
+    ),
     recheckPage,
     setActive,
     finish,

@@ -17,6 +17,8 @@ class Checkpoints:
         self.created = False
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        # Windows application packages may redirect a directory when it is created.
+        self.root = self.root.resolve()
         # One process lock serializes local document mutations; split by
         # document only if measured local queue contention warrants it.
         self.lock = FileLock(self.root / ".store.lock", timeout=30)

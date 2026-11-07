@@ -18,7 +18,9 @@ export default function IssueEditor({
   issue: Issue;
   workflowTest: boolean;
   runtimeScope?: RuntimeScope;
-  onSaved: (receipt: components["schemas"]["ReviewReceipt"]) => void;
+  onSaved: (
+    receipt: components["schemas"]["ReviewReceipt"],
+  ) => void | Promise<void>;
 }) {
   const [unmapped, setUnmapped] = useState<string[]>([]);
   const [focusRequest, setFocusRequest] = useState(0);
@@ -42,6 +44,9 @@ export default function IssueEditor({
     busy,
     completed,
     draftConflict,
+    remoteDraft,
+    resolveRemote,
+    lastDoubt,
     recheckPage,
     setActive,
     finish,
@@ -57,6 +62,12 @@ export default function IssueEditor({
   const previousLocation = useRef<{ id?: string; request: number }>({
     request: -1,
   });
+  const submitButton = useRef<HTMLButtonElement>(null);
+  const previouslyReady = useRef(ready);
+  useEffect(() => {
+    if (ready && !previouslyReady.current) submitButton.current?.focus();
+    previouslyReady.current = ready;
+  }, [ready]);
   function selectLocation(id: string) {
     setActive(id);
     setFocusRequest((value) => value + 1);
@@ -117,7 +128,7 @@ export default function IssueEditor({
             src={issue.images[issue.pages.indexOf(current.page)]}
             issue={current}
             locations={locations}
-            onSelect={editing ? undefined : selectLocation}
+            onSelect={editing || busy ? undefined : selectLocation}
             onBox={(box) => setBoxes((old) => ({ ...old, [current.id]: box }))}
           />
         ) : issue.images.length ? (
@@ -162,6 +173,29 @@ export default function IssueEditor({
             </details>
           </section>
         )}
+        {remoteDraft && (
+          <section className="review-draft-conflict" role="alert">
+            <p>服务器草稿已有更新，本页输入已保留。请选择要继续核对的版本。</p>
+            <details>
+              <summary>查看服务器草稿</summary>
+              <pre>{remoteDraft.draft_text ?? remoteDraft.text}</pre>
+            </details>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => resolveRemote(true)}
+            >
+              保留本页输入继续核对
+            </Button>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => resolveRemote(false)}
+            >
+              读取服务器草稿
+            </Button>
+          </section>
+        )}
         <section
           ref={preview}
           className="review-page-preview"
@@ -175,7 +209,7 @@ export default function IssueEditor({
               markdown={issue.kind === "figure" ? figurePreview(text) : text}
               highlights={locations}
               activeHighlight={current?.id}
-              onHighlight={editing ? undefined : selectLocation}
+              onHighlight={editing || busy ? undefined : selectLocation}
               footnotes={text === issue.text ? issue.footnotes : []}
               onLocationFailure={setUnmapped}
               assetBaseUrl={`/api/v2/runs/${issue.run_id}/artifacts`}
@@ -247,7 +281,11 @@ export default function IssueEditor({
             </section>
           )}
           {editing && (
-            <section className="review-edit-step" aria-label="修改当前内容">
+            <section
+              className="review-edit-step"
+              aria-label="修改当前内容"
+              inert={busy}
+            >
               {!wholePage && editRange ? (
                 <>
                   <label>
@@ -255,6 +293,7 @@ export default function IssueEditor({
                     <textarea
                       aria-label="本处最终文字"
                       autoFocus
+                      disabled={busy}
                       value={text.slice(editRange.start, editRange.end)}
                       onChange={(e) => changeFocus(e.target.value)}
                       rows={3}
@@ -295,6 +334,7 @@ export default function IssueEditor({
                         onChange={(e) => changeText(e.target.value)}
                         rows={18}
                         spellCheck={false}
+                        disabled={busy}
                       />
                     </label>
                   ) : (
@@ -314,7 +354,11 @@ export default function IssueEditor({
                     void finish("edit").catch(() => undefined);
                   }}
                 >
-                  {finishing ? "正在保存…" : "保存修改并继续"}
+                  {finishing
+                    ? "正在保存…"
+                    : lastDoubt
+                      ? "保存修改并检查本页"
+                      : "保存修改并继续"}
                 </Button>
                 <Button variant="outline" disabled={busy} onClick={cancelEdit}>
                   取消修改
@@ -368,6 +412,7 @@ export default function IssueEditor({
           </Button>
         )}
         <Button
+          ref={submitButton}
           disabled={
             !ready ||
             editing ||

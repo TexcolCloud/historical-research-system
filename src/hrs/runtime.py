@@ -10,13 +10,14 @@ from uuid import uuid4
 import psutil
 from filelock import FileLock
 
+from hrs.config import diagnostics_root, diagnostics_roots
 from hrs.processing.snapshots import atomic_json
 from hrs.processing.workspace import resolve_workspace
 
 
 def lifecycle_lock(project, *, timeout=30):
     """New owned services and coordinated backups serialize their admission."""
-    folder = Path(project).resolve() / ".cache/platform-diagnostics"
+    folder = diagnostics_root(project)
     folder.mkdir(parents=True, exist_ok=True)
     return FileLock(folder / "lifecycle.lock", timeout=timeout)
 
@@ -51,7 +52,7 @@ def register_server(settings, url):
     identity = root / ".workspace.json"
     workspace = json.loads(identity.read_text("utf-8")) if identity.is_file() else {}
     process = psutil.Process(os.getpid())
-    path = settings.project_root / ".cache/platform-diagnostics/servers" / (uuid4().hex + ".json")
+    path = diagnostics_root(settings.project_root) / "servers" / (uuid4().hex + ".json")
     atomic_json(
         path,
         {
@@ -74,7 +75,13 @@ def live_servers(project):
     """An alive owned API remains visible even when its runtime route has failed."""
     project = Path(project).resolve()
     result = []
-    for path in sorted((project / ".cache/platform-diagnostics/servers").glob("*.json")):
+    paths = (
+        path
+        for folder in diagnostics_roots(project)
+        for path in sorted((folder / "servers").glob("*.json"))
+    )
+    seen = set()
+    for path in paths:
         try:
             row = json.loads(path.read_text("utf-8"))
             if Path(row["project_root"]).resolve() != project:
@@ -88,7 +95,10 @@ def live_servers(project):
                 continue
         except (OSError, ValueError, KeyError, TypeError, psutil.Error):
             continue
-        result.append({**row, "record": str(path)})
+        key = (row["pid"], row["process_create_time"], row["url"])
+        if key not in seen:
+            result.append({**row, "record": str(path)})
+            seen.add(key)
     return result
 
 
@@ -96,8 +106,10 @@ def discover_servers(project):
     """Separate configured state from verified runtime state, including older launchers."""
     project = Path(project).resolve()
     candidates = {row["url"]: row for row in live_servers(project)}
-    previous = project / ".cache/platform-diagnostics/codex-platform.json"
-    if previous.is_file():
+    for folder in diagnostics_roots(project):
+        previous = folder / "codex-platform.json"
+        if not previous.is_file():
+            continue
         try:
             row = json.loads(previous.read_text("utf-8"))
             url = _local_url(row["url"])

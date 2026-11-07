@@ -1,10 +1,13 @@
+import json
 from pathlib import Path
 
 import pytest
 from PIL import Image
 from pypdf import PdfWriter
 
+from hrs.processing.application import prepare
 from hrs.processing.render import digest, render_document
+from hrs.processing.store import Store
 
 
 def test_tiff_retains_frames_and_detects_changed_evidence(tmp_path):
@@ -77,3 +80,71 @@ def test_transparent_scan_uses_white_paper_without_changing_retained_source(tmp_
         assert page.getpixel((0, 0)) == (255, 255, 255)
         assert page.getpixel((1, 1)) == (0, 0, 0)
     assert Path(manifest["source"]["path"]).read_bytes() == source.read_bytes()
+
+
+@pytest.mark.parametrize("suffix", ["pdf", "tiff"])
+def test_prepare_retains_one_image_per_page_and_reuses_it_on_retry(tmp_path, suffix):
+    source = tmp_path / f"two-pages.{suffix}"
+    if suffix == "pdf":
+        writer = PdfWriter()
+        writer.add_blank_page(width=40, height=50)
+        writer.add_blank_page(width=50, height=60)
+        writer.write(source)
+    else:
+        Image.new("RGB", (40, 50), "white").save(
+            source, save_all=True, append_images=[Image.new("RGB", (50, 60), "black")]
+        )
+    store = Store(tmp_path / "workspace")
+    document = prepare(store, str(source))
+    directory = store.document_directory(document["id"])
+    retained = {directory / page["image"] for page in document["pages"]}
+    manifest = json.loads((directory / "render.json").read_text("utf-8"))
+
+    assert {path.name for path in retained} == {"00001.png", "00002.png"}
+    assert set((directory / "pages").iterdir()) == retained
+    assert {Path(page["image"]) for page in manifest["pages"]} == retained
+    before = {path: (digest(path), path.stat().st_mtime_ns) for path in retained}
+    assert prepare(store, str(source))["pages"] == document["pages"]
+    assert {path: (digest(path), path.stat().st_mtime_ns) for path in retained} == before
+    assert set((directory / "pages").iterdir()) == retained
+    store.verify_evidence(document)
+
+
+def test_prepare_reuses_existing_six_digit_render_without_rewriting_evidence(tmp_path):
+    source = tmp_path / "old-scan.png"
+    Image.new("RGB", (40, 50), "white").save(source)
+    store = Store(tmp_path / "workspace")
+    directory = store.root / "documents" / digest(source)[:24]
+    manifest = render_document(source, directory)
+    old_page = directory / "pages" / "000001.png"
+    current_page = Path(manifest["pages"][0]["image"])
+    if current_page != old_page:
+        current_page.rename(old_page)
+    manifest["pages"][0]["image"] = str(old_page)
+    manifest_path = directory / "render.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    original_manifest = manifest_path.read_bytes()
+
+    document = prepare(store, str(source))
+
+    assert document["pages"][0]["image"] == "pages/000001.png"
+    assert list((directory / "pages").iterdir()) == [old_page]
+    assert manifest_path.read_bytes() == original_manifest
+    assert prepare(store, str(source))["pages"] == document["pages"]
+    store.verify_evidence(document)
+
+
+def test_external_render_keeps_an_independent_retained_copy(tmp_path):
+    source = tmp_path / "borrowed.png"
+    Image.new("RGB", (40, 50), "white").save(source)
+    manifest = render_document(source, tmp_path / "external-render")
+    store = Store(tmp_path / "workspace")
+    document = store.register_manifest(manifest)
+    directory = store.document_directory(document["id"])
+    retained = directory / document["pages"][0]["image"]
+
+    assert retained != Path(manifest["pages"][0]["image"])
+    Path(manifest["source"]["path"]).write_bytes(b"changed external source")
+    Path(manifest["pages"][0]["image"]).write_bytes(b"changed external page")
+    assert digest(retained) == document["pages"][0]["image_sha256"]
+    store.verify_evidence(document)

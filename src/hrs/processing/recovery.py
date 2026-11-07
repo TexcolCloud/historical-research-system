@@ -5,7 +5,7 @@ import time
 from filelock import FileLock, Timeout
 
 from hrs.processing.hashing import digest
-from hrs.processing.workflow_rules import request_continuation
+from hrs.processing.workflow_rules import metadata_work_remaining, request_continuation
 
 
 class RecoveryWait(ValueError):
@@ -95,7 +95,7 @@ def recover(context, identity, recovery_id, *, automatic=False):
                     recovery_id=recovery_id,
                     error=None,
                 )
-                if doc["state"] == "published":
+                if doc["state"] == "published" and not metadata_work_remaining(doc):
                     request["state"] = "succeeded"
                 elif not status["unfinished_tasks"]:
                     request["state"] = "waiting_human"

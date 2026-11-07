@@ -15,7 +15,7 @@ env:
   UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv
   PLATFORM_DATABASE_URL: postgresql+psycopg://hrs_test:engineering-only@127.0.0.1:55439/historical_research_v2_test
   PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://hrs_test:engineering-only@127.0.0.1:55439/historical_research_v2_test
-  PLATFORM_S3_ENDPOINT: http://127.0.0.1:58339
+  PLATFORM_S3_ENDPOINT: http://127.0.0.1:18339
   PLATFORM_S3_BUCKET: platform-ci
   PLATFORM_S3_ACCESS_KEY: engineering-only
   PLATFORM_S3_SECRET_KEY: engineering-only-secret
