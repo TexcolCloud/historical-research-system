@@ -14,6 +14,48 @@ from hrs.processing.acceptance import publication_acceptance
 from hrs.storage import models as db
 
 
+def export_markdown(chapter, prefix):
+    """Render one article with every canonical source span, including shared physical pages."""
+    insertions, offset = [], 0
+    for part in chapter["parts"]:
+        source = part["source"]
+        pages = source["pages"]
+        fields = [
+            ("physical-page" if len(pages) == 1 else "physical-pages", ",".join(map(str, pages)))
+        ]
+        fields.extend(
+            (label, value)
+            for label, value in (
+                ("image-sha256", source.get("image_sha256")),
+                ("source-span", part.get("span_id")),
+                ("original-start", source.get("original_start")),
+                ("original-end", source.get("original_end")),
+                ("markdown-sha256", source.get("markdown_sha256")),
+                ("approval-type", source.get("approval_type")),
+            )
+            if value is not None
+        )
+        marker = "<!-- " + " ".join(f"{name}: {value}" for name, value in fields) + " -->"
+        if offset == len(chapter["text"]):
+            position = len(chapter["reading_text"])
+        else:
+            segment = next(
+                s for s in chapter["reading_segments"] if s["start"] <= offset < s["end"]
+            )
+            position = segment["reading_start"] + (
+                offset - segment["start"] if segment["exact"] else 0
+            )
+        insertions.append((position, marker))
+        offset += len(part["text"])
+    return export_footnotes(
+        chapter["reading_text"],
+        chapter["reading_footnotes"],
+        prefix,
+        parts=chapter.get("reading_parts"),
+        insertions=insertions,
+    )
+
+
 class Exports:
     def __init__(self, settings, engine):
         self.engine = engine
@@ -63,7 +105,7 @@ class Exports:
                     == "workflow_test"
                 )
         dependencies = {"chapters": dependencies, "workflow_test": workflow_test}
-        key = "export:book-reading-v6-note-cross-references:" + fingerprint(dependencies)
+        key = "export:book-reading-v7-physical-source-spans:" + fingerprint(dependencies)
         saved = self.outputs.get(run_id, key, dependencies)
         if saved is None:
             content = (
@@ -73,12 +115,7 @@ class Exports:
             )
             for index, row in enumerate(chapters, 1):
                 chapter = self.library.chapter(row["id"])
-                content += export_footnotes(
-                    chapter["reading_text"],
-                    chapter["reading_footnotes"],
-                    f"c{index}",
-                    parts=chapter.get("reading_parts"),
-                )
+                content += export_markdown(chapter, f"c{index}")
             saved = self.outputs.objects.put_bytes(
                 content.encode("utf-8"), "text/markdown; charset=utf-8", run_id=run_id
             )

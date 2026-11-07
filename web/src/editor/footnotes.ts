@@ -34,7 +34,8 @@ export function withFootnotes(
     edits.push({
       start: link.note.start,
       end: link.note.marker_end,
-      html: `<span id="${id}" tabindex="-1" class="footnote-target">${label}</span> ${backlinks} `,
+      // Inline anchors must retain a paragraph boundary between adjacent definitions.
+      html: `\n\n<span id="${id}" tabindex="-1" class="footnote-target">${label}</span> ${backlinks} `,
     });
     link.references.forEach((ref, i) =>
       edits.push({
