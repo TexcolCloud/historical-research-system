@@ -4,6 +4,7 @@ import html
 import json
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from time import monotonic
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from hrs.codex.navigation_view import navigation_queue, render_navigation
@@ -449,6 +450,28 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
 
         def do_POST(self):
             try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if self.headers.get("Transfer-Encoding") or not 0 < length <= 2_000_000:
+                    raise ValueError("Invalid review form size")
+                # Consume bounded framing before rejection; unread POST data can
+                # discard the HTTP response when Windows closes the connection.
+                previous_timeout = self.connection.gettimeout()
+                try:
+                    deadline = monotonic() + 5
+                    chunks, remaining = [], length
+                    while remaining:
+                        timeout = deadline - monotonic()
+                        if timeout <= 0:
+                            raise ValueError("Review form read timed out")
+                        self.connection.settimeout(timeout)
+                        chunk = self.rfile.read1(min(remaining, 64 * 1024))
+                        if not chunk:
+                            raise ValueError("Incomplete review form")
+                        chunks.append(chunk)
+                        remaining -= len(chunk)
+                    body = b"".join(chunks)
+                finally:
+                    self.connection.settimeout(previous_timeout)
                 self.query()
                 same_origin = self.headers.get("Origin") == "http://" + self.server.authority
                 # Embedded browsers may use an opaque Origin while preserving
@@ -472,14 +495,9 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
                     "/revision",
                 } or not (same_origin or embedded_navigation):
                     raise ValueError("A same-origin local human form submission is required")
-                length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 2_000_000:
-                    raise ValueError("Invalid review form size")
                 form = {
                     k: v[0]
-                    for k, v in parse_qs(
-                        self.rfile.read(length).decode("utf-8"), keep_blank_values=True
-                    ).items()
+                    for k, v in parse_qs(body.decode("utf-8"), keep_blank_values=True).items()
                 }
                 action = urlparse(self.path).path
                 if action == "/navigation-decision":

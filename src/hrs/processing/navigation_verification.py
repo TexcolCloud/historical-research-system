@@ -4,8 +4,9 @@ import time
 from copy import deepcopy
 
 from hrs.processing.hashing import digest
-from hrs.processing.navigation_matching import target_evidence
+from hrs.processing.navigation_matching import candidate_evidence
 from hrs.processing.navigation_matching import verification_key as verification_key
+from hrs.processing.navigation_spans import source_spans, spans_sha256, target_spans
 from hrs.processing.workflow_rules import new_task
 
 UNRESOLVED = {"conflict", "not_found", "unresolved"}
@@ -71,8 +72,8 @@ def prepare_link_verification(doc, *, requested=False):
     if not entries:
         return False
     numbers = sorted(
-        {e["source_page"] for e in entries}
-        | {c["physical_page"] for e in entries for c in e["candidates"]}
+        {span["page"] for e in entries for span in source_spans(e)}
+        | {span["page"] for e in entries for c in e["candidates"] for span in target_spans(c)}
     )
     task = new_task("navigation")
     task["verification_inputs"] = {
@@ -179,14 +180,19 @@ def apply_link_verifications(doc, task, result, receipt):
             )
             if not candidate:
                 raise ValueError("Navigation target must be one frozen candidate")
-            if entry["source_page"] in unresolved or row["target_page"] in unresolved:
+            required = {s["page"] for s in source_spans(entry)} | {
+                s["page"] for s in target_spans(candidate)
+            }
+            if unresolved & required:
                 raise ValueError("Navigation unresolved original observations block a link")
             page = doc["pages"][row["target_page"] - 1]
             if page["approved"]["markdown"].count(row["target_anchor"]) != 1:
                 raise ValueError("Navigation candidate must retain one unique source anchor")
-            target = target_evidence(page, row["target_anchor"])
+            target = candidate_evidence(doc, candidate)
         decisions[entry["id"]] = {
             "source_sha256": entry["source_sha256"],
+            "source_spans": deepcopy(source_spans(entry)),
+            "source_spans_sha256": spans_sha256(source_spans(entry)),
             "verification_key": entry["verification_key"],
             "target": target,
             "receipt": {

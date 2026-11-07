@@ -5,6 +5,7 @@ import re
 import unicodedata
 
 from hrs.processing.hashing import digest
+from hrs.processing.navigation_coverage import coverage_report
 from hrs.processing.navigation_matching import (
     candidates_for,
     page_mappings,
@@ -15,8 +16,14 @@ from hrs.processing.navigation_matching import (
 from hrs.processing.navigation_matching import (
     target_evidence as target_evidence,
 )
+from hrs.processing.navigation_spans import (
+    source_spans,
+    spans_current,
+    spans_sha256,
+    validated_spans,
+)
+from hrs.processing.page_observation import observation as observation
 
-KINDS = {"toc", "text", "frontmatter", "table", "figure", "unknown"}
 NAVIGATION_REVIEW_POLICY = "navigation-confirmation-v1"
 
 
@@ -54,33 +61,6 @@ def label_range(label):
     return (match[1], match[2]) if match else (label, None)
 
 
-def observation(page, value):
-    if not isinstance(value, dict) or value.get("kind", "unknown") not in KINDS:
-        raise ValueError("Invalid source page observation")
-    text = page["approved"]["markdown"]
-    label = value.get("printed_label")
-    if label is not None and (
-        not isinstance(label, str)
-        or not label.strip()
-        or len(label) > 40
-        or normalized(label) not in normalized(text)
-    ):
-        raise ValueError("Printed label must be retained in the approved source text")
-    headings = value.get("headings", [])
-    if not isinstance(headings, list) or any(
-        not isinstance(h, str) or not h or normalized(h) not in normalized(text) for h in headings
-    ):
-        raise ValueError("Heading observations must occur in approved source text")
-    return {
-        "kind": value.get("kind", "unknown"),
-        "printed_label": label,
-        "headings": headings,
-        "sequence": value.get("sequence", "body"),
-        "image_sha256": page["image_sha256"],
-        "markdown_sha256": page["approved"]["sha256"],
-    }
-
-
 def toc_evidence(doc):
     return [
         {"page": p["page"], "sha256": p["approved"]["sha256"]}
@@ -94,21 +74,24 @@ def validate_proposal(doc, entries):
         raise ValueError("Navigation requires an entries list")
     output, seen = [], set()
     for row in entries:
-        source_page = row.get("source_page")
-        if type(source_page) is not int or not 1 <= source_page <= len(doc["pages"]):
-            raise ValueError("Directory source physical page is invalid")
+        supplied = row.get("source_spans")
+        spans = validated_spans(
+            doc,
+            supplied
+            if supplied is not None
+            else [{"page": row.get("source_page"), "anchor": row.get("source_anchor", "")}],
+            toc=True,
+            boundary=True,
+        )
+        first = spans[0]
+        source_page, anchor = first["page"], first["anchor"]
         p = doc["pages"][source_page - 1]
-        if (
-            not p.get("approved")
-            or p.get("observation", {}).get("kind", p.get("page_kind")) != "toc"
-        ):
-            raise ValueError("Directory entries require an approved directory source")
-        anchor, title, label = (
-            row.get("source_anchor", ""),
+        title, label = (
             row.get("title", ""),
             row.get("target_label", ""),
         )
         text = p["approved"]["markdown"]
+        combined = "\n".join(span["anchor"] for span in spans)
         if not all(isinstance(value, str) for value in (anchor, title, label)):
             raise ValueError("Directory title, label and source anchor must be text")
         if (
@@ -116,8 +99,8 @@ def validate_proposal(doc, entries):
             or text.count(anchor) != 1
             or not title
             or not label
-            or normalized(title) not in normalized(anchor)
-            or normalized(label) not in normalized(anchor)
+            or normalized(title) not in normalized(combined)
+            or normalized(label) not in normalized(combined)
         ):
             raise ValueError("Directory title and printed label require one unique source anchor")
         level = row.get("level", 1)
@@ -125,7 +108,7 @@ def validate_proposal(doc, entries):
         if end_label is not None and (
             not isinstance(end_label, str)
             or not end_label
-            or normalized(end_label) not in normalized(anchor)
+            or normalized(end_label) not in normalized(combined)
         ):
             raise ValueError("Directory end label must occur in its retained source anchor")
         source_label = label
@@ -134,6 +117,28 @@ def validate_proposal(doc, entries):
         if type(level) is not int or not 1 <= level <= 8:
             raise ValueError("Directory levels must be between 1 and 8")
         identity = fingerprint([doc["source"]["sha256"], source_page, anchor])[:24]
+        previous = _retained_source_identity(doc, spans, title, label)
+        if previous:
+            identity = previous["id"]
+            # Keep the exact old anchor used by a retained human receipt when it remains current.
+            anchor = previous["source_anchor"]
+            retained = source_spans(previous)
+            retained_text = "\n".join(span["anchor"] for span in retained)
+            if (
+                spans_current(doc, retained)
+                and normalized(title) in normalized(retained_text)
+                and normalized(source_label) in normalized(retained_text)
+            ):
+                spans = validated_spans(doc, retained, toc=True, boundary=True)
+        elif len(spans) > 1 and identity in (doc.get("navigation") or {}).get("decisions", {}):
+            # A fuller logical source must not silently extend an earlier human approval scope.
+            identity = fingerprint(
+                [
+                    doc["source"]["sha256"],
+                    "source-spans-v1",
+                    [(span["page"], span["anchor"]) for span in spans],
+                ]
+            )[:24]
         if identity in seen:
             raise ValueError("Repeated directory entry source")
         seen.add(identity)
@@ -145,6 +150,8 @@ def validate_proposal(doc, entries):
                 "source_start": text.index(anchor),
                 "source_sha256": p["approved"]["sha256"],
                 "source_image_sha256": p["image_sha256"],
+                "source_spans": spans,
+                "source_spans_sha256": spans_sha256(spans),
                 "title": title,
                 "target_label": label,
                 "source_label": source_label,
@@ -166,6 +173,37 @@ def validate_proposal(doc, entries):
         row["path"] = [p["title"] for p in parents] + [row["title"]]
         parents.append(row)
     return output
+
+
+def _retained_source_identity(doc, spans, title, label):
+    first = spans[0]
+    text = doc["pages"][first["page"] - 1]["approved"]["markdown"]
+    matches = []
+    for previous in (doc.get("navigation") or {}).get("source_entries", []):
+        anchor = previous.get("source_anchor", "")
+        old_title = normalized(previous.get("title", ""))
+        if (
+            previous.get("source_page") != first["page"]
+            or previous.get("source_sha256") != first["markdown_sha256"]
+            or not anchor
+            or text.count(anchor) != 1
+            or previous.get("target_label") != label
+            or not old_title
+            or not (
+                normalized(title).startswith(old_title) or old_title.startswith(normalized(title))
+            )
+        ):
+            continue
+        if previous["id"] in (doc.get("navigation") or {}).get("decisions", {}):
+            retained_text = "\n".join(span["anchor"] for span in source_spans(previous))
+            if normalized(title) not in normalized(retained_text) or normalized(
+                label
+            ) not in normalized(retained_text):
+                continue
+        start = text.index(anchor)
+        if max(start, first["start"]) < min(start + len(anchor), first["end"]):
+            matches.append(previous)
+    return matches[0] if len(matches) == 1 else None
 
 
 def target_position(entry):
@@ -218,11 +256,7 @@ def resolve_navigation(doc):
             if row["status"] == "conflict"
             else "目标页面尚未形成完整核验证据"
         )
-        current_source = doc["pages"][row["source_page"] - 1].get("approved", {})
-        if current_source.get("sha256") != row["source_sha256"] or (
-            row.get("source_image_sha256")
-            and doc["pages"][row["source_page"] - 1]["image_sha256"] != row["source_image_sha256"]
-        ):
+        if not spans_current(doc, source_spans(row)):
             row.update(
                 status="waiting_evidence", target=None, reason="目录源版本已变化，等待重新关联"
             )
@@ -268,7 +302,7 @@ def resolve_navigation(doc):
         else "waiting_evidence"
         if toc_evidence(doc)
         else "not_detected",
-        "coverage_complete": all(p.get("approved") for p in doc["pages"]),
+        **coverage_report(doc),
         "page_kinds": {
             str(p["page"]): p.get("observation", {}).get("kind", p.get("page_kind", "unknown"))
             for p in doc["pages"]

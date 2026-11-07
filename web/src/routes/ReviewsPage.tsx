@@ -4,7 +4,10 @@ import { ArrowUpRight, ClipboardCheck, CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { readBooks } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
-import { bookWorkspaceHref } from "@/features/books/workspace.ts";
+import {
+  bookWorkspaceHref,
+  hasNavigationWork,
+} from "@/features/books/workspace.ts";
 
 export default function ReviewsPage() {
   const books = useQuery({
@@ -16,7 +19,7 @@ export default function ReviewsPage() {
       (book) =>
         ["awaiting_review", "failed"].includes(book.state) ||
         (book.pending_count ?? 0) > 0 ||
-        (book.navigation_pending_count ?? 0) > 0,
+        hasNavigationWork(book),
     ) ?? [];
   return (
     <>
@@ -72,7 +75,9 @@ export default function ReviewsPage() {
                       ? `${book.pending_count} 页待核对 · ${book.state === "paused" ? "自动处理已暂停" : book.state === "running" ? "其余页面继续自动处理" : book.state === "queued" ? "自动任务排队中" : "确认后继续后续处理"}`
                       : (book.navigation_pending_count ?? 0) > 0
                         ? `${book.navigation_pending_count} 项目录位置需确认 · 不影响已核验正文`
-                        : "需要人工核对 · 对照原件逐项处理"}
+                        : (book.navigation_missing_page_count ?? 0) > 0
+                          ? `${book.navigation_missing_page_count} 页目录待补全 · 查看原图和补全进展`
+                          : "需要人工核对 · 对照原件逐项处理"}
                 </p>
                 <div className="workspace-task-links">
                   {(book.pending_count ?? 0) > 0 && (
@@ -83,6 +88,11 @@ export default function ReviewsPage() {
                   {(book.navigation_pending_count ?? 0) > 0 && (
                     <Link to={`/books/${book.id}?tab=review&task=navigation`}>
                       确认目录 · {book.navigation_pending_count} 项
+                    </Link>
+                  )}
+                  {(book.navigation_missing_page_count ?? 0) > 0 && (
+                    <Link to={`/books/${book.id}?tab=review&task=navigation`}>
+                      查看目录补全 · {book.navigation_missing_page_count} 页
                     </Link>
                   )}
                   {book.state === "failed" && (

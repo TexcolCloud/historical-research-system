@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { reviewPageOptions } from "@/features/review/review-page-query.ts";
@@ -11,7 +11,42 @@ import NavigationSearch, {
 
 type Entry = components["schemas"]["NavigationEntry"];
 type Report = components["schemas"]["NavigationReport"];
-export type NavigationChoice = { page: number; anchor: string };
+export type NavigationChoice = {
+  page: number;
+  anchor: string;
+  title?: string | null;
+  title_spans?: components["schemas"]["NavigationSourceSpan"][];
+};
+
+function choiceFor(candidate: {
+  physical_page: number;
+  anchor: string;
+  title?: string | null;
+  title_spans?: components["schemas"]["NavigationSourceSpan"][];
+}): NavigationChoice {
+  return {
+    page: candidate.physical_page,
+    anchor: candidate.anchor,
+    ...(candidate.title_spans?.length
+      ? { title: candidate.title, title_spans: candidate.title_spans }
+      : {}),
+  };
+}
+
+function spanIdentity(spans?: components["schemas"]["NavigationSourceSpan"][]) {
+  return JSON.stringify(
+    (spans ?? []).map(
+      ({ page, anchor, start, end, markdown_sha256, image_sha256 }) => [
+        page,
+        anchor,
+        start,
+        end,
+        markdown_sha256,
+        image_sha256,
+      ],
+    ),
+  );
+}
 
 function entryCandidates(entry: Entry) {
   const candidates = entry.candidates ?? [];
@@ -21,7 +56,9 @@ function entryCandidates(entry: Entry) {
         ...candidates.filter(
           (candidate) =>
             candidate.physical_page !== entry.target!.physical_page ||
-            candidate.anchor !== entry.target!.anchor,
+            candidate.anchor !== entry.target!.anchor ||
+            spanIdentity(candidate.title_spans) !==
+              spanIdentity(entry.target!.title_spans),
         ),
       ]
     : candidates;
@@ -69,6 +106,8 @@ export default function NavigationReview({
     ? {
         physical_page: manual.page,
         anchor: manual.anchor,
+        title: manual.title,
+        title_spans: manual.title_spans,
         printed_label: report.approved_pages?.find(
           (p) => p.page === manual.page,
         )?.printed_label,
@@ -83,13 +122,16 @@ export default function NavigationReview({
       entry.source_sha256 === latestEntry.source_sha256 &&
       entry.source_image_sha256 === latestEntry.source_image_sha256 &&
       entry.source_anchor === latestEntry.source_anchor &&
+      spanIdentity(entry.source_spans) ===
+        spanIdentity(latestEntry.source_spans) &&
       entry.title === latestEntry.title,
     );
     const nextCandidates = entryCandidates(latestEntry);
     const nextIndex = nextCandidates.findIndex(
       (value) =>
         value.physical_page === candidate.physical_page &&
-        value.anchor === candidate.anchor,
+        value.anchor === candidate.anchor &&
+        spanIdentity(value.title_spans) === spanIdentity(candidate.title_spans),
     );
     const next = nextCandidates[nextIndex];
     if (
@@ -98,7 +140,8 @@ export default function NavigationReview({
       "markdown_sha256" in candidate &&
       next.markdown_sha256 === candidate.markdown_sha256 &&
       next.image_sha256 === candidate.image_sha256 &&
-      next.start === candidate.start
+      next.start === candidate.start &&
+      spanIdentity(next.title_spans) === spanIdentity(candidate.title_spans)
     ) {
       setIndex(nextIndex);
       setSnapshot({ entry: latestEntry, report: latestReport });
@@ -118,11 +161,12 @@ export default function NavigationReview({
       const nextIndex = entryCandidates(nextEntry).findIndex(
         (value) =>
           value.physical_page === candidate?.physical_page &&
-          value.anchor === candidate.anchor,
+          value.anchor === candidate.anchor &&
+          spanIdentity(value.title_spans) ===
+            spanIdentity(candidate.title_spans),
       );
       if (nextIndex >= 0 && !manual) setIndex(nextIndex);
-      else if (candidate)
-        setManual({ page: candidate.physical_page, anchor: candidate.anchor });
+      else if (candidate) setManual(choiceFor(candidate));
       setSnapshot({ entry: nextEntry, report: nextReport });
       await query.invalidateQueries(
         { queryKey: ["platform", "conversion-page", runId] },
@@ -151,6 +195,25 @@ export default function NavigationReview({
   const opening = candidate
     ? navigationOpening(evidence.data?.text ?? "", candidate.anchor)
     : null;
+  const continuationSpans = (candidate?.title_spans ?? []).filter(
+    (span) => span.page !== candidate?.physical_page,
+  );
+  const continuations = useQueries({
+    queries: continuationSpans.map((span) =>
+      reviewPageOptions(runId, span.page),
+    ),
+  });
+  const continuationsReady = continuations.every((result, index) => {
+    const span = continuationSpans[index];
+    return (
+      !result.isFetching &&
+      !result.isError &&
+      result.data &&
+      Array.from(result.data.text).slice(span.start, span.end).join("") ===
+        span.anchor &&
+      navigationOpening(result.data.text, span.anchor) !== null
+    );
+  });
   const [searching, setSearching] = useState(!candidate);
   const section = useRef<HTMLElement>(null);
   const candidatePanel = useRef<HTMLDivElement>(null);
@@ -195,7 +258,8 @@ export default function NavigationReview({
     !searching &&
     opening !== null &&
     !evidence.isFetching &&
-    !evidence.isError;
+    !evidence.isError &&
+    continuationsReady;
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if (
@@ -215,10 +279,7 @@ export default function NavigationReview({
         return;
       if (event.key === "Enter" && canConfirm && candidate) {
         event.preventDefault();
-        onDecide(
-          { page: candidate.physical_page, anchor: candidate.anchor },
-          report.sha256,
-        );
+        onDecide(choiceFor(candidate), report.sha256);
       } else if (!searching && !manual && event.key === "ArrowRight") {
         event.preventDefault();
         setIndex((value) => Math.min(candidates.length - 1, value + 1));
@@ -253,7 +314,13 @@ export default function NavigationReview({
           <header>
             <h4>目录中的这一条</h4>
             <div className="navigation-column-actions">
-              <span>PDF 第 {entry.source_page} 页</span>
+              <span>
+                PDF 第{" "}
+                {entry.source_spans?.length
+                  ? entry.source_spans.map((span) => span.page).join("、")
+                  : entry.source_page}{" "}
+                页
+              </span>
               <Button
                 variant="ghost"
                 size="sm"
@@ -274,10 +341,29 @@ export default function NavigationReview({
                 <mark>{entry.source_anchor}</mark>
               </blockquote>
             </details>
-            <Original
-              src={entry.source_image}
-              label={`目录原图 · PDF 第 ${entry.source_page} 页`}
-            />
+            {(entry.source_spans?.length ?? 0) > 1 ? (
+              entry.source_spans!.map((span) => (
+                <div key={`${span.page}:${span.start}`}>
+                  <p>
+                    PDF 第 {span.page} 页片段：<mark>{span.anchor}</mark>
+                  </p>
+                  <Original
+                    src={
+                      span.image ??
+                      report.approved_pages?.find(
+                        (page) => page.page === span.page,
+                      )?.image
+                    }
+                    label={`目录原图 · PDF 第 ${span.page} 页`}
+                  />
+                </div>
+              ))
+            ) : (
+              <Original
+                src={entry.source_image}
+                label={`目录原图 · PDF 第 ${entry.source_page} 页`}
+              />
+            )}
           </div>
         </div>
         <div className="navigation-body-column" ref={candidatePanel}>
@@ -380,7 +466,7 @@ export default function NavigationReview({
                 )}
                 <div className="navigation-candidate-meta">
                   <h4>
-                    <mark>{candidate?.anchor}</mark>
+                    <mark>{candidate?.title ?? candidate?.anchor}</mark>
                   </h4>
                   <p>
                     书内页 {candidate?.printed_label ?? "未知"} ·
@@ -440,6 +526,39 @@ export default function NavigationReview({
                   src={page?.image ?? evidence.data?.image}
                   label={`正文原图 · PDF 第 ${candidate?.physical_page} 页`}
                 />
+                {continuationSpans.map((span, index) => (
+                  <div key={`${span.page}:${span.start}`}>
+                    <h4>标题续页 · PDF 第 {span.page} 页</h4>
+                    <p>
+                      <mark>{span.anchor}</mark>
+                    </p>
+                    {continuations[index].isPending ? (
+                      <p role="status">正在读取标题续页…</p>
+                    ) : (
+                      !continuationsReady && (
+                        <p role="alert">
+                          标题续页尚未能与当前证据一致定位，暂不能确认。
+                          <Button
+                            variant="outline"
+                            onClick={() => void continuations[index].refetch()}
+                          >
+                            重新读取续页
+                          </Button>
+                        </p>
+                      )
+                    )}
+                    <Original
+                      src={
+                        span.image ??
+                        report.approved_pages?.find(
+                          (page) => page.page === span.page,
+                        )?.image ??
+                        continuations[index].data?.image
+                      }
+                      label={`标题续页原图 · PDF 第 ${span.page} 页`}
+                    />
+                  </div>
+                ))}
               </>
             )}
           </div>
@@ -492,11 +611,7 @@ export default function NavigationReview({
             <Button
               disabled={!canConfirm}
               onClick={() =>
-                candidate &&
-                onDecide(
-                  { page: candidate.physical_page, anchor: candidate.anchor },
-                  report.sha256,
-                )
+                candidate && onDecide(choiceFor(candidate), report.sha256)
               }
             >
               {saving
@@ -545,7 +660,13 @@ function CandidatePreview({
           {candidate.physical_page} 页 · 书内页{" "}
           {candidate.printed_label ?? "未识别"}
         </span>
-        <strong>{candidate.anchor}</strong>
+        <strong>{candidate.title ?? candidate.anchor}</strong>
+        {(candidate.title_spans?.length ?? 0) > 1 && (
+          <span>
+            跨页标题 · PDF 第{" "}
+            {candidate.title_spans!.map((span) => span.page).join("、")} 页
+          </span>
+        )}
       </button>
       {Boolean(candidate.match_signals?.length) && (
         <ul

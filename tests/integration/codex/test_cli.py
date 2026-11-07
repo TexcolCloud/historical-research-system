@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ import pytest
 
 from hrs.codex import cli, execution
 from hrs.processing.store import Store
+from hrs.processing.workflow_rules import new_task
 
 
 def prepared_store(tmp_path):
@@ -18,6 +20,110 @@ def prepared_store(tmp_path):
     store = Store(tmp_path / "external evidence with spaces")
     document = store.register(source, [{"page": 1, "image": str(source)}])
     return store, document["id"]
+
+
+def published_store(tmp_path):
+    store, document_id = prepared_store(tmp_path)
+    for stage, result in [
+        ("ocr", {"markdown": "Synthetic reviewed article"}),
+        ("review", {"verdict": "approved", "issues": []}),
+        ("organization", {"articles": [{"title": "Synthetic article", "pages": [1]}]}),
+    ]:
+        task = store.claim_task(document_id, stage, f"synthetic-{stage}")
+        store.submit_task(
+            document_id,
+            task["task_id"],
+            task["lease_token"],
+            {"input_sha256": task["input_sha256"], **result},
+        )
+    store.publish(document_id)
+    return store, document_id
+
+
+@pytest.mark.parametrize("task_state", ["ready", "leased"])
+def test_run_published_with_unfinished_navigation_is_exit_two(
+    tmp_path, monkeypatch, capsys, task_state
+):
+    store, document_id = published_store(tmp_path)
+    publication = store.status(document_id)["publication"]
+    with store.context.verified(document_id) as doc:
+        task = new_task("navigation")
+        task["state"] = task_state
+        if task_state == "leased":
+            task["claim"] = {"expires_at": time.time() + 900}
+        doc["tasks"].append(task)
+        store.checkpoints.write(doc)
+    store.runtime_control.failure("quota_exhausted", "provider-quota", scope="account")
+    with store.checkpoints.ledger.connect() as connection:
+        before = connection.execute(
+            "SELECT scope,payload FROM runtime_control ORDER BY scope"
+        ).fetchall()
+    calls = []
+    monkeypatch.setattr(cli, "run_codex", lambda *args, **kwargs: calls.append(True))
+    monkeypatch.setattr(sys, "argv", ["hrs", "--root", str(store.root), "run", document_id])
+    with pytest.raises(SystemExit) as stopped:
+        cli._main()
+    assert stopped.value.code == 2
+    status = json.loads(capsys.readouterr().out)["status"]
+    assert status["state"] == "published"
+    assert status["publication"] == publication
+    with store.checkpoints.ledger.connect() as connection:
+        after = connection.execute(
+            "SELECT scope,payload FROM runtime_control ORDER BY scope"
+        ).fetchall()
+    assert after == before
+    assert calls == []
+
+
+@pytest.mark.parametrize("coverage_complete", [None, True, False])
+def test_run_published_requires_explicit_directory_coverage_when_present(
+    tmp_path, monkeypatch, capsys, coverage_complete
+):
+    store, document_id = published_store(tmp_path)
+    with store.context.verified(document_id) as doc:
+        if coverage_complete is None:
+            doc.pop("navigation", None)
+        else:
+            doc["navigation"]["coverage_complete"] = coverage_complete
+        store.checkpoints.write(doc)
+    monkeypatch.setattr(
+        cli, "run_codex", lambda *args, **kwargs: pytest.fail("Publication needs no native run")
+    )
+    monkeypatch.setattr(sys, "argv", ["hrs", "--root", str(store.root), "run", document_id])
+    if coverage_complete is False:
+        with pytest.raises(SystemExit) as stopped:
+            cli._main()
+        assert stopped.value.code == 2
+    else:
+        cli._main()
+    assert json.loads(capsys.readouterr().out)["status"]["state"] == "published"
+
+
+def test_run_consumes_a_queued_plan_without_clearing_provider_pressure(
+    tmp_path, monkeypatch, capsys
+):
+    store, document_id = prepared_store(tmp_path)
+    store.request_run(document_id)
+    store.runtime_control.failure("quota_exhausted", "provider-quota", scope="account")
+    with store.checkpoints.ledger.connect() as connection:
+        before = connection.execute(
+            "SELECT scope,payload FROM runtime_control ORDER BY scope"
+        ).fetchall()
+    calls = []
+    monkeypatch.setattr(
+        cli, "run_codex", lambda *args, **kwargs: calls.append(True) or {"returncode": 0}
+    )
+    monkeypatch.setattr(sys, "argv", ["hrs", "--root", str(store.root), "run", document_id])
+    with pytest.raises(SystemExit) as stopped:
+        cli._main()
+    assert stopped.value.code == 2
+    capsys.readouterr()
+    with store.checkpoints.ledger.connect() as connection:
+        after = connection.execute(
+            "SELECT scope,payload FROM runtime_control ORDER BY scope"
+        ).fetchall()
+    assert after == before
+    assert calls == []
 
 
 class ProcessStub:

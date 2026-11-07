@@ -4,10 +4,10 @@ import json
 import re
 from uuid import UUID, uuid5
 
-from sqlalchemy import delete, func, insert, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import func, insert, select, update
 
 from hrs.library.books import get_run
+from hrs.library.navigation_projection import prepare_projection
 from hrs.library.projection.facts import PROJECTION_POLICY
 from hrs.library.structure import describe_structure, project_structure
 from hrs.processing.acceptance import publication_acceptance
@@ -64,19 +64,39 @@ class NativePublication:
         if doc["state"] != "published":
             return
         with self.engine.connect() as connection:
-            if (
-                run["result"].get("codex_publication_sha256")
-                == doc["publication"]["markdown_sha256"]
-                and run["result"].get("codex_projection_policy") == PROJECTION_POLICY
-                and run["result"].get("codex_projected_navigation_sha256")
-                == doc.get("navigation", {}).get("sha256")
-                and connection.scalar(
-                    select(func.count())
-                    .select_from(db.chapters)
+            current = list(
+                connection.execute(
+                    select(db.chapters)
                     .where(db.chapters.c.run_id == run["id"])
+                    .order_by(db.chapters.c.position)
                 )
-            ):
-                return
+                .mappings()
+                .all()
+            )
+        organization_sha = doc["publication"].get("organization_sha256")
+        previous_organization = run["result"].get("codex_organization_sha256")
+        if current and organization_sha and previous_organization is None:
+            retained = json.loads(self.objects.read_bytes(current[0]["content"]))
+            previous_organization = (
+                retained.get("acceptance", {}).get("publication", {}).get("organization_sha256")
+            )
+        if (
+            current
+            and run["result"].get("codex_publication_sha256")
+            == doc["publication"]["markdown_sha256"]
+            and run["result"].get("codex_projection_policy") == PROJECTION_POLICY
+            and (not organization_sha or previous_organization == organization_sha)
+        ):
+            return {
+                "chapter_rows": None,
+                "reading_projection": prepare_projection(
+                    self.objects,
+                    run,
+                    doc,
+                    current,
+                    previous=run["result"].get("codex_reading_projection"),
+                ),
+            }
         groups = article_groups(doc, run["id"])
         parts = sorted([p for g in groups for p in g["parts"]], key=lambda p: p["start"])
         text = "".join(p["text"] for p in parts)
@@ -104,7 +124,6 @@ class NativePublication:
         )
         rows = []
         for position, group in enumerate(groups):
-            group["navigation"] = doc.get("navigation", {})
             group["acceptance"] = {
                 "content_acceptance": publication_acceptance(doc),
                 "publication": doc["publication"],
@@ -128,27 +147,18 @@ class NativePublication:
                     "codepoints": sum(len(p["text"]) for p in group["parts"]),
                 }
             )
-        with self.engine.begin() as connection:
-            connection.execute(delete(db.chapters).where(db.chapters.c.run_id == run["id"]))
-            connection.execute(pg_insert(db.chapters).values(rows).on_conflict_do_nothing())
-            connection.execute(
-                insert(db.events).values(
-                    book_id=run["book_id"],
-                    run_id=run["id"],
-                    kind="library.revised"
-                    if run["result"].get("codex_publication_sha256")
-                    else "book.published",
-                    payload={
-                        "state": "ready",
-                        "stage": "indexing",
-                        "revision": run["revision"] + 1,
-                    },
-                )
-            )
+        return {
+            "chapter_rows": rows,
+            "reading_projection": prepare_projection(self.objects, run, doc, rows, groups=groups),
+        }
 
     def index_if_needed(self, run, doc):
+        from hrs.search.chunks import CHUNK_RULE
+        from hrs.search.inputs import INPUT_RULE
+
         publication_sha = (doc.get("publication") or {}).get("markdown_sha256")
         navigation_sha = doc.get("navigation", {}).get("sha256")
+        chapter_sha = (run["result"].get("codex_reading_projection") or {}).get("chapters_sha256")
         if (
             doc["state"] == "published"
             and run["result"].get("published")
@@ -158,12 +168,25 @@ class NativePublication:
                 run["result"].get("codex_indexed_publication_sha256") != publication_sha
                 or run["result"].get("codex_indexed_projection_policy") != PROJECTION_POLICY
                 or run["result"].get("codex_indexed_navigation_sha256") != navigation_sha
+                or run["result"].get("codex_indexed_chunk_rule") != CHUNK_RULE
+                or run["result"].get("codex_indexed_chapters_sha256") != chapter_sha
             )
             and run["result"].get("codex_projected_navigation_sha256") == navigation_sha
+            and run["result"].get("codex_reading_projection")
         ):
             from hrs.search.indexing import BookIndexer
 
-            BookIndexer(self.settings, self.engine).index(run["id"])
+            indexer = BookIndexer(self.settings, self.engine)
+            if (
+                run["result"].get("codex_indexed_publication_sha256") == publication_sha
+                and run["result"].get("codex_indexed_projection_policy") == PROJECTION_POLICY
+                and run["result"].get("codex_indexed_chunk_rule") == CHUNK_RULE
+                and run["result"].get("retrieval_input_rule") == INPUT_RULE
+                and run["result"].get("codex_indexed_chapters_sha256") == chapter_sha
+            ):
+                indexer.refresh_navigation(run["id"])
+            else:
+                indexer.index(run["id"])
             indexed = get_run(self.engine, run["id"])["result"]
             with self.engine.begin() as connection:
                 connection.execute(
@@ -180,6 +203,8 @@ class NativePublication:
                             "codex_indexed_publication_sha256": publication_sha,
                             "codex_indexed_projection_policy": PROJECTION_POLICY,
                             "codex_indexed_navigation_sha256": navigation_sha,
+                            "codex_indexed_chunk_rule": CHUNK_RULE,
+                            "codex_indexed_chapters_sha256": chapter_sha,
                             "bridge_failures": 0,
                             "bridge_not_before": 0,
                         },

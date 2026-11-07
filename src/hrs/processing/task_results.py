@@ -28,6 +28,10 @@ def apply_review(document, task, result, receipt):
     doc = document
     page = doc["pages"][task["page"] - 1] if task["page"] is not None else None
     stage = task["stage"]
+    if "page_observation" in result:
+        from hrs.processing.page_observation import structure
+
+        structure(result["page_observation"])
     automatic_verification = False
     verdict = review_verdict(result)
     if verdict == "approved" and task.get("source_reading", {}).get("reading", {}).get(
@@ -112,6 +116,11 @@ def apply_review(document, task, result, receipt):
         "issues": result.get("issues", []),
         "normalizations": result.get("normalizations", []),
     }
+    from hrs.processing.page_observation import bind_proposal, retain_proposal
+
+    retain_proposal(page, task, result, receipt)
+    if page.get("approved"):
+        bind_proposal(page)
     return result, automatic_verification
 
 
@@ -122,7 +131,9 @@ def apply_navigation(document, task, result, receipt):
         return apply_link_verifications(document, task, result, receipt)
     doc = document
     task_id = task["task_id"]
-    from hrs.processing.navigation import observation, validate_proposal
+    from hrs.processing.navigation import fingerprint, observation, toc_evidence, validate_proposal
+    from hrs.processing.navigation_coverage import apply_coverage
+    from hrs.processing.navigation_spans import source_spans
 
     for row in task["inputs"]["pages"]:
         current = doc["pages"][row["page"] - 1]
@@ -137,14 +148,18 @@ def apply_navigation(document, task, result, receipt):
             raise ValueError("Navigation observations require original-image access")
         p["observation"] = observation(p, row)
     entries = validate_proposal(doc, result.get("entries"))
-    if any(e["source_page"] not in allowed for e in entries):
+    if any(span["page"] not in allowed for entry in entries for span in source_spans(entry)):
         raise ValueError("Directory source outside the claimed snapshot")
-    if any(str(e["source_page"]) not in task.get("image_accesses", {}) for e in entries):
+    if any(
+        str(span["page"]) not in task.get("image_accesses", {})
+        for entry in entries
+        for span in source_spans(entry)
+    ):
         raise ValueError("Navigation worker must inspect directory original images")
-    nav = doc.get("navigation") or {}
+    apply_coverage(doc, task, result, entries, receipt)
+    nav = doc["navigation"]
     nav.update(
-        source_entries=entries,
-        parsed_toc_sha256=task["inputs"]["toc_sha256"],
+        parsed_toc_sha256=fingerprint(toc_evidence(doc)),
         task_id=task_id,
         receipt=receipt,
     )

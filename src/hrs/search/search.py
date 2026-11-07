@@ -43,6 +43,10 @@ def calibrated_policy(result):
         or not result.get("retrieval_generation")
         or policy.get("generation") != result["retrieval_generation"]
         or policy.get("reranker_revision") != MODEL_REVISIONS["BAAI/bge-reranker-v2-m3"]
+        or (
+            result.get("codex_projected_navigation_sha256") is not None
+            and policy.get("navigation_sha256") != result["codex_projected_navigation_sha256"]
+        )
     ):
         return {}
     score = policy.get("min_top_score")
@@ -77,7 +81,14 @@ class Search:
         published = [
             (book, result.get("retrieval_generation"))
             for book, result in rows
-            if result and result.get("published")
+            if result
+            and result.get("published")
+            and not (
+                result.get("retrieval_chapters_sha256")
+                and (result.get("codex_reading_projection") or {}).get("chapters_sha256")
+                and result["retrieval_chapters_sha256"]
+                != result["codex_reading_projection"]["chapters_sha256"]
+            )
         ]
         # Never transfer one book's calibration to a global or ambiguous search scope.
         policies = [
@@ -361,7 +372,12 @@ class Search:
                 with measured(metrics, "rerank_ms"):
                     texts, owners = ranking_windows(
                         query,
-                        [row.get("retrieval_text", row["text"]) for row in rows],
+                        [
+                            "\n".join(
+                                [*row.get("toc_path", []), row.get("retrieval_text", row["text"])]
+                            )
+                            for row in rows
+                        ],
                         self.runtime.tokenizer("BAAI/bge-reranker-v2-m3"),
                     )
                     window_scores = self.runtime.compute("rerank", texts, query=query)["scores"]

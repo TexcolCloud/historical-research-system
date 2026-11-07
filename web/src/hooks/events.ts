@@ -43,6 +43,7 @@ const eventSchema = z.object({
     revision: z.number().optional(),
     pending_count: z.number().optional(),
     navigation_pending_count: z.number().optional(),
+    navigation_missing_page_count: z.number().optional(),
   }),
 });
 
@@ -141,6 +142,12 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
         : {}),
       ...(event.payload.navigation_pending_count !== undefined
         ? { navigation_pending_count: event.payload.navigation_pending_count }
+        : {}),
+      ...(event.payload.navigation_missing_page_count !== undefined
+        ? {
+            navigation_missing_page_count:
+              event.payload.navigation_missing_page_count,
+          }
         : {}),
       ...(event.payload.revision_pending !== undefined
         ? { revision_pending: event.payload.revision_pending }

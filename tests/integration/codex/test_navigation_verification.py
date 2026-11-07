@@ -216,6 +216,109 @@ def test_stdio_link_verification_withholds_candidates_until_all_originals_are_fr
     asyncio.run(scenario())
 
 
+def test_stdio_cross_page_navigation_freezes_all_fragments_before_exposing_the_title(tmp_path):
+    store, doc_id = document(tmp_path, 4)
+    rows = [
+        ("目录\n关于甲乙\n1", "toc", "1", []),
+        ("工作的决定……12\n2", "toc", "2", []),
+        ("此前正文\n\n# 关于甲乙\n12", "text", "12", ["关于甲乙"]),
+        ("# 工作的决定\n正文\n13", "text", "13", ["工作的决定"]),
+    ]
+    for number, (text, kind, label, headings) in enumerate(rows, 1):
+        complete(store, doc_id, "ocr", f"split-ocr-{number}", {"markdown": text})
+        complete(
+            store,
+            doc_id,
+            "review",
+            f"split-review-{number}",
+            {
+                "verdict": "approved",
+                "issues": [],
+                "page_observation": {
+                    "kind": kind,
+                    "printed_label": label,
+                    "headings": headings,
+                },
+            },
+        )
+    parser = store.claim_task(doc_id, "navigation", "split-parser")
+    for number in (1, 2):
+        store.original_page(
+            doc_id, number, task_id=parser["task_id"], lease_token=parser["lease_token"]
+        )
+    store.submit_task(
+        doc_id,
+        parser["task_id"],
+        parser["lease_token"],
+        {
+            "input_sha256": parser["input_sha256"],
+            "entries": [
+                {
+                    "title": "关于甲乙工作的决定",
+                    "target_label": "12",
+                    "source_spans": [
+                        {"page": 1, "anchor": "关于甲乙"},
+                        {"page": 2, "anchor": "工作的决定……12"},
+                    ],
+                }
+            ],
+            "page_coverage": [
+                {"page": 1, "status": "entries"},
+                {"page": 2, "status": "continuation", "reason": "同一标题从前一原页延续"},
+            ],
+        },
+    )
+
+    async def scenario():
+        async with Client(
+            server_parameters(store.root), mode="legacy", read_timeout_seconds=20
+        ) as client:
+            task = value(
+                await client.call_tool(
+                    "claim_task",
+                    {
+                        "document_id": doc_id,
+                        "stage": "navigation",
+                        "worker_id": "split-independent-sol",
+                    },
+                )
+            )
+            assert_source_only(task, ["关于甲乙工作的决定"])
+            assert [p["page"] for p in task["inputs"]["pages"]] == [1, 2, 3, 4]
+            entries, readings = await read_candidates(client, doc_id, task)
+            assert len(readings) == 4
+            candidate = next(c for c in entries[0]["candidates"] if c.get("title_spans"))
+            result = value(
+                await client.call_tool(
+                    "submit_task",
+                    {
+                        "document_id": doc_id,
+                        "task_id": task["task_id"],
+                        "lease_token": task["lease_token"],
+                        "result": {
+                            "input_sha256": task["input_sha256"],
+                            "links": [
+                                {
+                                    "entry_id": entries[0]["id"],
+                                    "target_page": candidate["physical_page"],
+                                    "target_anchor": candidate["anchor"],
+                                }
+                            ],
+                        },
+                    },
+                )
+            )
+            assert result["task_state"] == "completed"
+
+    asyncio.run(scenario())
+    entry = store.status(doc_id)["navigation"]["entries"][0]
+    assert entry["status"] == "matched_verified"
+    assert entry["target"]["title"] == "关于甲乙工作的决定"
+    assert len(entry["target"]["title_spans"]) == 2
+    assert len(entry["source_spans"]) == 2
+    assert entry["verification"]["receipt"]["human_approval"] is False
+
+
 def test_expired_navigation_lease_cannot_reuse_another_workers_original_reading(tmp_path):
     store, doc_id, titles = navigation_document(tmp_path)
 

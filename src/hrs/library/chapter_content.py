@@ -16,16 +16,35 @@ from hrs.storage.objects import S3Objects
 MAX_CACHED_BYTES = 2 * 1024 * 1024
 
 
-def read_content(storage, reference):
+def storage_identity(settings):
+    return (
+        settings.s3_endpoint,
+        settings.s3_bucket,
+        settings.s3_region,
+        settings.s3_access_key,
+        settings.s3_secret_key,
+    )
+
+
+@lru_cache(maxsize=8)
+def object_reader(storage, factory):
+    """One pooled SDK client per configured store, including immutable legacy readers."""
     endpoint, bucket, region, access, secret = storage
-    objects = S3Objects(
+    return factory(
         endpoint=endpoint,
         bucket=bucket,
         region=region,
         access_key=access.get_secret_value(),
         secret_key=secret.get_secret_value(),
     )
-    body = json.loads(objects.read_bytes(json.loads(reference)))
+
+
+def read_json(storage, reference):
+    return json.loads(object_reader(storage, S3Objects).read_bytes(json.loads(reference)))
+
+
+def read_content(storage, reference):
+    body = read_json(storage, reference)
     text = "".join(part["text"] for part in body["parts"])
     content = {
         "text": text,
@@ -53,13 +72,7 @@ def cached_content(storage, reference):
 
 
 def chapter_content(settings, reference):
-    storage = (
-        settings.s3_endpoint,
-        settings.s3_bucket,
-        settings.s3_region,
-        settings.s3_access_key,
-        settings.s3_secret_key,
-    )
+    storage = storage_identity(settings)
     key = json.dumps(reference, sort_keys=True)
     # Large chapters remain readable without monopolizing a bounded process cache.
     loader = cached_content if reference["byte_length"] <= MAX_CACHED_BYTES else read_content

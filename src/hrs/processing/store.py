@@ -193,6 +193,13 @@ class Store:
     def refresh_navigation(self, document_id: str):
         return self.navigation.refresh_navigation(document_id)
 
+    def repair_structure(
+        self, document_id: str, *, apply: bool = False, replan_navigation: bool = False
+    ):
+        return self.navigation.repair_structure(
+            document_id, apply=apply, replan_navigation=replan_navigation
+        )
+
     def navigation_decision(
         self,
         document_id: str,
@@ -201,6 +208,8 @@ class Store:
         expected_sha256: str,
         target_page: int | None,
         target_anchor: str = "",
+        target_spans: list[dict] | None = None,
+        target_title: str | None = None,
         decision_id: str | None = None,
         decision_scope: str | None = None,
     ):
@@ -210,6 +219,8 @@ class Store:
             expected_sha256=expected_sha256,
             target_page=target_page,
             target_anchor=target_anchor,
+            target_spans=target_spans,
+            target_title=target_title,
             decision_id=decision_id,
             decision_scope=decision_scope,
         )

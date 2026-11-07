@@ -299,6 +299,10 @@ class PublicationWorkflow:
                 ):
                     raise ValueError("Publication evidence hash mismatch")
                 return doc["publication"]
+            from hrs.processing.navigation_coverage import coverage_report
+
+            if not coverage_report(doc)["coverage_complete"]:
+                raise ValueError("Complete directory page coverage before publication")
             content = "\n\n".join(
                 f"<!-- physical-page: {p['page']} image-sha256: {p['image_sha256']} -->\n\n{p['approved']['markdown']}"
                 for p in doc["pages"]

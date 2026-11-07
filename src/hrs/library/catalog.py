@@ -292,10 +292,18 @@ class Library:
         if not row:
             raise ServiceError(404, "章节尚未发布。")
         chapter = {**row, **chapter_content(self.settings, row["content"])}
+        from hrs.library.navigation_projection import book_navigation
         from hrs.library.reading_locations import toc_links
 
-        navigation = chapter.get("navigation", {})
-        if any(e.get("source_page") in chapter["pages"] for e in navigation.get("entries", [])):
+        rows = self.chapters(row["book_id"])
+        navigation = book_navigation(self.settings, get_run(self.engine, str(row["run_id"])), rows)
+        chapter["navigation"] = navigation
+        if any(
+            set(s.get("page") for s in e.get("source_spans", []))
+            .union({e.get("source_page")})
+            .intersection(chapter["pages"])
+            for e in navigation.get("entries", [])
+        ):
             targets = self.navigation_targets(row["run_id"], navigation)
             chapter["toc_links"] = toc_links(chapter, targets)
         else:
@@ -304,6 +312,7 @@ class Library:
 
     def navigation_targets(self, run_id, navigation):
         """Resolve only targets supported by the currently published chapter objects."""
+        from hrs.library.navigation_projection import book_locators
         from hrs.library.reading_locations import target_in_chapter
 
         entries = [
@@ -320,15 +329,12 @@ class Library:
                 .mappings()
                 .all()
             )
-        pages = {e["target"]["physical_page"] for e in entries}
-        chapters = [
-            {**row, **chapter_content(self.settings, row["content"])}
-            for row in rows
-            if pages.intersection(row["pages"])
-        ]
+        run = get_run(self.engine, str(run_id))
+        chapters = book_locators(self.settings, run, rows)
+        current = {str(row["id"]): row for row in rows}
         by_page = {}
         for chapter in chapters:
-            for page in chapter["pages"]:
+            for page in current[chapter["id"]]["pages"]:
                 by_page.setdefault(page, []).append(chapter)
         targets = {}
         for entry in entries:
@@ -343,8 +349,7 @@ class Library:
 
     def reading_navigation(self, book_id):
         """Read the navigation frozen with the visible publication, including during revision."""
-        from copy import deepcopy
-
+        from hrs.library.navigation_projection import book_navigation
         from hrs.processing.navigation import navigation_review_summary
 
         rows = self.chapters(book_id)
@@ -365,11 +370,9 @@ class Library:
             # Mixed generations cannot define a reliable book-wide navigation map.
             return {**empty, "state": "unavailable"}
         run_id = next(iter(run_ids))
-        navigation = deepcopy(
-            chapter_content(self.settings, rows[0]["content"]).get("navigation", {})
-        )
-        targets = self.navigation_targets(run_id, navigation)
         run = get_run(self.engine, run_id)
+        navigation = book_navigation(self.settings, run, rows)
+        targets = self.navigation_targets(run_id, navigation)
         images = {}
         if run["conversion"]:
             bundle = self.review.read_json(run["conversion"])
@@ -381,7 +384,20 @@ class Library:
                 if source_page in images
                 else ""
             )
+            for span in entry.get("source_spans", []):
+                span["image"] = (
+                    f"/api/v2/runs/{run_id}/artifacts/{images[span['page']]}"
+                    if span["page"] in images
+                    else ""
+                )
             target = entry.get("target")
+            for candidate in [*entry.get("candidates", []), *([target] if target else [])]:
+                for span in candidate.get("title_spans", []):
+                    span["image"] = (
+                        f"/api/v2/runs/{run_id}/artifacts/{images[span['page']]}"
+                        if span["page"] in images
+                        else ""
+                    )
             page = target["physical_page"] if target else None
             entry["target_image"] = (
                 f"/api/v2/runs/{run_id}/artifacts/{images[page]}" if page in images else None

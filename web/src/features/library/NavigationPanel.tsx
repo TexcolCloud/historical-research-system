@@ -138,6 +138,10 @@ export default function NavigationPanel({
       (book) => ({
         ...book,
         navigation_pending_count: committed.pending_count,
+        navigation_missing_page_count: new Set([
+          ...(committed.missing_pages ?? []),
+          ...(committed.unresolved_pages ?? []),
+        ]).size,
       }),
     );
     void query.invalidateQueries({
@@ -166,6 +170,9 @@ export default function NavigationPanel({
         expected_sha256: sha,
         target_page: choice?.page ?? null,
         target_anchor: choice?.anchor ?? "",
+        ...(choice?.title_spans?.length
+          ? { target_spans: choice.title_spans, target_title: choice.title }
+          : {}),
         decision_scope:
           runtimeScope === "workflow_only"
             ? ("workflow_test" as const)
@@ -324,6 +331,44 @@ export default function NavigationPanel({
       )}
       {report.data && (
         <>
+          {Boolean(
+            report.data.missing_pages?.length ||
+            report.data.unresolved_pages?.length,
+          ) && (
+            <aside
+              role="status"
+              aria-label="目录覆盖检查"
+              className="navigation-difference"
+            >
+              <strong>目录尚未补全</strong>
+              <p>
+                仍有原页的目录结构或条目待补全。当前清单只统计已发现的条目，已有关联可继续使用。
+              </p>
+              <ul>
+                {[
+                  ...new Set([
+                    ...(report.data.missing_pages ?? []),
+                    ...(report.data.unresolved_pages ?? []),
+                  ]),
+                ].map((page) => {
+                  const image = report.data!.approved_pages?.find(
+                    (value) => value.page === page,
+                  )?.image;
+                  return (
+                    <li key={page}>
+                      {image ? (
+                        <a href={image} target="_blank" rel="noreferrer">
+                          查看 PDF 第 {page} 页原图
+                        </a>
+                      ) : (
+                        `PDF 第 ${page} 页`
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </aside>
+          )}
           {reviewOnly && (
             <div className="navigation-recommendation-tools">
               <p>
@@ -346,7 +391,10 @@ export default function NavigationPanel({
               <p className="navigation-queue-status">
                 {attention.length
                   ? `还有 ${attention.length} 项目录需要核对。确认跳转只改变目录导航，正文与原件保留。`
-                  : "当前没有需要你确认的目录项目。"}
+                  : report.data.missing_pages?.length ||
+                      report.data.unresolved_pages?.length
+                    ? "已发现的目录条目均已处理，仍需补全上述目录页。"
+                    : "当前没有需要你确认的目录项目。"}
               </p>
               {attention.length > 0 && (
                 <div
@@ -415,13 +463,16 @@ export default function NavigationPanel({
           {!visible.length && (
             <div className="workspace-empty">
               <h3>
-                {reviewOnly && attention.length > 0
-                  ? "当前分组没有待核对目录"
-                  : reviewOnly && message
-                    ? "当前目录核对完成"
-                    : filter === "attention"
-                      ? "当前没有需要核对的目录"
-                      : "暂无目录条目"}
+                {report.data.missing_pages?.length ||
+                report.data.unresolved_pages?.length
+                  ? "目录正在补全"
+                  : reviewOnly && attention.length > 0
+                    ? "当前分组没有待核对目录"
+                    : reviewOnly && message
+                      ? "当前目录核对完成"
+                      : filter === "attention"
+                        ? "当前没有需要核对的目录"
+                        : "暂无目录条目"}
               </h3>
               <p>
                 {report.data.coverage_complete

@@ -40,6 +40,13 @@ class BookSummary(BaseModel):
             "navigation_pending_count", AliasPath("result", "codex_navigation_pending_count")
         ),
     )
+    navigation_missing_page_count: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "navigation_missing_page_count",
+            AliasPath("result", "codex_navigation_missing_page_count"),
+        ),
+    )
     revision_pending: bool = Field(
         default=False,
         validation_alias=AliasChoices(
@@ -208,6 +215,16 @@ class ReadingTarget(BaseModel):
     image_sha256: str = ""
 
 
+class NavigationSourceSpan(BaseModel):
+    page: int = Field(ge=1)
+    anchor: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    markdown_sha256: str
+    image_sha256: str
+    image: str | None = None
+
+
 class NavigationTarget(BaseModel):
     physical_page: int
     printed_label: str | None = None
@@ -220,6 +237,8 @@ class NavigationTarget(BaseModel):
     match_signals: list[str] = Field(default_factory=list)
     match_method: str | None = None
     group_id: str | None = None
+    title: str | None = None
+    title_spans: list[NavigationSourceSpan] = Field(default_factory=list)
 
 
 class NavigationEntry(BaseModel):
@@ -232,6 +251,8 @@ class NavigationEntry(BaseModel):
     source_image: str
     source_sha256: str | None = None
     source_image_sha256: str | None = None
+    source_spans: list[NavigationSourceSpan] = Field(default_factory=list)
+    source_spans_sha256: str | None = None
     target_label: str
     target_end_label: str | None = None
     status: str
@@ -252,6 +273,13 @@ class NavigationPage(BaseModel):
     headings: list[str]
     printed_label: str | None = None
     image: str | None = None
+    titles: list[NavigationTarget] = Field(default_factory=list)
+
+
+class NavigationPageCoverage(BaseModel):
+    page: int = Field(ge=1)
+    status: str
+    reason: str | None = None
 
 
 class NavigationPageMapping(BaseModel):
@@ -273,6 +301,11 @@ class NavigationReport(BaseModel):
     sha256: str
     pending_count: int = Field(default=0, ge=0)
     coverage_complete: bool = False
+    pages_complete: bool | None = None
+    toc_pages: list[int] = Field(default_factory=list)
+    missing_pages: list[int] = Field(default_factory=list)
+    unresolved_pages: list[int] = Field(default_factory=list)
+    page_coverage: list[NavigationPageCoverage] = Field(default_factory=list)
     page_count: int | None = Field(default=None, ge=0)
     approved_pages: list[NavigationPage] = Field(default_factory=list)
     page_mappings: list[NavigationPageMapping] = Field(default_factory=list)
@@ -285,6 +318,8 @@ class NavigationDecision(BaseModel):
     expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_page: int | None = Field(default=None, ge=1)
     target_anchor: str = ""
+    target_title: str | None = None
+    target_spans: list[NavigationSourceSpan] | None = None
 
 
 class RunControlReceipt(BaseModel):

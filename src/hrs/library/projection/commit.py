@@ -2,7 +2,8 @@
 
 import time
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs.library.projection.facts import (
     NAVIGATION_REVIEW_POLICY,
@@ -35,6 +36,7 @@ class ProjectionCommit:
         scheduling,
         publication_sha,
         navigation_sha,
+        publication_projection=None,
     ):
         request = doc.get("run_request", {})
         if "runtime_control" in scheduling:
@@ -52,6 +54,27 @@ class ProjectionCommit:
             if current_revision != run["revision"]:
                 # A human decision arrived while objects were prepared. Retry from it next tick.
                 return
+            if publication_projection and publication_projection["chapter_rows"] is not None:
+                connection.execute(delete(db.chapters).where(db.chapters.c.run_id == run["id"]))
+                connection.execute(
+                    pg_insert(db.chapters)
+                    .values(publication_projection["chapter_rows"])
+                    .on_conflict_do_nothing()
+                )
+                connection.execute(
+                    insert(db.events).values(
+                        book_id=run["book_id"],
+                        run_id=run["id"],
+                        kind="library.revised"
+                        if run["result"].get("codex_publication_sha256")
+                        else "book.published",
+                        payload={
+                            "state": "ready",
+                            "stage": "indexing",
+                            "revision": run["revision"] + 1,
+                        },
+                    )
+                )
             for issue in prepared_issues:
                 current = (
                     connection.execute(
@@ -111,6 +134,12 @@ class ProjectionCommit:
                     navigation_requires_confirmation(entry)
                     for entry in doc.get("navigation", {}).get("entries", [])
                 ),
+                "codex_navigation_missing_page_count": len(
+                    set(
+                        doc.get("navigation", {}).get("missing_pages", [])
+                        + doc.get("navigation", {}).get("unresolved_pages", [])
+                    )
+                ),
                 "codex_scheduling": scheduling,
                 "codex_execution": {
                     "state": request.get("state"),
@@ -145,6 +174,16 @@ class ProjectionCommit:
                     doc.get("active_publication") and doc["state"] != "published"
                 ),
                 **({"codex_publication_sha256": publication_sha} if publication_sha else {}),
+                **(
+                    {"codex_organization_sha256": doc["publication"].get("organization_sha256")}
+                    if publication_projection
+                    else {}
+                ),
+                **(
+                    {"codex_reading_projection": publication_projection["reading_projection"]}
+                    if publication_projection
+                    else {}
+                ),
                 **(
                     {"codex_projected_navigation_sha256": navigation_sha}
                     if doc["state"] == "published"
@@ -189,6 +228,9 @@ class ProjectionCommit:
                         "revision": revision,
                         "pending_count": len(pending),
                         "navigation_pending_count": result["codex_navigation_pending_count"],
+                        "navigation_missing_page_count": result[
+                            "codex_navigation_missing_page_count"
+                        ],
                         "revision_pending": result["codex_revision_pending"],
                     },
                 )

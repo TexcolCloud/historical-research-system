@@ -8,7 +8,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import { readBooks } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
 import DeleteBookButton from "@/features/books/DeleteBookButton.tsx";
-import { bookWorkspaceHref } from "@/features/books/workspace.ts";
+import {
+  bookWorkspaceHref,
+  hasNavigationWork,
+} from "@/features/books/workspace.ts";
 import type { WorkspaceContext } from "@/app/AppShell.tsx";
 const states: Record<string, string> = {
   uploading: "正在上传",
@@ -41,7 +44,7 @@ export default function BooksPage() {
             (filter === "review"
               ? book.state === "awaiting_review" ||
                 (book.pending_count ?? 0) > 0 ||
-                (book.navigation_pending_count ?? 0) > 0
+                hasNavigationWork(book)
               : [
                   "uploading",
                   "queued",
@@ -147,10 +150,13 @@ export default function BooksPage() {
                   {(book.navigation_pending_count ?? 0) > 0 && (
                     <p>{book.navigation_pending_count} 项目录位置待确认</p>
                   )}
+                  {(book.navigation_missing_page_count ?? 0) > 0 && (
+                    <p>{book.navigation_missing_page_count} 页目录待补全</p>
+                  )}
                 </div>
                 <span className="platform-book-next">
                   {(book.pending_count ?? 0) > 0 ||
-                  (book.navigation_pending_count ?? 0) > 0 ||
+                  hasNavigationWork(book) ||
                   book.state === "awaiting_review"
                     ? "继续核对"
                     : book.state === "ready"

@@ -17,7 +17,8 @@ from hrs.library.parsing import TableRows as TableRows
 from hrs.library.parsing import blocks as blocks
 from hrs.processing.navigation import fragment_navigation
 
-CHUNK_RULE = "structure-1400-160-v8-navigation"
+CHUNK_RULE = "structure-1400-160-v9-stable-navigation"
+VECTOR_INPUT_RULE = "canonical-article-context-v1"
 IMAGE = re.compile(r"!\[([^\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\n]|\([^()\n]*\))*)\)")
 
 
@@ -268,7 +269,8 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
                 for a, b, role in dict.fromkeys(additions)
                 if not start <= a < b <= end
             ]
-            path = list(dict.fromkeys([chapter["title"], *hit.get("toc_path", []), *block["path"]]))
+            # Mutable directory labels are lexical/rerank metadata, not vector inputs.
+            path = list(dict.fromkeys([chapter["title"], *block["path"]]))
             projection = embedding_text(
                 "\n".join(
                     [book_title, " / ".join(path), hit["text"], *(c["text"] for c in context)]

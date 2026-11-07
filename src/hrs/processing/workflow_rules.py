@@ -13,10 +13,7 @@ STAGES = {"ocr", "review", "verify", "navigation", "organization"}
 def metadata_work_remaining(doc: dict) -> bool:
     """Publication stays readable while source-bound link verification continues."""
     return any(
-        task["stage"] == "navigation"
-        and task["state"] in {"ready", "leased"}
-        and (task.get("inputs") or task.get("verification_inputs", {})).get("navigation_mode")
-        == "verify_links"
+        task["stage"] == "navigation" and task["state"] in {"ready", "leased"}
         for task in doc["tasks"]
     )
 

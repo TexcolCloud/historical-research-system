@@ -58,13 +58,23 @@ export default function NavigationSearch({
   const results = terms.length
     ? pages
         .flatMap((p) =>
-          p.headings.map((anchor) => ({
-            page: p.page,
-            anchor,
-            printed: p.printed_label,
-          })),
+          p.titles?.length
+            ? p.titles.map((title) => ({
+                page: title.physical_page,
+                anchor: title.anchor,
+                title: title.title ?? title.anchor,
+                title_spans: title.title_spans,
+                printed: title.printed_label ?? p.printed_label,
+              }))
+            : p.headings.map((anchor) => ({
+                page: p.page,
+                anchor,
+                title: anchor,
+                title_spans: undefined,
+                printed: p.printed_label,
+              })),
         )
-        .filter((r) => terms.every((t) => normalized(r.anchor).includes(t)))
+        .filter((r) => terms.every((t) => normalized(r.title).includes(t)))
     : [];
   return (
     <section className="navigation-search" aria-label="查找其他正文">
@@ -96,7 +106,7 @@ export default function NavigationSearch({
       <ol className="navigation-search-results">
         {results.slice(0, limit).map((r) => (
           <SearchResult
-            key={`${r.page}:${r.anchor}`}
+            key={`${r.page}:${r.anchor}:${r.title}`}
             runId={runId}
             choice={r}
             printed={r.printed}
@@ -262,7 +272,13 @@ function SearchResult({
     : null;
   return (
     <li>
-      <strong>{choice.anchor}</strong>
+      <strong>{choice.title ?? choice.anchor}</strong>
+      {(choice.title_spans?.length ?? 0) > 1 && (
+        <p>
+          跨页标题 · PDF 第{" "}
+          {choice.title_spans!.map((span) => span.page).join("、")} 页
+        </p>
+      )}
       <p>
         PDF 第 {choice.page} 页 · 书内页码（系统识别）{printed ?? "未知"}
       </p>

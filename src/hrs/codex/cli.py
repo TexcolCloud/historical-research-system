@@ -12,6 +12,7 @@ from hrs.codex.mcp import create_server
 from hrs.config import project_root
 from hrs.processing.application import prepare
 from hrs.processing.store import Store
+from hrs.processing.workflow_rules import metadata_work_remaining
 from hrs.processing.workspace import identity, resolve_workspace
 
 PROJECT = project_root()
@@ -34,6 +35,16 @@ def _main() -> None:
     execution.add_argument("--capacity", type=int, required=True)
     execution.add_argument("--batch-pages", type=int, default=8)
     execution.add_argument("--overlap-reading", action=argparse.BooleanOptionalAction, default=True)
+    repair = commands.add_parser(
+        "repair-structure", help="Audit or restore page structure from retained review evidence"
+    )
+    repair.add_argument("document_id")
+    repair.add_argument("--apply", action="store_true", help="Apply the audited metadata repair")
+    repair.add_argument(
+        "--replan-navigation",
+        action="store_true",
+        help="Replace idle unfinished directory parses with bounded page batches",
+    )
     workbench_parser = commands.add_parser(
         "workbench", help="Run the unified workbench and durable executor"
     )
@@ -81,6 +92,12 @@ def _main() -> None:
             batch_pages=args.batch_pages,
             overlap_reading=args.overlap_reading,
         )
+    elif args.command == "repair-structure":
+        result = store.repair_structure(
+            args.document_id, apply=args.apply, replan_navigation=args.replan_navigation
+        )
+        if args.apply:
+            result["run_request"] = store.request_run(args.document_id)
     elif args.command == "migrate-ledger":
         result = store.checkpoints.migrate(store.verify_evidence)
     elif args.command == "prepare":
@@ -115,7 +132,7 @@ def _main() -> None:
     elif args.command == "run":
         from hrs.processing.runner import Runner
 
-        store.request_run(args.document_id, resume=True)
+        store.request_run(args.document_id)
         executor = Runner(
             store, execute=lambda s, d, **options: run_codex(s, d, model=args.model, **options)
         )
@@ -139,7 +156,11 @@ def _main() -> None:
             "docker_required": False,
         }
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if args.command == "run" and result["status"].get("state") != "published":
+    if args.command == "run" and (
+        result["status"].get("state") != "published"
+        or metadata_work_remaining(result["status"])
+        or (result["status"].get("navigation") or {}).get("coverage_complete") is False
+    ):
         raise SystemExit(2)
     if args.command == "doctor" and not result["logged_in"]:
         raise SystemExit(1)
