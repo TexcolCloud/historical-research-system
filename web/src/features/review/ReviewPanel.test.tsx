@@ -208,7 +208,9 @@ test("adopting a full-anchor proposal replaces only the focused error without du
       }) as HTMLTextAreaElement
     ).value,
   ).toBe("对");
-  await userEvent.click(screen.getByRole("button", { name: "保存修改并继续" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: /保存修改并(?:继续|检查本页)/ }),
+  );
   await waitFor(() => expect(put).toHaveBeenCalled());
   put.mockRestore();
 });

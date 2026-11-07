@@ -235,6 +235,16 @@ class TaskWorkflow:
                 and task["state"] in {"ready", "leased"}
                 and not task.get("technical_blocked")
                 and task.get("retry_after", 0) <= time.time()
+                and not (
+                    (task.get("inputs") or task.get("verification_inputs", {})).get(
+                        "navigation_mode"
+                    )
+                    == "verify_links"
+                    and (task.get("inputs") or task.get("verification_inputs", {})).get(
+                        "prior_worker_id"
+                    )
+                    == worker_id
+                )
                 and (task["state"] != "leased" or task["claim"]["expires_at"] <= time.time())
                 and (
                     not (session or {}).get("preflight_page")
@@ -327,6 +337,16 @@ class TaskWorkflow:
             claim["actual_model"] = (session or {}).get("actual_model", model_for_stage(stage))
             if task.get("source_reading"):
                 task.setdefault("source_reading_history", []).append(task.pop("source_reading"))
+            if inputs.get("navigation_mode") == "verify_links" and (
+                task.get("navigation_original_reading") or task.get("image_accesses")
+            ):
+                task.setdefault("navigation_reading_history", []).append(
+                    {
+                        "claim": task.get("claim"),
+                        "reading": task.pop("navigation_original_reading", None),
+                        "image_accesses": task.pop("image_accesses", {}),
+                    }
+                )
             task.pop("image_access", None)
             task.pop("candidate_accesses", None)
             task["bounded_candidate_required"] = (
@@ -347,6 +367,7 @@ class TaskWorkflow:
         self, document_id: str, task_id: str, lease_token: str, result: dict, session=None
     ) -> dict:
         with self.context.verified_task(document_id, task_id=task_id) as doc:
+            was_published = doc["state"] == "published"
             require_active(doc)
             task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
             claim = task.get("claim", {})
@@ -445,6 +466,10 @@ class TaskWorkflow:
             elif stage in {"review", "verify"}:
                 result, automatic_verification = apply_review(doc, task, result, receipt)
             elif stage == "navigation":
+                if task.get("navigation_original_reading"):
+                    receipt["navigation_original_reading_sha256"] = task[
+                        "navigation_original_reading"
+                    ]["sha256"]
                 apply_navigation(doc, task, result, receipt)
             else:
                 apply_organization(doc, task, result, receipt)
@@ -466,19 +491,16 @@ class TaskWorkflow:
                 page["page_kind"] = page["observation"]["kind"]
             self.navigation.refresh_document(doc)
             if all(p["state"] == "approved" for p in doc["pages"]):
-                if not any(
-                    t["stage"] == "organization" and t["state"] != "superseded"
-                    for t in doc["tasks"]
-                ) and not any(
+                navigation_pending = any(
                     t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
                     for t in doc["tasks"]
-                ):
-                    doc["tasks"].append(new_task("organization"))
-                doc["state"] = (
-                    "ready"
-                    if doc["organization"]
-                    else ("pending" if task["state"] == "pending" else "processing")
                 )
+                if was_published and stage == "navigation":
+                    doc["state"] = "published"
+                elif doc["organization"] and not navigation_pending:
+                    doc["state"] = "ready"
+                else:
+                    doc["state"] = "pending" if task["state"] == "pending" else "processing"
             else:
                 doc["state"] = (
                     "pending"

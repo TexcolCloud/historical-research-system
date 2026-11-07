@@ -13,6 +13,7 @@ import { client, readReviewIssues } from "@/client/api.ts";
 import {
   applyReviewReceipt,
   issuesKey,
+  mergeReviewIssue,
 } from "@/features/review/review-cache.ts";
 import type { components } from "@/client/schema.d.ts";
 import ConversionReader from "@/features/review/ConversionReader.tsx";
@@ -20,6 +21,11 @@ import ConversionReader from "@/features/review/ConversionReader.tsx";
 const issueOptions = (id: string) =>
   queryOptions({
     queryKey: queryKeys.issue(id),
+    structuralSharing: (current, incoming) =>
+      mergeReviewIssue(
+        current as components["schemas"]["ReviewIssue"] | undefined,
+        incoming as components["schemas"]["ReviewIssue"],
+      ),
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/reviews/{issue_id}", {
         params: { path: { issue_id: id } },
@@ -71,8 +77,8 @@ export default function ReviewPanel({
   useEffect(() => {
     if (nextId) void query.prefetchQuery(issueOptions(nextId));
   }, [nextId, query]);
-  function saved(receipt: components["schemas"]["ReviewReceipt"]) {
-    applyReviewReceipt(query, receipt);
+  async function saved(receipt: components["schemas"]["ReviewReceipt"]) {
+    if (!(await applyReviewReceipt(query, receipt, current.data))) return;
     setSelected(receipt.next_issue_id);
     setMessage(
       receipt.pending_count
@@ -80,6 +86,10 @@ export default function ReviewPanel({
         : "本页已提交，当前核对清单已处理完。整书核对通过后，系统会继续整理入库。",
     );
   }
+  useEffect(() => {
+    if (current.data && current.data.state !== "pending")
+      void query.invalidateQueries({ queryKey: issuesKey(runId) });
+  }, [current.data?.state, query, runId]);
   return (
     <section className="evidence-review">
       {bookId ? (
@@ -179,6 +189,8 @@ export default function ReviewPanel({
                 重新读取本页
               </Button>
             </p>
+          ) : current.data && current.data.state !== "pending" ? (
+            <p role="status">本页已提交，正在读取下一待核对页…</p>
           ) : current.data ? (
             <IssueEditor
               key={`${current.data.id}:${("review_input_sha256" in current.data && current.data.review_input_sha256) || current.data.text_sha256}`}

@@ -68,6 +68,13 @@ class Evidence:
         for task in doc["tasks"]:
             if pages is not None and task["page"] not in pages:
                 continue
+            if task.get("navigation_original_reading") or task.get("navigation_reading_history"):
+                from hrs.processing.navigation_verification import verify_link_readings
+
+                try:
+                    verify_link_readings(task)
+                except ValueError as error:
+                    raise EvidenceMismatch(str(error)) from error
             readings = task.get("source_reading_history", []) + (
                 [task["source_reading"]] if task.get("source_reading") else []
             )
@@ -100,6 +107,24 @@ class Evidence:
                     != task["source_reading"]["sha256"]
                 ):
                     raise EvidenceMismatch("Machine decision lacks its original-first reading")
+            if (
+                task.get("inputs", {}).get("navigation_mode") == "verify_links"
+                and task.get("result") is not None
+            ):
+                reading = task.get("navigation_original_reading")
+                if (
+                    not reading
+                    or digest(reading["readings"]) != reading["sha256"]
+                    or task["receipt"].get("navigation_original_reading_sha256")
+                    != reading["sha256"]
+                ):
+                    raise EvidenceMismatch("Navigation decision lacks its original-first reading")
+                for row in reading["readings"]:
+                    access = task.get("image_accesses", {}).get(str(row["page"]), {})
+                    if row["image_sha256"] != access.get("image_sha256") or row[
+                        "image_receipt"
+                    ] != access.get("receipt"):
+                        raise EvidenceMismatch("Navigation original reading receipt mismatch")
             if task.get("inputs") and digest(task["inputs"]) != task["claim"]["input_sha256"]:
                 raise EvidenceMismatch("Retained task input hash mismatch")
             if (

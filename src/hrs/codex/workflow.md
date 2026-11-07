@@ -351,8 +351,28 @@ for any title alias and do not fabricate a date/author/title relationship.
 Optional `page_observations` require opening those originals under the
 navigation lease. Never rewrite TOC text or force article boundaries from TOC entries.
 
-The store resolves only exact label + approved heading matches. Duplicate targets,
-label discrepancies and conflicting sequences remain conflicts; missing evidence
+The store ranks source-bound title/layout variants, dates and article openings,
+using reviewed page labels and segmented mappings as supporting evidence. Mappings
+split at observed numbering resets or offset changes; a predicted offset or semantic
+similarity alone never establishes a link. PDF bookmarks and existing BGE retrieval
+provide bounded extra candidates through the platform's update-recommendations action.
+Human calibration reorders the same segment's candidates without granting other
+human decisions. All target anchors remain unique literal spans of approved text.
+
+Ambiguous links with candidates receive one bounded independent Sol navigation pass
+per source/candidate snapshot. Its packet has navigation_mode="verify_links" and
+withholds entries until source observations are frozen. Open EVERY listed original_image
+under the task/lease, then call navigation_candidates with original_readings:
+[{page,image_receipt,image_sha256,observations:[visible facts],unresolved:[]}]. Read
+approved_pages_text only after this freeze. Return links:[{entry_id,target_page,
+target_anchor}], covering every supplied entry; use null target_page for unresolved
+links. Match only a supplied candidate after inspecting the directory and body
+originals, including dates and openings. The result is machine metadata, never human
+approval or a content correction. Reclaimed leases require fresh original observations.
+New imports schedule this pass after complete page coverage; an explicit update can
+request it over the currently approved candidate pages. Paused documents remain paused.
+
+Duplicate targets and conflicting evidence remain conflicts; missing evidence
 waits until full page coverage before reporting not_found. Mapping conflicts do not
 approve content or block otherwise valid body publication. Human mapping choices
 are available only in the local UI, bound to the navigation/source/target hashes.

@@ -57,6 +57,10 @@ class TaskInspection:
             or task["claim"]["expires_at"] <= time.time()
         ):
             raise ValueError("Approved-page batch requires an active organization/navigation lease")
+        if task["inputs"].get("navigation_mode") == "verify_links" and not task.get(
+            "navigation_original_reading"
+        ):
+            raise ValueError("Freeze navigation original observations before reading candidate text")
         frozen = [p for p in task["inputs"]["pages"] if p["page"] > after_page]
         pages, size = [], 0
         for reference in frozen[:limit]:

@@ -116,6 +116,10 @@ def apply_review(document, task, result, receipt):
 
 
 def apply_navigation(document, task, result, receipt):
+    if task["inputs"].get("navigation_mode") == "verify_links":
+        from hrs.processing.navigation_verification import apply_link_verifications
+
+        return apply_link_verifications(document, task, result, receipt)
     doc = document
     task_id = task["task_id"]
     from hrs.processing.navigation import observation, validate_proposal

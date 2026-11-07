@@ -29,6 +29,13 @@ def navigation(settings: SettingsDep, engine: EngineDep, run_id: UUID) -> dict:
     return Navigation(settings, engine).status(run_id)
 
 
+@router.post("/api/v2/runs/{run_id}/navigation/refresh", response_model=NavigationReport)
+def refresh_navigation(settings: SettingsDep, engine: EngineDep, run_id: UUID) -> dict:
+    from hrs.library.navigation import Navigation
+
+    return Navigation(settings, engine).refresh(run_id)
+
+
 @router.post(
     "/api/v2/runs/{run_id}/navigation/{entry_id}/decision", response_model=NavigationReport
 )

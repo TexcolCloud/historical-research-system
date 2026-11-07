@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, replaceEqualDeep } from "@tanstack/react-query";
 import { client } from "@/client/api";
 import { queryKeys } from "@/client/query-keys";
 import type { components } from "@/client/schema";
@@ -7,6 +7,13 @@ type NavigationReport = components["schemas"]["NavigationReport"];
 export function navigationOptions(runId: string) {
   return queryOptions<NavigationReport>({
     queryKey: queryKeys.navigation(runId),
+    structuralSharing: (previous, incoming) => {
+      const current = previous as NavigationReport | undefined;
+      const next = incoming as NavigationReport;
+      return current && current.version > next.version
+        ? current
+        : replaceEqualDeep(previous, incoming);
+    },
     queryFn: async ({ signal }) => {
       const { data } = await client.GET("/api/v2/runs/{run_id}/navigation", {
         params: { path: { run_id: runId } },

@@ -162,7 +162,9 @@ test("terminal human review separates judgment, editing and final page submissio
       }) as HTMLTextAreaElement
     ).value,
   ).toBe("对");
-  await userEvent.click(screen.getByRole("button", { name: "保存修改并继续" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: /保存修改并(?:继续|检查本页)/ }),
+  );
   await screen.findByRole("button", { name: "提交本页并继续" });
   await waitFor(() => expect(put).toHaveBeenCalled());
   expect(put.mock.calls.at(-1)?.[1]?.body.text).toBe("甲对乙");
@@ -234,7 +236,7 @@ test("successive edits keep prior decisions and save both final readings", async
     );
     await userEvent.click(screen.getByRole("button", { name: "填入机器建议" }));
     await userEvent.click(
-      screen.getByRole("button", { name: "保存修改并继续" }),
+      screen.getByRole("button", { name: /保存修改并(?:继续|检查本页)/ }),
     );
   }
   await screen.findByRole("button", { name: "提交本页并继续" });

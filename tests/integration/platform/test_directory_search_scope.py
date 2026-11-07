@@ -63,8 +63,10 @@ def fixture():
     return book, body, entries, library
 
 
-def test_parent_scope_contains_children_but_stops_at_same_page_sibling():
+@pytest.mark.parametrize("status", ["matched", "matched_verified"])
+def test_parent_scope_contains_children_but_stops_at_same_page_sibling(status):
     book, body, entries, library = fixture()
+    entries[0]["status"] = status
     scope = DirectoryScope.resolve(library, book, "first")
     assert scope.ranges == {body["id"]: (0, body["text"].rindex("# 同名"))}
     crossing = {**source_excerpt(body, 0, len(body["text"])), "score": 1, "context": []}

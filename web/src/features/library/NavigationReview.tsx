@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { reviewPageOptions } from "@/features/review/review-page-query.ts";
@@ -13,6 +13,20 @@ type Entry = components["schemas"]["NavigationEntry"];
 type Report = components["schemas"]["NavigationReport"];
 export type NavigationChoice = { page: number; anchor: string };
 
+function entryCandidates(entry: Entry) {
+  const candidates = entry.candidates ?? [];
+  return entry.target
+    ? [
+        entry.target,
+        ...candidates.filter(
+          (candidate) =>
+            candidate.physical_page !== entry.target!.physical_page ||
+            candidate.anchor !== entry.target!.anchor,
+        ),
+      ]
+    : candidates;
+}
+
 export default function NavigationReview({
   entry: latestEntry,
   report: latestReport,
@@ -23,7 +37,7 @@ export default function NavigationReview({
   onCancel,
   error,
   onReload,
-  reloading = false,
+  reloading: fetchingReport = false,
 }: {
   entry: Entry;
   report: Report;
@@ -33,24 +47,20 @@ export default function NavigationReview({
   onDecide: (choice: NavigationChoice | null, sha: string) => void;
   onCancel: () => void;
   error?: string;
-  onReload?: () => void;
+  onReload?: () =>
+    Report | undefined | void | Promise<Report | undefined | void>;
   reloading?: boolean;
 }) {
+  const query = useQueryClient();
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
+  const [reloadFailure, setReloadFailure] = useState("");
+  const reloading = fetchingReport || loadingEvidence;
   // Keep the displayed evidence and decision SHA together until an explicit reload.
-  const [{ entry, report }] = useState({
+  const [{ entry, report }, setSnapshot] = useState({
     entry: latestEntry,
     report: latestReport,
   });
-  const candidates = entry.target
-    ? [
-        entry.target,
-        ...(entry.candidates ?? []).filter(
-          (c) =>
-            c.physical_page !== entry.target!.physical_page ||
-            c.anchor !== entry.target!.anchor,
-        ),
-      ]
-    : (entry.candidates ?? []);
+  const candidates = entryCandidates(entry);
   const [index, setIndex] = useState(0);
   const [manual, setManual] = useState<NavigationChoice | null>(null);
   const candidate = manual
@@ -62,8 +72,75 @@ export default function NavigationReview({
         )?.printed_label,
       }
     : candidates[index];
+  const evidenceChanged = latestReport.sha256 !== report.sha256;
+  useEffect(() => {
+    if (!evidenceChanged || manual || !candidate) return;
+    const sameSource = Boolean(
+      entry.source_sha256 &&
+      entry.source_image_sha256 &&
+      entry.source_sha256 === latestEntry.source_sha256 &&
+      entry.source_image_sha256 === latestEntry.source_image_sha256 &&
+      entry.source_anchor === latestEntry.source_anchor &&
+      entry.title === latestEntry.title,
+    );
+    const nextCandidates = entryCandidates(latestEntry);
+    const nextIndex = nextCandidates.findIndex(
+      (value) =>
+        value.physical_page === candidate.physical_page &&
+        value.anchor === candidate.anchor,
+    );
+    const next = nextCandidates[nextIndex];
+    if (
+      sameSource &&
+      next &&
+      "markdown_sha256" in candidate &&
+      next.markdown_sha256 === candidate.markdown_sha256 &&
+      next.image_sha256 === candidate.image_sha256 &&
+      next.start === candidate.start
+    ) {
+      setIndex(nextIndex);
+      setSnapshot({ entry: latestEntry, report: latestReport });
+    }
+  }, [evidenceChanged, entry, latestEntry, latestReport, manual, candidate]);
+  async function reloadEvidence() {
+    if (!onReload || reloading || busy) return;
+    setLoadingEvidence(true);
+    setReloadFailure("");
+    try {
+      const nextReport = await onReload();
+      if (!nextReport) return;
+      const nextEntry = nextReport.entries.find(
+        (value) => value.id === entry.id,
+      );
+      if (!nextEntry) throw new Error("这条目录已更新，请返回目录重新选择。");
+      const nextIndex = entryCandidates(nextEntry).findIndex(
+        (value) =>
+          value.physical_page === candidate?.physical_page &&
+          value.anchor === candidate.anchor,
+      );
+      if (nextIndex >= 0 && !manual) setIndex(nextIndex);
+      else if (candidate)
+        setManual({ page: candidate.physical_page, anchor: candidate.anchor });
+      setSnapshot({ entry: nextEntry, report: nextReport });
+      await query.invalidateQueries(
+        { queryKey: ["platform", "conversion-page", runId] },
+        { throwOnError: true },
+      );
+    } catch (failure) {
+      setReloadFailure(
+        failure instanceof Error
+          ? failure.message
+          : "核对证据未能重新载入，请重试。",
+      );
+    } finally {
+      setLoadingEvidence(false);
+    }
+  }
   const page = report.approved_pages?.find(
     (p) => p.page === candidate?.physical_page,
+  );
+  const mapping = report.page_mappings?.find(
+    (value) => value.id === entry.group_id,
   );
   const evidence = useQuery({
     ...reviewPageOptions(runId, candidate?.physical_page ?? 0),
@@ -107,12 +184,61 @@ export default function NavigationReview({
   }, [searching, index, manual?.page, manual?.anchor]);
   const canConfirm =
     !busy &&
+    !error &&
+    !reloadFailure &&
+    !reloading &&
+    !evidenceChanged &&
     approvalReady &&
     candidate &&
     !searching &&
     opening !== null &&
     !evidence.isFetching &&
     !evidence.isError;
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (
+        !event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        event.repeat ||
+        busy ||
+        reloading ||
+        evidenceChanged ||
+        (event.target instanceof HTMLElement &&
+          event.target.closest(
+            "input, textarea, select, [contenteditable='true']",
+          ))
+      )
+        return;
+      if (event.key === "Enter" && canConfirm && candidate) {
+        event.preventDefault();
+        onDecide(
+          { page: candidate.physical_page, anchor: candidate.anchor },
+          report.sha256,
+        );
+      } else if (!searching && !manual && event.key === "ArrowRight") {
+        event.preventDefault();
+        setIndex((value) => Math.min(candidates.length - 1, value + 1));
+      } else if (!searching && !manual && event.key === "ArrowLeft") {
+        event.preventDefault();
+        setIndex((value) => Math.max(0, value - 1));
+      }
+    };
+    document.addEventListener("keydown", shortcut);
+    return () => document.removeEventListener("keydown", shortcut);
+  }, [
+    busy,
+    reloading,
+    evidenceChanged,
+    canConfirm,
+    candidate,
+    candidates.length,
+    searching,
+    manual,
+    onDecide,
+    report.sha256,
+  ]);
   return (
     <section
       ref={section}
@@ -178,7 +304,7 @@ export default function NavigationReview({
                     <Button
                       variant="ghost"
                       disabled={busy || reloading}
-                      onClick={onReload}
+                      onClick={() => void reloadEvidence()}
                     >
                       更新可选正文
                     </Button>
@@ -232,6 +358,24 @@ export default function NavigationReview({
                     不是这篇，查找其他正文
                   </Button>
                 </div>
+                {!manual && candidates.length > 1 && (
+                  <ol
+                    className="navigation-candidate-options"
+                    aria-label="推荐正文候选"
+                  >
+                    {candidates.slice(0, 3).map((option, rank) => (
+                      <CandidatePreview
+                        key={`${option.physical_page}:${option.anchor}`}
+                        candidate={option}
+                        rank={rank}
+                        runId={runId}
+                        selected={index === rank}
+                        disabled={busy || reloading || evidenceChanged}
+                        onChoose={() => setIndex(rank)}
+                      />
+                    ))}
+                  </ol>
+                )}
                 <div className="navigation-candidate-meta">
                   <h4>
                     <mark>{candidate?.anchor}</mark>
@@ -240,6 +384,24 @@ export default function NavigationReview({
                     书内页 {candidate?.printed_label ?? "未知"} ·
                     系统识别，请以原图为准
                   </p>
+                  {!manual &&
+                    Boolean(candidates[index]?.match_signals?.length) && (
+                      <ul
+                        className="navigation-match-signals"
+                        aria-label="推荐依据"
+                      >
+                        {candidates[index].match_signals!.map((signal) => (
+                          <li key={signal}>{signal}</li>
+                        ))}
+                      </ul>
+                    )}
+                  {mapping && (
+                    <p>
+                      本段已用 {mapping.anchor_count} 个可靠位置校准，其中{" "}
+                      {mapping.manual_anchor_count}{" "}
+                      个人工确认。请对照当前原图裁决。
+                    </p>
+                  )}
                 </div>
                 {candidate?.printed_label &&
                   entry.target_label &&
@@ -286,10 +448,16 @@ export default function NavigationReview({
         role="group"
         aria-label="目录裁决操作"
       >
-        {error && (
+        {(error || evidenceChanged || reloadFailure) && (
           <p role="alert" className="navigation-action-error">
-            {error}
-            <Button variant="outline" disabled={reloading} onClick={onReload}>
+            {reloadFailure ||
+              error ||
+              "目录或正文证据已更新，当前预览与选择已保留。请重新载入后核对。"}
+            <Button
+              variant="outline"
+              disabled={reloading || !onReload}
+              onClick={() => void reloadEvidence()}
+            >
               {reloading ? "正在载入…" : "重新载入核对证据"}
             </Button>
           </p>
@@ -298,11 +466,22 @@ export default function NavigationReview({
           {approvalReady
             ? "预览不会保存。确认后仅更新目录跳转，正文与原件保留。"
             : "工作区范围未确认，暂不能提交目录决定。"}
+          {approvalReady && (
+            <small className="navigation-shortcuts">
+              Alt + ← / → 切换候选 · Alt + Enter 确认当前正文
+            </small>
+          )}
         </p>
         <div>
           <Button
             variant="outline"
-            disabled={busy || !approvalReady}
+            disabled={
+              busy ||
+              reloading ||
+              evidenceChanged ||
+              Boolean(error || reloadFailure) ||
+              !approvalReady
+            }
             onClick={() => onDecide(null, report.sha256)}
           >
             {busy ? "正在保存…" : "保留目录文字，不设置跳转"}
@@ -326,6 +505,58 @@ export default function NavigationReview({
         </div>
       </footer>
     </section>
+  );
+}
+
+function CandidatePreview({
+  candidate,
+  rank,
+  runId,
+  selected,
+  disabled,
+  onChoose,
+}: {
+  candidate: components["schemas"]["NavigationTarget"];
+  rank: number;
+  runId: string;
+  selected: boolean;
+  disabled: boolean;
+  onChoose: () => void;
+}) {
+  const preview = useQuery({
+    ...reviewPageOptions(runId, candidate.physical_page),
+    staleTime: 30_000,
+  });
+  const opening =
+    preview.data && navigationOpening(preview.data.text, candidate.anchor);
+  return (
+    <li data-selected={selected}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onChoose}
+        aria-pressed={selected}
+        aria-label={`查看候选 ${rank + 1} · PDF 第 ${candidate.physical_page} 页`}
+      >
+        <span>
+          {rank === 0 ? "首选候选" : `候选 ${rank + 1}`} · PDF 第{" "}
+          {candidate.physical_page} 页 · 书内页{" "}
+          {candidate.printed_label ?? "未识别"}
+        </span>
+        <strong>{candidate.anchor}</strong>
+      </button>
+      {Boolean(candidate.match_signals?.length) && (
+        <ul
+          className="navigation-match-signals"
+          aria-label={`候选 ${rank + 1} 推荐依据`}
+        >
+          {candidate.match_signals!.slice(0, 3).map((signal) => (
+            <li key={signal}>{signal}</li>
+          ))}
+        </ul>
+      )}
+      {opening ? <Opening text={opening.slice(0, 120)} /> : null}
+    </li>
   );
 }
 

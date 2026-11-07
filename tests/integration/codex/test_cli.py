@@ -69,6 +69,12 @@ def test_runner_native_command_paths_model_inheritance_and_receipt(tmp_path, mon
         if argument.startswith("mcp_servers.historical_research.args=")
     )
     assert json.loads(mcp_arguments) == ["-m", "hrs", "--root", str(store.root), "mcp"]
+    enabled = next(
+        argument.split("=", 1)[1]
+        for argument in process.arguments
+        if argument.startswith("mcp_servers.historical_research.enabled_tools=")
+    )
+    assert "navigation_candidates" in json.loads(enabled)
     if model is None:
         assert process.arguments[process.arguments.index("--model") + 1] == "gpt-6.1-sol"
     else:

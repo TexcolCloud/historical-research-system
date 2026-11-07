@@ -4,6 +4,7 @@ type Entry = components["schemas"]["NavigationEntry"];
 
 const labels: Record<string, string> = {
   matched: "已关联正文",
+  matched_verified: "原图核验已关联",
   matched_manual: "已确认跳转",
   unlinked_manual: "已确认不设置跳转",
   waiting_evidence: "等待系统核验",
@@ -19,7 +20,10 @@ export function navigationStatusLabel(entry: Entry) {
 }
 
 export function navigationCompleted(entry: Entry) {
-  return ["matched", "matched_manual", "unlinked_manual"].includes(
-    entry.status,
-  );
+  return [
+    "matched",
+    "matched_verified",
+    "matched_manual",
+    "unlinked_manual",
+  ].includes(entry.status);
 }

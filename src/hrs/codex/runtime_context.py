@@ -12,6 +12,7 @@ TOOLS = [
     "dispatch_work",
     "open_task_packet",
     "freeze_observations",
+    "navigation_candidates",
     "submit_packet",
     "finish_worker",
     "wait_for_changes",
