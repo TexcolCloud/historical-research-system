@@ -121,26 +121,48 @@ def _internal_references(text, note):
             yield positions[match.start()], positions[match.end() - 1] + 1, match[1]
 
 
-def _apply_edits(text, edits):
+def _apply_edits(text, edits, *, insertions=()):
+    if any(not 0 <= start < stop <= len(text) for start, stop, _ in edits):
+        raise ValueError("Footnote export ranges overlap or escape canonical source")
+    operations = [(start, stop, replacement, -1) for start, stop, replacement in edits]
+    for order, (position, value) in enumerate(insertions):
+        if not 0 <= position <= len(text):
+            raise ValueError("Export metadata escapes canonical source")
+        # A marker split by a source boundary stays intact; the comment identifies
+        # the retained original span even when its display anchor moves to this token.
+        position = next((start for start, stop, _ in edits if start < position < stop), position)
+        # Mid-paragraph source boundaries must not create a paragraph break.
+        if position == 0 or text[position - 1] in "\r\n":
+            value += "\n\n"
+        operations.append((position, position, value, order))
     end = len(text)
-    for start, stop, replacement in sorted(edits, reverse=True):
-        if not 0 <= start < stop <= end:
+    for start, stop, replacement, _ in sorted(
+        operations, key=lambda operation: (operation[0], operation[1], operation[3]), reverse=True
+    ):
+        if not 0 <= start <= stop <= end:
             raise ValueError("Footnote export ranges overlap or escape canonical source")
         text = text[:start] + replacement + text[stop:]
         end = start
     return text
 
 
-def export_footnotes(text, links, prefix, *, parts=None):
+def export_footnotes(text, links, prefix, *, parts=None, insertions=()):
     """Namespace export links; only explicit, unique same-page note-internal targets resolve."""
     if parts is not None and "".join(part["text"] for part in parts) != text:
         raise ValueError("Footnote export source parts differ from the reading text")
     links = list(links)
     next_number = len(links) + 1
     excluded, ranges = _excluded_ranges(text), _page_ranges(parts)
+    # Keep source comments outside literal code/HTML tokens. All anchors and note
+    # replacements still refer to the unchanged reading text, never annotated text.
+    insertions = [
+        (next((start for start, end in excluded if start <= position < end), position), value)
+        for position, value in insertions
+    ]
     definitions = _definitions(text, excluded)
     by_id = {note["id"]: note for note in definitions}
     by_key = defaultdict(list)
+    consumed_insertions = set()
     for note in definitions:
         by_key[note["key"]].append(note)
     names, selected, edits, internal = {}, [], [], {}
@@ -194,12 +216,18 @@ def export_footnotes(text, links, prefix, *, parts=None):
             )
             continue
         body = text[span["marker_end"] : span["end"]]
+        body_insertions = []
+        for index, (position, value) in enumerate(insertions):
+            if span["marker_end"] <= position < span["end"]:
+                body_insertions.append((position - span["marker_end"], value))
+                consumed_insertions.add(index)
         body = _apply_edits(
             body,
             [
                 (start - span["marker_end"], end - span["marker_end"], value)
                 for start, end, value in internal[note["id"]]
             ],
+            insertions=body_insertions,
         )
         lines = body.strip(" \n\r").splitlines()
         definition = f"[^{names[note['id']]}]: " + lines[0]
@@ -217,7 +245,13 @@ def export_footnotes(text, links, prefix, *, parts=None):
         ):
             continue
         edits.append((start, match.end(), "\\" + match[0]))
-    return _apply_edits(text, edits)
+    return _apply_edits(
+        text,
+        edits,
+        insertions=[
+            value for index, value in enumerate(insertions) if index not in consumed_insertions
+        ],
+    )
 
 
 def resolve_footnotes(text, parts):

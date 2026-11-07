@@ -93,7 +93,7 @@ uv run --no-sync --locked python -m hrs start 'C:/materials/source.pdf'
 uv run --no-sync --locked python -m hrs workbench --port 0
 ```
 
-正常情况下 MCP 由 Codex 启动，无需另开一份。将示例文件替换为真实路径。`start` 返回文档 ID、工作区 ID 与本机网址；独立界面网址可能含访问令牌，不要公开。同一工作区的平台在线时直接打开 React 工作台；已有 MCP 文档通过幂等附接进入同一书籍队列，不重复识别。平台离线时使用不依赖 SQL 的独立核对界面，也支持疑点定位和目录终审。
+正常情况下 MCP 由 Codex 启动，无需另开一份。将示例文件替换为真实路径。升级代码或修改工作区配置后，在 Codex 的 MCP 设置中重启已有连接，再核对其 `workspace_id` 与平台、CLI 一致；已启动的长连接不会自动切换工作区。`start` 返回文档 ID、工作区 ID 与本机网址；独立界面网址可能含访问令牌，不要公开。同一工作区的平台在线时直接打开 React 工作台；已有 MCP 文档通过幂等附接进入同一书籍队列，不重复识别。平台离线时使用不依赖 SQL 的独立核对界面，也支持疑点定位和目录终审。
 
 API 与独立 MCP 共用工作区选择：显式 `--root`（或直接提供的 API 设置）> 进程 `PLATFORM_CODEX_ROOT` > 进程 `HRS_CODEX_ROOT` > 根 `.env` 的 `PLATFORM_CODEX_ROOT` > 根 `.env` 的 `HRS_CODEX_ROOT` > 共享 JSON 中的非空 `root`。默认 JSON 的 `root: null` 表示自动选择：`state/codex` 已有账本、旧文档或工作区身份文件时沿用原路径，否则使用数据根下的 `native/`。需要本机自定义工作区时，可在被忽略的根 `.env` 中可选设置 `HRS_CODEX_ROOT`；dotenv 相对路径以项目根为准，CLI `--root` 和进程 `HRS_CODEX_ROOT` 的相对路径保持以当前目录为准。操作前核对 `workspace_id`，不要因连接到了另一个工作区而重复导入。升级不会自动移动、删除已有工作区或修改证据路径。
 

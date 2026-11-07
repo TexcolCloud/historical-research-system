@@ -72,8 +72,12 @@ def test_real_search_retains_source_scopes_and_exports_after_cache_loss(
         assert search.search("粮食入库数量", book, semantic=True)[0]["pages"] == [7]
         assert search.search("粮食", str(uuid4())) == []
         with TestClient(create_app(settings, engine)) as client:
+            exported = (
+                f"<!-- physical-page: 7 source-span: {span} original-start: 0 "
+                f"original-end: {len(source)} -->\n\n" + source
+            )
             response = client.get(f"/api/v2/books/{book}/export")
-            assert response.status_code == 200 and response.text == source
+            assert response.status_code == 200 and response.text == exported
             # Streaming exports need no downloads directory. Remove only caches
             # actually created inside this test's isolated cache root.
             for file in tmp_path.rglob("*"):
@@ -81,7 +85,7 @@ def test_real_search_retains_source_scopes_and_exports_after_cache_loss(
                     assert file.resolve().is_relative_to(tmp_path.resolve())
                     file.unlink()
             response = client.get(f"/api/v2/books/{book}/export")
-            assert response.status_code == 200 and response.text == source
+            assert response.status_code == 200 and response.text == exported
         search.client.indices.delete(index=name)
         monkeypatch.setattr(
             indexer.runtime,
