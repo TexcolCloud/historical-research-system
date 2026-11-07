@@ -32,6 +32,7 @@ export default function NavigationReview({
   report: latestReport,
   runId,
   busy,
+  saving = false,
   approvalReady = true,
   onDecide,
   onCancel,
@@ -43,6 +44,7 @@ export default function NavigationReview({
   report: Report;
   runId: string;
   busy: boolean;
+  saving?: boolean;
   approvalReady?: boolean;
   onDecide: (choice: NavigationChoice | null, sha: string) => void;
   onCancel: () => void;
@@ -484,7 +486,7 @@ export default function NavigationReview({
             }
             onClick={() => onDecide(null, report.sha256)}
           >
-            {busy ? "正在保存…" : "保留目录文字，不设置跳转"}
+            {saving ? "正在保存…" : "保留目录文字，不设置跳转"}
           </Button>
           {!searching && (
             <Button
@@ -497,7 +499,7 @@ export default function NavigationReview({
                 )
               }
             >
-              {busy
+              {saving
                 ? "正在保存…"
                 : `确认跳转到 PDF 第 ${candidate?.physical_page} 页`}
             </Button>

@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import NavigationPanel from "./NavigationPanel.tsx";
 import { RuntimeScopeContext } from "@/app/runtime-scope.ts";
 import { respondWith } from "@/test/responses.ts";
 import { client } from "@/client/api.ts";
+import { queryKeys } from "@/client/query-keys.ts";
 
 afterEach(() => {
   cleanup();
@@ -119,9 +120,70 @@ test("updating recommendations invokes matching without submitting a human decis
   await screen.findByText("正文开头。");
   await userEvent.click(screen.getByRole("button", { name: "更新推荐" }));
   await screen.findByText(/目录推荐已更新/);
+  expect(screen.queryByText(/已打开下一项目录/)).toBeNull();
   expect(post).toHaveBeenCalledExactlyOnceWith(
     "/api/v2/runs/{run_id}/navigation/refresh",
     { params: { path: { run_id: "run" } } },
+  );
+});
+
+test("recommendation updates disable human decisions without claiming a decision is being saved", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.spyOn(client, "POST").mockImplementation(async () => {
+    await gate;
+    return {
+      data: { ...report, version: 2, sha256: "d".repeat(64) },
+      response: new Response(),
+    };
+  });
+  mount();
+  await screen.findByText("正文开头。");
+  await userEvent.click(screen.getByRole("button", { name: "更新推荐" }));
+  await screen.findByRole("button", { name: "正在更新推荐…" });
+  try {
+    expect(screen.queryAllByRole("button", { name: "正在保存…" })).toHaveLength(
+      0,
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "保留目录文字，不设置跳转" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "确认跳转到 PDF 第 5 页" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+  } finally {
+    release();
+    await screen.findByText(/目录推荐已更新/);
+  }
+});
+
+test("recommendation receipts do not preserve an obsolete current pending count", async () => {
+  vi.spyOn(client, "POST").mockResolvedValue({
+    data: { ...report, version: 2, sha256: "d".repeat(64) },
+    response: new Response(),
+  });
+  const { query } = mount();
+  await screen.findByText("正文开头。");
+  await userEvent.click(screen.getByRole("button", { name: "更新推荐" }));
+  await screen.findByText(/目录推荐已更新/);
+  act(() => {
+    query.setQueryData(queryKeys.navigation("run"), {
+      ...report,
+      version: 3,
+      sha256: "e".repeat(64),
+      entries: [recommended],
+      pending_count: 1,
+    });
+  });
+  await screen.findByText(/还有 1 项目录需要核对/);
+  expect(screen.getByText(/目录推荐已更新/).textContent).not.toMatch(
+    /当前\s*\d+\s*项/,
   );
 });
 

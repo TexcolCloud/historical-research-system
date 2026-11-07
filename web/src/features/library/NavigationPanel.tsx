@@ -66,7 +66,10 @@ export default function NavigationPanel({
   const [selected, setSelected] = useState<string | null>(entryId ?? null),
     [filter, setFilter] = useState(reviewOnly ? "attention" : "all"),
     [queueGroup, setQueueGroup] = useState("all"),
-    [message, setMessage] = useState(""),
+    [message, setMessage] = useState<{
+      kind: "decision" | "recommendation";
+      text: string;
+    } | null>(null),
     [restart, setRestart] = useState(0);
   const entries = report.data?.entries ?? [],
     attention = entries.filter((e) => e.needs_confirmation);
@@ -213,15 +216,17 @@ export default function NavigationPanel({
               ),
           ).length
         : 0;
-      setMessage(
-        (choice
-          ? `已确认：《${title}》 → PDF 第 ${choice.page} 页。`
-          : `已确认：《${title}》保留目录文字，不设置跳转。`) +
+      setMessage({
+        kind: "decision",
+        text:
+          (choice
+            ? `已确认：《${title}》 → PDF 第 ${choice.page} 页。`
+            : `已确认：《${title}》保留目录文字，不设置跳转。`) +
           (automatic
             ? ` 另有 ${automatic} 条目录已由系统匹配，保留为机器关联。`
             : "") +
           (updated ? ` 同段另有 ${updated} 条目录候选已更新。` : ""),
-      );
+      });
       setSelected(
         reviewOnly
           ? (committed.entries.find((e) => e.needs_confirmation && inGroup(e))
@@ -253,12 +258,14 @@ export default function NavigationPanel({
     onSuccess: async (data) => {
       await query.cancelQueries({ queryKey: queryKeys.navigation(runId) });
       const committed = commitReport(data);
-      setMessage(
-        `目录推荐已更新，当前 ${committed.pending_count} 项需要你核对。此次更新未提交人工决定。` +
+      setMessage({
+        kind: "recommendation",
+        text:
+          "目录推荐已更新，剩余待办见下方清单。此次更新未提交人工决定。" +
           (committed.assistance_warning
             ? ` ${committed.assistance_warning}`
             : ""),
-      );
+      });
     },
   });
   const busy = decision.isPending || recommendation.isPending;
@@ -297,12 +304,15 @@ export default function NavigationPanel({
       )}
       {message && (
         <p role="status" className="navigation-receipt">
-          {message}
-          {reviewOnly && queueEntries.length > 0
+          {message.text}
+          {message.kind === "decision" && reviewOnly && queueEntries.length > 0
             ? " 已打开下一项目录。"
-            : reviewOnly && attention.length > 0
-              ? " 当前组已完成，可切换其他分组。"
-              : ""}
+            : ""}
+        </p>
+      )}
+      {reviewOnly && attention.length > 0 && queueEntries.length === 0 && (
+        <p role="status" className="navigation-queue-status">
+          当前组已完成，可切换其他分组。
         </p>
       )}
       {report.isPending && <p role="status">正在读取目录…</p>}
@@ -543,6 +553,7 @@ export default function NavigationPanel({
                         report={report.data!}
                         runId={runId}
                         busy={busy}
+                        saving={decision.isPending}
                         approvalReady={runtimeScope !== "unknown"}
                         error={decision.error?.message ?? report.error?.message}
                         reloading={report.isFetching}
