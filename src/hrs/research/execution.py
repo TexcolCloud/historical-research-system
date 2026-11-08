@@ -50,6 +50,7 @@ ROLES = {
     "repair": "research_repairer",
     "reverify": "research_reverification",
 }
+_TERMINAL_WORKER_STATES = {"completed", "errored", "failed", "shutdown", "not_found", "timed_out"}
 
 
 def _policy_stages(policy):
@@ -94,6 +95,9 @@ No task available means stop that child, not a provider failure. Admission denie
 If a child fails, use research_fail only for its actual task token and the actual technical error.
 Validation errors require fixing arguments, never unsupported content approval or provider-outage guesses.
 Use native wait tools while children run; avoid repeated status polling or reading article content yourself.
+Observe progress only with wait and research_status. Never use send_input(interrupt=true), interrupt, or
+close_agent to ask a live leased child for progress or to hasten generation. Long output generation without
+tool traffic is normal within its host budget. A healthy child's silence is not a technical failure.
 Use wait intervals of at most 60 seconds, then inspect dispatch status. The host retires only a failed or
 expired lease; close its old native child and dispatch a fresh worker ID when its task returns ready.
 A completed child without a committed submission is a technical worker failure. Inspect current status;
@@ -268,30 +272,32 @@ class ResearchEvents(RuntimeEvents):
                     self.states[agent] = "pending_init"
             if worker and item.get("status") in {"failed", "errored"} and item.get("error"):
                 self._worker_failed(worker, item["error"], evidence)
-        for agent, state in (item.get("agents_states") or {}).items():
+        states = dict(item.get("agents_states") or {})
+        if item.get("tool") == "close_agent" and item.get("status") == "completed":
+            for agent in item.get("receiver_thread_ids", []):
+                if agent in self.workers:
+                    # The CLI can return the pre-close running snapshot.
+                    states[agent] = {"status": "shutdown"}
+        for agent, state in states.items():
             if not isinstance(state, dict) or agent not in self.workers:
                 continue
-            if self.states.get(agent) in {
-                "completed",
-                "errored",
-                "failed",
-                "shutdown",
-                "not_found",
-                "timed_out",
-            } and state.get("status") in {"pending_init", "running"}:
-                continue
             previous = self.states.get(agent)
+            if previous in _TERMINAL_WORKER_STATES:
+                continue
+            if (
+                item.get("tool") == "send_input"
+                and item.get("status") == "completed"
+                and agent in item.get("receiver_thread_ids", [])
+                and state.get("status") == "interrupted"
+                and previous in {"running", "pending_init"}
+            ):
+                # Sending starts the next turn; this snapshot may still describe the
+                # interrupted old turn. Keep observation only, never renew task activity.
+                continue
             self.states[agent] = state.get("status")
             if state.get("status") in {"failed", "errored"}:
                 self._worker_failed(self.workers[agent], state.get("error") or state, evidence)
-            elif state.get("status") in {"completed", "shutdown", "not_found"} and previous not in {
-                "completed",
-                "errored",
-                "failed",
-                "shutdown",
-                "not_found",
-                "timed_out",
-            }:
+            elif state.get("status") in {"completed", "shutdown", "not_found"}:
                 task = next(
                     (
                         task

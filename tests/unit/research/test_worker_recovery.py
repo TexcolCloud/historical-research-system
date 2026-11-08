@@ -91,6 +91,111 @@ def test_host_expires_one_exact_lease_even_after_deadline_without_touching_repla
     assert observer.states["native-1"] == "timed_out"
 
 
+def test_successful_send_input_transient_interruption_keeps_only_started_generation_budget(
+    tmp_path, monkeypatch
+):
+    clock = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    workflow, run, observer, packets = workers(tmp_path)
+    workflow.read_source(packets[0]["task_token"], 0, 32000)
+    before = next(t for t in workflow.status(run)["tasks"] if t["worker_id"] == "worker-1")
+    clock[0] += 700
+    observer._collaboration(
+        {
+            "tool": "send_input",
+            "status": "completed",
+            "receiver_thread_ids": ["native-1"],
+            "agents_states": {"native-1": {"status": "interrupted"}},
+        },
+        {},
+    )
+    assert observer.active_workers() == {"worker-1", "worker-2"}
+    task = next(t for t in workflow.status(run)["tasks"] if t["worker_id"] == "worker-1")
+    assert task["last_progress_at"] == before["last_progress_at"]
+    assert task["claimed_at"] == before["claimed_at"]
+    assert workflow.supervision_timeouts(run, active_workers=observer.active_workers()) == []
+    assert workflow.renew_run_leases(run, active_workers=observer.active_workers()) == 2
+    with workflow.ledger.connect(write=True) as connection:
+        task, _ = workflow._lease(connection, packets[0]["task_token"])
+        task["claimed_at"] = clock[0] - 6000
+        workflow._save_task(connection, task)
+    expired = workflow.supervision_timeouts(run, active_workers=observer.active_workers())
+    assert len(expired) == 1 and "absolute task deadline" in expired[0]["reason"]
+    workflow.pause(run)
+    assert workflow.renew_run_leases(run, active_workers=observer.active_workers()) == 0
+
+
+@pytest.mark.parametrize("tool,call_state", [("wait", "completed"), ("send_input", "failed")])
+def test_unrelated_interruption_is_not_a_continuing_native_turn(tmp_path, tool, call_state):
+    workflow, run, observer, packets = workers(tmp_path)
+    workflow.read_source(packets[0]["task_token"], 0, 32000)
+    observer._collaboration(
+        {
+            "tool": tool,
+            "status": call_state,
+            "receiver_thread_ids": ["native-1"],
+            "agents_states": {"native-1": {"status": "interrupted"}},
+        },
+        {},
+    )
+    assert observer.active_workers() == {"worker-2"}
+
+
+def test_send_input_pending_snapshot_requires_actual_reads_from_this_execution(tmp_path):
+    workflow, run, observer, packets = workers(tmp_path)
+    observer.states["native-1"] = "pending_init"
+    sent = {
+        "tool": "send_input",
+        "status": "completed",
+        "receiver_thread_ids": ["native-1"],
+        "agents_states": {"native-1": {"status": "interrupted"}},
+    }
+    observer._collaboration(sent, {})
+    assert observer.states["native-1"] == "pending_init"
+    assert observer.active_workers() == {"worker-2"}
+    workflow.read_source(packets[0]["task_token"], 0, 32000)
+    assert observer.active_workers() == {"worker-1", "worker-2"}
+    workflow.pause(run)
+    assert observer.active_workers() == {"worker-2"}
+    assert workflow.renew_run_leases(run, active_workers=observer.active_workers()) == 0
+
+
+@pytest.mark.parametrize("terminal", ["completed", "timed_out", "shutdown"])
+def test_send_input_cannot_revive_a_retired_native_worker(tmp_path, terminal):
+    workflow, run, observer, packets = workers(tmp_path)
+    workflow.read_source(packets[0]["task_token"], 0, 32000)
+    observer.states["native-1"] = terminal
+    observer._collaboration(
+        {
+            "tool": "send_input",
+            "status": "completed",
+            "receiver_thread_ids": ["native-1"],
+            "agents_states": {"native-1": {"status": "interrupted"}},
+        },
+        {},
+    )
+    assert observer.states["native-1"] == terminal
+    assert observer.active_workers() == {"worker-2"}
+
+
+def test_successful_close_retires_preclose_running_snapshot_without_global_failure(tmp_path):
+    workflow, run, observer, packets = workers(tmp_path)
+    observer._collaboration(
+        {
+            "tool": "close_agent",
+            "status": "completed",
+            "receiver_thread_ids": ["native-1"],
+            "agents_states": {"native-1": {"status": "running"}},
+        },
+        {},
+    )
+    assert observer.states["native-1"] == "shutdown"
+    assert observer.active_workers() == {"worker-2"}
+    status = workflow.status(run)
+    assert status["counts"]["ready"] == 1 and status["counts"]["leased"] == 1
+    assert status.get("runtime_failures", 0) == 0
+
+
 def test_source_finding_mapping_errors_name_all_wrong_positions_without_weakening_gate():
     inventory = observation()["inventory"]
     assessments = [
