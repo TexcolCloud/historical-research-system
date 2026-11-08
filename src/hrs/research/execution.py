@@ -171,6 +171,8 @@ Author: make one complete source-bound master card with structured metadata and 
 Every mention needs an identity_key and at least one exact locations occurrence. Author MUST submit at least
 one proposed question in card.research_plan, but MUST NOT call research_plan; only enrich/repair use that tool
 to persist the evaluated plan. Fill every required field in the frozen stage's result_schema before submission.
+Every mention occurrence must fit entirely inside at least one span in that mention's evidence_ids. Use the
+located original ranges for both; a cited span that cuts off even the final character does not cover the name.
 Known metadata needs exact cited evidence; unknown fields carry an explicit note, not invented bibliographic facts.
 For every SourceValue including event.place, certainty=unknown REQUIRES value=''; put missing facts in note.
 A broad but explicitly sourced place is stated (or another supported certainty) with evidence and a note about
@@ -191,6 +193,8 @@ Use research_target_card then research_target_card_text for each counterpart des
 and its complete frozen source using source_index. Cross-relations require both source sides and the exact
 target card/version/publication hash. Search snippets, shared names or copied reprints cannot prove identity
 or independent corroboration. Source-backed reply/reprint/support/counter/limit links may remain disputed.
+Different frozen source IDs can describe the same original with different retained note maps. Read each
+descriptor separately; parsing variants are never independent historical witnesses.
 Answer every frozen notebook research_question at its exact definition_version using question_findings;
 unresolved/partial findings retain missing evidence instead of claiming all evidence has been found.
 Verifier/reverifier: first independently inventory every original coverage_unit before candidate exposure:

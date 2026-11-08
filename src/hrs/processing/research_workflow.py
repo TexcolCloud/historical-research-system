@@ -1110,10 +1110,27 @@ class ResearchWorkflow:
                     source_run_id=snapshot["source_run_id"],
                     document_id=snapshot["document_id"],
                 )
-                existing = next(
-                    (item for item in task["external_sources"] if item["id"] == external["id"]),
-                    None,
-                )
+                family_id, existing = external["id"], None
+                for item in task["external_sources"]:
+                    if item["id"] != family_id and not item["id"].startswith(family_id + "-"):
+                        continue
+                    previous = self._load_source(connection, item["source_ref"])
+                    previous = {**previous, "id": family_id}
+                    if {k: v for k, v in previous.items() if k != "footnotes"} != {
+                        k: v for k, v in external.items() if k != "footnotes"
+                    }:
+                        raise EvidenceMismatch("Previously frozen external source changed")
+                    if item["id"] == family_id and previous == external:
+                        existing = item
+                if existing is None:
+                    # New identities are descriptor-bound across tasks/order.
+                    # Only an identical retained legacy binding keeps its bare
+                    # ID; neither its source/hash nor old citations are changed.
+                    external["id"] += "-" + digest(external)
+                    existing = next(
+                        (item for item in task["external_sources"] if item["id"] == external["id"]),
+                        None,
+                    )
                 reference = self._freeze_source(connection, external, "external_article")
                 if existing is not None and existing["source_ref"] != reference:
                     raise EvidenceMismatch("Previously frozen external source changed")
@@ -1721,24 +1738,36 @@ class ResearchWorkflow:
                 linked_evidence = [
                     item for item in card["evidence"] if item["id"] in link["evidence_ids"]
                 ]
-                if not any(
-                    sources[item["article_id"]].get("book_id", run["book_id"])
-                    == target_source["book_id"]
-                    and sources[item["article_id"]].get(
-                        "publication_sha256", run["publication_sha256"]
+                linked_sources = {
+                    (
+                        source.get("book_id", run["book_id"]),
+                        source.get("publication_sha256", run["publication_sha256"]),
+                        source.get("original_article_id", item["article_id"]),
                     )
-                    == target_source["publication_sha256"]
-                    and sources[item["article_id"]].get("original_article_id", item["article_id"])
-                    == target_source["article_id"]
                     for item in linked_evidence
+                    for source in [sources[item["article_id"]]]
+                }
+                target_sources = {
+                    (
+                        target_source["book_id"],
+                        target_source["publication_sha256"],
+                        target_source.get("original_article_id", target_source["article_id"]),
+                    )
                     for target_source in (target.get("source_mentions") or [target])
-                ):
+                }
+                if not linked_sources & target_sources:
                     raise EvidenceMismatch(
                         "Identity link must cite the frozen original source of its existing target"
                     )
-                if (
-                    link["relation"] == "same_as"
-                    and len({item["article_id"] for item in linked_evidence}) < 2
+                primary = sources[task["article_id"]]
+                primary_key = (
+                    primary.get("book_id", run["book_id"]),
+                    primary.get("publication_sha256", run["publication_sha256"]),
+                    primary.get("original_article_id", task["article_id"]),
+                )
+                if link["relation"] == "same_as" and (
+                    primary_key not in linked_sources
+                    or not ((linked_sources & target_sources) - {primary_key})
                 ):
                     raise EvidenceMismatch(
                         "A same_as identity decision requires evidence from both source articles"
