@@ -52,9 +52,13 @@ def test_large_task_book_mcp_status_retains_counts_without_returning_unbounded_m
 
 
 def test_live_lease_precedes_external_fetch_and_search_audit_is_server_owned(tmp_path, monkeypatch):
+    from hrs.processing.research_workflow import POLICY
+
     store = Store(tmp_path / "native")
     workflow = ResearchWorkflow(store)
-    run = workflow.enqueue(snapshot())
+    # Preserve the original v4 lease/transport contract; v5 extraction coverage
+    # and independent inventory are exercised in the complete-workflow suite.
+    run = workflow.enqueue(snapshot(), _policy={**POLICY, "version": 4, "complete_research": False})
     submit_draft(workflow, run["run_id"], "author", "author")
     packet = workflow.claim(run["run_id"], "enricher", stage="enrich")
     calls = []

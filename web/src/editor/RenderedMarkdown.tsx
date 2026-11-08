@@ -101,6 +101,11 @@ export function RenderedMarkdown({
     () => renderSource(markdown, []),
     [markdown, renderSource],
   );
+  // A background annotation refresh must not replace an identical anchor between
+  // pointer-down and click. Values, rather than response-array identity, own DOM updates.
+  const readingLinksKey = JSON.stringify(readingLinks);
+  const readingFocusKey = JSON.stringify(readingFocus);
+  const highlightsKey = JSON.stringify(highlights);
   useEffect(() => {
     if (root.current) {
       const readingSourceChanged = renderedReadingSource.current !== html;
@@ -142,11 +147,10 @@ export function RenderedMarkdown({
   }, [
     html,
     markdown,
-    highlights,
+    highlightsKey,
     activeHighlight,
-    renderSource,
-    readingLinks,
-    readingFocus,
+    readingLinksKey,
+    readingFocusKey,
   ]);
   return (
     <div

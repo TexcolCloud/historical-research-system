@@ -68,11 +68,13 @@ class CodexBridge:
         self.executor.start()
         self.research_executor = ResearchRunner(self.store)
         self.research_executor.start()
+        self.research.start_indexing()
         self.thread = threading.Thread(target=self.loop, name="codex-platform-bridge", daemon=True)
         self.thread.start()
 
     def stop(self):
         self.stop_event.set()
+        self.research.stop_indexing()
         self.executor.stop()
         if getattr(self, "research_executor", None):
             self.research_executor.stop()

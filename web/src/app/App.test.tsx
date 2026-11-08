@@ -1,11 +1,18 @@
 // @vitest-environment happy-dom
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { respondWith } from "@/test/responses";
+import { research } from "@/features/research/api";
+
+beforeEach(() =>
+  vi
+    .spyOn(research, "pending")
+    .mockResolvedValue({ items: [], total: 0, offset: 0, limit: 50 }),
+);
 
 const lifetime = vi.hoisted(() => ({ mounts: 0, stops: 0 }));
 vi.mock("@/routes/BookPage.tsx", () => ({
@@ -28,6 +35,7 @@ vi.mock("@/features/uploads/UploadPanel.tsx", async () => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 test("retired introduction redirects to books while navigation retains one stream and active upload", async () => {

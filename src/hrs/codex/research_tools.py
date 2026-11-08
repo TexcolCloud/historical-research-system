@@ -1,12 +1,73 @@
 """Native research tools: bounded evidence access and transactional submissions only."""
 
+import json
+import logging
 from functools import lru_cache
+from typing import Annotated
 
 from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field, ValidationError
 
+from hrs.processing.errors import EvidenceMismatch
 from hrs.processing.research_workflow import ResearchWorkflow
-from hrs.research.diagnostics import failure_details
+from hrs.research.diagnostics import failure_details, redact_error
+
+logger = logging.getLogger(__name__)
+
+
+def rejection_diagnostics(error):
+    """Keep all validation paths in audit; group repeated fields for a bounded native reply."""
+    raw = (
+        error.errors(include_input=False, include_url=False)
+        if isinstance(error, ValidationError)
+        else getattr(error, "validation_issues", None)
+        or [{"loc": (), "type": "evidence_mismatch", "msg": str(error)}]
+    )
+    issues, groups = [], {}
+    for issue in raw:
+        path = list(issue["loc"])
+        message = redact_error(issue["msg"])
+        issues.append({"path": path, "type": issue["type"], "message": message})
+        pattern = tuple("*" if isinstance(part, int) else part for part in path)
+        key = (pattern, issue["type"], message)
+        group = groups.setdefault(
+            key,
+            {
+                "path": list(pattern),
+                "type": issue["type"],
+                "message": message[:400],
+                "occurrences": 0,
+                "indices": [],
+                "omitted_indices": 0,
+                "examples": [],
+            },
+        )
+        group["occurrences"] += 1
+        group["indices"].append([part for part in path if isinstance(part, int)])
+        if len(group["examples"]) < 2:
+            group["examples"].append(path)
+    summary = {
+        "error": "submission_rejected",
+        "message": "Correct the failed positions in indices, in order of '*' in each path. Other positions are unchanged. Follow the frozen claim schema.",
+        "issue_count": len(issues),
+        "issues": list(groups.values()),
+        "omitted_issue_groups": 0,
+        "omitted_issues": 0,
+    }
+    while len(json.dumps(summary, ensure_ascii=False)) > 5000:
+        largest = max(summary["issues"], key=lambda issue: len(issue["indices"]))
+        if len(largest["indices"]) > 2:
+            retained = max(2, len(largest["indices"]) // 2)
+            largest["omitted_indices"] += len(largest["indices"]) - retained
+            del largest["indices"][retained:]
+        elif len(summary["issues"]) > 1:
+            removed = summary["issues"].pop()
+            summary["omitted_issue_groups"] += 1
+            summary["omitted_issues"] += removed["occurrences"]
+        else:
+            break
+    return {"issues": issues, "issue_count": len(issues)}, summary
 
 
 def status_summary(status):
@@ -29,7 +90,9 @@ def status_summary(status):
         },
         "ready_by_stage": {
             stage: sum(task["stage"] == stage and task["state"] == "ready" for task in tasks)
-            for stage in ("author", "enrich", "verify")
+            for stage in dict.fromkeys(
+                ("author", "enrich", "verify", *(task["stage"] for task in tasks))
+            )
         },
         "active": {
             "count": len(active),
@@ -68,6 +131,13 @@ def register_research_tools(server, store, checked):
             )
         return ResearchEvidence(settings, engine_for(settings))
 
+    @lru_cache(maxsize=1)
+    def research_workspace():
+        from hrs.research.api import Research
+
+        source = evidence()
+        return Research(source.settings, source.engine).workspace
+
     @server.tool()
     @checked
     def research_status(run_id: str) -> dict:
@@ -103,6 +173,33 @@ def register_research_tools(server, store, checked):
 
     @server.tool()
     @checked
+    def research_locate_quotes(
+        task_token: str,
+        worker_id: str,
+        quotes: Annotated[
+            list[Annotated[str, Field(min_length=1, max_length=4000)]],
+            Field(
+                min_length=1,
+                max_length=20,
+                description="1–20 exact quotations; at most 16000 characters combined.",
+            ),
+        ],
+        article_id: str | None = None,
+        offset: Annotated[int, Field(ge=0)] = 0,
+        limit: Annotated[int, Field(ge=1, le=20)] = 20,
+    ) -> dict:
+        """Locate exact quotes in a fully read frozen source; ambiguity stays explicit, no inference."""
+        return workflow.locate_quotes(
+            task_token,
+            worker_id,
+            quotes,
+            article_id=article_id,
+            offset=offset,
+            limit=limit,
+        )
+
+    @server.tool()
+    @checked
     def research_candidate(task_token: str, worker_id: str, observations: dict) -> dict:
         """After full independent source reading freeze article_id/text_sha256/summary observations."""
         return workflow.candidate(task_token, worker_id, observations, paged=None)
@@ -117,15 +214,69 @@ def register_research_tools(server, store, checked):
 
     @server.tool()
     @checked
+    def research_plan(task_token: str, worker_id: str, questions: list[dict]) -> dict:
+        """Persist a bounded research plan before retrieval; the native worker owns its judgments."""
+        return workflow.record_plan(task_token, worker_id, questions)
+
+    @server.tool()
+    @checked
+    def research_target_card(
+        task_token: str,
+        worker_id: str,
+        card_id: str,
+        version: int | None = None,
+    ) -> dict:
+        """Freeze an authorized counterpart and its source versions; verification reads retained targets."""
+        return workflow.target_card(
+            task_token,
+            worker_id,
+            card_id,
+            version,
+            authorize=lambda card: evidence().require_card(card["id"], card["version"]),
+        )
+
+    @server.tool()
+    @checked
+    def research_target_card_text(
+        task_token: str,
+        worker_id: str,
+        card_ref: str,
+        offset: int = 0,
+        limit: int = 1600,
+    ) -> dict:
+        """Read the complete frozen counterpart in bounded windows; its source must be independently read."""
+        return workflow.target_card_text(task_token, worker_id, card_ref, offset, min(limit, 2000))
+
+    @server.tool()
+    @checked
     def research_search(
-        task_token: str, query: str, book_id: str | None = None, limit: int = 8
+        task_token: str,
+        query: str,
+        book_id: str | None = None,
+        limit: int = 8,
+        book_ids: list[str] | None = None,
     ) -> dict:
         """Search indexed primary publications using the shared hybrid/rerank pipeline."""
         if not 1 <= limit <= 20:
             raise ValueError("Research retrieval limit must be between 1 and 20")
-        workflow.prepare_search(task_token)
+        scope = workflow.prepare_search(task_token, query=query) or {}
+        frozen_books = scope.get("book_ids") or []
+        if book_ids is not None and (
+            not isinstance(book_ids, list)
+            or len(book_ids) > 200
+            or any(not isinstance(value, str) or not value for value in book_ids)
+        ):
+            raise ValueError("Research search scope requires at most 200 book IDs")
+        if book_id and book_ids:
+            raise ValueError("Select book_id or book_ids, not both research scopes")
+        selected = sorted(set(book_ids or ([book_id] if book_id else frozen_books)))
+        if frozen_books and not set(selected).issubset(frozen_books):
+            raise ValueError("Research search cannot leave the frozen question scope")
+        options = {"book_ids": selected} if selected and not book_id else {}
+        if frozen_books:
+            options["trusted_scope"] = True
         try:
-            result = evidence().search(query, book_id, semantic=True, limit=limit)
+            result = evidence().search(query, book_id, semantic=True, limit=limit, **options)
         except Exception as error:  # noqa: BLE001 - retain an actual failed retrieval, then propagate it
             workflow.record_search(
                 task_token,
@@ -138,22 +289,26 @@ def register_research_tools(server, store, checked):
                     "error": {"type": type(error).__name__, "message": str(error)[:2000]},
                 },
                 book_id=book_id,
+                book_ids=selected,
                 limit=limit,
             )
             raise
         from hrs.research.sources import retrieval_preview
 
         preview = retrieval_preview(result)
-        workflow.record_search(
+        receipt = workflow.record_search(
             task_token,
             result,
             book_id=book_id,
+            book_ids=selected,
             limit=limit,
             preview_summary={
                 key: preview.get(key)
                 for key in ("total_hits", "returned_hits", "omitted_hits", "truncated")
             },
         )
+        if receipt and receipt.get("receipt_id"):
+            preview["receipt_id"] = receipt["receipt_id"]
         return preview
 
     @server.tool()
@@ -197,36 +352,31 @@ def register_research_tools(server, store, checked):
         """Explore bounded source-backed identity/event neighbours as leads, not new historical claims."""
         workflow.read_source(task_token, 0, 1)
         evidence().require_entity(entity_id)
-        result = workflow.related(task_token, entity_id, hops=hops, limit=limit)
-        entity_ids = [
-            node["id"]
-            for node in result["nodes"]
-            if node.get("kind") in {"person", "organization", "place", "event"}
-        ]
-        allowed = evidence().authorized_entity_ids(entity_ids)
-        retained = {
-            node["id"]
-            for node in result["nodes"]
-            if node["id"] not in entity_ids or node["id"] in allowed
-        }
-        result["edges"] = [
-            edge
-            for edge in result["edges"]
-            if edge["source_id"] in retained and edge["target_id"] in retained
-        ]
-        connected = {
-            entity_id,
-            *(edge["source_id"] for edge in result["edges"]),
-            *(edge["target_id"] for edge in result["edges"]),
-        }
-        result["nodes"] = [node for node in result["nodes"] if node["id"] in retained & connected]
-        return result
+        # Preserve task/stage authorization, then validate complete edge provenance
+        # through the HTTP facade before truncating discovery metadata for MCP.
+        workflow.related(task_token, entity_id, hops=hops, limit=limit)
+        from hrs.research.graph import graph_leads
+
+        graph = research_workspace().graph(entity_id, hops=hops, limit=min(limit, 8))
+        return graph_leads(graph, requested_limit=limit)
 
     @server.tool()
     @checked
     def research_submit(task_token: str, worker_id: str, result: dict) -> dict:
         """Validate and commit the exact stage schema; native decisions never grant human approval."""
-        return workflow.submit(task_token, worker_id, result)
+        try:
+            return workflow.submit(task_token, worker_id, result)
+        except (ValidationError, EvidenceMismatch) as error:
+            diagnostics, reply = rejection_diagnostics(error)
+            try:
+                receipt = workflow.record_submission_rejection(
+                    task_token, worker_id, result, diagnostics
+                )
+                if receipt.get("recorded"):
+                    reply["rejection_ref"] = receipt["rejection_ref"]
+            except Exception:  # noqa: BLE001 - audit failure cannot hide the original rejection or approve content
+                logger.debug("Could not retain rejected research proposal", exc_info=True)
+            raise ToolError(json.dumps(reply, ensure_ascii=False, separators=(",", ":"))) from error
 
     @server.tool()
     @checked

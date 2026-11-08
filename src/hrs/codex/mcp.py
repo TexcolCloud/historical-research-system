@@ -86,7 +86,7 @@ def create_server(root: Path) -> MCPServer:
     server = MCPServer(
         "Historical Research",
         instructions=(
-            "Use native Codex subagents for OCR, review, correction verification and organization. "
+            "Use native Codex subagents for OCR, review, correction verification, organization and research. "
             "Runtime sessions use dispatch_work and open_task_packet, which includes the stage contract. "
             "Direct clients read workflow_instructions first. Every reviewer inspects original pixels before judging. "
             "Publish only after every page and organization task passes. Verdicts are machine decisions."
@@ -562,12 +562,20 @@ def create_server(root: Path) -> MCPServer:
     @server.tool()
     @contract_errors
     def search_library(query: str, limit: int = 20, book_id: str | None = None,
-                       semantic: bool = True) -> dict:
+                       semantic: bool = True, book_ids: list[str] | None = None) -> dict:
         """Shared platform evidence search; unavailable infrastructure is explicitly labelled."""
+        if book_id and book_ids:
+            raise ValueError("Select a single book or a multi-book scope, not both")
+        if book_ids is not None and (
+            len(book_ids) > 200 or any(not isinstance(value, str) or not value for value in book_ids)
+        ):
+            raise ValueError("Library lookup supports at most 200 explicit book IDs")
         try:
-            return research_evidence().search(query, book_id, semantic=semantic, limit=limit)
+            return research_evidence().search(
+                query, book_id, book_ids=book_ids, semantic=semantic, limit=limit,
+            )
         except Exception as error:  # noqa: BLE001 - direct standalone clients keep labelled literal lookup
-            if book_id is not None:
+            if book_id is not None or book_ids:
                 raise ToolError("Platform search is unavailable; book-scoped search requires its index") from error
             return {"query": query, "backend": "local_literal_fallback", "available": False,
                     "hits": store.search(query, limit=limit),

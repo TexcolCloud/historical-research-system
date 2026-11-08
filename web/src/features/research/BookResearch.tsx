@@ -52,9 +52,23 @@ function PublishedBookResearch({ book }: { book: Book }) {
     latestCurrent?.state === "completed"
       ? latestCurrent
       : undefined;
-  const active = outdatedRun ? undefined : latestCurrent;
+  const upgradeRun =
+    detail.data?.needs_upgrade && latestCurrent?.state === "completed"
+      ? latestCurrent
+      : undefined;
+  const requestedRunId = params.get("researchRun");
+  const active = requestedRunId
+    ? detail.data?.runs.find((run) => run.run_id === requestedRunId)
+    : outdatedRun
+      ? undefined
+      : latestCurrent;
   const start = useMutation({
-    mutationFn: () => research.start(book.id, outdatedRun?.run_id),
+    mutationFn: () =>
+      research.start(
+        book.id,
+        upgradeRun?.run_id || outdatedRun?.run_id,
+        upgradeRun ? "升级完整研究" : "研究来源更新，重新核验",
+      ),
     onSuccess: (run) => {
       query.setQueryData(researchKeys.run(run.run_id), run);
       query.setQueryData<ResearchBook>(
@@ -69,6 +83,11 @@ function PublishedBookResearch({ book }: { book: Book }) {
           },
       );
       void query.invalidateQueries({ queryKey: researchKeys.book(book.id) });
+      if (requestedRunId) {
+        const next = new URLSearchParams(params);
+        next.set("researchRun", run.run_id);
+        setParams(next);
+      }
     },
   });
   const selected = params.get("card");
@@ -140,11 +159,12 @@ function PublishedBookResearch({ book }: { book: Book }) {
           </p>
         </div>
       )}
-      {active ? (
+      {active || requestedRunId ? (
         <ResearchRunPanel
-          key={active.run_id}
-          runId={active.run_id}
+          key={requestedRunId || active!.run_id}
+          runId={requestedRunId || active!.run_id}
           initial={active}
+          legacy={Boolean(upgradeRun && active?.run_id === upgradeRun.run_id)}
           onOpenCard={openCard}
         />
       ) : (
@@ -172,6 +192,25 @@ function PublishedBookResearch({ book }: { book: Book }) {
             </Button>
           </div>
         )
+      )}
+      {upgradeRun && (
+        <div className="research-source-notice" role="note">
+          <strong>旧版基础卡 · 尚未补充完整研究信息</strong>
+          <p>
+            当前结果来自第 {detail.data?.research_policy_version ?? "旧"}{" "}
+            版研究流程，保留原卡与人工决定。升级后会补充全文覆盖、人物身份、事件性质与材料关系，并重新独立核验。
+          </p>
+          <Button
+            disabled={
+              start.isPending ||
+              !detail.data?.indexed ||
+              detail.data.source_revision_pending
+            }
+            onClick={() => start.mutate()}
+          >
+            补充完整研究信息
+          </Button>
+        </div>
       )}
       {start.isPending && <p role="status">正在创建研究任务…</p>}
       {start.isError && <p role="alert">{start.error.message}</p>}

@@ -10,6 +10,158 @@ from hrs.research.models import CardDraft
 from hrs.research.projection import located_card
 
 
+def test_complete_research_export_keeps_metadata_roles_plans_and_cross_card_versions():
+    text, reply = "甲致函乙。", "乙复函甲。"
+    draft = CardDraft.model_validate(
+        {
+            "id": "card",
+            "article_id": "article",
+            "title": "函件对照",
+            "summary": "仅陈述两份函件记载",
+            "metadata": {
+                "title_origin": "system",
+                "authors": {
+                    "value": "甲",
+                    "certainty": "stated",
+                    "evidence_ids": ["e1"],
+                    "note": "作者落款唯一",
+                },
+            },
+            "evidence": [
+                {"id": "e1", "article_id": "article", "start": 0, "end": len(text), "quote": text},
+                {"id": "e2", "article_id": "reply", "start": 0, "end": len(reply), "quote": reply},
+            ],
+            "mentions": [
+                {
+                    "id": "person",
+                    "name": "甲",
+                    "kind": "person",
+                    "identity_basis": "落款",
+                    "evidence_ids": ["e1"],
+                }
+            ],
+            "events": [
+                {
+                    "id": "event",
+                    "name": "发函",
+                    "description": "甲发送函件",
+                    "action": "申请拨款唯一",
+                    "place": {
+                        "value": "上海",
+                        "certainty": "inferred",
+                        "evidence_ids": ["e1"],
+                        "note": "地点依据唯一",
+                    },
+                    "participant_ids": ["person"],
+                    "participant_roles": [
+                        {
+                            "mention_id": "person",
+                            "role": "发函者唯一",
+                            "description": "发函记载",
+                            "evidence_ids": ["e1"],
+                        }
+                    ],
+                    "evidence_ids": ["e1"],
+                }
+            ],
+            "coverage": [
+                {
+                    "id": "unit",
+                    "article_id": "article",
+                    "start": 0,
+                    "end": len(text),
+                    "summary": "完整覆盖唯一",
+                    "mention_ids": ["person"],
+                    "event_ids": ["event"],
+                    "relation_ids": ["cross"],
+                }
+            ],
+            "research_plan": [
+                {
+                    "id": "plan",
+                    "question": "是否存在复函唯一？",
+                    "status": "answered",
+                    "proposed_queries": ["往复函件"],
+                    "search_receipt_ids": ["search-1"],
+                    "evidence_ids": ["e1", "e2"],
+                    "evaluation": "分别核对来往文书唯一",
+                    "stop_reason": "两文均已完整审读唯一",
+                }
+            ],
+            "cross_relations": [
+                {
+                    "id": "cross",
+                    "target_card_id": "counterpart-card",
+                    "target_card_version": 7,
+                    "target_publication_sha256": "9" * 64,
+                    "kind": "reply_to",
+                    "reason": "明确函复关联唯一",
+                    "source_evidence_ids": ["e1"],
+                    "target_evidence_ids": ["e2"],
+                }
+            ],
+            "question_findings": [
+                {
+                    "id": "finding",
+                    "question_id": "question",
+                    "definition_version": 3,
+                    "text": "问题结论唯一",
+                    "status": "partial",
+                    "evidence_ids": ["e1", "e2"],
+                    "unresolved": ["办结尚未有据唯一"],
+                }
+            ],
+        }
+    ).model_dump()
+    articles = [
+        {
+            "id": aid,
+            "text": body,
+            "text_sha256": text_digest(body),
+            "parts": [{"start": 0, "end": len(body), "text": body, "source": {"pages": [page]}}],
+        }
+        for aid, body, page in [("article", text, 1), ("reply", reply, 2)]
+    ]
+    snapshot = {
+        "source_run_id": "source",
+        "book_id": "book",
+        "publication_sha256": "a" * 64,
+        "articles": articles,
+    }
+    draft.update(
+        book_id="book",
+        run_id="run",
+        source_run_id="source",
+        version=1,
+        state="verified",
+        checks={"decision": "approve"},
+        publication_sha256="a" * 64,
+    )
+    card = located_card(draft, snapshot)
+    service = object.__new__(Research)
+    service.card = lambda _: card
+    service.workflow = SimpleNamespace(snapshot=lambda _: snapshot, sources=lambda _: [])
+    exported = service.export("card")
+    for expected in (
+        "作者落款唯一",
+        "申请拨款唯一",
+        "地点依据唯一",
+        "发函者唯一",
+        "完整覆盖唯一",
+        "是否存在复函唯一",
+        "分别核对来往文书唯一",
+        "两文均已完整审读唯一",
+        "counterpart-card",
+        "target_card_version",
+        "7",
+        "9" * 64,
+        "明确函复关联唯一",
+        "问题结论唯一",
+        "办结尚未有据唯一",
+    ):
+        assert expected in exported, expected
+
+
 def test_export_keeps_complete_card_meaning_and_frozen_publication_provenance():
     article_id, external_id = "primary-article", "external-frozen-article"
     text = "# 原文标题\n\n甲[^1]提出主张。\n\n[^1]: 编者原注，不能当作甲的发言。\n"

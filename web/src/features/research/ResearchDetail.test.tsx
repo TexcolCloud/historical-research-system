@@ -2,13 +2,73 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ResearchDetail from "./ResearchDetail";
+import * as libraryApi from "@/client/api";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+test("entity relationships translate system predicates while preserving the source's natural-language relation", async () => {
+  const relation = {
+    source_id: "person",
+    target_id: "other",
+    role: "association",
+    card_id: "card",
+    card_version: 1,
+    book_id: "book",
+    run_id: "run",
+    evidence: [],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        id: "person",
+        name: "陈毅",
+        kind: "person",
+        card_id: "card",
+        book_id: "book",
+        run_id: "run",
+        state: "verified",
+        evidence: [],
+        relationships: [
+          {
+            ...relation,
+            id: "system",
+            kind: "mentioned_in",
+            predicate: "mentioned_in",
+            reason: "原文中的来源提及",
+          },
+          {
+            ...relation,
+            id: "authored",
+            kind: "association",
+            predicate: "曾致函请求拨款",
+            reason: "按原文保留谓词",
+          },
+        ],
+      }),
+    ),
+  );
+  render(
+    <MemoryRouter initialEntries={["/research?entity=person"]}>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ResearchDetail />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText("见于材料")).toBeTruthy();
+  expect(screen.queryByText("mentioned_in")).toBeNull();
+  expect(screen.getByText("曾致函请求拨款")).toBeTruthy();
 });
 const card = {
   id: "last-card",
@@ -49,6 +109,151 @@ const card = {
   alternatives: [],
   questions: [],
 };
+
+test("a card citation focuses its own source even when another relationship packet reuses the local evidence id", async () => {
+  const scrolled: string[] = [];
+  vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
+    this: Element,
+  ) {
+    scrolled.push(this.textContent ?? "");
+  });
+  vi.spyOn(libraryApi, "readOriginalPage").mockResolvedValue(
+    "/retained-source.png",
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        ...card,
+        items: [
+          {
+            id: "item",
+            kind: "evidence",
+            title: "本卡论据",
+            text: "本卡解释",
+            evidence_ids: ["ev"],
+            epistemic_state: "stated",
+            attribution: "",
+            limitations: [],
+          },
+        ],
+        derived_relations: {
+          truncated: false,
+          items: [
+            {
+              id: "edge",
+              source_id: "first",
+              target_id: "second",
+              card_id: "other-packet",
+              card_version: 1,
+              kind: "reply_to",
+              predicate: "复函",
+              reason: "关系补证",
+              role: "association",
+              book_id: "book",
+              run_id: "run",
+              evidence: [
+                { ...card.evidence[0], quote: "其他证据包中的同号引文" },
+              ],
+            },
+          ],
+        },
+      }),
+    ),
+  );
+  render(
+    <MemoryRouter initialEntries={["/research?card=last-card"]}>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ResearchDetail />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "证据 1" }));
+  expect(scrolled).toHaveLength(1);
+  expect(scrolled[0]).toContain("原文证据");
+  expect(scrolled[0]).not.toContain("其他证据包中的同号引文");
+  const ids = [
+    ...document.querySelectorAll(".research-evidence > article"),
+  ].map((node) => node.id);
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+function CurrentLocation() {
+  const location = useLocation();
+  return (
+    <output aria-label="当前页面">{location.pathname + location.search}</output>
+  );
+}
+
+test("saving a pending card opens the next identity task rather than returning to the already resolved card", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/decision"))
+        return Response.json({ ...card, state: "human_accepted", version: 2 });
+      if (url.includes("/pending?"))
+        return Response.json({
+          items: [
+            { id: "old", kind: "card", card_id: card.id, title: card.title },
+            {
+              id: "identity-2",
+              kind: "identity",
+              card_id: "next-card",
+              entity_id: "person",
+              target_id: "possible-person",
+              title: "同名身份",
+            },
+          ],
+          total: 2,
+          offset: 0,
+          limit: 50,
+        });
+      if (url.includes("/entities/"))
+        return Response.json({
+          id: "person",
+          name: "张某",
+          kind: "person",
+          evidence: [],
+          mentions: [],
+        });
+      return Response.json(card);
+    }),
+  );
+  render(
+    <MemoryRouter
+      initialEntries={[
+        "/research?from=pending&researchTask=old&card=last-card",
+      ]}
+    >
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ResearchDetail />
+        <CurrentLocation />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "确认采用此卡" }),
+  );
+  await screen.findByRole("heading", { name: "张某" });
+  expect(screen.getByLabelText("当前页面").textContent).toContain(
+    "entity=person",
+  );
+  expect(screen.getByLabelText("当前页面").textContent).toContain(
+    "compare=possible-person",
+  );
+  expect(screen.getByLabelText("当前页面").textContent).not.toContain(
+    "card=last-card",
+  );
+});
 
 test("accepting the final pending card retains its evidence and refreshes the task and book state", async () => {
   let decision: unknown;

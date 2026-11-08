@@ -88,7 +88,14 @@ def draft(article_id="article-1", text="第一頁記張三。第二頁記張三�
 
 
 @pytest.fixture
-def workflow(tmp_path):
+def workflow(tmp_path, monkeypatch):
+    # This suite retains the v4 wire/lease contracts; complete v5 extraction has
+    # its own inventory, metadata, repair and catalogue acceptance fixtures.
+    from hrs.processing import research_workflow as module
+
+    monkeypatch.setattr(
+        module, "POLICY", {**deepcopy(module.POLICY), "version": 4, "complete_research": False}
+    )
     return ResearchWorkflow(Store(tmp_path / "workspace"))
 
 
@@ -148,7 +155,12 @@ def verify(workflow, run_id, decision="approve", worker="independent-verifier"):
 
 
 def completed(workflow, book_id="book-1"):
-    run = workflow.enqueue(snapshot(book_id))
+    from hrs.processing import research_workflow as module
+
+    run = workflow.enqueue(
+        snapshot(book_id),
+        _policy={**deepcopy(module.POLICY), "version": 4, "complete_research": False},
+    )
     submit_draft(workflow, run["run_id"], "author", "author")
     submit_draft(workflow, run["run_id"], "enrich", "enricher")
     verify(workflow, run["run_id"])

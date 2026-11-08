@@ -25,7 +25,17 @@ from hrs.storage import models as db
 
 
 @pytest.fixture
-def research_book(platform):
+def research_book(platform, monkeypatch):
+    from copy import deepcopy
+
+    from hrs.processing import research_workflow
+
+    # These synthetic fixtures exercise retained v4 HTTP/projection contracts,
+    # never native v5 coverage or content-accuracy acceptance.
+    retained_policy = deepcopy(research_workflow.POLICY)
+    retained_policy["version"] = 4
+    retained_policy.pop("complete_research", None)
+    monkeypatch.setattr(research_workflow, "POLICY", retained_policy)
     settings, engine = platform
     values = {}
 
@@ -134,13 +144,1016 @@ def test_indexed_reconciliation_is_durable_idempotent_and_freezes_full_article(r
     assert article["parts"][0]["source"]["original_start"] == 35
     assert article["footnotes"] and article["text_sha256"] == text_digest(text)
     with engine.connect() as connection:
-        assert connection.scalar(select(func.count()).select_from(db.outbox)) == 1
-        assert connection.scalar(select(db.outbox.c.delivered)) is True
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(db.outbox)
+                .where(db.outbox.c.kind == "start_research")
+            )
+            == 1
+        )
+        assert (
+            connection.scalar(
+                select(db.outbox.c.delivered).where(db.outbox.c.kind == "start_research")
+            )
+            is True
+        )
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(db.outbox)
+                .where(db.outbox.c.kind == "index_research")
+            )
+            == 1
+        )
         assert (
             connection.scalar(select(db.runs.c.state).where(db.runs.c.id == source_run))
             == "completed"
         )
         assert connection.scalar(select(db.research_runs.c.id)) == runs[0]["run_id"]
+
+
+def test_research_multi_book_scope_is_one_authorized_union(research_book):
+    from hrs.research.sources import ResearchEvidence
+
+    settings, engine, _, book_id, source_run, chapter_id, _ = research_book
+    ids = []
+    with engine.begin() as connection:
+        original = (
+            connection.execute(select(db.runs).where(db.runs.c.id == source_run)).mappings().one()
+        )
+        chapter = (
+            connection.execute(select(db.chapters).where(db.chapters.c.id == chapter_id))
+            .mappings()
+            .one()
+        )
+        for number in range(2):
+            other_book, other_run, other_chapter = (str(uuid4()) for _ in range(3))
+            connection.execute(
+                insert(db.books).values(id=other_book, title=f"Scope {number}", state="ready")
+            )
+            connection.execute(
+                insert(db.runs).values(**{**original, "id": other_run, "book_id": other_book})
+            )
+            connection.execute(
+                insert(db.chapters).values(
+                    **{**chapter, "id": other_chapter, "run_id": other_run, "book_id": other_book}
+                )
+            )
+            ids.append((other_book, other_chapter))
+    evidence = ResearchEvidence(settings, engine)
+    assert evidence.article_scope(book_ids=[book_id, ids[0][0]]) == {chapter_id, ids[0][1]}
+    assert evidence.article_scope(book_ids=[str(uuid4())]) == set()
+
+
+def test_question_http_preserves_selected_card_evidence_and_requires_cas(research_book):
+    settings, engine, bridge, book_id, _, _, _ = research_book
+    _, card = finish_contract_run(bridge, bridge.start(book_id), "Selected source card")
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    app = create_app(settings, engine)
+    app.state.research = service
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v2/research/questions",
+            json={"title": "What does this source support?", "book_ids": [book_id]},
+        )
+        assert created.status_code == 200
+        question = created.json()
+        assert (
+            question["selections"] == [] and question["findings"] == [] and question["runs"] == []
+        )
+        chosen = client.post(
+            f"/api/v2/research/questions/{question['id']}/evidence",
+            json={
+                "expected_version": question["version"],
+                "kind": "card",
+                "target_id": card["id"],
+                "decision": "adopted",
+            },
+        )
+        assert chosen.status_code == 200
+        selected = chosen.json()["selections"][0]
+        assert selected["evidence"][0]["quote"] == "人物甲"
+        assert selected["evidence"][0]["text_sha256"]
+        summary = client.get("/api/v2/research/questions").json()["items"][0]
+        assert (
+            summary["selection_count"] == 1
+            and summary["finding_count"] == 0
+            and summary["run_count"] == 0
+        )
+        assert "selections" not in summary and "findings" not in summary and "runs" not in summary
+        assert (
+            client.patch(
+                f"/api/v2/research/questions/{question['id']}",
+                json={
+                    "expected_version": question["version"],
+                    "notes": "stale write",
+                },
+            ).status_code
+            == 409
+        )
+
+
+def test_complete_card_selection_keeps_all_evidence_and_marks_only_changed_derived_record(
+    research_book,
+):
+    settings, engine, bridge, book_id, _, chapter_id, text = research_book
+    start = text.index("人物甲")
+    evidence = [
+        {
+            "id": f"e{index}",
+            "article_id": chapter_id,
+            "start": start,
+            "end": start + 3,
+            "quote": "人物甲",
+        }
+        for index in range(133)
+    ]
+    _, card = finish_contract_run(
+        bridge, bridge.start(book_id), "Complete selection", draft_patch={"evidence": evidence}
+    )
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    app = create_app(settings, engine)
+    app.state.research = service
+    with TestClient(app) as client:
+        question = client.post(
+            "/api/v2/research/questions",
+            json={"title": "Complete reviewed source", "book_ids": [book_id]},
+        ).json()
+        selected = client.post(
+            f"/api/v2/research/questions/{question['id']}/evidence",
+            json={
+                "expected_version": question["version"],
+                "kind": "card",
+                "target_id": card["id"],
+                "decision": "adopted",
+            },
+        )
+        assert selected.status_code == 200, selected.text
+        saved = selected.json()
+        assert len(saved["selections"][0]["evidence"]) == 133
+        assert saved["selections"][0]["record_ref"]["version"] == card["version"]
+        explicit = client.post(
+            f"/api/v2/research/questions/{question['id']}/evidence",
+            json={
+                "expected_version": saved["version"],
+                "kind": "card",
+                "target_id": card["id"],
+                "evidence_ids": [f"e{index}" for index in range(100)],
+            },
+        )
+        assert explicit.status_code == 200, explicit.text
+        assert sorted(len(item["evidence"]) for item in explicit.json()["selections"]) == [100, 133]
+        assert (
+            client.post(
+                f"/api/v2/research/questions/{question['id']}/evidence",
+                json={
+                    "expected_version": explicit.json()["version"],
+                    "kind": "card",
+                    "target_id": card["id"],
+                    "evidence_ids": [f"e{index}" for index in range(101)],
+                },
+            ).status_code
+            == 422
+        )
+        approved = client.post(
+            f"/api/v2/research/cards/{card['id']}/decision",
+            json={"action": "accept", "expected_version": card["version"]},
+        )
+        assert approved.status_code == 200
+        retained = client.get(f"/api/v2/research/questions/{question['id']}").json()
+        assert all(item["record_current"] is False for item in retained["selections"])
+        assert all(
+            span["source_current"] for item in retained["selections"] for span in item["evidence"]
+        )
+        assert (
+            next(item for item in retained["selections"] if len(item["evidence"]) == 133)[
+                "decision"
+            ]
+            == "adopted"
+        )
+
+
+@pytest.mark.parametrize("change", [{"published": False}, {"content_acceptance": "workflow_test"}])
+def test_unpublished_or_workflow_only_sources_cannot_authorize_current_research_evidence(
+    research_book, change
+):
+    settings, engine, bridge, book_id, source_run, chapter_id, _ = research_book
+    _, card = finish_contract_run(bridge, bridge.start(book_id), "Source acceptance boundary")
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    assert service.card(card["id"])["source_current"]
+    with engine.begin() as connection:
+        original = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == source_run))
+        connection.execute(
+            update(db.runs).where(db.runs.c.id == source_run).values(result={**original, **change})
+        )
+    assert not service.card(card["id"])["source_current"]
+    assert service.workspace._source_metadata(chapter_id) is None
+    with pytest.raises(ServiceError):
+        service.workspace.current_card(card["id"])
+
+
+def test_graph_drops_stale_owner_edges_after_entities_merge_into_current_books(research_book):
+    from hrs.research.workspace import IdentityDecision
+
+    settings, engine, bridge, book_id, source_run, chapter_id, text = research_book
+    start = text.index("人物甲提出主张")
+    phrase = "人物甲提出主张"
+    event = {
+        "id": "event",
+        "name": "提出主张",
+        "description": phrase,
+        "participant_ids": ["person"],
+        "evidence_ids": ["e2"],
+    }
+    patch = named_patch(chapter_id, text)
+    patch["evidence"] = [
+        {"id": "e1", "article_id": chapter_id, "start": start, "end": start + 3, "quote": "人物甲"},
+        {
+            "id": "e2",
+            "article_id": chapter_id,
+            "start": start,
+            "end": start + len(phrase),
+            "quote": phrase,
+        },
+    ]
+    patch["events"] = [event]
+    _, old_card = finish_contract_run(
+        bridge, bridge.start(book_id), "Old owner A", draft_patch=patch
+    )
+    book_b, article_b = later_source(engine, source_run, chapter_id)
+    _, card_b = finish_contract_run(
+        bridge, bridge.start(book_b), "Current person B", draft_patch=named_patch(article_b, text)
+    )
+    book_c, article_c = later_source(engine, source_run, chapter_id)
+    _, card_c = finish_contract_run(
+        bridge,
+        bridge.start(book_c),
+        "Current event C",
+        draft_patch={
+            "events": [{**event, "participant_ids": [], "evidence_ids": ["e1"]}],
+            "evidence": [
+                {
+                    "id": "e1",
+                    "article_id": article_c,
+                    "start": start,
+                    "end": start + len(phrase),
+                    "quote": phrase,
+                }
+            ],
+        },
+    )
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+
+    def merge(source_card, source_kind, target_card):
+        left = next(
+            entity
+            for entity in bridge.workflow.list_entities(run_id=source_card["run_id"])
+            if entity["kind"] == source_kind
+        )
+        right = next(
+            entity
+            for entity in bridge.workflow.list_entities(run_id=target_card["run_id"])
+            if entity["kind"] == source_kind
+        )
+        source = service.entity(left["canonical_id"])
+        target = service.entity(right["canonical_id"])
+        return service.workspace.identity_decision(
+            source["id"],
+            IdentityDecision(
+                action="merge",
+                expected_version=source["version"],
+                target_id=target["id"],
+                target_version=target["version"],
+                evidence_refs=[
+                    {
+                        "card_id": source_card["id"],
+                        "card_version": source_card["version"],
+                        "evidence_id": "e1" if source_kind == "person" else "e2",
+                    },
+                    {
+                        "card_id": target_card["id"],
+                        "card_version": target_card["version"],
+                        "evidence_id": "e1",
+                    },
+                ],
+            ),
+        )
+
+    person = merge(old_card, "person", card_b)
+    merge(old_card, "event", card_c)
+    assert any(
+        edge["card_id"] == old_card["id"] for edge in service.workspace.graph(person["id"])["edges"]
+    )
+    with engine.begin() as connection:
+        original = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == source_run))
+        connection.execute(
+            update(db.runs)
+            .where(db.runs.c.id == source_run)
+            .values(result={**original, "codex_publication_sha256": "f" * 64})
+        )
+    graph = service.workspace.graph(person["id"])
+    assert all(edge["card_id"] != old_card["id"] for edge in graph["edges"])
+    for node in graph["nodes"]:
+        assert all(
+            mention["card_id"] != old_card["id"] for mention in node.get("source_mentions", [])
+        )
+        assert all(
+            ref["card_id"] != old_card["id"]
+            for alias in node.get("aliases", [])
+            for ref in alias["evidence_refs"]
+        )
+
+
+def test_all_library_question_freezes_authorized_books_before_joint_retrieval(
+    research_book, monkeypatch
+):
+    settings, engine, bridge, book_id, source_run, chapter_id, _ = research_book
+    foreign_book, foreign_run = str(uuid4()), str(uuid4())
+    with engine.begin() as connection:
+        source = (
+            connection.execute(select(db.runs).where(db.runs.c.id == source_run)).mappings().one()
+        )
+        connection.execute(
+            insert(db.books).values(id=foreign_book, title="Other workspace", state="ready")
+        )
+        connection.execute(
+            insert(db.runs).values(
+                **{
+                    **source,
+                    "id": foreign_run,
+                    "book_id": foreign_book,
+                    "result": {**source["result"], "codex_workspace_id": "foreign-workspace"},
+                }
+            )
+        )
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    calls = []
+
+    def retrieve(query, **options):
+        calls.append(options)
+        assert options["book_ids"] == [book_id] and options["trusted_scope"]
+        return {"hits": [{"book_id": book_id, "chapter_id": chapter_id}]}
+
+    monkeypatch.setattr(service.evidence, "search", retrieve)
+    app = create_app(settings, engine)
+    app.state.research = service
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v2/research/questions", json={"title": "All current sources", "book_ids": []}
+        ).json()
+        response = client.post(
+            f"/api/v2/research/questions/{created['id']}/research",
+            json={"expected_version": created["version"]},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["book_ids"] == []
+        assert response.json()["runs"][0]["book_id"] == book_id
+        summary = client.get("/api/v2/research/questions").json()["items"][0]
+        assert summary["run_count"] == 1 and "runs" not in summary
+    assert len(calls) == 1
+    runs = bridge.workflow.list_runs(book_id)
+    question_run = next(run for run in runs if run.get("purpose") == "question")
+    frozen = bridge.workflow.snapshot(question_run["run_id"])
+    assert frozen["research_scope"]["book_ids"] == [book_id]
+    assert frozen["research_scope"]["selection"] == "workspace_all"
+    assert frozen["research_questions"][0]["id"] == created["id"]
+
+
+def test_source_hits_advertise_only_current_verified_card_targets(research_book, monkeypatch):
+    from types import SimpleNamespace
+
+    from hrs.research import sources
+
+    settings, engine, bridge, book_id, _, chapter_id, text = research_book
+    _, card = finish_contract_run(bridge, bridge.start(book_id), "A target without named people")
+
+    class Retrieval:
+        def __init__(self, *args):
+            self.client = SimpleNamespace(indices=SimpleNamespace(exists=lambda **kw: True))
+
+        def search(self, *args, **kwargs):
+            return [{"id": "synthetic-hit", "chapter_id": chapter_id}]
+
+    monkeypatch.setattr(sources, "Search", Retrieval)
+    adapter = sources.ResearchEvidence(settings, engine)
+    hits = adapter.search("target")["hits"]
+    assert hits[0]["research_cards"][0]["id"] == card["id"]
+    assert hits[0]["research_cards"][0]["version"] == card["version"]
+    with engine.begin() as connection:
+        connection.execute(
+            update(db.books).where(db.books.c.id == book_id).values(state="deleting")
+        )
+    adapter._attach_card_targets(hits)
+    assert hits[0]["research_cards"] == []
+
+
+def named_patch(chapter_id, text):
+    start = text.index("人物甲")
+    return {
+        "mentions": [
+            {
+                "id": "person",
+                "kind": "person",
+                "name": "人物甲",
+                "identity_basis": "Explicit synthetic source name",
+                "evidence_ids": ["e1"],
+                "locations": [
+                    {"article_id": chapter_id, "start": start, "end": start + 3, "quote": "人物甲"}
+                ],
+            }
+        ]
+    }
+
+
+def later_source(engine, source_run, chapter_id):
+    book_id, run_id, article_id = (str(uuid4()) for _ in range(3))
+    with engine.begin() as connection:
+        source = (
+            connection.execute(select(db.runs).where(db.runs.c.id == source_run)).mappings().one()
+        )
+        article = (
+            connection.execute(select(db.chapters).where(db.chapters.c.id == chapter_id))
+            .mappings()
+            .one()
+        )
+        connection.execute(
+            insert(db.books).values(id=book_id, title="Later question source", state="ready")
+        )
+        connection.execute(insert(db.runs).values(**{**source, "id": run_id, "book_id": book_id}))
+        connection.execute(
+            insert(db.chapters).values(
+                **{**article, "id": article_id, "run_id": run_id, "book_id": book_id}
+            )
+        )
+    return book_id, article_id
+
+
+@pytest.mark.parametrize("human", [False, True])
+def test_link_refresh_freezes_questions_and_retains_current_notebook_findings(research_book, human):
+    from hrs.research.notebook import ResearchNotebook
+    from hrs.research.projection import located_card
+
+    settings, engine, bridge, book_id, source_run, chapter_id, text = research_book
+    notebook = ResearchNotebook(bridge.store)
+    question = notebook.create("What does the named source establish?", [])
+    finding = {
+        "id": "finding",
+        "question_id": question["id"],
+        "definition_version": 1,
+        "text": "Synthetic source-bound statement",
+        "status": "partial",
+        "evidence_ids": ["e1"],
+        "unresolved": ["Further proof remains unavailable"],
+    }
+    initial, original = finish_contract_run(
+        bridge,
+        bridge.start(book_id),
+        "Original question card",
+        draft_patch={**named_patch(chapter_id, text), "question_findings": [finding]},
+    )
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    if human:
+        original = service.decide(
+            original["id"], ResearchDecision(action="accept", expected_version=original["version"])
+        )
+    notebook.sync_card(
+        located_card(
+            bridge.workflow.card(original["id"]), bridge.workflow.snapshot(initial["run_id"])
+        )
+    )
+    other_book, other_article = later_source(engine, source_run, chapter_id)
+    _, counterpart = finish_contract_run(
+        bridge,
+        bridge.start(other_book),
+        "Later question card",
+        draft_patch=named_patch(other_article, text),
+    )
+    links = bridge.enqueue_links(other_book)
+    refresh = next(
+        bridge.workflow.status(run_id)
+        for run_id in links
+        if bridge.workflow.status(run_id)["research_scope"]["source_card_id"] == original["id"]
+    )
+    snapshot = bridge.workflow.snapshot(refresh["run_id"])
+    assert snapshot["research_questions"][0]["id"] == question["id"]
+    assert snapshot["research_questions"][0]["book_ids"] == []
+    assert snapshot["research_questions"][0]["definition_version"] == question["definition_version"]
+    _, replacement = finish_contract_run(
+        bridge,
+        refresh,
+        "Question-linked refresh",
+        counterpart=counterpart,
+        draft_patch={"question_findings": [finding]},
+    )
+    notebook.sync_card(
+        located_card(replacement, snapshot, bridge.workflow.sources(refresh["run_id"]))
+    )
+    retained = service.workspace.question(question["id"])
+    original_finding = next(
+        item for item in retained["findings"] if item["card_id"] == original["id"]
+    )
+    new_finding = next(
+        item for item in retained["findings"] if item["card_id"] == replacement["id"]
+    )
+    assert new_finding["card_current"] and new_finding["definition_current"]
+    assert original_finding["card_current"] is human
+    assert notebook.question(question["id"])["book_ids"] == []
+    if human:
+        assert bridge.workflow.card(original["id"])["human_decision"] == original["human_decision"]
+        assert (
+            replacement["linked_card_id"] == original["id"] and not replacement["replaces_card_id"]
+        )
+    else:
+        assert replacement["replaces_card_id"] == original["id"]
+
+
+def test_link_context_prioritizes_current_definitions_and_bounds_prior_findings(research_book):
+    from hrs.research.notebook import ResearchNotebook
+
+    _, _, bridge, book_id, _, _, _ = research_book
+    notebook = ResearchNotebook(bridge.store)
+    first = notebook.create("Original global question", [])
+    notebook.update(first["id"], first["version"], title="Current global question definition")
+    additional = [notebook.create(f"Other active question {index}", []) for index in range(12)]
+    card = {"question_findings": [{"question_id": first["id"], "definition_version": 1}]}
+    context = bridge._link_questions(card, [book_id])
+    assert len(context["questions"]) == 10 and context["omitted"] == 3
+    assert context["questions"][0]["id"] == first["id"]
+    assert (
+        context["questions"][0]["definition_version"] == 2
+        and context["questions"][0]["book_ids"] == []
+    )
+    assert not context["preserve_source_card"]
+    card["question_findings"].extend(
+        {"question_id": question["id"], "definition_version": 1} for question in additional
+    )
+    context = bridge._link_questions(card, [book_id])
+    assert len(context["questions"]) == 10 and context["omitted"] == 3
+    assert context["previous_omitted"] == 3 and context["preserve_source_card"]
+
+
+def test_notebook_syncs_http_decisions_and_controls_even_when_projection_is_current(research_book):
+    from hrs.research.notebook import ResearchNotebook
+
+    settings, engine, bridge, book_id, _, chapter_id, text = research_book
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    notebook = ResearchNotebook(bridge.store)
+    question = notebook.create("A pending finding needs a human decision", [book_id])
+    status, card = finish_contract_run(
+        bridge,
+        bridge.start(book_id),
+        "Pending question",
+        pending=True,
+        draft_patch={
+            "question_findings": [
+                {
+                    "id": "finding",
+                    "question_id": question["id"],
+                    "definition_version": 1,
+                    "text": "Synthetic statement awaiting review",
+                    "status": "partial",
+                    "evidence_ids": ["e1"],
+                    "unresolved": [],
+                }
+            ]
+        },
+    )
+    bridge.tick()
+    assert notebook.question(question["id"])["findings"] == []
+    app = create_app(settings, engine)
+    app.state.research = service
+    with TestClient(app) as client:
+        approved = client.post(
+            f"/api/v2/research/cards/{card['id']}/decision",
+            json={"action": "accept", "expected_version": card["version"]},
+        )
+        assert approved.status_code == 200
+        assert (
+            bridge.projection.versions()[status["run_id"]]
+            == bridge.workflow.status(status["run_id"])["version"]
+        )
+        bridge.tick()
+        assert len(notebook.question(question["id"])["findings"]) == 1
+        current_question = notebook.question(question["id"])
+        scope = {
+            "kind": "question",
+            "book_ids": [book_id],
+            "question_id": question["id"],
+            "definition_version": 1,
+        }
+        pending_run = bridge.start(
+            book_id,
+            question_id=question["id"],
+            article_ids=[chapter_id],
+            purpose="question",
+            research_scope=scope,
+        )
+        notebook.attach_runs(question["id"], current_question["version"], [pending_run["run_id"]])
+        for action in ("pause", "resume"):
+            response = client.post(f"/api/v2/research/runs/{pending_run['run_id']}/{action}")
+            assert response.status_code == 200
+            bridge.tick()
+            assert notebook.question(question["id"])["runs"][0]["state"] == response.json()["state"]
+        packet = bridge.workflow.claim(
+            pending_run["run_id"], "synthetic-count-progress", stage="author"
+        )
+        bridge.projection.sync(bridge.workflow.status(pending_run["run_id"]))
+        bridge.tick()
+        before = notebook.question(question["id"])["version"]
+        for source in packet["source_index"]:
+            bridge.workflow.read_source(packet["task_token"], article_id=source["id"])
+        updated = bridge.workflow.submit(
+            packet["task_token"],
+            "synthetic-count-progress",
+            {
+                "input_hash": packet["input_hash"],
+                "cards": [
+                    {
+                        "id": "draft",
+                        "article_id": chapter_id,
+                        "title": "Synthetic progress",
+                        "summary": "Counts only; no new user decision",
+                        "evidence": [
+                            {
+                                "id": "e1",
+                                "article_id": chapter_id,
+                                "start": text.index("人物甲"),
+                                "end": text.index("人物甲") + 3,
+                                "quote": "人物甲",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        assert updated["state"] == "running"
+        bridge.projection.sync(updated)
+        bridge.tick()
+        assert notebook.question(question["id"])["version"] == before
+        restarted = ResearchBridge(settings, engine, store=bridge.store, objects=bridge.objects)
+        restarted.tick()
+        assert notebook.question(question["id"])["version"] == before
+
+
+def test_alias_decision_refreshes_durable_projection_and_authorized_hybrid_index(
+    research_book, monkeypatch
+):
+    from hrs.research.discovery import ResearchDiscovery
+    from hrs.research.workspace import IdentityDecision
+    from hrs.search.indexing import BookIndexer
+
+    settings, engine, bridge, book_id, source_run, chapter_id, text = research_book
+    status, card = finish_contract_run(
+        bridge, bridge.start(book_id), "Named source", draft_patch=named_patch(chapter_id, text)
+    )
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    entity_id = bridge.workflow.list_entities(run_id=status["run_id"])[0]["canonical_id"]
+    entity = service.entity(entity_id)
+    with engine.connect() as connection:
+        before = connection.scalar(
+            select(db.research_runs.c.summary).where(db.research_runs.c.id == status["run_id"])
+        )
+    result = service.workspace.identity_decision(
+        entity_id,
+        IdentityDecision(
+            action="alias",
+            expected_version=entity["version"],
+            alias="甲先生唯一别名",
+            evidence_refs=[
+                {"card_id": card["id"], "card_version": card["version"], "evidence_id": "e1"}
+            ],
+        ),
+    )
+    assert any(alias["name"] == "甲先生唯一别名" for alias in result["aliases"])
+    assert service.evidence.authorized_entity_ids([entity_id]) == {entity_id}
+    graph = service.workspace.graph(entity_id)
+    assert entity_id in {node["id"] for node in graph["nodes"]}, graph
+    with engine.connect() as connection:
+        summary = connection.scalar(
+            select(db.research_runs.c.summary).where(db.research_runs.c.id == status["run_id"])
+        )
+        projected = connection.scalar(
+            select(db.research_entities.c.summary).where(
+                db.research_entities.c.run_id == status["run_id"]
+            )
+        )
+        assert "甲先生唯一别名" in json.dumps(projected, ensure_ascii=False)
+        assert summary["discovery_input_sha256"] != before["discovery_input_sha256"]
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(db.outbox)
+                .where(db.outbox.c.kind == "index_research", db.outbox.c.run_id == source_run)
+            )
+            == 3
+        )
+    settings = settings.model_copy(
+        update={
+            "opensearch_url": "http://127.0.0.1:19269",
+            "opensearch_index": "test-alias-" + uuid4().hex,
+        }
+    )
+    discovery = ResearchDiscovery(settings, engine, bridge.objects, bridge.store)
+    monkeypatch.setattr(
+        BookIndexer,
+        "embed_cached",
+        lambda self, run_id, records, metrics: {
+            "chunks": [dict(record, vector=[1.0] + [0.0] * 1023) for record in records],
+            "model": {"synthetic_contract_only": True},
+        },
+    )
+    try:
+        discovery.index(status["run_id"], summary["discovery_input_sha256"])
+        found = discovery.search("甲先生唯一别名", semantic=False, book_ids=[book_id])
+        assert any(
+            row["record_id"] == entity_id and row["record_kind"] == "entity"
+            for row in found["records"]
+        )
+    finally:
+        if discovery.client.indices.exists(index=discovery.name):
+            discovery.client.indices.delete(index=discovery.name)
+
+
+def test_reading_annotations_bind_exact_quote_version_and_canonical_entity(
+    research_book, monkeypatch
+):
+    from hrs.library.catalog import Library
+
+    settings, engine, bridge, book_id, source_run, chapter_id, text = research_book
+    _, card = finish_contract_run(
+        bridge, bridge.start(book_id), "Reader source", draft_patch=named_patch(chapter_id, text)
+    )
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    monkeypatch.setattr(
+        Library,
+        "chapter",
+        lambda self, cid: {
+            "id": chapter_id,
+            "book_id": book_id,
+            "run_id": source_run,
+            "text": text,
+            "text_sha256": text_digest(text),
+        },
+    )
+    result = service.workspace.reading(chapter_id, expected_sha256=text_digest(text))
+    assert result["source_current"] and result["annotations"]
+    annotation = result["annotations"][0]
+    assert text[annotation["start"] : annotation["end"]] == annotation["quote"] == "人物甲"
+    assert annotation["entity_id"].startswith("entity-")
+    assert annotation["card_id"] == card["id"]
+    with pytest.raises(ServiceError, match="阅读原文已换版"):
+        service.workspace.reading(chapter_id, expected_sha256="0" * 64)
+
+
+def test_new_book_completion_durably_queues_native_link_refresh_without_human_overwrite(
+    research_book,
+):
+    settings, engine, bridge, book_id, source_run, chapter_id, text = research_book
+    _, original = finish_contract_run(
+        bridge, bridge.start(book_id), "Original source", draft_patch=named_patch(chapter_id, text)
+    )
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    original = service.decide(
+        original["id"], ResearchDecision(action="accept", expected_version=original["version"])
+    )
+    other_book, other_run, other_chapter = (str(uuid4()) for _ in range(3))
+    with engine.begin() as connection:
+        source = (
+            connection.execute(select(db.runs).where(db.runs.c.id == source_run)).mappings().one()
+        )
+        chapter = (
+            connection.execute(select(db.chapters).where(db.chapters.c.id == chapter_id))
+            .mappings()
+            .one()
+        )
+        connection.execute(
+            insert(db.books).values(id=other_book, title="Later arrival", state="ready")
+        )
+        connection.execute(
+            insert(db.runs).values(**{**source, "id": other_run, "book_id": other_book})
+        )
+        connection.execute(
+            insert(db.chapters).values(
+                **{**chapter, "id": other_chapter, "run_id": other_run, "book_id": other_book}
+            )
+        )
+    _, second = finish_contract_run(
+        bridge,
+        bridge.start(other_book),
+        "Later source",
+        draft_patch=named_patch(other_chapter, text),
+    )
+    bridge.refresh_links()
+    links = [run for run in bridge.workflow.list_runs() if run.get("purpose") == "link_refresh"]
+    assert len(links) == 2
+    assert {run["research_scope"]["source_card_id"] for run in links} == {
+        original["id"],
+        second["id"],
+    }
+    old = bridge.workflow.card(original["id"])
+    assert old["state"] == "human_accepted" and old["human_decision"] == original["human_decision"]
+    for run in links:
+        frozen = bridge.workflow.snapshot(run["run_id"])
+        assert frozen["link_target_cards"][0]["card_id"] in {original["id"], second["id"]}
+        assert len(frozen["articles"]) == 1
+    bridge.refresh_links()
+    assert len([r for r in bridge.workflow.list_runs() if r.get("purpose") == "link_refresh"]) == 2
+    refresh = next(
+        run for run in links if run["research_scope"]["source_card_id"] == original["id"]
+    )
+    _, package = finish_contract_run(
+        bridge, refresh, "Independent relation package", counterpart=second
+    )
+    retained = service.card(original["id"])
+    assert (
+        retained["human_decision"] == original["human_decision"]
+        and retained["version"] == original["version"]
+    )
+    edge = retained["derived_relations"]["items"][0]
+    assert edge["source_id"] == original["id"] and edge["target_id"] == second["id"]
+    assert edge["card_id"] == package["id"] != original["id"]
+    assert {span["book_id"] for span in edge["evidence"]} == {book_id, other_book}
+    assert {span["reading_target"]["chapter_id"] for span in edge["evidence"]} == {
+        chapter_id,
+        other_chapter,
+    }
+    assert service.card(second["id"])["derived_relations"]["items"][0]["id"] == edge["id"]
+    from hrs.research.workspace import QuestionCreate, QuestionEvidence
+
+    question = service.workspace.create_question(
+        QuestionCreate(title="Select both retained sides", book_ids=[book_id, other_book])
+    )
+    selected = service.workspace.select_evidence(
+        question["id"],
+        QuestionEvidence(
+            expected_version=question["version"],
+            kind="relation",
+            target_id=edge["id"],
+            decision="adopted",
+        ),
+    )
+    evidence = selected["selections"][0]["evidence"]
+    assert {span["book_id"] for span in evidence} == {book_id, other_book}
+    assert all(span["source_current"] for span in evidence)
+    assert "后续补充的双向关系" in service.export(original["id"])
+
+
+def test_structured_card_revision_replaces_only_its_article_after_independent_review(
+    research_book, monkeypatch
+):
+    from hrs.research.discovery import ResearchDiscovery
+    from hrs.research.models import CardDraft
+    from hrs.research.workspace import CardRevision
+    from hrs.search.indexing import BookIndexer
+
+    settings, engine, bridge, book_id, _, chapter_id, _ = research_book
+    second_id = str(uuid4())
+    with engine.begin() as connection:
+        article = (
+            connection.execute(select(db.chapters).where(db.chapters.c.id == chapter_id))
+            .mappings()
+            .one()
+        )
+        connection.execute(
+            insert(db.chapters).values(
+                **{**article, "id": second_id, "position": 1, "title": "Second article"}
+            )
+        )
+    initial = bridge.start(book_id)
+    initial, first = finish_contract_run(bridge, initial, "LegacyOnlyMarker")
+    initial, second = finish_contract_run(bridge, initial, "Second article")
+    assert initial["state"] == "completed"
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    draft = CardDraft.model_validate(bridge.workflow.card_draft(first["id"]))
+    draft.summary = "User structured revision retained for review"
+    draft.title = "RevisedOnlyMarker"
+    revised_run = service.workspace.card_revision(
+        first["id"], CardRevision(expected_version=first["version"], card=draft)
+    )
+    assert {row["id"] for row in service.records(db.research_cards, book_id)["items"]} == {
+        first["id"],
+        second["id"],
+    }
+    packet = bridge.workflow.claim(
+        revised_run["run_id"], "synthetic-independent-revision", stage="verify"
+    )
+    for source in packet["source_index"]:
+        bridge.workflow.read_source(packet["task_token"], article_id=source["id"])
+    candidate = bridge.workflow.candidate(
+        packet["task_token"],
+        "synthetic-independent-revision",
+        {
+            "article_id": first["article_id"],
+            "text_sha256": text_digest(
+                bridge.workflow.snapshot(initial["run_id"])["articles"][0]["text"]
+            ),
+            "summary": "Synthetic original-first observation",
+        },
+    )
+    final = bridge.workflow.submit(
+        packet["task_token"],
+        "synthetic-independent-revision",
+        {
+            "input_hash": packet["input_hash"],
+            "decision": "approve",
+            **candidate["required_checks"],
+            "issues": [],
+        },
+    )
+    bridge.projection.sync(final)
+    replacement = bridge.workflow.list_cards(run_id=final["run_id"])[0]
+    assert replacement["replaces_card_id"] == first["id"]
+    assert {row["id"] for row in service.records(db.research_cards, book_id)["items"]} == {
+        replacement["id"],
+        second["id"],
+    }
+    assert service.card(first["id"])["superseded"]
+    assert not service.card(second["id"])["superseded"]
+    assert service.card(replacement["id"])["summary"] == draft.summary
+    # The original run still owns the second article, so its generation remains
+    # searchable; its superseded first card must not consume the top-N window.
+    indexed_settings = settings.model_copy(
+        update={
+            "opensearch_url": "http://127.0.0.1:19269",
+            "opensearch_index": "test-lineage-" + uuid4().hex,
+        }
+    )
+    discovery = ResearchDiscovery(indexed_settings, engine, bridge.objects, bridge.store)
+    monkeypatch.setattr(
+        BookIndexer,
+        "embed_cached",
+        lambda self, run_id, records, metrics: {
+            "chunks": [dict(record, vector=[1.0] + [0.0] * 1023) for record in records],
+            "model": {"synthetic_contract_only": True},
+        },
+    )
+    try:
+        for run in (initial, final):
+            with engine.connect() as connection:
+                projected = connection.scalar(
+                    select(db.research_runs.c.summary).where(db.research_runs.c.id == run["run_id"])
+                )
+            discovery.index(run["run_id"], projected["discovery_input_sha256"])
+        assert discovery.scope([book_id])["ready_runs"] == 2
+        assert (
+            discovery.search("LegacyOnlyMarker", book_ids=[book_id], semantic=False)["records"]
+            == []
+        )
+        assert (
+            discovery.search("RevisedOnlyMarker", book_ids=[book_id], semantic=False)["records"][0][
+                "record_id"
+            ]
+            == replacement["id"]
+        )
+    finally:
+        if discovery.client.indices.exists(index=discovery.name):
+            discovery.client.indices.delete(index=discovery.name)
+
+
+def test_retained_policy_is_visible_as_upgrade_without_automatic_rewriting(
+    research_book, monkeypatch
+):
+    from copy import deepcopy
+
+    from hrs.processing import research_workflow
+
+    settings, engine, bridge, book_id, _, _, _ = research_book
+    status, _ = finish_contract_run(bridge, bridge.start(book_id), "Retained v4 source")
+    current = deepcopy(research_workflow.POLICY)
+    current["version"] = 5
+    current["complete_research"] = True
+    monkeypatch.setattr(research_workflow, "POLICY", current)
+    bridge.tick()
+    assert (
+        len(
+            [
+                run
+                for run in bridge.workflow.list_runs(book_id)
+                if run.get("purpose", "book") == "book"
+            ]
+        )
+        == 1
+    )
+    service = Research(settings, engine)
+    service.bridge, service.workflow = bridge, bridge.workflow
+    result = service.overview(book_id)
+    assert result["needs_upgrade"] and result["needs_update"]
+    assert (
+        result["research_policy_version"] == 4 and result["required_research_policy_version"] == 5
+    )
+    assert result["runs"][0]["run_id"] == status["run_id"]
 
 
 def test_status_changes_reference_one_immutable_source_object(research_book):
@@ -523,9 +1536,17 @@ def test_pending_human_api_cas_reader_export_and_deleted_book_cancellation(resea
         assert connection.scalar(select(func.count()).select_from(db.research_runs)) == 0
 
 
-def finish_contract_run(bridge, status, title, *, pending=False, external=None):
+def finish_contract_run(
+    bridge, status, title, *, pending=False, external=None, draft_patch=None, counterpart=None
+):
     """Synthetic stage contracts; this helper is never a native accuracy acceptance."""
-    article = bridge.workflow.snapshot(status["run_id"])["articles"][0]
+    first_worker = f"synthetic-{status['run_id']}-author"
+    first_packet = bridge.workflow.claim(status["run_id"], first_worker, stage="author")
+    article = next(
+        article
+        for article in bridge.workflow.snapshot(status["run_id"])["articles"]
+        if article["id"] == first_packet["article_id"]
+    )
     start = article["text"].index("人物甲")
     draft = {
         "id": "local-card",
@@ -542,9 +1563,14 @@ def finish_contract_run(bridge, status, title, *, pending=False, external=None):
             }
         ],
     }
+    draft.update(draft_patch or {})
     for stage in ("author", "enrich", "verify"):
         worker = f"synthetic-{status['run_id']}-{stage}"
-        packet = bridge.workflow.claim(status["run_id"], worker)
+        packet = (
+            first_packet
+            if stage == "author"
+            else bridge.workflow.claim(status["run_id"], worker, stage=stage)
+        )
         for source in packet["source_index"]:
             bridge.workflow.read_source(packet["task_token"], article_id=source["id"])
         if stage == "enrich":
@@ -557,6 +1583,7 @@ def finish_contract_run(bridge, status, title, *, pending=False, external=None):
                     "hits": [],
                     "metrics": {"synthetic_contract": True},
                 },
+                book_ids=(status.get("research_scope") or {}).get("book_ids"),
             )
             if external:
                 source = bridge.workflow.add_source(packet["task_token"], external)[0]
@@ -570,6 +1597,37 @@ def finish_contract_run(bridge, status, title, *, pending=False, external=None):
                         "quote": "人物甲",
                     }
                 )
+            if counterpart:
+                target = bridge.workflow.target_card(
+                    packet["task_token"], worker, counterpart["id"], counterpart["version"]
+                )
+                for source in target["source_index"]:
+                    bridge.workflow.read_source(packet["task_token"], article_id=source["id"])
+                for offset in range(0, target["total"], 1600):
+                    bridge.workflow.target_card_text(
+                        packet["task_token"], worker, target["card_ref"], offset, 1600
+                    )
+                draft["evidence"].append(
+                    {
+                        "id": "e2",
+                        "article_id": target["source_ids"][0],
+                        "start": start,
+                        "end": start + 3,
+                        "quote": "人物甲",
+                    }
+                )
+                draft["cross_relations"] = [
+                    {
+                        "id": "cross",
+                        "kind": "association",
+                        "reason": "Synthetic two-sided contract only",
+                        "target_card_id": counterpart["id"],
+                        "target_card_version": counterpart["version"],
+                        "target_publication_sha256": counterpart["publication_sha256"],
+                        "source_evidence_ids": ["e1"],
+                        "target_evidence_ids": ["e2"],
+                    }
+                ]
         if stage == "verify":
             candidate = bridge.workflow.candidate(
                 packet["task_token"],
@@ -580,6 +1638,11 @@ def finish_contract_run(bridge, status, title, *, pending=False, external=None):
                     "summary": "Synthetic source-first observation",
                 },
             )
+            for target in candidate.get("target_cards", []):
+                for offset in range(0, target["total"], 1600):
+                    bridge.workflow.target_card_text(
+                        packet["task_token"], worker, target["card_ref"], offset, 1600
+                    )
             result = {
                 "decision": "pending" if pending else "approve",
                 **candidate["required_checks"],
@@ -591,7 +1654,70 @@ def finish_contract_run(bridge, status, title, *, pending=False, external=None):
             packet["task_token"], worker, {"input_hash": packet["input_hash"], **result}
         )
     bridge.projection.sync(status)
-    return status, bridge.workflow.list_cards(run_id=status["run_id"])[0]
+    return status, next(
+        card
+        for card in bridge.workflow.list_cards(run_id=status["run_id"])
+        if card["article_id"] == article["id"]
+    )
+
+
+def test_derived_discovery_is_versioned_and_never_reuses_stale_source(research_book, monkeypatch):
+    from hrs.research.discovery import ResearchDiscovery
+    from hrs.search.indexing import BookIndexer
+
+    settings, engine, bridge, book_id, source_run, _, _ = research_book
+    status, card = finish_contract_run(bridge, bridge.start(book_id), "Distinct discovery title")
+    settings = settings.model_copy(
+        update={
+            "opensearch_url": "http://127.0.0.1:19269",
+            "opensearch_index": "test-discovery-" + uuid4().hex,
+        }
+    )
+    discovery = ResearchDiscovery(settings, engine, bridge.objects, bridge.store)
+    monkeypatch.setattr(
+        BookIndexer,
+        "embed_cached",
+        lambda self, run_id, records, metrics: {
+            "chunks": [dict(record, vector=[1.0] + [0.0] * 1023) for record in records],
+            "model": {"synthetic_contract_only": True},
+        },
+    )
+    with engine.connect() as connection:
+        expected = connection.scalar(
+            select(db.research_runs.c.summary).where(db.research_runs.c.id == status["run_id"])
+        )["discovery_input_sha256"]
+    try:
+        built = discovery.index(status["run_id"], expected)
+        assert built["chunks"] > 0
+        with engine.begin() as connection:
+            connection.execute(
+                update(db.outbox).where(db.outbox.c.kind == "index_research").values(delivered=True)
+            )
+        assert bridge.rebuild_discovery(source_run)["research_run_ids"] == [status["run_id"]]
+        with engine.connect() as connection:
+            assert (
+                connection.scalar(
+                    select(func.count())
+                    .select_from(db.outbox)
+                    .where(db.outbox.c.kind == "index_research", db.outbox.c.delivered.is_(False))
+                )
+                == 1
+            )
+        result = discovery.search("Distinct discovery", book_ids=[book_id], semantic=False)
+        assert result["available"] and result["backend"] == "lexical"
+        assert result["records"][0]["record_id"] == card["id"]
+        assert result["records"][0]["source_evidence"] is False
+        with engine.begin() as connection:
+            source = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == source_run))
+            connection.execute(
+                update(db.runs)
+                .where(db.runs.c.id == source_run)
+                .values(result={**source, "codex_publication_sha256": "e" * 64})
+            )
+        assert discovery.search("Distinct discovery", semantic=False)["records"] == []
+    finally:
+        if discovery.client.indices.exists(index=discovery.name):
+            discovery.client.indices.delete(index=discovery.name)
 
 
 def test_research_revision_keeps_complete_cards_until_replacement_is_ready(research_book):

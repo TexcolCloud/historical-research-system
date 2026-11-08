@@ -102,7 +102,8 @@ def test_two_books_run_together_and_shutdown_retains_both_receipts_and_checkpoin
 
         def __init__(self, args, *, stdout, **kwargs):
             self.run_id = args[0].removeprefix("synthetic-")
-            worker = "worker-" + self.run_id
+            execution_id = workflow.status(self.run_id)["native_execution_id"]
+            worker = f"{self.run_id}-{execution_id}-author-0001"
             assert workflow.claim(self.run_id, worker)
             stdout.write(
                 json.dumps(

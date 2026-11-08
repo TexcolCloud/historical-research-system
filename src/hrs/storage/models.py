@@ -233,8 +233,20 @@ research_entities = Table(
     Column("content", JSONB, nullable=False),
 )
 Index("ix_research_entities_name", research_entities.c.name)
+Index("ix_research_entities_canonical", research_entities.c.summary["canonical_id"].astext)
 Index(
     "ix_research_entities_search",
     func.to_tsvector(literal_column("'simple'::regconfig"), research_entities.c.search_text),
     postgresql_using="gin",
+)
+
+# Rebuildable discovery-generation receipts, never native research task state.
+research_discovery_indexes = Table(
+    "research_discovery_indexes",
+    metadata,
+    Column("id", Text, ForeignKey("research_runs.id", ondelete="CASCADE"), primary_key=True),
+    Column("input_sha256", Text, nullable=False),
+    Column("generation", Text, nullable=False),
+    Column("chunks", Integer, nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )

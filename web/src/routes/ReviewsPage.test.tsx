@@ -1,11 +1,20 @@
 // @vitest-environment happy-dom
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReviewsPage from "./ReviewsPage.tsx";
 import { respondWith } from "@/test/responses.ts";
-afterEach(cleanup);
+import { research } from "@/features/research/api";
+beforeEach(() =>
+  vi
+    .spyOn(research, "pending")
+    .mockResolvedValue({ items: [], total: 0, offset: 0, limit: 50 }),
+);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 test("running content issues and independent directory conflicts stay discoverable", async () => {
   respondWith(() => [

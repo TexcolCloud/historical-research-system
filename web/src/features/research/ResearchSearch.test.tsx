@@ -5,10 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ResearchSearch from "./ResearchSearch";
+import * as libraryApi from "@/client/api";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 test("cross-book search keeps the selected book filter and opens an exact source with a restorable search URL", async () => {
@@ -165,4 +167,52 @@ test("explicit same-query search refreshes newly finished cards once and a chang
   await userEvent.click(screen.getByRole("button", { name: "查找" }));
   await vi.waitFor(() => expect(requests).toHaveLength(3));
   expect(requests[2].searchParams.get("q")).toBe("补给");
+});
+
+test("choosing two books submits one joint search with both source filters", async () => {
+  const searches: URL[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://local");
+      if (url.pathname === "/api/v2/books")
+        return Response.json([
+          { id: "book-a", title: "甲书", state: "ready" },
+          { id: "book-b", title: "乙书", state: "ready" },
+        ]);
+      searches.push(url);
+      return Response.json({
+        query: "运输",
+        available: true,
+        backend: "hybrid",
+        hits: [],
+        cards: [],
+        entities: [],
+      });
+    }),
+  );
+  vi.spyOn(libraryApi, "readBooks").mockImplementation(async () =>
+    (await fetch("/api/v2/books")).json(),
+  );
+  render(
+    <MemoryRouter initialEntries={["/research?q=运输"]}>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ResearchSearch />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "选择书籍" }));
+  await userEvent.click(await screen.findByRole("checkbox", { name: "甲书" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: "乙书" }));
+  const before = searches.length;
+  await userEvent.click(screen.getByRole("button", { name: "应用书籍范围" }));
+  await vi.waitFor(() => expect(searches).toHaveLength(before + 1));
+  expect(searches.at(-1)?.searchParams.getAll("book_ids")).toEqual([
+    "book-a",
+    "book-b",
+  ]);
 });

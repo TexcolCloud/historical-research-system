@@ -17,6 +17,50 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("a whole footnote definition safely falls back while its visible body maps with unchanged source and note ownership", () => {
+  const markdown = "标题[^*]。\n\n[^*]: 星注原文。";
+  const start = markdown.indexOf("[^*]:"),
+    end = markdown.length;
+  const footnotes = [
+    {
+      id: "star-note",
+      label: "*",
+      note: { start, end, marker_end: start + 5 },
+      references: [
+        { start: markdown.indexOf("[^*]"), end: markdown.indexOf("[^*]") + 4 },
+      ],
+    },
+  ];
+  const retained = JSON.stringify(footnotes);
+  const failed = vi.fn();
+  const { container, rerender } = render(
+    <RenderedMarkdown
+      markdown={markdown}
+      footnotes={footnotes}
+      readingFocus={{ id: "whole-source-note", start, end }}
+      onReadingFailure={failed}
+    />,
+  );
+  const visibleText = container.textContent;
+  expect(failed).toHaveBeenLastCalledWith(["whole-source-note"]);
+  expect(container.querySelector("mark[data-reading-focus]")).toBeNull();
+  rerender(
+    <RenderedMarkdown
+      markdown={markdown}
+      footnotes={footnotes}
+      readingFocus={{ id: "visible-note-body", start: start + 6, end }}
+      onReadingFailure={failed}
+    />,
+  );
+  expect(failed).toHaveBeenLastCalledWith([]);
+  expect(container.querySelector("mark[data-reading-focus]")?.textContent).toBe(
+    "星注原文。",
+  );
+  expect(container.textContent).toBe(visibleText);
+  expect(container.querySelector('[id$="star-note"]')).toBeTruthy();
+  expect(JSON.stringify(footnotes)).toBe(retained);
+});
+
 test("reading links and destination focus preserve Unicode and footnote targets", async () => {
   const markdown = "😀目录条目 …… 12\n\n正文[^1]。\n\n[^1]: 原注。";
   const chars = Array.from(markdown),
@@ -125,10 +169,7 @@ test("the actual backend search target renders an exact cross-block highlight", 
     target: ReadingTarget;
   } = JSON.parse(
     readFileSync(
-      resolve(
-        process.cwd(),
-        "../tests/fixtures/reading_heading_target.json",
-      ),
+      resolve(process.cwd(), "../tests/fixtures/reading_heading_target.json"),
       "utf8",
     ),
   );

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -7,6 +7,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReaderPanel from "./ReaderPanel";
 import { readingHref } from "./reader-location";
 import { respondWith } from "@/test/responses";
+import { research } from "@/features/research/api";
+beforeEach(() =>
+  vi.spyOn(research, "reading").mockResolvedValue({
+    chapter_id: "",
+    run_id: "",
+    text_sha256: "",
+    cards: [],
+    annotations: [],
+  }),
+);
 
 afterEach(() => {
   cleanup();

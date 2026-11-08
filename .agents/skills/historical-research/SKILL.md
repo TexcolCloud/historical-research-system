@@ -43,11 +43,20 @@ source for PDF routing, original-first review, publication and post-index resear
 For research cards and person/event evidence, open the workbench's research view
 and inspect `research_status(run_id)`. Research starts from published, indexed,
 content-verified articles and has an independent queue; original reading does not
-wait for cards. Its author, enrich and independent verify stages use native Sol
-workers and their `research_claim` packets. Follow the research section of
+wait for cards. Its author, enrich, independent verify and, when required, one
+directed repair followed by fresh independent reverify use native Sol workers
+and their `research_claim` packets. Follow the research section of
 `workflow_instructions` for complete source reads, candidate gates, cross-book
-freezing and submission coverage. Search hits and graph neighbours are leads;
-retain source-bound identity uncertainty. Old `kind=cards` execution stays retired.
+freezing, source-first omission inventories and submission coverage. New complete
+cards retain metadata, every source part, named entities, event modalities and
+participant roles. Enrichment persists its question plan before retrieval;
+cross-card relationships freeze both card versions and complete sources.
+Use the research workspace for question scope, adopted/excluded evidence,
+unresolved findings and source-bound person/event navigation. Search hits and
+graph neighbours are leads; retain identity uncertainty. Canonical identity
+changes and structured card revisions are explicit local human actions.
+Old frozen policies remain unchanged; upgrade a basic card through an explicit
+research revision. Old `kind=cards` execution stays retired.
 
 If independent original-image audits still disagree after detail inspection,
 use `request_human_review` with current evidence hashes and the exact unresolved

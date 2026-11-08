@@ -68,6 +68,7 @@ class Search:
         self.library, self.outputs = Library(settings, engine), Outputs(settings, engine)
 
     def active_scope(self, book_id):
+        selected = list(book_id) if isinstance(book_id, (list, tuple)) else None
         with self.engine.connect() as connection:
             rows = connection.execute(
                 select(db.runs.c.book_id, db.runs.c.result)
@@ -75,7 +76,10 @@ class Search:
                 .where(
                     db.runs.c.kind == "book",
                     db.books.c.state.not_in(["deleting", "delete_failed", "deleted"]),
-                    *([db.runs.c.book_id == str(book_id)] if book_id else []),
+                    *(
+                        [db.runs.c.book_id.in_(selected)] if selected is not None
+                        else [db.runs.c.book_id == str(book_id)] if book_id else []
+                    ),
                 )
             ).all()
         published = [
@@ -94,7 +98,8 @@ class Search:
         policies = [
             calibrated_policy(result) for _, result in rows if result and result.get("published")
         ]
-        self._policy = policies[0] if book_id and len(policies) == 1 else {}
+        singleton = len(selected) == 1 if selected is not None else bool(book_id)
+        self._policy = policies[0] if singleton and len(policies) == 1 else {}
         active = [generation for _, generation in published if generation]
         legacy = [book for book, generation in published if not generation]
         return [
@@ -137,11 +142,21 @@ class Search:
         chapter_ids=None,
         include_navigation=False,
         toc_entry_id=None,
+        book_ids=None,
     ):
+        if book_ids is not None:
+            if book_id is not None:
+                raise ValueError("Single-book and multi-book search scopes cannot be combined")
+            book_id = tuple(dict.fromkeys(map(str, book_ids)))
+        directory_book = book_id
+        if isinstance(book_id, tuple):
+            directory_book = book_id[0] if len(book_id) == 1 else None
+            if toc_entry_id and directory_book is None:
+                raise ValueError("A directory entry needs exactly one selected book")
         self._include_navigation = include_navigation
         metrics = metrics if metrics is not None else {}
         directory_scope = (
-            DirectoryScope.resolve(self.library, book_id, toc_entry_id) if toc_entry_id else None
+            DirectoryScope.resolve(self.library, directory_book, toc_entry_id) if toc_entry_id else None
         )
         try:
             with measured(metrics, "total_ms"):

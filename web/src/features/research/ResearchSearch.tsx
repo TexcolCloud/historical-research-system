@@ -6,20 +6,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { readingHref } from "@/features/library/reader-location";
 import { research } from "./api";
+import BookScope from "./BookScope";
+import QuestionPicker from "./QuestionPicker";
 
 export default function ResearchSearch() {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const q = params.get("q") ?? "",
     book = params.get("book_id") ?? "";
+  const books = [...new Set(params.getAll("book_ids"))];
+  const scope = books.length ? books : book;
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
   const results = useQuery({
-    queryKey: ["research", "search", q, book],
+    queryKey: ["research", "search", q, scope],
     enabled: Boolean(q),
     staleTime: 30000,
     refetchOnWindowFocus: false,
-    queryFn: ({ signal }) => research.search(q, book, signal),
+    queryFn: ({ signal }) => research.search(q, scope, signal),
   });
   const returnTo = `${location.pathname}${location.search}`;
   const noSources = results.data?.evidence_status === "no_published_sources";
@@ -61,13 +65,32 @@ export default function ResearchSearch() {
         <Button type="submit">查找</Button>
       </form>
       <div className="research-search-scope">
-        <span>{book ? "当前范围：所选书籍" : "当前范围：全部已入库书籍"}</span>
-        {book && (
+        <span>
+          {books.length
+            ? `当前范围：${books.length} 本书籍`
+            : book
+              ? "当前范围：所选书籍"
+              : "当前范围：全部已入库书籍"}
+        </span>
+        <BookScope
+          value={books.length ? books : book ? [book] : []}
+          onApply={(selected) => {
+            const next = new URLSearchParams(params);
+            next.delete("book_id");
+            next.delete("book_ids");
+            next.delete("card");
+            next.delete("entity");
+            selected.forEach((value) => next.append("book_ids", value));
+            setParams(next);
+          }}
+        />
+        {(book || books.length > 0) && (
           <Button
             variant="ghost"
             onClick={() => {
               const next = new URLSearchParams(params);
               next.delete("book_id");
+              next.delete("book_ids");
               next.delete("card");
               next.delete("entity");
               setParams(next);
@@ -105,38 +128,66 @@ export default function ResearchSearch() {
               {results.data.backend === "hybrid"
                 ? "原文：语义与关键词综合检索"
                 : "原文：关键词检索"}{" "}
-              · 卡片和人物事件按已保存文字匹配
+              {results.data.research_backend === "hybrid"
+                ? "· 卡片与人物事件：语义与关键词综合检索"
+                : results.data.research_backend === "lexical"
+                  ? "· 卡片与人物事件：关键词检索"
+                  : "· 卡片和人物事件按已保存文字匹配"}
             </p>
           )}
+          {results.data.research_index &&
+            results.data.research_index.state !== "ready" && (
+              <p role="status" className="workspace-status-note">
+                {results.data.research_index.state === "building"
+                  ? "研究索引正在构建，原文仍可检索。"
+                  : results.data.research_index.state === "partial"
+                    ? "部分研究索引尚未就绪，当前结果可能不完整。"
+                    : "研究索引暂不可用，保留已保存文字的明确匹配结果。"}
+              </p>
+            )}
           {!noSources &&
             !results.data.hits.length &&
             !results.data.cards.length &&
             !results.data.entities.length && (
               <p>没有找到相关内容。可缩短关键词后重试。</p>
             )}
-          {!!results.data.entities.length && (
-            <section aria-label="人物与事件结果">
-              <h2>人物与事件</h2>
-              <div className="research-entity-chips">
-                {results.data.entities.map((entity) => (
-                  <Button
-                    key={entity.id}
-                    variant="outline"
-                    onClick={() => select("entity", entity.id)}
-                  >
-                    {entity.name}
-                    <small>
-                      {entity.kind === "event"
-                        ? "事件"
-                        : entity.kind === "person"
-                          ? "人物"
-                          : "实体"}
-                    </small>
-                  </Button>
-                ))}
-              </div>
-            </section>
-          )}
+          {[
+            { kind: "person", label: "人物" },
+            { kind: "event", label: "事件" },
+            { kind: "other", label: "机构与地点" },
+          ].map(({ kind, label }) => {
+            const entities = results.data.entities.filter((item) =>
+              kind === "other"
+                ? !["person", "event"].includes(item.kind)
+                : item.kind === kind,
+            );
+            return (
+              entities.length > 0 && (
+                <section aria-label={`${label}结果`} key={kind}>
+                  <h2>{label}</h2>
+                  <div className="research-entity-chips">
+                    {entities.map((entity) => (
+                      <Button
+                        key={entity.id}
+                        variant="outline"
+                        onClick={() => select("entity", entity.id)}
+                      >
+                        {entity.name}
+                        {entity.aliases?.length ? (
+                          <small>
+                            别名：
+                            {entity.aliases
+                              .map((alias) => alias.name)
+                              .join("、")}
+                          </small>
+                        ) : null}
+                      </Button>
+                    ))}
+                  </div>
+                </section>
+              )
+            );
+          })}
           {!!results.data.cards.length && (
             <section aria-label="史料卡结果">
               <h2>史料卡</h2>
@@ -149,6 +200,13 @@ export default function ResearchSearch() {
                     {card.title}
                   </button>
                   <p>{card.summary}</p>
+                  <QuestionPicker
+                    material={{
+                      kind: "card",
+                      target_id: card.id,
+                      title: card.title,
+                    }}
+                  />
                   <Link
                     to={`/books/${encodeURIComponent(card.book_id)}?tab=research&card=${encodeURIComponent(card.id)}`}
                   >
@@ -168,6 +226,18 @@ export default function ResearchSearch() {
                     PDF 第 {hit.pages.join("、")} 页
                   </p>
                   <p className="research-quote">{hit.text}</p>
+                  {hit.reading_target && (
+                    <QuestionPicker
+                      material={{
+                        kind: "source",
+                        target_id: hit.reading_target.chapter_id,
+                        title: hit.title,
+                        start: hit.reading_target.start,
+                        end: hit.reading_target.end,
+                        text_sha256: hit.reading_target.text_sha256,
+                      }}
+                    />
+                  )}
                   {hit.reading_target && (
                     <Link
                       className="research-source-link"

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
@@ -8,6 +8,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReaderPanel from "@/features/library/ReaderPanel.tsx";
 import { respondWith } from "@/test/responses.ts";
 import { readingNavigationOptions } from "./navigation-query";
+import { research } from "@/features/research/api";
+beforeEach(() =>
+  vi.spyOn(research, "reading").mockResolvedValue({
+    chapter_id: "",
+    run_id: "",
+    text_sha256: "",
+    cards: [],
+    annotations: [],
+  }),
+);
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

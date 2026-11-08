@@ -11,7 +11,7 @@ from hrs.library.reading_locations import reading_target
 from hrs.processing.hashing import digest
 from hrs.storage import models as db
 
-PROJECTION_POLICY = 2
+PROJECTION_POLICY = 3
 
 
 def located_card(card, snapshot, external_sources=()):
@@ -26,6 +26,17 @@ def located_card(card, snapshot, external_sources=()):
         }
         evidence["reading_target"] = reading_target(chapter, evidence["start"], evidence["end"])
         evidence["text_sha256"] = article["text_sha256"]
+        evidence.update(
+            source_run_id=chapter["run_id"],
+            book_id=article.get("book_id") or evidence.get("book_id") or snapshot.get("book_id"),
+            original_article_id=chapter["id"],
+            publication_sha256=article.get("publication_sha256")
+            or evidence.get("publication_sha256")
+            or snapshot.get("publication_sha256"),
+            content_sha256=(article.get("content") or {}).get(
+                "sha256", evidence.get("content_sha256")
+            ),
+        )
         for note in evidence.get("footnotes", []):
             start, end = note["note"]["start"], note["note"]["end"]
             note["text"] = article["text"][start:end]
@@ -35,6 +46,22 @@ def located_card(card, snapshot, external_sources=()):
     card["book_title"] = snapshot.get("book_title", "")
     for mention in [*card.get("mentions", []), *card.get("events", [])]:
         mention["entity_id"] = digest([card["id"], mention["id"]])[:32]
+    return card
+
+
+def catalogue_card(card, workflow):
+    """Resolve only this card's indexed mentions without loading all book identities."""
+    from hrs.research.catalogue import ResearchCatalogue
+
+    mentions = [*card.get("mentions", []), *card.get("events", [])]
+    mapped = ResearchCatalogue(workflow.ledger).annotate_mentions(
+        [{"id": mention["entity_id"]} for mention in mentions]
+    )
+    for mention, identity in zip(mentions, mapped, strict=True):
+        mention["source_mention_id"] = mention["entity_id"]
+        if identity.get("canonical_id"):
+            mention["entity_id"] = identity["canonical_id"]
+            mention["canonical_id"] = identity["canonical_id"]
     return card
 
 
@@ -54,12 +81,12 @@ class ResearchProjection:
             cache[key] = self.put(value, source_run_id)
         return cache[key]
 
-    def sync(self, status):
+    def sync(self, status, *, force=False):
         run_id = status["run_id"]
         snapshot = self.workflow.snapshot(run_id)
         external = self.workflow.sources(run_id)
         cards = [
-            located_card(card, snapshot, external)
+            catalogue_card(located_card(card, snapshot, external), self.workflow)
             for card in self.workflow.list_cards(run_id=run_id)
         ]
         entities = self.workflow.list_entities(run_id=run_id)
@@ -114,7 +141,7 @@ class ResearchProjection:
                 "summary": card_summary(card),
                 "content": self.retained(
                     self.card_refs,
-                    (run_id, card["id"], card["version"]),
+                    (run_id, card["id"], card["version"], digest(card)),
                     card,
                     snapshot["source_run_id"],
                 ),
@@ -141,6 +168,7 @@ class ResearchProjection:
                         entity["id"],
                         entity.get("state"),
                         by_card[entity["card_id"]]["version"],
+                        digest(entity),
                     ),
                     entity,
                     snapshot["source_run_id"],
@@ -148,6 +176,12 @@ class ResearchProjection:
             }
             for entity in entities
         ]
+        discovery_input = digest(
+            [
+                [(row["id"], row["content"]["sha256"]) for row in card_rows],
+                [(row["id"], row["content"]["sha256"]) for row in entity_rows],
+            ]
+        )
         with self.engine.begin() as connection:
             require_active(connection, snapshot["book_id"])
             previous = (
@@ -157,6 +191,9 @@ class ResearchProjection:
                         db.research_runs.c.summary["projection_policy"]
                         .as_integer()
                         .label("policy"),
+                        db.research_runs.c.summary["discovery_input_sha256"].astext.label(
+                            "discovery_input"
+                        ),
                     )
                     .where(db.research_runs.c.id == run_id)
                     .with_for_update()
@@ -168,6 +205,8 @@ class ResearchProjection:
                 previous["version"] > status["version"]
                 or previous["version"] == status["version"]
                 and previous["policy"] == PROJECTION_POLICY
+                and previous["discovery_input"] == discovery_input
+                and not force
             ):
                 return
             artifacts_changed = False
@@ -198,6 +237,7 @@ class ResearchProjection:
                     "chapters_sha256": snapshot["chapters_sha256"],
                     "external_source_versions": source_versions,
                     "projection_policy": PROJECTION_POLICY,
+                    "discovery_input_sha256": discovery_input,
                 },
                 "content": run_ref,
                 "updated_at": func.now(),
@@ -215,7 +255,25 @@ class ResearchProjection:
                 )
                 for row in rows:
                     self.upsert(connection, table, row)
-            if previous is None or previous["version"] < status["version"]:
+            from hrs.research.discovery import enqueue_discovery
+
+            enqueue_discovery(connection, snapshot["source_run_id"], run_id, discovery_input)
+            if status["state"] == "completed" and status.get("purpose", "book") in {
+                "book",
+                "card_revision",
+            }:
+                # Completion can expose a counterpart after an earlier book's enrichment finished.
+                connection.execute(
+                    pg_insert(db.outbox)
+                    .values(
+                        dedup_key=f"link-research:{run_id}:{discovery_input}",
+                        run_id=snapshot["source_run_id"],
+                        kind="link_research",
+                        payload={"book_id": snapshot["book_id"]},
+                    )
+                    .on_conflict_do_nothing(index_elements=[db.outbox.c.dedup_key])
+                )
+            if previous is None or previous["version"] < status["version"] or artifacts_changed:
                 connection.execute(
                     insert(db.events).values(
                         book_id=snapshot["book_id"],
@@ -274,12 +332,18 @@ def card_summary(card):
         "document_type",
         "source_layer",
         "article_title",
+        "replaces_card_id",
+        "lineage_id",
     )
     return {
         **{key: card.get(key) for key in fields},
         "evidence_count": len(card.get("evidence", [])),
         "item_count": len(card.get("items", [])),
         "entity_count": len(card.get("mentions", [])) + len(card.get("events", [])),
+        "event_count": len(card.get("events", [])),
+        "relation_count": len(card.get("relations", [])),
+        "cross_relation_count": len(card.get("cross_relations", [])),
+        "coverage_count": len(card.get("coverage", [])),
         "reading_target": next(
             (
                 span["reading_target"]

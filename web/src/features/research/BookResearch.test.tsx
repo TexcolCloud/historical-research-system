@@ -37,6 +37,53 @@ const run = {
   tasks: [],
 };
 
+test("legacy completed research offers a normal v5 revision without overwriting its source cards", async () => {
+  const old = { ...run, state: "completed", run_id: "legacy-v4" };
+  let body: unknown;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        body = JSON.parse(String(init.body));
+        return Response.json({ ...run, state: "ready" });
+      }
+      if (url.includes("/cards?"))
+        return Response.json({ items: [], total: 0, offset: 0, limit: 50 });
+      if (url.includes("/runs/")) return Response.json(old);
+      return Response.json({
+        book_id: "book",
+        runs: [old],
+        indexed: true,
+        source_version: old.publication_sha256,
+        cards_count: 0,
+        entities_count: 0,
+        needs_upgrade: true,
+        research_policy_version: 4,
+        required_research_policy_version: 5,
+      });
+    }),
+  );
+  render(
+    <MemoryRouter initialEntries={["/books/book?tab=research"]}>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <BookResearch book={book} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "补充完整研究信息" }),
+  );
+  expect(body).toMatchObject({
+    revision_of: "legacy-v4",
+    reason: "升级完整研究",
+  });
+});
+
 test("a new research revision has its own progress while prior completed cards remain readable", async () => {
   const requests: string[] = [];
   vi.stubGlobal(

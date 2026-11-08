@@ -11,6 +11,10 @@ import { PanelLeftClose, PanelLeftOpen, BookOpen, Search } from "lucide-react";
 import { RenderedMarkdown } from "@/editor/RenderedMarkdown.tsx";
 import { client } from "@/client/api.ts";
 import StructurePanel from "@/features/library/StructurePanel.tsx";
+import OriginalPage from "./OriginalPage";
+import { research } from "@/features/research/api";
+import { researchReadingLinks } from "@/features/research/reading";
+import ReadingResearchSidebar from "@/features/research/ReadingResearchSidebar";
 import SearchPanel from "@/features/search/SearchPanel.tsx";
 import { readingNavigationOptions } from "./navigation-query";
 import { navigationStatusLabel } from "./navigation-status";
@@ -93,6 +97,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
     [page, setPage] = useState<number | null>(null);
   const [mappingFailures, setMappingFailures] = useState<string[]>([]);
   const [navigationOpen, setNavigationOpen] = useState(true);
+  const [researchOpen, setResearchOpen] = useState(false);
   const searchOpen =
     params.get("section") === "search" || params.get("tab") === "search";
   const [navigationView, setNavigationView] = useState<
@@ -131,6 +136,20 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
     chapters.data?.[0]?.id ||
     "";
   const chapter = useQuery({ ...chapterOptions(id), enabled: Boolean(id) });
+  const researchReading = useQuery({
+    queryKey: [
+      "research",
+      "reading",
+      id,
+      chapter.data?.run_id,
+      chapter.data?.text_sha256,
+    ],
+    queryFn: ({ signal }) => research.reading(id, signal),
+    enabled: Boolean(id && chapter.data?.text_sha256),
+    staleTime: 30000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
   const sourcePages = useMemo(
     () => [...new Set(chapter.data?.pages ?? [])].sort((a, b) => a - b),
     [chapter.data?.pages],
@@ -189,10 +208,17 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
         (!range ||
           (readingFocus && mappingFailures.includes(readingFocus.id))))),
   );
+  const targetSourceChanged = Boolean(
+    target &&
+    chapter.data &&
+    (target.chapter_id !== chapter.data.id ||
+      target.run_id !== chapter.data.run_id ||
+      target.text_sha256 !== chapter.data.text_sha256),
+  );
   const inlineLinks = useMemo(() => {
     const current = chapter.data;
     if (!current) return [];
-    return (current.toc_links ?? []).flatMap((link) => {
+    const directory = (current.toc_links ?? []).flatMap((link) => {
       const sourceTarget: ReadingTarget = {
         chapter_id: current.id,
         run_id: current.run_id,
@@ -214,7 +240,21 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
         },
       ];
     });
-  }, [chapter.data, bookId]);
+    return [
+      ...directory,
+      ...researchReadingLinks(
+        current,
+        researchReading.data,
+        `${location.pathname}${location.search}`,
+      ),
+    ];
+  }, [
+    chapter.data,
+    bookId,
+    researchReading.data,
+    location.pathname,
+    location.search,
+  ]);
   useEffect(() => {
     if (!chapter.data) return;
     const anchor = params.get("anchor");
@@ -258,6 +298,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
     setPage(null);
   }
   function toggleSearch(open: boolean) {
+    if (open) setResearchOpen(false);
     const next = new URLSearchParams(params);
     next.set("tab", "reader");
     next.set("section", open ? "search" : "text");
@@ -477,6 +518,16 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
             <Search size={17} aria-hidden="true" />
             检索本书
           </Button>
+          <Button
+            variant={researchOpen ? "default" : "outline"}
+            aria-expanded={researchOpen}
+            onClick={() => {
+              if (!researchOpen && searchOpen) toggleSearch(false);
+              setResearchOpen(!researchOpen);
+            }}
+          >
+            相关史料
+          </Button>
           {chapter.data && (
             <div className="reader-structure-control" ref={structureControl}>
               <StructurePanel
@@ -502,15 +553,20 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
         </div>
         {failedTarget && (
           <p role="status" className="workspace-status-note">
-            定位依据已更新，或此位置无法精确对应阅读版。请结合原图核对，未标记其他文字。
+            {targetSourceChanged
+              ? "定位依据已更新，或此位置无法精确对应阅读版。请结合原图核对，未标记其他文字。"
+              : "此位置暂不能精确对应阅读版。请结合原图核对，未标记其他文字。"}
           </p>
         )}
         {mappingFailures.some((value) => value !== readingFocus?.id) && (
           <p className="workspace-status-note">
-            部分目录文字无法安全生成链接，可从左侧原书目录跳转。
+            部分关联位置无法安全显示为链接，可从原书目录或“相关史料”继续查阅。
           </p>
         )}
-        <div className="reader-body" data-search-open={searchOpen}>
+        <div
+          className="reader-body"
+          data-search-open={searchOpen || researchOpen}
+        >
           <div
             className={
               original
@@ -593,46 +649,17 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
               />
             </aside>
           )}
+          {researchOpen && (
+            <ReadingResearchSidebar
+              data={researchReading.data}
+              returnTo={`${location.pathname}${location.search}`}
+              onClose={() => setResearchOpen(false)}
+              error={researchReading.error}
+              onRetry={() => void researchReading.refetch()}
+            />
+          )}
         </div>
       </div>
     </div>
-  );
-}
-
-function OriginalPage({ runId, page }: { runId: string; page: number }) {
-  const original = useQuery({
-    queryKey: ["platform", "original-page", runId, page],
-    staleTime: Infinity,
-    queryFn: async ({ signal }) => {
-      const { data } = await client.GET(
-        "/api/v2/runs/{run_id}/review-pages/{page}",
-        { params: { path: { run_id: runId, page } }, signal },
-      );
-      if (!data) throw new Error("本页原图暂时无法读取，可重试或打开原 PDF。");
-      return data.image;
-    },
-  });
-  return (
-    <figure>
-      <a
-        href={`/api/v2/runs/${runId}/artifacts/original.pdf#page=${page}`}
-        target="_blank"
-        rel="noreferrer"
-      >
-        打开原 PDF
-      </a>
-      {original.isPending ? (
-        <p role="status">正在读取原书第 {page} 页…</p>
-      ) : original.isError ? (
-        <p role="alert">
-          {original.error.message}
-          <Button onClick={() => void original.refetch()}>重新读取原图</Button>
-        </p>
-      ) : (
-        <a href={original.data} target="_blank" rel="noreferrer">
-          <img src={original.data} alt={`原书第 ${page} 页`} />
-        </a>
-      )}
-    </figure>
   );
 }

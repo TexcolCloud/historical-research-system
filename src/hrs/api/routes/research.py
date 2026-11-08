@@ -7,6 +7,7 @@ from fastapi.responses import Response
 
 from hrs.api.deps import ResearchDep
 from hrs.research.api import (
+    EditableCardResponse,
     ResearchBookResponse,
     ResearchCardPage,
     ResearchCardResponse,
@@ -16,6 +17,15 @@ from hrs.research.api import (
     ResearchRunResponse,
     ResearchSearchResponse,
     StartResearch,
+)
+from hrs.research.workspace import (
+    CardRevision,
+    IdentityDecision,
+    QuestionCreate,
+    QuestionEvidence,
+    QuestionUpdate,
+    SelectionUpdate,
+    Version,
 )
 
 router = APIRouter(prefix="/api/v2/research", tags=["research"])
@@ -93,6 +103,126 @@ def entity(service: ResearchDep, entity_id: str):
     return service.entity(entity_id)
 
 
+@router.get("/entities", response_model=ResearchEntityPage)
+def catalogue(
+    service: ResearchDep,
+    book_id: UUID | None = None,
+    book_ids: list[UUID] | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=1000),
+    kind: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+):
+    return service.workspace.catalogue(
+        book_id=book_id, book_ids=book_ids, query=q, kind=kind, offset=offset, limit=limit
+    )
+
+
+@router.post("/entities/{entity_id}/decisions", response_model=ResearchEntityResponse)
+def identity_decision(service: ResearchDep, entity_id: str, body: IdentityDecision):
+    return service.workspace.identity_decision(entity_id, body)
+
+
+@router.get("/cards/{card_id}/draft", response_model=EditableCardResponse)
+def card_draft(service: ResearchDep, card_id: str):
+    card = service.card(card_id)
+    return {
+        "card": service.invoke(service.workflow.card_draft, card_id),
+        "version": card["version"],
+        "source_current": card["source_current"],
+        "superseded": card["superseded"],
+    }
+
+
+@router.post("/cards/{card_id}/revisions", response_model=ResearchRunResponse)
+def revise_card(service: ResearchDep, card_id: str, body: CardRevision):
+    return service.workspace.card_revision(card_id, body)
+
+
+@router.get("/pending")
+def pending(
+    service: ResearchDep,
+    book_id: UUID | None = None,
+    kind: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+):
+    return service.workspace.pending(book_id=book_id, kind=kind, offset=offset, limit=limit)
+
+
+@router.get("/reading/{chapter_id}")
+def reading(service: ResearchDep, chapter_id: UUID, text_sha256: str | None = None):
+    return service.workspace.reading(str(chapter_id), expected_sha256=text_sha256)
+
+
+@router.get("/graph")
+def graph(
+    service: ResearchDep,
+    entity_id: str,
+    hops: int = Query(1, ge=1, le=2),
+    limit: int = Query(50, ge=1, le=100),
+):
+    return service.workspace.graph(entity_id, hops=hops, limit=limit)
+
+
+@router.get("/timeline")
+def timeline(
+    service: ResearchDep,
+    entity_id: str | None = None,
+    book_id: UUID | None = None,
+    limit: int = Query(100, ge=1, le=100),
+):
+    return service.workspace.timeline(entity_id=entity_id, book_id=book_id, limit=limit)
+
+
+@router.get("/questions")
+def questions(
+    service: ResearchDep,
+    book_ids: list[UUID] | None = Query(default=None),
+    status: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+):
+    return service.workspace.questions(
+        book_ids=list(map(str, book_ids)) if book_ids is not None else None,
+        status=[status] if status else None,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.post("/questions")
+def create_question(service: ResearchDep, body: QuestionCreate):
+    return service.workspace.create_question(body)
+
+
+@router.get("/questions/{question_id}")
+def question(service: ResearchDep, question_id: str):
+    return service.workspace.question(question_id)
+
+
+@router.patch("/questions/{question_id}")
+def update_question(service: ResearchDep, question_id: str, body: QuestionUpdate):
+    return service.workspace.update_question(question_id, body)
+
+
+@router.post("/questions/{question_id}/evidence")
+def select_evidence(service: ResearchDep, question_id: str, body: QuestionEvidence):
+    return service.workspace.select_evidence(question_id, body)
+
+
+@router.patch("/questions/{question_id}/evidence/{selection_id}")
+def update_selection(
+    service: ResearchDep, question_id: str, selection_id: str, body: SelectionUpdate
+):
+    return service.workspace.update_selection(question_id, selection_id, body)
+
+
+@router.post("/questions/{question_id}/research")
+def research_question(service: ResearchDep, question_id: str, body: Version):
+    return service.workspace.start_question(question_id, body)
+
+
 @router.post("/cards/{card_id}/decision", response_model=ResearchCardResponse)
 def decision(service: ResearchDep, card_id: str, body: ResearchDecision):
     return service.decide(card_id, body)
@@ -112,7 +242,14 @@ def search(
     service: ResearchDep,
     q: str = Query(min_length=1, max_length=1000),
     book_id: UUID | None = None,
+    book_ids: list[UUID] | None = Query(default=None),
     semantic: bool = True,
     limit: int = Query(8, ge=1, le=50),
 ):
-    return service.search(q, book_id, semantic=semantic, limit=limit)
+    return service.search(
+        q,
+        book_id,
+        book_ids=list(map(str, book_ids)) if book_ids is not None else None,
+        semantic=semantic,
+        limit=limit,
+    )

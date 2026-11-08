@@ -3,7 +3,7 @@
 import copy
 import json
 
-from sqlalchemy import Float, case, column, exists, func, literal_column, not_, or_, select
+from sqlalchemy import Float, and_, case, column, exists, func, literal_column, not_, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 
 from hrs.library.books import get_run
@@ -65,6 +65,12 @@ def retrieval_preview(result):
                 "context_roles": sorted({item.get("role", "") for item in hit.get("context", [])}),
                 "context_omitted": bool(hit.get("context")),
                 "has_shared_cells": bool(hit.get("table_scopes")),
+                "research_cards": [
+                    {key: card.get(key) for key in ("id", "version", "title", "publication_sha256")}
+                    for card in hit.get("research_cards", [])[:2]
+                ],
+                "cards_omitted": hit.get("cards_omitted", 0)
+                + max(0, len(hit.get("research_cards", [])) - 2),
                 "metadata_truncated": len(hit.get("title", "")) > 80
                 or len(hit.get("book_title", "")) > 60,
             }
@@ -182,6 +188,7 @@ def visible_research_run(workspace_id):
         .where(
             candidate.c.book_id == db.books.c.id,
             candidate.c.workspace_id == workspace_id,
+            func.coalesce(candidate.c.summary["purpose"].astext, "book") == "book",
             source.c.result["codex_workspace_id"].astext == workspace_id,
             candidate.c.state != "cancelled",
             *current_source_conditions(candidate, source),
@@ -194,6 +201,96 @@ def visible_research_run(workspace_id):
         .limit(1)
         .correlate(db.books)
         .scalar_subquery()
+    )
+
+
+def current_card_ids(workspace_id):
+    """A verified single-card revision replaces its lineage, never the other book articles."""
+    card, run, source, book = (
+        db.research_cards.alias(),
+        db.research_runs.alias(),
+        db.runs.alias(),
+        db.books.alias(),
+    )
+    replacement, replacement_run, replacement_source = (
+        db.research_cards.alias(),
+        db.research_runs.alias(),
+        db.runs.alias(),
+    )
+    lineage = func.coalesce(card.c.summary["lineage_id"].astext, card.c.id)
+    purpose = func.coalesce(run.c.summary["purpose"].astext, "book")
+    newer = exists(
+        select(1)
+        .select_from(
+            replacement.join(replacement_run, replacement_run.c.id == replacement.c.run_id).join(
+                replacement_source, replacement_source.c.id == replacement_run.c.source_run_id
+            )
+        )
+        .where(
+            replacement.c.book_id == card.c.book_id,
+            replacement.c.id != card.c.id,
+            replacement.c.state.in_(["verified", "human_accepted"]),
+            replacement_run.c.workspace_id == workspace_id,
+            replacement_run.c.summary["purpose"].astext.in_(["card_revision", "link_refresh"]),
+            replacement.c.summary["replaces_card_id"].astext.is_not(None),
+            replacement.c.summary["lineage_id"].astext == lineage,
+            replacement_run.c.summary["created_at"].astext.cast(Float)
+            > run.c.summary["created_at"].astext.cast(Float),
+            *current_source_conditions(replacement_run, replacement_source),
+        )
+        .correlate(card, run)
+    )
+    # The selector normally correlates to db.books; use an explicit book alias here.
+    primary = db.research_runs.alias()
+    visible = (
+        select(primary.c.id)
+        .join(db.runs, db.runs.c.id == primary.c.source_run_id)
+        .where(
+            primary.c.book_id == book.c.id,
+            primary.c.workspace_id == workspace_id,
+            func.coalesce(primary.c.summary["purpose"].astext, "book") == "book",
+            primary.c.state != "cancelled",
+            *current_source_conditions(primary, db.runs),
+        )
+        .order_by(
+            case((primary.c.state == "completed", 0), else_=1),
+            primary.c.summary["created_at"].astext.cast(Float).desc(),
+            primary.c.id.desc(),
+        )
+        .limit(1)
+        .correlate(book)
+        .scalar_subquery()
+    )
+    primary_created = (
+        select(db.research_runs.c.summary["created_at"].astext.cast(Float))
+        .where(db.research_runs.c.id == visible)
+        .correlate(book)
+        .scalar_subquery()
+    )
+    return (
+        select(card.c.id)
+        .select_from(
+            card.join(run, run.c.id == card.c.run_id)
+            .join(source, source.c.id == run.c.source_run_id)
+            .join(book, book.c.id == card.c.book_id)
+        )
+        .where(
+            run.c.workspace_id == workspace_id,
+            book.c.state.not_in(["deleted", "deleting", "delete_failed"]),
+            *current_source_conditions(run, source),
+            or_(
+                and_(purpose == "book", run.c.id == visible),
+                and_(
+                    purpose.in_(["card_revision", "link_refresh"]),
+                    card.c.summary["replaces_card_id"].astext.is_not(None),
+                    card.c.state.in_(["verified", "human_accepted"]),
+                    run.c.summary["created_at"].astext.cast(Float) >= primary_created,
+                ),
+            ),
+            not_(newer),
+            card.c.state != "excluded",
+        )
+        .correlate(None)
     )
 
 
@@ -339,10 +436,26 @@ class ResearchEvidence:
             article_ids=[str(article_id)],
         )
 
-    def search(self, query, book_id=None, *, semantic=True, **options):
+    def search(
+        self, query, book_id=None, *, book_ids=None, semantic=True, trusted_scope=False, **options
+    ):
         metrics = {}
+        if book_id is not None and book_ids is not None:
+            raise ServiceError(400, "单书与多书范围不能同时提供。")
+        if book_ids is not None and (
+            not isinstance(book_ids, (list, tuple))
+            or not trusted_scope
+            and len(book_ids) > 100
+            or any(not isinstance(value, str) or not value for value in book_ids)
+        ):
+            raise ServiceError(400, "多书检索范围无效。")
+        selected = list(dict.fromkeys(book_ids)) if book_ids is not None else None
         try:
-            scope = self.article_scope(book_id)
+            scope = (
+                self.article_scope(book_id, book_ids=selected)
+                if selected is not None
+                else self.article_scope(book_id)
+            )
             requested = options.pop("chapter_ids", None)
             options["chapter_ids"] = (
                 sorted(scope.intersection(map(str, requested)))
@@ -368,7 +481,10 @@ class ResearchEvidence:
                     status=503,
                     retryable=True,
                 )
+            if selected is not None:
+                options["book_ids"] = selected
             hits = retrieval.search(query, book_id, semantic=semantic, metrics=metrics, **options)
+            self._attach_card_targets(hits)
         except Problem:
             raise
         except Exception as error:  # noqa: BLE001 - present an explicit unavailable backend
@@ -387,7 +503,57 @@ class ResearchEvidence:
             "metrics": metrics,
         }
 
-    def article_scope(self, book_id=None):
+    def _attach_card_targets(self, hits):
+        chapters = {str(hit["chapter_id"]) for hit in hits if hit.get("chapter_id")}
+        if not chapters:
+            return
+        from hrs.processing.store import Store
+        from hrs.processing.workspace import resolve_workspace
+
+        store = Store(resolve_workspace(self.settings.codex_root))
+        workspace_id = identity(store)["workspace_id"]
+        relation = db.research_cards.join(db.research_runs).join(
+            db.runs, db.runs.c.id == db.research_runs.c.source_run_id
+        )
+        with self.engine.connect() as connection:
+            rows = (
+                connection.execute(
+                    select(
+                        db.research_cards.c.summary,
+                        db.research_cards.c.version,
+                        db.research_runs.c.summary["publication_sha256"].astext.label(
+                            "publication"
+                        ),
+                    )
+                    .select_from(relation)
+                    .where(
+                        db.research_cards.c.id.in_(current_card_ids(workspace_id)),
+                        db.research_cards.c.state.in_(["verified", "human_accepted"]),
+                        db.research_cards.c.summary["article_id"].astext.in_(chapters),
+                        db.research_runs.c.workspace_id == workspace_id,
+                        *current_source_conditions(db.research_runs, db.runs, indexed=True),
+                    )
+                    .order_by(db.research_cards.c.id)
+                )
+                .mappings()
+                .all()
+            )
+        targets = {}
+        for row in rows:
+            card = row["summary"]
+            targets.setdefault(str(card["article_id"]), []).append(
+                {
+                    "id": card["id"],
+                    "version": row["version"],
+                    "title": card["title"][:120],
+                    "publication_sha256": row["publication"],
+                }
+            )
+        for hit in hits:
+            found = targets.get(str(hit.get("chapter_id")), [])
+            hit.update(research_cards=found[:5], cards_omitted=max(0, len(found) - 5))
+
+    def article_scope(self, book_id=None, *, book_ids=None):
         from hrs.processing.store import Store
         from hrs.processing.workspace import resolve_workspace
 
@@ -401,7 +567,13 @@ class ResearchEvidence:
                         workspace_runs(store),
                         db.runs.c.kind == "book",
                         db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
-                        *([db.runs.c.book_id == str(book_id)] if book_id else []),
+                        *(
+                            [db.runs.c.book_id.in_(book_ids)]
+                            if book_ids is not None
+                            else [db.runs.c.book_id == str(book_id)]
+                            if book_id
+                            else []
+                        ),
                     )
                 )
                 .mappings()
@@ -426,11 +598,29 @@ class ResearchEvidence:
                 )
             )
 
-    def entities(self, query="", book_id=None, limit=20, *, entity_ids=None):
-        """Query bounded validated identities in SQL, including literal Chinese aliases."""
+    def _entity_scope(self):
         from hrs.processing.store import Store
         from hrs.processing.workspace import resolve_workspace
 
+        store = Store(resolve_workspace(self.settings.codex_root))
+        conditions = [
+            db.research_runs.c.workspace_id == identity(store)["workspace_id"],
+            db.research_entities.c.summary["state"].astext.in_(["verified", "human_accepted"]),
+            db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
+            *current_source_conditions(db.research_runs, db.runs, indexed=True),
+            db.research_entities.c.summary["card_id"].astext.in_(
+                current_card_ids(identity(store)["workspace_id"])
+            ),
+        ]
+        relation = (
+            db.research_entities.join(db.research_runs)
+            .join(db.runs, db.runs.c.id == db.research_runs.c.source_run_id)
+            .join(db.books, db.books.c.id == db.research_entities.c.book_id)
+        )
+        return relation, conditions
+
+    def entities(self, query="", book_id=None, limit=20, *, entity_ids=None):
+        """Query bounded validated identities in SQL, including literal Chinese aliases."""
         if (
             not isinstance(query, str)
             or len(query) > 1000
@@ -438,18 +628,16 @@ class ResearchEvidence:
             or not 1 <= limit <= 50
         ):
             raise ServiceError(400, "实体检索词或结果数量无效。")
-        store = Store(resolve_workspace(self.settings.codex_root))
-        conditions = [
-            db.research_runs.c.workspace_id == identity(store)["workspace_id"],
-            db.research_entities.c.summary["state"].astext.in_(["verified", "human_accepted"]),
-            db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
-            *current_source_conditions(db.research_runs, db.runs, indexed=True),
-            db.research_runs.c.id == visible_research_run(identity(store)["workspace_id"]),
-        ]
+        relation, conditions = self._entity_scope()
         if book_id:
             conditions.append(db.research_entities.c.book_id == str(book_id))
         if entity_ids is not None:
-            conditions.append(db.research_entities.c.id.in_(entity_ids))
+            conditions.append(
+                or_(
+                    db.research_entities.c.id.in_(entity_ids),
+                    db.research_entities.c.summary["canonical_id"].astext.in_(entity_ids),
+                )
+            )
         if query:
             pattern = (
                 "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -463,11 +651,6 @@ class ResearchEvidence:
                     ).op("@@")(func.plainto_tsquery(literal_column("'simple'::regconfig"), query)),
                 )
             )
-        relation = (
-            db.research_entities.join(db.research_runs)
-            .join(db.runs, db.runs.c.id == db.research_runs.c.source_run_id)
-            .join(db.books, db.books.c.id == db.research_entities.c.book_id)
-        )
         with self.engine.connect() as connection:
             return list(
                 connection.scalars(
@@ -490,14 +673,56 @@ class ResearchEvidence:
             raise ServiceError(404, "实体来源已更新、删除或尚未核验。")
         return rows[0]
 
+    def require_card(self, card_id, version=None):
+        """Authorize a new relation target before native task freezing, never rewrite old evidence."""
+        from hrs.processing.store import Store
+        from hrs.processing.workspace import resolve_workspace
+
+        store = Store(resolve_workspace(self.settings.codex_root))
+        conditions = [
+            db.research_cards.c.id == str(card_id),
+            db.research_cards.c.state.in_(["verified", "human_accepted"]),
+            db.research_runs.c.workspace_id == identity(store)["workspace_id"],
+            db.research_cards.c.id.in_(current_card_ids(identity(store)["workspace_id"])),
+            db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
+            *current_source_conditions(db.research_runs, db.runs, indexed=True),
+        ]
+        if version is not None:
+            conditions.append(db.research_cards.c.version == version)
+        relation = (
+            db.research_cards.join(db.research_runs)
+            .join(db.runs, db.runs.c.id == db.research_runs.c.source_run_id)
+            .join(db.books, db.books.c.id == db.research_cards.c.book_id)
+        )
+        with self.engine.connect() as connection:
+            row = connection.execute(
+                select(db.research_cards.c.summary).select_from(relation).where(*conditions)
+            ).scalar_one_or_none()
+        if row is None:
+            raise ServiceError(404, "目标卡片已换版、删除或尚未核验。")
+        return row
+
     def authorized_entity_ids(self, entity_ids):
         identities = sorted(set(map(str, entity_ids)))
+        if not identities:
+            return set()
+        relation, conditions = self._entity_scope()
+        canonical = db.research_entities.c.summary["canonical_id"].astext
         authorized = set()
-        for offset in range(0, len(identities), 50):
-            authorized.update(
-                row["id"]
-                for row in self.entities(limit=50, entity_ids=identities[offset : offset + 50])
-            )
+        with self.engine.connect() as connection:
+            for offset in range(0, len(identities), 50):
+                selected = identities[offset : offset + 50]
+                legacy = (
+                    select(db.research_entities.c.id)
+                    .select_from(relation)
+                    .where(*conditions, db.research_entities.c.id.in_(selected))
+                )
+                stable = (
+                    select(canonical)
+                    .select_from(relation)
+                    .where(*conditions, canonical.in_(selected))
+                )
+                authorized.update(connection.scalars(legacy.union(stable)))
         return authorized
 
     def read_source(

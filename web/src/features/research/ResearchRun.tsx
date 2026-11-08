@@ -14,14 +14,31 @@ const runLabels: Record<string, string> = {
   cancelled: "研究任务已停止",
   superseded: "研究任务已由新版本替代",
 };
+const stageLabels: Record<string, string> = {
+  author: "全文提取与史料制卡",
+  enrich: "关联检索与补证",
+  verify: "独立原文核验",
+  repair: "定向修订",
+  reverify: "再次独立核验",
+};
+const taskStateLabels: Record<string, string> = {
+  ready: "等待处理",
+  running: "处理中",
+  completed: "本步已处理",
+  failed: "技术错误",
+  technical_blocked: "技术阻塞",
+  paused: "已暂停",
+};
 export default function ResearchRunPanel({
   runId,
   initial,
   onOpenCard,
+  legacy = false,
 }: {
   runId: string;
   initial?: ResearchRun;
   onOpenCard?: (id: string) => void;
+  legacy?: boolean;
 }) {
   const query = useQueryClient();
   const [candidateGroup, setCandidateGroup] = useState(0);
@@ -81,6 +98,8 @@ export default function ResearchRunPanel({
       void query.invalidateQueries({
         queryKey: researchKeys.cards(saved.book_id),
       });
+      void query.invalidateQueries({ queryKey: ["research", "question"] });
+      void query.invalidateQueries({ queryKey: researchKeys.questions });
     },
   });
   if (run.isPending) return <p role="status">正在读取研究任务进展…</p>;
@@ -108,7 +127,11 @@ export default function ResearchRunPanel({
       aria-label="研究任务进展"
     >
       <div>
-        <h2>{runLabels[data.state] ?? data.state}</h2>
+        <h2>
+          {legacy && data.state === "completed"
+            ? "旧版基础研究已完成"
+            : (runLabels[data.state] ?? "研究任务状态待确认")}
+        </h2>
         <p>独立研究任务 · 已有结果会保留</p>
         <p className="research-run-counts">
           {total > 0 && (
@@ -125,6 +148,27 @@ export default function ResearchRunPanel({
             value={completed}
             max={total}
           />
+        )}
+        {(data.tasks ?? []).some((task) =>
+          ["ready", "running", "failed", "technical_blocked"].includes(
+            task.state,
+          ),
+        ) && (
+          <ul className="research-stage-progress" aria-label="当前研究阶段">
+            {(data.tasks ?? [])
+              .filter((task) =>
+                ["ready", "running", "failed", "technical_blocked"].includes(
+                  task.state,
+                ),
+              )
+              .slice(0, 20)
+              .map((task) => (
+                <li key={task.task_id}>
+                  {stageLabels[task.stage] || "研究处理"} ·{" "}
+                  {taskStateLabels[task.state] || "等待确认"}
+                </li>
+              ))}
+          </ul>
         )}
         {data.state === "pending" && (
           <p>请打开待人工核验的卡片，对照原文作出决定。</p>

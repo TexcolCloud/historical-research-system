@@ -72,6 +72,31 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
           ? ["research", "run", event.payload.research_run_id]
           : ["research", "run"],
       });
+      const runId = event.payload.research_run_id;
+      const runState = event.payload.state;
+      if (runId && runState) {
+        type QuestionProgress = {
+          runs?: Array<{ run_id: string; state?: string }>;
+        };
+        const changed = (question: QuestionProgress) =>
+          question.runs?.some(
+            (run) => run.run_id === runId && run.state !== runState,
+          ) ?? false;
+        void query.invalidateQueries({
+          predicate: (entry) => {
+            if (entry.queryKey[0] !== "research") return false;
+            if (entry.queryKey[1] === "question")
+              return changed((entry.state.data as QuestionProgress) ?? {});
+            if (entry.queryKey[1] === "questions")
+              return (
+                (
+                  entry.state.data as { items?: QuestionProgress[] }
+                )?.items?.some(changed) ?? false
+              );
+            return false;
+          },
+        });
+      }
     }
     return event.sequence;
   }

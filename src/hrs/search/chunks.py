@@ -17,7 +17,7 @@ from hrs.library.parsing import TableRows as TableRows
 from hrs.library.parsing import blocks as blocks
 from hrs.processing.navigation import fragment_navigation
 
-CHUNK_RULE = "structure-1400-160-v9-stable-navigation"
+CHUNK_RULE = "structure-1400-160-v10-scoped-endnotes"
 VECTOR_INPUT_RULE = "canonical-article-context-v1"
 IMAGE = re.compile(r"!\[([^\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\n]|\([^()\n]*\))*)\)")
 

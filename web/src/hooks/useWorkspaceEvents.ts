@@ -93,17 +93,21 @@ export function useWorkspaceEvents() {
       if (document.visibilityState === "hidden") return;
       void query.invalidateQueries({
         predicate: (entry) =>
-          entry.queryKey[0] === "platform" &&
-          [
-            "books",
-            "run",
-            "book",
-            "runs",
-            "issues",
-            "executions",
-            "cards",
-            "chapters",
-          ].includes(String(entry.queryKey[1])),
+          (entry.queryKey[0] === "research" &&
+            ["book", "run", "question", "questions", "pending"].includes(
+              String(entry.queryKey[1]),
+            )) ||
+          (entry.queryKey[0] === "platform" &&
+            [
+              "books",
+              "run",
+              "book",
+              "runs",
+              "issues",
+              "executions",
+              "cards",
+              "chapters",
+            ].includes(String(entry.queryKey[1]))),
         refetchType: "active",
       });
     }, 30000);

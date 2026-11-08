@@ -49,6 +49,24 @@ def test_delete_is_immediate_idempotent_and_blocks_recovery(platform):
                 require_run_active(connection, run)
 
 
+def test_deletion_erases_original_and_derived_search_namespaces(platform):
+    settings, engine = platform
+    book, _ = seed(engine)
+    erased = []
+    search = SimpleNamespace(
+        indices=SimpleNamespace(exists=lambda **kwargs: True),
+        delete_by_query=lambda **kwargs: erased.append(kwargs) or {},
+    )
+    cleanup = BookCleanup(settings, engine, search_factory=lambda _: search)
+    request_deletion(settings, engine, book)
+    cleanup.erase_book(book)
+    assert {request["index"] for request in erased} == {
+        settings.opensearch_index,
+        settings.opensearch_index + "-research",
+    }
+    assert all(request["body"] == {"query": {"term": {"book_id": book}}} for request in erased)
+
+
 def test_other_book_research_evidence_keeps_original_object_until_last_owner_is_deleted(platform):
     """Storage ownership only; these rows do not represent native content approval."""
     settings, engine = platform

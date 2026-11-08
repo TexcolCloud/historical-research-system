@@ -3,6 +3,65 @@
 from hrs.processing.hashing import digest
 
 
+def graph_leads(graph, *, requested_limit):
+    """MCP graph results are discovery metadata; full quotations remain source tools."""
+    nodes = [
+        {
+            key: node[key]
+            for key in ("id", "canonical_id", "kind", "name", "card_id", "book_id")
+            if key in node
+        }
+        for node in graph["nodes"]
+    ]
+    edges = []
+    for edge in graph["edges"]:
+        preview = {
+            key: edge[key]
+            for key in (
+                "id",
+                "source_id",
+                "target_id",
+                "kind",
+                "predicate",
+                "card_id",
+                "card_version",
+                "target_card_id",
+                "target_card_version",
+                "approval_type",
+            )
+            if key in edge
+        }
+        preview["reason_preview"] = edge.get("reason", "")[:240]
+        preview["evidence_refs"] = edge.get("evidence_refs", [])[:4]
+        preview["evidence_index"] = [
+            {
+                key: span[key]
+                for key in (
+                    "id",
+                    "article_id",
+                    "book_id",
+                    "source_run_id",
+                    "publication_sha256",
+                    "article_sha256",
+                    "start",
+                    "end",
+                    "pages",
+                )
+                if key in span
+            }
+            for span in edge.get("evidence", [])[:4]
+        ]
+        edges.append(preview)
+    return {
+        **{key: graph[key] for key in ("entity_id", "hops", "limit", "truncated")},
+        "nodes": nodes,
+        "edges": edges,
+        "requested_limit": requested_limit,
+        "metadata_only": True,
+        "usage": "Discovery leads only. Open the referenced frozen card and complete original sources before citing.",
+    }
+
+
 class ResearchGraph:
     def __init__(self, workflow):
         self.workflow = workflow

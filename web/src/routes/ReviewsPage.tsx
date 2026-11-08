@@ -4,6 +4,7 @@ import { ArrowUpRight, ClipboardCheck, CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { readBooks } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
+import ResearchPendingPanel from "@/features/research/ResearchPending";
 import {
   bookWorkspaceHref,
   hasNavigationWork,
@@ -47,8 +48,8 @@ export default function ReviewsPage() {
       ) : !pending.length ? (
         <section className="platform-empty">
           <ClipboardCheck size={36} />
-          <h2>暂时没有需要处理的内容</h2>
-          <p>书籍核验发现问题后，会在这里列出。</p>
+          <h2>正文与目录暂无待办</h2>
+          <p>书籍核验发现问题后，会在这里列出；研究待办单独列在下方。</p>
           <Link to="/">查看书籍进展</Link>
         </section>
       ) : (
@@ -107,6 +108,7 @@ export default function ReviewsPage() {
           ))}
         </section>
       )}
+      <ResearchPendingPanel />
     </>
   );
 }

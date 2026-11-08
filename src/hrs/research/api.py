@@ -4,7 +4,7 @@ from typing import Literal
 from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import and_, func, not_, select
+from sqlalchemy import and_, func, not_, or_, select
 
 from hrs.api.schemas import FootnoteLink, ReadingTarget, SearchHit
 from hrs.library.books import get_run
@@ -21,11 +21,13 @@ from hrs.research.models import (
     EvidenceSpan,
     IdentityLink,
     ResearchDate,
+    SourceValue,
     VerificationSubmission,
 )
-from hrs.research.projection import located_card
+from hrs.research.projection import catalogue_card, located_card
 from hrs.research.sources import (
     ResearchEvidence,
+    current_card_ids,
     current_external_sources,
     current_source_conditions,
     indexed_version,
@@ -74,10 +76,14 @@ class ResearchEvidenceResponse(EvidenceSpan):
 
 class ResearchMentionResponse(EntityMention):
     entity_id: str
+    canonical_id: str | None = None
+    source_mention_id: str | None = None
 
 
 class ResearchEventResponse(EventDraft):
     entity_id: str
+    canonical_id: str | None = None
+    source_mention_id: str | None = None
 
 
 class ResearchHumanDecision(BaseModel):
@@ -104,6 +110,23 @@ class ResearchCardResponse(CardDraft):
     evidence: list[ResearchEvidenceResponse]
     mentions: list[ResearchMentionResponse]
     events: list[ResearchEventResponse]
+    replaces_card_id: str | None = None
+    lineage_id: str | None = None
+    publication_sha256: str = ""
+    source_run_id: str = ""
+    article_sha256: str | None = None
+    created_at: float | None = None
+    linked_card_id: str | None = None
+    derived_relations: "ResearchDerivedRelationsResponse" = Field(
+        default_factory=lambda: ResearchDerivedRelationsResponse()
+    )
+
+
+class EditableCardResponse(BaseModel):
+    card: CardDraft
+    version: int
+    source_current: bool
+    superseded: bool
 
 
 class ResearchCardSummary(BaseModel):
@@ -123,12 +146,18 @@ class ResearchCardSummary(BaseModel):
     evidence_count: int
     item_count: int
     entity_count: int
+    event_count: int = 0
+    relation_count: int = 0
+    cross_relation_count: int = 0
+    coverage_count: int = 0
     reading_target: ReadingTarget | None = None
     source_current: bool = True
     needs_update: bool = False
     source_status: Literal["current", "revision_pending", "stale"] = "current"
     research_current: bool = True
     superseded: bool = False
+    replaces_card_id: str | None = None
+    lineage_id: str | None = None
 
 
 class ResearchTaskResponse(BaseModel):
@@ -164,6 +193,129 @@ class ResearchIdentityLinkResponse(IdentityLink):
     reading_target: ReadingTarget | None = None
 
 
+class ResearchEvidenceRefResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    card_id: str
+    card_version: int
+    evidence_id: str
+    evidence: ResearchEvidenceResponse | None = None
+
+
+class ResearchAliasResponse(BaseModel):
+    name: str
+    evidence_refs: list[ResearchEvidenceRefResponse] = Field(default_factory=list)
+    source_current: bool = True
+    approval_type: str | None = None
+    historical_evidence_refs: list[ResearchEvidenceRefResponse] = Field(default_factory=list)
+
+
+class CanonicalEntityResponse(BaseModel):
+    id: str
+    name: str
+    kind: str
+    version: int = 1
+    aliases: list[ResearchAliasResponse] = Field(default_factory=list)
+    historical_aliases: list[ResearchAliasResponse] = Field(default_factory=list)
+    withdrawn_aliases: list[ResearchAliasResponse] = Field(default_factory=list)
+
+
+class ResearchSourceMentionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    canonical_id: str | None = None
+    local_id: str = ""
+    name: str
+    kind: str
+    card_id: str
+    card_version: int = 1
+    card_title: str = ""
+    book_id: str
+    run_id: str
+    article_id: str = ""
+    publication_sha256: str = ""
+    state: str
+    identity_basis: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    evidence_refs: list[ResearchEvidenceRefResponse] = Field(default_factory=list)
+    evidence: list[ResearchEvidenceResponse] = Field(default_factory=list)
+    reading_target: ReadingTarget | None = None
+    source_current: bool = True
+
+
+class ResearchRelationshipResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    source_id: str
+    target_id: str
+    kind: str = "association"
+    predicate: str = ""
+    reason: str = ""
+    role: str = ""
+    card_id: str
+    card_version: int = 1
+    target_card_id: str | None = None
+    target_card_version: int | None = None
+    book_id: str = ""
+    run_id: str = ""
+    approval_type: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+    evidence_refs: list[ResearchEvidenceRefResponse] = Field(default_factory=list)
+    evidence: list[ResearchEvidenceResponse] = Field(default_factory=list)
+    source_evidence_ids: list[str] = Field(default_factory=list)
+    target_evidence_ids: list[str] = Field(default_factory=list)
+    target_publication_sha256: str | None = None
+    source_current: bool = True
+    target_current: bool = True
+    needs_update: bool = False
+
+
+class ResearchDerivedRelationsResponse(BaseModel):
+    items: list[ResearchRelationshipResponse] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class ResearchParticipationResponse(ResearchRelationshipResponse):
+    event_id: str
+    event_name: str = ""
+    participant_name: str = ""
+    date: ResearchDate | None = None
+    action: str = ""
+    place: SourceValue | None = None
+    event_status: str = "unknown"
+    status_note: str = ""
+
+
+class ResearchParticipantResponse(BaseModel):
+    entity_id: str
+    name: str = ""
+    role: str = "participant"
+
+
+class ResearchEventDetailResponse(BaseModel):
+    id: str
+    name: str
+    date: ResearchDate | None = None
+    action: str = ""
+    place: SourceValue | None = None
+    event_status: str = "unknown"
+    status_note: str = ""
+    card_id: str
+    evidence: list[ResearchEvidenceResponse] = Field(default_factory=list)
+    participants: list[ResearchParticipantResponse] = Field(default_factory=list)
+
+
+class ResearchIdentityDecisionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    entity_id: str
+    target_id: str | None = None
+    action: str
+    approval_type: str
+    reason: str = ""
+    evidence_refs: list[ResearchEvidenceRefResponse] = Field(default_factory=list)
+    at: float
+
+
 class ResearchEntityResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
     id: str
@@ -186,6 +338,17 @@ class ResearchEntityResponse(BaseModel):
     source_status: Literal["current", "revision_pending", "stale"] = "current"
     research_current: bool = True
     superseded: bool = False
+    canonical_id: str | None = None
+    version: int = 1
+    canonical: CanonicalEntityResponse | None = None
+    aliases: list[ResearchAliasResponse] = Field(default_factory=list)
+    historical_aliases: list[ResearchAliasResponse] = Field(default_factory=list)
+    withdrawn_aliases: list[ResearchAliasResponse] = Field(default_factory=list)
+    source_mentions: list[ResearchSourceMentionResponse] = Field(default_factory=list)
+    participations: list[ResearchParticipationResponse] = Field(default_factory=list)
+    events: list[ResearchEventDetailResponse] = Field(default_factory=list)
+    relationships: list[ResearchRelationshipResponse] = Field(default_factory=list)
+    identity_decisions: list[ResearchIdentityDecisionResponse] = Field(default_factory=list)
 
 
 class ResearchBookResponse(BaseModel):
@@ -201,6 +364,9 @@ class ResearchBookResponse(BaseModel):
     needs_update: bool = False
     stale_cards_count: int = 0
     source_revision_pending: bool = False
+    needs_upgrade: bool = False
+    research_policy_version: int | None = None
+    required_research_policy_version: int = 5
 
 
 class ResearchCardPage(BaseModel):
@@ -217,16 +383,30 @@ class ResearchEntityPage(BaseModel):
     limit: int
 
 
+class ResearchTargetCardResponse(BaseModel):
+    id: str
+    version: int
+    title: str
+    publication_sha256: str
+
+
+class ResearchSourceHit(SearchHit):
+    research_cards: list[ResearchTargetCardResponse] = Field(default_factory=list)
+    cards_omitted: int = 0
+
+
 class ResearchSearchResponse(BaseModel):
     query: str
     backend: Literal["hybrid", "lexical"]
     available: bool
-    hits: list[SearchHit]
+    hits: list[ResearchSourceHit]
     evidence_status: str
     metrics: dict
     cards: list[ResearchCardSummary]
     entities: list[ResearchEntityResponse]
-    research_backend: Literal["sql_literal"]
+    research_backend: Literal["hybrid", "lexical", "sql_literal_fallback"]
+    research_available: bool = False
+    research_index: dict = Field(default_factory=dict)
 
 
 class Research:
@@ -235,6 +415,9 @@ class Research:
         self.bridge = ResearchBridge(settings, engine)
         self.workflow = self.bridge.workflow
         self.evidence = ResearchEvidence(settings, engine)
+        from hrs.research.workspace import ResearchWorkspace
+
+        self.workspace = ResearchWorkspace(self)
 
     def invoke(self, operation, *args, **kwargs):
         try:
@@ -291,8 +474,8 @@ class Research:
             (run["result"] or {}).get("codex_revision_pending") for run in source_runs
         )
         with self.engine.connect() as connection:
-            complete = connection.scalar(
-                select(func.count())
+            policy_version = connection.scalar(
+                select(func.max(db.research_runs.c.summary["policy"]["version"].as_integer()))
                 .select_from(
                     db.research_runs.join(db.runs, db.runs.c.id == db.research_runs.c.source_run_id)
                 )
@@ -300,9 +483,13 @@ class Research:
                     db.research_runs.c.book_id == str(book_id),
                     db.research_runs.c.workspace_id == identity(self.bridge.store)["workspace_id"],
                     db.research_runs.c.state == "completed",
+                    func.coalesce(db.research_runs.c.summary["purpose"].astext, "book") == "book",
                     *current_source_conditions(db.research_runs, db.runs),
                 )
             )
+        from hrs.processing.research_workflow import POLICY
+
+        needs_upgrade = policy_version is not None and policy_version < POLICY["version"]
         return {
             "book_id": str(book_id),
             "book_title": book["title"],
@@ -315,7 +502,10 @@ class Research:
             "source_version": version["publication_sha256"] if version else None,
             "stale_cards_count": stale,
             "source_revision_pending": revision_pending,
-            "needs_update": revision_pending or bool(stale and not complete),
+            "needs_update": revision_pending or bool(stale and not policy_version) or needs_upgrade,
+            "needs_upgrade": needs_upgrade,
+            "research_policy_version": policy_version,
+            "required_research_policy_version": POLICY["version"],
         }
 
     def records(
@@ -328,6 +518,8 @@ class Research:
         include=True,
         query=None,
         stale_only=False,
+        book_ids=None,
+        record_ids=None,
     ):
         workspace_id = identity(self.bridge.store)["workspace_id"]
         conditions = [
@@ -344,11 +536,26 @@ class Research:
             )
         else:
             conditions.extend(current_source_conditions(db.research_runs, db.runs))
-            conditions.append(db.research_runs.c.id == visible_research_run(workspace_id))
+            conditions.append(
+                table.c.id.in_(current_card_ids(workspace_id))
+                if table is db.research_cards
+                else table.c.summary["card_id"].astext.in_(current_card_ids(workspace_id))
+            )
         if table is db.research_cards:
             conditions.append(table.c.state != "excluded")
         if book_id:
             conditions.append(table.c.book_id == str(book_id))
+        if book_ids is not None:
+            conditions.append(table.c.book_id.in_(book_ids))
+        if record_ids is not None:
+            conditions.append(
+                or_(
+                    table.c.id.in_(record_ids),
+                    table.c.summary["canonical_id"].astext.in_(record_ids),
+                )
+                if table is db.research_entities
+                else table.c.id.in_(record_ids)
+            )
         if query:
             # The cards/entities lane is explicitly SQL literal search; source hits use hybrid search.
             conditions.append(
@@ -391,7 +598,7 @@ class Research:
         ]
         return {"items": items, "total": total, "offset": offset, "limit": limit}
 
-    def card(self, card_id):
+    def card(self, card_id, *, include_relations=True):
         card = self.invoke(self.workflow.card, card_id)
         snapshot = self.workflow.snapshot(card["run_id"])
         with self.engine.connect() as connection:
@@ -403,6 +610,7 @@ class Research:
                         db.research_runs.c.summary["created_at"]
                         .as_float()
                         .label("research_created"),
+                        db.research_runs.c.summary["purpose"].astext.label("research_purpose"),
                     )
                     .select_from(
                         db.runs.join(db.books, db.books.c.id == db.runs.c.book_id).outerjoin(
@@ -422,10 +630,13 @@ class Research:
             raise ServiceError(404, "研究来源已删除或不可用。")
         result = source["result"] or {}
         require_workspace(self.engine, source, self.bridge.store)
-        current = snapshot["publication_sha256"] == result.get(
-            "codex_publication_sha256"
-        ) and snapshot["chapters_sha256"] == (result.get("codex_reading_projection") or {}).get(
-            "chapters_sha256"
+        current = (
+            result.get("published") is True
+            and result.get("content_acceptance") != "workflow_test"
+            and snapshot.get("content_verified", True)
+            and snapshot["publication_sha256"] == result.get("codex_publication_sha256")
+            and snapshot["chapters_sha256"]
+            == (result.get("codex_reading_projection") or {}).get("chapters_sha256")
         )
         current = current and bool(source["external_current"])
         revision = bool(result.get("codex_revision_pending"))
@@ -445,9 +656,34 @@ class Research:
         superseded = bool(
             newer and newer > (source["research_created"] or card.get("created_at", 0))
         )
+        purpose = source["research_purpose"] or "book"
+        if purpose in {"book", "card_revision"} or card.get("replaces_card_id"):
+            with self.engine.connect() as connection:
+                lineage_replacement = connection.scalar(
+                    select(db.research_cards.c.id)
+                    .join(db.research_runs)
+                    .where(
+                        db.research_cards.c.id.in_(
+                            current_card_ids(identity(self.bridge.store)["workspace_id"])
+                        ),
+                        db.research_cards.c.id != card["id"],
+                        func.coalesce(
+                            db.research_cards.c.summary["lineage_id"].astext, db.research_cards.c.id
+                        )
+                        == (card.get("lineage_id") or card["id"]),
+                        db.research_runs.c.summary["created_at"].as_float()
+                        > (source["research_created"] or card.get("created_at", 0)),
+                    )
+                    .limit(1)
+                )
+            superseded |= lineage_replacement is not None
+        else:
+            superseded = False
         research_current = not superseded
-        return {
-            **located_card(card, snapshot, self.workflow.sources(card["run_id"])),
+        result = {
+            **catalogue_card(
+                located_card(card, snapshot, self.workflow.sources(card["run_id"])), self.workflow
+            ),
             "source_current": current,
             "needs_update": not current or revision,
             "source_status": "stale"
@@ -458,6 +694,63 @@ class Research:
             "research_current": research_current,
             "superseded": superseded,
         }
+        if include_relations:
+            result["derived_relations"] = self.card_relations(card_id)
+        return result
+
+    def card_relations(self, card_id):
+        result = self.invoke(self.workflow.card_relationships, card_id, limit=100)
+        cards, items = {}, []
+        for relation in result["items"]:
+            if not relation.get("target_card_id"):
+                continue
+            try:
+                owner_id = relation["card_id"]
+                if owner_id not in cards:
+                    cards[owner_id] = self.card(owner_id, include_relations=False)
+                owner = cards[owner_id]
+                if owner["state"] not in {"verified", "human_accepted"}:
+                    continue
+                evidence_ids = set(
+                    relation.get("source_evidence_ids", [])
+                    + relation.get("target_evidence_ids", [])
+                )
+                spans = [span for span in owner["evidence"] if span["id"] in evidence_ids]
+                target_id = relation.get("target_card_id", relation["target_id"])
+                if target_id not in cards:
+                    try:
+                        cards[target_id] = self.card(target_id, include_relations=False)
+                    except ServiceError as error:
+                        if error.status_code not in {404, 409}:
+                            raise
+                        cards[target_id] = None
+                target = cards[target_id]
+                target_current = (
+                    target is not None
+                    and target["source_current"]
+                    and not target["superseded"]
+                    and target["version"] == relation.get("target_card_version", target["version"])
+                )
+                source_current = owner["source_current"]
+                try:
+                    self.workspace.current_relation(relation, cards=cards)
+                except ServiceError as error:
+                    if error.status_code not in {404, 409}:
+                        raise
+                    source_current = False
+                items.append(
+                    {
+                        **relation,
+                        "evidence": spans,
+                        "source_current": source_current,
+                        "target_current": target_current,
+                        "needs_update": not source_current or not target_current,
+                    }
+                )
+            except ServiceError as error:
+                if error.status_code not in {404, 409}:
+                    raise
+        return {**result, "items": items}
 
     def entity(self, entity_id):
         entity = self.invoke(self.workflow.entity, entity_id)
@@ -465,26 +758,23 @@ class Research:
 
         def locate(mention):
             card_id = mention["card_id"]
-            if card_id not in cards:
-                cards[card_id] = self.card(card_id)
-            card = cards[card_id]
+            card = self.workspace.current_card(card_id, mention.get("card_version"), cards=cards)
             ids = set(mention.get("evidence_ids", []))
             evidence = [span for span in card["evidence"] if span["id"] in ids]
             return {
                 **mention,
+                "card_version": card["version"],
                 "evidence": evidence,
                 "card_title": card["title"],
                 "reading_target": next(
                     (e["reading_target"] for e in evidence if e["reading_target"]), None
                 ),
-                "source_current": card["source_current"],
+                "source_current": True,
                 "needs_update": card["needs_update"],
                 "source_status": card["source_status"],
-                "research_current": card["research_current"],
-                "superseded": card["superseded"],
+                "research_current": True,
+                "superseded": False,
             }
-
-        result = locate(entity)
 
         def retained(items):
             rows = []
@@ -492,12 +782,114 @@ class Research:
                 try:
                     rows.append(locate(item))
                 except ServiceError as error:
-                    if error.status_code != 404:
+                    if error.status_code not in {404, 409}:
                         raise
             return rows
 
-        result["mentions"] = retained(entity.get("mentions", []))
-        result["identity_links"] = retained(entity.get("identity_links", []))
+        members = retained(entity.get("source_mentions") or entity.get("mentions") or [entity])
+        if not members:
+            raise ServiceError(404, "实体的来源已删除、换版或尚未核验。")
+        canonical = entity.get("canonical_id") or entity["id"]
+        supported = {
+            (mention["card_id"], mention["card_version"], span["id"])
+            for mention in members
+            for span in mention["evidence"]
+        }
+        aliases, historical = [], []
+        for alias in [*entity.get("aliases", []), *entity.get("historical_aliases", [])]:
+            refs = alias.get("evidence_refs", [])
+            live = [
+                ref
+                for ref in refs
+                if (ref["card_id"], ref["card_version"], ref["evidence_id"]) in supported
+            ]
+            old = [ref for ref in refs if ref not in live]
+            old.extend(ref for ref in alias.get("historical_evidence_refs", []) if ref not in old)
+            projected = {
+                **alias,
+                "evidence_refs": live if live else refs,
+                "historical_evidence_refs": old,
+                "source_current": bool(live),
+            }
+            (aliases if live else historical).append(projected)
+        withdrawn = [
+            {**alias, "source_current": False} for alias in entity.get("withdrawn_aliases", [])
+        ]
+        result = {
+            **entity,
+            **members[0],
+            "id": canonical,
+            "canonical_id": canonical,
+            "name": entity["name"],
+            "kind": entity["kind"],
+            "version": entity.get("version", 1),
+            "aliases": aliases,
+            "historical_aliases": historical,
+            "withdrawn_aliases": withdrawn,
+            "canonical": {
+                "id": canonical,
+                "name": entity["name"],
+                "kind": entity["kind"],
+                "version": entity.get("version", 1),
+                "aliases": aliases,
+                "historical_aliases": historical,
+                "withdrawn_aliases": withdrawn,
+            },
+            "mentions": members,
+            "source_mentions": members,
+            "evidence": [e for mention in members for e in mention["evidence"]],
+            "identity_links": retained(entity.get("identity_links", [])),
+        }
+        relationships = []
+        for relation in entity.get("relationships", entity.get("relations", [])):
+            try:
+                current = self.workspace.current_relation(relation, cards=cards)
+                card = cards[relation["card_id"]]
+                participant = next(
+                    (
+                        mention["name"]
+                        for mention in card.get("mentions", [])
+                        if mention.get("entity_id") == relation.get("target_id")
+                    ),
+                    "",
+                )
+                relationships.append(
+                    {
+                        **current,
+                        "participant_name": relation.get("participant_name") or participant,
+                    }
+                )
+            except ServiceError as error:
+                if error.status_code not in {404, 409}:
+                    raise
+        result["relationships"] = relationships
+        result["participations"] = [edge for edge in relationships if edge.get("event_id")]
+        events = {}
+        for edge in result["participations"]:
+            event_id = edge["event_id"]
+            events.setdefault(
+                event_id,
+                {
+                    "id": event_id,
+                    "name": edge.get("event_name", edge.get("name", "")),
+                    "date": edge.get("date"),
+                    "action": edge.get("action", ""),
+                    "place": edge.get("place"),
+                    "card_id": edge["card_id"],
+                    "event_status": edge.get("event_status", "unknown"),
+                    "status_note": edge.get("status_note", ""),
+                    "evidence": edge["evidence"],
+                    "participants": [],
+                },
+            )
+            events[event_id]["participants"].append(
+                {
+                    "entity_id": edge.get("target_id"),
+                    "name": edge.get("participant_name", ""),
+                    "role": edge.get("role", edge.get("predicate", "participant")),
+                }
+            )
+        result["events"] = list(events.values())
         return result
 
     def start(self, book_id, request):
@@ -524,15 +916,65 @@ class Research:
         self.bridge.projection.sync(self.workflow.status(card["run_id"]))
         return self.card(card_id)
 
-    def search(self, query, book_id=None, *, semantic=True, limit=8):
-        result = self.evidence.search(query, book_id, semantic=semantic, limit=limit)
+    def search(self, query, book_id=None, *, book_ids=None, semantic=True, limit=8):
+        import logging
+
+        from hrs.research.discovery import ResearchDiscovery
+
+        selected = book_ids if book_ids is not None else [str(book_id)] if book_id else None
+        result = self.evidence.search(
+            query, book_id, book_ids=book_ids, semantic=semantic, limit=limit
+        )
+        try:
+            discovery = ResearchDiscovery(
+                self.settings, self.engine, self.bridge.objects, self.bridge.store
+            )
+            found = discovery.search(query, book_ids=selected, semantic=semantic, limit=limit)
+        except Exception:  # noqa: BLE001 - derived index failure does not hide available originals
+            logging.getLogger(__name__).exception(
+                "Research discovery unavailable; source results retained"
+            )
+            found = {
+                "available": False,
+                "backend": "unavailable",
+                "index": {"state": "unavailable"},
+                "records": [],
+            }
+        available = found["backend"] != "unavailable"
+        cards = self.records(
+            db.research_cards,
+            book_ids=selected,
+            query=None if available else query,
+            record_ids=[r["record_id"] for r in found["records"] if r["record_kind"] == "card"]
+            if available
+            else None,
+            limit=limit,
+        )["items"]
+        entities = self.records(
+            db.research_entities,
+            book_ids=selected,
+            query=None if available else query,
+            record_ids=[r["record_id"] for r in found["records"] if r["record_kind"] == "entity"]
+            if available
+            else None,
+            limit=limit,
+        )["items"]
+        indexed_entities = {}
+        for entity in entities:
+            canonical = entity.get("canonical_id") or entity["id"]
+            indexed_entities.setdefault(canonical, {**entity, "id": canonical})
+        ranks = {row["record_id"]: index for index, row in enumerate(found["records"])}
+        cards.sort(key=lambda row: ranks.get(row["id"], len(ranks)))
+        ranked_entities = sorted(
+            indexed_entities.values(), key=lambda row: ranks.get(row["id"], len(ranks))
+        )
         return {
             **result,
-            "cards": self.records(db.research_cards, book_id, query=query, limit=limit)["items"],
-            "entities": self.records(db.research_entities, book_id, query=query, limit=limit)[
-                "items"
-            ],
-            "research_backend": "sql_literal",
+            "cards": cards,
+            "entities": ranked_entities,
+            "research_backend": found["backend"] if available else "sql_literal_fallback",
+            "research_available": found["available"],
+            "research_index": found["index"],
         }
 
     def export(self, card_id, *, base_url=""):
@@ -585,6 +1027,8 @@ class Research:
             ("卡片 ID（id）", card["id"]),
             ("卡片版本（version）", card.get("version")),
             ("原任务内 ID（local_id）", card.get("local_id")),
+            ("卡片沿革（lineage_id）", card.get("lineage_id")),
+            ("替代此前卡片（replaces_card_id）", card.get("replaces_card_id")),
             (
                 "已保留修订（revision_versions）",
                 "、".join(map(str, card.get("revision_versions", []))),
@@ -626,6 +1070,31 @@ class Research:
         lines.append("")
         date("成文时间（formation_date）", card.get("formation_date"))
         date("事件时间（event_date）", card.get("event_date"))
+        metadata = card.get("metadata") or {}
+        if metadata:
+            lines.extend(["## 文献身份与形成信息（metadata）", ""])
+            labels = {
+                "original_title": "原题",
+                "authors": "作者",
+                "recipients": "收受者",
+                "editors": "编者",
+                "publication": "出版与版本",
+                "volume": "卷次",
+                "archive_id": "档号",
+                "formation_place": "成文地点",
+                "purpose": "写作目的",
+                "testimony": "记载性质",
+            }
+            field("标题性质（title_origin）", metadata.get("title_origin"))
+            for key, value in metadata.items():
+                if key == "title_origin":
+                    continue
+                lines.extend([f"### {labels.get(key, key)}（{key}）", ""])
+                field("原文记载", value.get("value") or "未详")
+                field("认识状态", value.get("certainty"))
+                field("原文依据", references(value.get("evidence_ids", [])))
+                field("说明与局限", value.get("note"))
+                lines.append("")
         lines.extend(["## 提要", "", card["summary"], "", "## 卡片内容", ""])
         kinds = {
             "section": "原文结构",
@@ -658,6 +1127,15 @@ class Research:
             field("实体 ID", mention.get("entity_id"))
             field("身份依据", mention["identity_basis"])
             field("原文依据", references(mention["evidence_ids"]))
+            for alias in mention.get("aliases", []):
+                field("别名", alias["name"])
+                field("别名依据", references(alias.get("evidence_ids", [])))
+            for location in mention.get("locations", []):
+                field(
+                    "原文提及位置",
+                    f"{location['article_id']} {location['start']}–{location['end']}",
+                )
+                field("原文写法", location.get("quote"))
             lines.append("")
         lines.extend(["## 事件（events）", ""])
         for event in card.get("events", []):
@@ -666,6 +1144,18 @@ class Research:
             field("实体 ID", event.get("entity_id"))
             field("参与者", "、".join(named(identity) for identity in event["participant_ids"]))
             field("原文依据", references(event["evidence_ids"]))
+            field("具体行为（action）", event.get("action"))
+            field("材料中的事件性质（event_status）", event.get("event_status", "unknown"))
+            field("事件性质说明（status_note）", event.get("status_note"))
+            place = event.get("place") or {}
+            field("事件地点", place.get("value") or "未详")
+            field("地点认识状态", place.get("certainty"))
+            field("地点依据", references(place.get("evidence_ids", [])))
+            field("地点说明", place.get("note"))
+            for role in event.get("participant_roles", []):
+                field("参与者角色", f"{named(role['mention_id'])}：{role['role']}")
+                field("角色记载", role["description"])
+                field("角色依据", references(role["evidence_ids"]))
             lines.append("")
             date(f"{event['name']}的日期", event.get("date"))
         lines.extend(["## 关系网络（relations）", ""])
@@ -694,6 +1184,101 @@ class Research:
             field("关联理由", link["reason"])
             field("原文依据", references(link["evidence_ids"]))
             lines.append("")
+        if card.get("cross_relations"):
+            lines.extend(["## 跨卡文献与证据关系（cross_relations）", ""])
+            for relation in card["cross_relations"]:
+                lines.extend([f"### {relation['kind']} · {relation['id']}", ""])
+                for key in (
+                    "target_card_id",
+                    "target_card_version",
+                    "target_publication_sha256",
+                    "certainty",
+                    "reason",
+                ):
+                    field(key, relation.get(key))
+                field("本卡来源版本", card.get("publication_sha256"))
+                field("本篇原文依据", references(relation["source_evidence_ids"]))
+                field("对方原文依据", references(relation["target_evidence_ids"]))
+                lines.extend(
+                    [
+                        f"[查看对方卡片]({base_url}/#/research?{urlencode({'card': relation['target_card_id']})})",
+                        "",
+                    ]
+                )
+        derived = card.get("derived_relations") or {}
+        if derived.get("items"):
+            lines.extend(["## 后续补充的双向关系（derived_relations）", ""])
+            for relation in derived["items"]:
+                lines.extend([f"### {relation.get('kind', 'association')} · {relation['id']}", ""])
+                for key in (
+                    "card_id",
+                    "card_version",
+                    "source_id",
+                    "target_id",
+                    "target_card_version",
+                    "target_publication_sha256",
+                    "certainty",
+                    "reason",
+                    "needs_update",
+                ):
+                    field(key, relation.get(key))
+                for span in relation.get("evidence", []):
+                    lines.extend(
+                        [
+                            "",
+                            f"**冻结证据 {span['id']}** · {span['article_id']} {span['start']}–{span['end']}",
+                            "",
+                            span["quote"],
+                            "",
+                        ]
+                    )
+                    field("来源发布版本", span.get("publication_sha256"))
+                    field("原文 SHA256", span.get("text_sha256"))
+                    for note in span.get("footnotes", []):
+                        field("源脚注 " + note["id"], note.get("text"))
+                lines.extend(
+                    [
+                        f"[查看独立证据包]({base_url}/#/research?{urlencode({'card': relation['card_id']})})",
+                        "",
+                    ]
+                )
+            if derived.get("truncated"):
+                lines.extend(["补充关系有省略，请在工作台继续查阅。", ""])
+        if card.get("coverage"):
+            lines.extend(["## 全文提取覆盖（coverage）", ""])
+            for unit in card["coverage"]:
+                lines.extend(
+                    [
+                        f"### {unit['id']} · {unit['article_id']} {unit['start']}–{unit['end']}",
+                        "",
+                        unit["summary"],
+                        "",
+                    ]
+                )
+                for key in ("mention_ids", "event_ids", "relation_ids"):
+                    field(key, "、".join(unit.get(key, [])))
+                for key in ("no_mentions_reason", "no_events_reason", "no_relations_reason"):
+                    field(key, unit.get(key))
+                lines.append("")
+        if card.get("research_plan"):
+            lines.extend(["## 补证计划与证据评价（research_plan）", ""])
+            for plan in card["research_plan"]:
+                lines.extend([f"### {plan['question']}", ""])
+                for key in ("id", "status", "evaluation", "stop_reason"):
+                    field(key, plan.get(key))
+                for key in ("proposed_queries", "search_receipt_ids", "missing_evidence"):
+                    field(key, "；".join(plan.get(key, [])))
+                field("实际采用依据", references(plan.get("evidence_ids", [])))
+                lines.append("")
+        if card.get("question_findings"):
+            lines.extend(["## 研究问题结论（question_findings）", ""])
+            for finding in card["question_findings"]:
+                for key in ("id", "question_id", "definition_version", "status"):
+                    field(key, finding.get(key))
+                lines.extend(["", finding["text"], ""])
+                field("原文依据", references(finding.get("evidence_ids", [])))
+                field("未解决事项", "；".join(finding.get("unresolved", [])))
+                lines.append("")
         for heading, key in (
             ("使用边界（limitations）", "limitations"),
             ("备选解释（alternatives）", "alternatives"),
@@ -711,6 +1296,15 @@ class Research:
             ("checked_evidence_ids", "核验引文"),
             ("checked_relation_ids", "核验关系"),
             ("checked_identity_links", "核验身份关联"),
+            ("checked_search_receipt_ids", "核验检索回执"),
+            ("checked_mechanical_evidence_ids", "核验字符回执"),
+            ("checked_metadata_fields", "核验文献信息"),
+            ("checked_entity_ids", "核验人物实体"),
+            ("checked_event_ids", "核验事件"),
+            ("checked_coverage_ids", "核验全文覆盖"),
+            ("checked_research_question_ids", "核验补证计划"),
+            ("checked_cross_relation_ids", "核验跨卡关系"),
+            ("checked_question_finding_ids", "核验研究问题结论"),
         ):
             field(label, "、".join(checks.get(key, [])))
         field("补充研究判定已核验", checks.get("checked_research_disposition"))

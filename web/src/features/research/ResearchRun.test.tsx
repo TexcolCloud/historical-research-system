@@ -11,6 +11,45 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+test("automatic repair and re-verification remain machine work and expose their actual stage names", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        run_id: "run",
+        book_id: "book",
+        state: "running",
+        version: 2,
+        counts: {
+          articles_total: 1,
+          articles_completed: 0,
+          articles_pending: 0,
+        },
+        card_ids: [],
+        tasks: [
+          { task_id: "verify", stage: "verify", state: "completed" },
+          { task_id: "repair", stage: "repair", state: "running" },
+          { task_id: "reverify", stage: "reverify", state: "ready" },
+        ],
+      }),
+    ),
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <ResearchRunPanel runId="run" />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText(/定向修订.*处理中/)).toBeTruthy();
+  expect(await screen.findByText(/再次独立核验.*等待处理/)).toBeTruthy();
+  expect(
+    screen.queryByText("请打开待人工核验的卡片，对照原文作出决定。"),
+  ).toBeNull();
+});
+
 test("queue and running progress poll only the lightweight task until human review is needed", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const requests: string[] = [];

@@ -81,6 +81,10 @@ test("research metadata events leave source and content caches alone, while chan
   const cardKey = ["research", "card", "card"];
   const researchBook = ["research", "book", "book"];
   const researchRun = ["research", "run", "research-run"];
+  const questionKey = ["research", "question", "q"];
+  query.setQueryData(questionKey, {
+    runs: [{ run_id: "research-run", state: "paused" }],
+  });
   const sourceKeys = [
     queryKeys.book("book"),
     queryKeys.run("source"),
@@ -116,6 +120,7 @@ test("research metadata events leave source and content caches alone, while chan
     applyBookEvent(query, event(false));
     expect(query.getQueryState(researchBook)?.isInvalidated).toBe(true);
     expect(query.getQueryState(researchRun)?.isInvalidated).toBe(true);
+    expect(query.getQueryState(questionKey)?.isInvalidated).toBe(true);
     expect(query.getQueryState(cardKey)?.isInvalidated).toBe(false);
     expect(rerank).not.toHaveBeenCalled();
     applyBookEvent(query, event(true));

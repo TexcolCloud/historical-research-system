@@ -140,15 +140,20 @@ class BookCleanup:
         shared = self.closure(self.roots(book_id, others=True)) if saved["references"] else {}
         owned = [ref for ref in saved["references"] if ref["key"] not in shared]
         search = self.search_factory(self.settings.opensearch_url)
-        if search.indices.exists(index=self.settings.opensearch_index):
-            result = search.delete_by_query(
-                index=self.settings.opensearch_index,
-                body={"query": {"term": {"book_id": book_id}}},
-                refresh=True,
-                conflicts="proceed",
-            )
-            if result.get("failures") or result.get("timed_out") or result.get("version_conflicts"):
-                raise RuntimeError("检索记录清理未完成。")
+        for index in (self.settings.opensearch_index, self.settings.opensearch_index + "-research"):
+            if search.indices.exists(index=index):
+                result = search.delete_by_query(
+                    index=index,
+                    body={"query": {"term": {"book_id": book_id}}},
+                    refresh=True,
+                    conflicts="proceed",
+                )
+                if (
+                    result.get("failures")
+                    or result.get("timed_out")
+                    or result.get("version_conflicts")
+                ):
+                    raise RuntimeError("检索记录清理未完成。")
         client, bucket = self.objects.client, self.objects.bucket
         for session_id in saved["uploads"]:
             prefix = self.settings.upload_prefix + str(UUID(session_id)) + "/"
