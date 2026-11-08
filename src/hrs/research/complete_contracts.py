@@ -77,29 +77,76 @@ def validate_complete_cards(
         raise EvidenceMismatch(
             "Every extracted entity, event and relation requires a source coverage unit"
         )
-    for mention in card["mentions"]:
+    occurrence_errors = []
+    for mention_index, mention in enumerate(card["mentions"]):
         if not mention["identity_key"].strip():
             raise EvidenceMismatch("Source mentions require a stable source-qualified identity_key")
         if not mention.get("locations"):
             raise EvidenceMismatch(
                 "Complete source mentions require exact original occurrence locations"
             )
-        for location in mention["locations"]:
+        for location_index, location in enumerate(mention["locations"]):
+            issue_type, message = None, None
             if (
                 location["article_id"] != article["id"]
                 or not 0 <= location["start"] < location["end"] <= len(article["text"])
                 or article["text"][location["start"] : location["end"]] != location["quote"]
             ):
-                raise EvidenceMismatch(
-                    "Entity occurrence must exactly locate this original article"
-                )
-            if not any(
+                issue_type = "entity_occurrence_original_range"
+                message = "Entity occurrence must exactly locate this original article"
+            elif not any(
                 evidence["id"] in mention["evidence_ids"]
                 and evidence["article_id"] == location["article_id"]
                 and evidence["start"] <= location["start"] < location["end"] <= evidence["end"]
                 for evidence in card["evidence"]
             ):
-                raise EvidenceMismatch("Entity occurrence must be contained in its cited evidence")
+                issue_type = "entity_occurrence_evidence_containment"
+                message = "Entity occurrence must be contained in its cited evidence"
+            if issue_type:
+                context = {
+                    "card_id": card["id"],
+                    "mention_id": mention["id"],
+                    "qualified_mention_id": f"{card['id']}/{mention['id']}",
+                    "location": {key: location[key] for key in ("article_id", "start", "end")},
+                    "expected_article_id": article["id"],
+                    "article_length": len(article["text"]),
+                    "cited_evidence": [
+                        {
+                            "evidence_id": evidence["id"],
+                            "evidence_index": index,
+                            "qualified_evidence_id": f"{card['id']}/{evidence['id']}",
+                            **{key: evidence[key] for key in ("article_id", "start", "end")},
+                        }
+                        for index, evidence in enumerate(card["evidence"])
+                        if evidence["id"] in mention["evidence_ids"]
+                    ],
+                }
+                cited = context["cited_evidence"]
+                ranges = (
+                    "; ".join(
+                        f"evidence[{span['evidence_index']}] {span['qualified_evidence_id']} "
+                        f"{span['article_id']}[{span['start']},{span['end']})"
+                        for span in cited[:3]
+                    )
+                    or "none"
+                )
+                if len(cited) > 3:
+                    ranges += f"; +{len(cited) - 3} further cited spans; inspect the retained proposal"
+                message += (
+                    f": mention {context['qualified_mention_id']}; "
+                    f"location {location['article_id']}[{location['start']},{location['end']}); "
+                    f"cited {ranges}. Ranges use Unicode codepoints and exclusive ends."
+                )
+                occurrence_errors.append(
+                    {
+                        "loc": ("cards", 0, "mentions", mention_index, "locations", location_index),
+                        "type": issue_type,
+                        "msg": message,
+                        "ctx": context,
+                    }
+                )
+    if occurrence_errors:
+        raise AssessmentMismatch(occurrence_errors)
     for event in card["events"]:
         if not event.get("status_note", "").strip():
             raise EvidenceMismatch("Event occurrence status requires a source-backed explanation")

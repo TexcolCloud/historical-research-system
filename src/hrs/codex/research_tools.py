@@ -67,7 +67,11 @@ def rejection_diagnostics(error):
             summary["omitted_issues"] += removed["occurrences"]
         else:
             break
-    return {"issues": issues, "issue_count": len(issues)}, summary
+    return {
+        "message": issues[0]["message"] if issues else "Native research proposal failed validation",
+        "issues": issues,
+        "issue_count": len(issues),
+    }, summary
 
 
 def status_summary(status):

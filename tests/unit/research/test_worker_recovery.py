@@ -258,6 +258,7 @@ def test_rejected_verification_keeps_paths_and_never_renews_without_full_candida
     with workflow.ledger.connect() as connection:
         retained = workflow._load_source(connection, receipt["rejection_ref"])
     assert retained["error"]["issues"] == audit["issues"]
+    assert retained["error"]["message"] == audit["issues"][0]["message"]
     assert retained["proposal"] == proposal and retained["accepted"] is False
     duplicate = workflow.record_submission_rejection(
         packet["task_token"], "verifier", proposal, audit
