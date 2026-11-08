@@ -193,6 +193,9 @@ Use research_target_card then research_target_card_text for each counterpart des
 and its complete frozen source using source_index. Cross-relations require both source sides and the exact
 target card/version/publication hash. Search snippets, shared names or copied reprints cannot prove identity
 or independent corroboration. Source-backed reply/reprint/support/counter/limit links may remain disputed.
+Both source_evidence_ids and target_evidence_ids name IDs in this output card.evidence, never IDs copied
+from the counterpart descriptor. First add the actual counterpart frozen-source span to this card with a
+new local evidence ID and the exact source_index article ID; reference that new ID in target_evidence_ids.
 Different frozen source IDs can describe the same original with different retained note maps. Read each
 descriptor separately; parsing variants are never independent historical witnesses.
 Answer every frozen notebook research_question at its exact definition_version using question_findings;

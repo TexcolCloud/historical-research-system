@@ -18,6 +18,7 @@ from hrs.processing.ledger import encode
 from hrs.processing.runtime_control import FAILURE_CODES
 from hrs.research.catalogue import ResearchCatalogue
 from hrs.research.complete_contracts import (
+    AssessmentMismatch,
     complete_checks,
     validate_assessments,
     validate_complete_cards,
@@ -1774,9 +1775,9 @@ class ResearchWorkflow:
                     )
 
     def _require_targets_read(self, connection, task, cards, reads, *, verify_ranges=True):
-        for card in cards:
+        for card_index, card in enumerate(cards):
             evidence = {item["id"]: item for item in card["evidence"]}
-            for relation in card.get("cross_relations", []):
+            for relation_index, relation in enumerate(card.get("cross_relations", [])):
                 reference = next(
                     (
                         item
@@ -1801,20 +1802,95 @@ class ResearchWorkflow:
                     raise EvidenceMismatch(
                         "Read every complete frozen counterpart card window before submitting"
                     )
-                if not any(
-                    evidence[eid]["article_id"] == task["article_id"]
-                    for eid in relation["source_evidence_ids"]
+                for field, source_ids, message in (
+                    (
+                        "source_evidence_ids",
+                        [task["article_id"]],
+                        "Cross-card relation must cite this document's own source",
+                    ),
+                    (
+                        "target_evidence_ids",
+                        reference["source_ids"],
+                        "Cross-card relation must cite the frozen target document source",
+                    ),
                 ):
-                    raise EvidenceMismatch(
-                        "Cross-card relation must cite this document's own source"
+                    matched, bad_count, groups = 0, 0, {}
+                    # Inspect every reference, retaining at most four distinct
+                    # bad IDs and eight positions each, even for huge repeats.
+                    for index, eid in enumerate(relation[field]):
+                        actual = evidence[eid]["article_id"]
+                        if actual in source_ids:
+                            matched += 1
+                            continue
+                        bad_count += 1
+                        key = (eid, actual)
+                        if key not in groups:
+                            if len(groups) == 4:
+                                continue
+                            groups[key] = {"indices": [], "occurrences": 0}
+                        group = groups[key]
+                        group["occurrences"] += 1
+                        if len(group["indices"]) < 8:
+                            group["indices"].append(index)
+                    valid = bool(matched) if field == "source_evidence_ids" else bad_count == 0
+                    if valid:
+                        continue
+                    if not groups:
+                        raise EvidenceMismatch(message)
+                    errors = []
+                    expected = [identity[:128] for identity in source_ids[:3]]
+                    omitted = max(0, len(source_ids) - 3)
+                    expected_label = f"{expected}" + (
+                        f" (+{omitted} further IDs)" if omitted else ""
                     )
-                if not all(
-                    evidence[eid]["article_id"] in reference["source_ids"]
-                    for eid in relation["target_evidence_ids"]
-                ):
-                    raise EvidenceMismatch(
-                        "Cross-card relation must cite the frozen target document source"
-                    )
+                    omitted_groups = bad_count - sum(g["occurrences"] for g in groups.values())
+                    omitted_refs = bad_count - sum(len(g["indices"]) for g in groups.values())
+                    for (eid, actual), group in groups.items():
+                        index = group["indices"][0]
+                        omitted_indices = group["occurrences"] - len(group["indices"])
+                        context = {
+                            "card_id": card["id"][:128],
+                            "relation_id": relation["id"][:128],
+                            "target_card_id": relation["target_card_id"][:128],
+                            "target_card_version": relation["target_card_version"],
+                            "evidence_id": eid[:128],
+                            "actual_source_id": actual[:128],
+                            "expected_source_ids": expected,
+                            "omitted_expected_sources": omitted,
+                            "bad_reference_count": bad_count,
+                            "occurrences": group["occurrences"],
+                            "reference_indices": group["indices"],
+                            "omitted_indices": omitted_indices,
+                            "omitted_group_references": omitted_groups,
+                            "omitted_reference_indices": omitted_refs,
+                        }
+                        errors.append(
+                            {
+                                "loc": (
+                                    "cards",
+                                    card_index,
+                                    "cross_relations",
+                                    relation_index,
+                                    field,
+                                    index,
+                                ),
+                                "type": f"cross_card_{field.removesuffix('_ids')}_source",
+                                "msg": f"{bad_count} invalid references; {group['occurrences']} occurrences; "
+                                f"{omitted_indices} omitted indices; "
+                                f"{omitted_groups} further invalid references omitted. "
+                                f"cards[{card_index}].cross_relations[{relation_index}].{field}[{index}]: "
+                                f"actual source {context['actual_source_id']}; "
+                                f"expected frozen source IDs {expected_label}. "
+                                f"{message}: relation {context['card_id']}/{context['relation_id']} "
+                                f"target {context['target_card_id']}@{context['target_card_version']}; "
+                                f"{field}[{index}]={context['evidence_id']} resolves in "
+                                "this output card.evidence. "
+                                f"Retained indices for this ID: {group['indices']}. "
+                                "Counterpart evidence IDs are a separate namespace.",
+                                "ctx": context,
+                            }
+                        )
+                    raise AssessmentMismatch(errors)
 
     def _materialize_submission(self, task, run, result):
         contract = submission_model(

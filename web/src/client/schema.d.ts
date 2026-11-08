@@ -1510,9 +1510,15 @@ export interface components {
              * @enum {string}
              */
             certainty: "stated" | "inferred" | "disputed";
-            /** Source Evidence Ids */
+            /**
+             * Source Evidence Ids
+             * @description IDs in this output card.evidence citing this card's own primary source; not evidence IDs taken from a counterpart card.
+             */
             source_evidence_ids: string[];
-            /** Target Evidence Ids */
+            /**
+             * Target Evidence Ids
+             * @description IDs in this output card.evidence citing the exact frozen counterpart source. Copy the actual frozen-source span into this card under a new local evidence ID; counterpart-card evidence IDs belong to a separate namespace and cannot be reused as references.
+             */
             target_evidence_ids: string[];
         };
         /** DeletionReceipt */

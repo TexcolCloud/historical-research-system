@@ -161,8 +161,17 @@ class CrossCardRelation(Contract):
     ]
     reason: str = Field(min_length=1)
     certainty: Literal["stated", "inferred", "disputed"] = "inferred"
-    source_evidence_ids: list[str] = Field(min_length=1)
-    target_evidence_ids: list[str] = Field(min_length=1)
+    source_evidence_ids: list[str] = Field(
+        min_length=1,
+        description="IDs in this output card.evidence citing this card's own primary source; "
+        "not evidence IDs taken from a counterpart card.",
+    )
+    target_evidence_ids: list[str] = Field(
+        min_length=1,
+        description="IDs in this output card.evidence citing the exact frozen counterpart source. "
+        "Copy the actual frozen-source span into this card under a new local evidence ID; "
+        "counterpart-card evidence IDs belong to a separate namespace and cannot be reused as references.",
+    )
 
 
 class IndependentFinding(Contract):
@@ -344,11 +353,18 @@ class CardDraft(Contract):
             for link in self.identity_links
         ):
             raise ValueError("Identity links must identify local source mentions or events")
-        if any(
-            set([*relation.source_evidence_ids, *relation.target_evidence_ids]) - evidence_ids
-            for relation in self.cross_relations
-        ):
-            raise ValueError("Cross-card relationships require both source-bound evidence sides")
+        for relation_index, relation in enumerate(self.cross_relations):
+            for field in ("source_evidence_ids", "target_evidence_ids"):
+                for evidence_index, evidence_id in enumerate(getattr(relation, field)):
+                    if evidence_id not in evidence_ids:
+                        raise ValueError(
+                            "Cross-card relationships require both source-bound evidence sides: "
+                            f"relation {self.id[:128]}/{relation.id[:128]} "
+                            f"target {relation.target_card_id[:128]}@{relation.target_card_version}; "
+                            f"cross_relations[{relation_index}].{field}[{evidence_index}] "
+                            f"references missing ID {evidence_id[:128]} in this output card.evidence. "
+                            "Counterpart evidence IDs are a separate namespace."
+                        )
         mention_ids = {item.id for item in self.mentions}
         if any(
             role.mention_id not in mention_ids
