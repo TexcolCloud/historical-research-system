@@ -6,6 +6,7 @@ import type { components } from "@/client/schema";
 import { research, researchKeys, type ResearchEvidence } from "./api";
 import Evidence from "./ResearchEvidence";
 import { relationLabel } from "./relation-labels";
+import { isFrozenTarget } from "./cross-card-target";
 function Relation({
   relation,
   evidence,
@@ -23,10 +24,7 @@ function Relation({
     staleTime: 30000,
     retry: false,
   });
-  const exact =
-    target.data &&
-    target.data.version === relation.target_card_version &&
-    target.data.publication_sha256 === relation.target_publication_sha256;
+  const exact = isFrozenTarget(relation, target.data);
   return (
     <article className="research-relation">
       <h4>
@@ -79,7 +77,7 @@ function Relation({
                   </p>
                 ) : (
                   <Evidence
-                    evidence={target.data.evidence.filter((item) =>
+                    evidence={evidence.filter((item) =>
                       relation.target_evidence_ids.includes(item.id),
                     )}
                     bookId={target.data.book_id}

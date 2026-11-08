@@ -301,6 +301,8 @@ function DraftForm({
           <CrossRelationFields
             value={draft.cross_relations ?? []}
             evidence={evidence}
+            sourceEvidence={card.data?.evidence}
+            retainedRelations={card.data?.cross_relations}
             onChange={(value) => change("cross_relations", value)}
           />
           {(["tags", "limitations", "alternatives", "questions"] as const).map(

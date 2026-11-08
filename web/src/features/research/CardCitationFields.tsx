@@ -8,6 +8,7 @@ import type { components } from "@/client/schema";
 import { research, researchKeys, type ResearchCard } from "./api";
 import { References, certainty, newId, type Draft } from "./CardFields";
 import { crossRelationLabels } from "./relation-labels";
+import { isFrozenTarget } from "./cross-card-target";
 type S = components["schemas"];
 function EvidenceText({
   value,
@@ -181,11 +182,15 @@ function TargetCardPicker({
 function CrossRelationEditor({
   value,
   evidence,
+  sourceEvidence,
+  retainedRelations,
   onChange,
   onRemove,
 }: {
   value: S["CrossCardRelation"];
   evidence: Draft["evidence"];
+  sourceEvidence?: ResearchCard["evidence"];
+  retainedRelations?: S["CrossCardRelation"][];
   onChange: (value: S["CrossCardRelation"]) => void;
   onRemove: () => void;
 }) {
@@ -194,6 +199,43 @@ function CrossRelationEditor({
     queryFn: ({ signal }) => research.card(value.target_card_id, signal),
     staleTime: 30000,
   });
+  const available =
+    isFrozenTarget(value, target.data) &&
+    target.data?.source_current &&
+    !target.data.superseded &&
+    ["verified", "human_accepted"].includes(target.data.state);
+  const targetSources = new Set(
+    (sourceEvidence ?? [])
+      .filter(
+        (item) =>
+          item.book_id === target.data?.book_id &&
+          item.publication_sha256 === value.target_publication_sha256 &&
+          (item.original_article_id ?? item.article_id) ===
+            target.data?.article_id,
+      )
+      .map((item) => item.article_id),
+  );
+  const retained = retainedRelations?.find(
+    (item) =>
+      item.id === value.id &&
+      item.target_card_id === value.target_card_id &&
+      item.target_card_version === value.target_card_version &&
+      item.target_publication_sha256 === value.target_publication_sha256,
+  );
+  const boundSources = new Set(
+    (sourceEvidence ?? [])
+      .filter(
+        (item) =>
+          retained?.target_evidence_ids.includes(item.id) &&
+          targetSources.has(item.article_id),
+      )
+      .map((item) => item.article_id),
+  );
+  const targetEvidence = evidence.filter(
+    (item) =>
+      targetSources.has(item.article_id) &&
+      (!boundSources.size || boundSources.has(item.article_id)),
+  );
   return (
     <fieldset className="research-edit-group">
       <legend>{target.data?.title ?? "跨卡关系"}</legend>
@@ -262,14 +304,29 @@ function CrossRelationEditor({
           >
             核对对方卡片与原页
           </Link>
-          <References
-            label="对方卡片依据"
-            value={value.target_evidence_ids}
-            evidence={target.data.evidence}
-            onChange={(target_evidence_ids) =>
-              onChange({ ...value, target_evidence_ids })
-            }
-          />
+          {!available ? (
+            <p className="workspace-status-note" role="alert">
+              对方卡片版本或原文已更新，当前关系仍保留原绑定。请重新核对目标卡片后更新关系。
+            </p>
+          ) : targetEvidence.length ? (
+            <>
+              <p className="research-provenance">
+                从本卡已保存的对方原文中选取依据；提交时仍会核验冻结的来源版本。
+              </p>
+              <References
+                label="对方卡片依据"
+                value={value.target_evidence_ids}
+                evidence={targetEvidence}
+                onChange={(target_evidence_ids) =>
+                  onChange({ ...value, target_evidence_ids })
+                }
+              />
+            </>
+          ) : (
+            <p className="research-provenance">
+              尚无已可靠对应的本卡引文。请先在本卡中补充并核对对方冻结版本的原文，不能直接使用对方卡片的证据编号。
+            </p>
+          )}
         </>
       )}
       {target.isError && <p role="alert">{target.error.message}</p>}
@@ -338,10 +395,14 @@ export function CitationFields({
 export function CrossRelationFields({
   value,
   evidence,
+  sourceEvidence,
+  retainedRelations,
   onChange,
 }: {
   value: NonNullable<Draft["cross_relations"]>;
   evidence: Draft["evidence"];
+  sourceEvidence?: ResearchCard["evidence"];
+  retainedRelations?: S["CrossCardRelation"][];
   onChange: (value: NonNullable<Draft["cross_relations"]>) => void;
 }) {
   return (
@@ -352,6 +413,8 @@ export function CrossRelationFields({
           key={item.id}
           value={item}
           evidence={evidence}
+          sourceEvidence={sourceEvidence}
+          retainedRelations={retainedRelations}
           onChange={(next) =>
             onChange(value.map((old, at) => (at === index ? next : old)))
           }

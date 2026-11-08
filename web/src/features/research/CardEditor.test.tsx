@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -9,6 +9,156 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+test.each([
+  { id: "target-own-local", quote: "对方保留原文" },
+  { id: "copied-target-local", quote: "对方同号但无关引文" },
+])(
+  "editing a cross-card relation saves the copied quote's owner-local evidence ID: %j",
+  async (counterpart) => {
+    const publication = "a".repeat(64);
+    const draft = {
+      id: "owner-card",
+      article_id: "owner-article",
+      title: "组织工作的回忆",
+      summary: "原提要",
+      document_type: "回忆",
+      source_layer: "正文",
+      items: [],
+      evidence: [
+        {
+          id: "own",
+          article_id: "owner-article",
+          start: 0,
+          end: 4,
+          quote: "本篇来源",
+          footnote_ids: [],
+        },
+        {
+          id: "copied-target-local",
+          article_id: "target-alias",
+          start: 7,
+          end: 11,
+          quote: "对方保留原文",
+          footnote_ids: [],
+        },
+      ],
+      mentions: [],
+      events: [],
+      relations: [],
+      identity_links: [],
+      tags: [],
+      limitations: [],
+      alternatives: [],
+      questions: [],
+      metadata: null,
+      cross_relations: [
+        {
+          id: "cross",
+          target_card_id: "target-card",
+          target_card_version: 3,
+          target_publication_sha256: publication,
+          kind: "background",
+          reason: "两份材料描述不同阶段",
+          certainty: "inferred",
+          source_evidence_ids: ["own"],
+          target_evidence_ids: [],
+        },
+      ],
+    };
+    let submitted: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/revisions")) {
+          submitted = JSON.parse(String(init?.body));
+          return Response.json({ run_id: "revision", state: "ready" });
+        }
+        if (url.endsWith("/draft"))
+          return Response.json({
+            card: draft,
+            version: 2,
+            source_current: true,
+            superseded: false,
+          });
+        if (url.endsWith("/target-card"))
+          return Response.json({
+            id: "target-card",
+            title: "对方原卡",
+            book_id: "target-book",
+            article_id: "target-article",
+            version: 3,
+            publication_sha256: publication,
+            source_current: true,
+            superseded: false,
+            state: "verified",
+            evidence: [
+              {
+                ...draft.evidence[1],
+                ...counterpart,
+                article_id: "target-article",
+                pages: [7],
+              },
+            ],
+          });
+        return Response.json({
+          ...draft,
+          version: 2,
+          book_id: "owner-book",
+          source_current: true,
+          superseded: false,
+          evidence: draft.evidence.map((span) => ({
+            ...span,
+            book_id:
+              span.article_id === "target-alias" ? "target-book" : "owner-book",
+            original_article_id:
+              span.article_id === "target-alias"
+                ? "target-article"
+                : "owner-article",
+            publication_sha256:
+              span.article_id === "target-alias" ? publication : "c".repeat(64),
+          })),
+        });
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <CardEditor cardId="owner-card" onClose={() => {}} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("textbox", { name: "修订内容提要" });
+    await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+    const choices = within(
+      await screen.findByRole("group", { name: "对方卡片依据" }),
+    );
+    await userEvent.click(
+      choices.getByRole("checkbox", { name: /对方保留原文/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "提交修订核验" }));
+    await screen.findByText("修订已提交独立核验，原有卡片和人工决定继续保留。");
+    expect(submitted).toMatchObject({
+      expected_version: 2,
+      card: {
+        cross_relations: [
+          {
+            target_card_id: "target-card",
+            target_card_version: 3,
+            target_publication_sha256: publication,
+            source_evidence_ids: ["own"],
+            target_evidence_ids: ["copied-target-local"],
+          },
+        ],
+      },
+    });
+  },
+);
 
 test.each([true, false])(
   "revision conflicts preserve the draft and only allow explicit same-source version recovery when current=%s",
