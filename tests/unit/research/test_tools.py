@@ -51,6 +51,32 @@ def test_large_task_book_mcp_status_retains_counts_without_returning_unbounded_m
     assert len(json.dumps(summary, ensure_ascii=False, indent=2)) < 2000
 
 
+def test_dispatch_contract_waits_for_leased_generation_and_stays_alive_between_stages(tmp_path):
+    from tests.unit.research.test_complete_workflow import draft, read, source
+
+    workflow = ResearchWorkflow(Store(tmp_path / "native"))
+    run = workflow.enqueue(source())["run_id"]
+    assert status_summary(workflow.status(run))["dispatch_action"] == "dispatch"
+    packet = workflow.claim(run, "author", stage="author")
+    waiting = status_summary(workflow.status(run))
+    assert not any(waiting["ready_by_stage"].values())
+    assert waiting["active"]["count"] == 1 and waiting["dispatch_action"] == "wait"
+    read(workflow, packet)
+    workflow.submit(
+        packet["task_token"], "author", {"input_hash": packet["input_hash"], "cards": [draft()]}
+    )
+    continuation = status_summary(workflow.status(run))
+    assert continuation["counts"]["completed"] == 1
+    assert continuation["ready_by_stage"]["enrich"] == 1
+    assert continuation["dispatch_action"] == "dispatch"
+    workflow.pause(run)
+    assert status_summary(workflow.status(run))["dispatch_action"] == "stop"
+    workflow.resume(run)
+    assert status_summary(workflow.status(run))["dispatch_action"] == "dispatch"
+    workflow.claim(run, "enricher", stage="enrich")
+    assert status_summary(workflow.status(run))["dispatch_action"] == "wait"
+
+
 def test_live_lease_precedes_external_fetch_and_search_audit_is_server_owned(tmp_path, monkeypatch):
     from hrs.processing.research_workflow import POLICY
 

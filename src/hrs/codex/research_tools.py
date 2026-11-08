@@ -81,12 +81,21 @@ def status_summary(status):
     failures = [task["last_failure"] for task in tasks if task.get("last_failure")]
     last = max(failures, key=lambda item: item.get("at", 0), default={})
     detail = last.get("details") or status.get("last_runtime_failure") or {}
+    if status["state"] in {
+        "completed", "pending", "paused", "cancelled", "superseded", "failed", "technical_blocked"
+    }:
+        dispatch_action = "stop"
+    elif any(task["state"] == "ready" for task in tasks):
+        dispatch_action = "dispatch"
+    else:
+        dispatch_action = "wait"
     return {
         "run_id": status["run_id"],
         "book_id": status["book_id"],
         "state": status["state"],
         "version": status["version"],
         "counts": status["counts"],
+        "dispatch_action": dispatch_action,
         "policy": {
             key: policy[key]
             for key in ("version", "models", "coordinator_model", "reasoning_effort")
