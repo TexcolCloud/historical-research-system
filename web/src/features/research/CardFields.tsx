@@ -1,7 +1,54 @@
 import { Input } from "@/components/ui/input";
 import type { components } from "@/client/schema";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 type S = components["schemas"];
 export type Draft = S["EditableCardResponse"]["card"];
+
+export const CardEditorReveal = createContext<readonly string[]>([]);
+
+/** The caller retains the draft; closed sections never construct their field trees. */
+export function DeferredFields({
+  summary,
+  children,
+  initiallyOpen = false,
+  className,
+  editorKey,
+}: {
+  summary: ReactNode;
+  children: () => ReactNode;
+  initiallyOpen?: boolean;
+  className?: string;
+  editorKey?: string;
+}) {
+  const [open, setOpen] = useState(initiallyOpen);
+  const element = useRef<HTMLDetailsElement>(null);
+  const revealed = useContext(CardEditorReveal);
+  useEffect(() => {
+    if (editorKey && revealed.includes(editorKey)) {
+      setOpen(true);
+      if (editorKey.includes(":"))
+        element.current?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [editorKey, revealed]);
+  return (
+    <details
+      ref={element}
+      className={className}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>{summary}</summary>
+      {open ? children() : null}
+    </details>
+  );
+}
 type DateValue = S["ResearchDate"];
 type SourceValue = S["SourceValue"];
 export const certainty = {

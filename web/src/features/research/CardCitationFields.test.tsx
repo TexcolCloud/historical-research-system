@@ -4,9 +4,10 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import { useState } from "react";
 import type { components } from "@/client/schema";
 import type { ResearchEvidence } from "./api";
-import { CrossRelationFields } from "./CardCitationFields";
+import { CitationFields, CrossRelationFields } from "./CardCitationFields";
 import type { Draft } from "./CardFields";
 
 afterEach(() => {
@@ -66,16 +67,65 @@ const target = {
   ],
 };
 
+test("citation sections mount fields only for expanded entries and preserve the full parent draft through collapse", async () => {
+  const initial = Array.from({ length: 76 }, (_, index) => ({
+    ...own,
+    id: `quote-${index}`,
+    quote: `原文证据${index}`,
+  }));
+  let saved: Draft["evidence"] = initial;
+  function DraftCitations() {
+    const [value, setValue] = useState<Draft["evidence"]>(initial);
+    return (
+      <CitationFields
+        value={value}
+        onChange={(next) => {
+          saved = next;
+          setValue(next);
+        }}
+      />
+    );
+  }
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <DraftCitations />
+    </QueryClientProvider>,
+  );
+  expect(document.querySelectorAll("input,textarea,select")).toHaveLength(0);
+  await userEvent.click(screen.getByText("引文与原文范围"));
+  expect(document.querySelectorAll("input,textarea,select")).toHaveLength(0);
+  await userEvent.click(screen.getByText("证据 1 · 原文证据0"));
+  expect(document.querySelectorAll("input,textarea,select")).toHaveLength(2);
+  const quote = screen.getByRole("textbox", { name: "证据原文" });
+  await userEvent.clear(quote);
+  await userEvent.type(quote, "保留编辑");
+  await userEvent.click(screen.getByText("证据 1 · 保留编辑"));
+  expect(document.querySelectorAll("input,textarea,select")).toHaveLength(0);
+  await userEvent.click(screen.getByText("引文与原文范围"));
+  await userEvent.click(screen.getByText("引文与原文范围"));
+  await userEvent.click(screen.getByText("证据 1 · 保留编辑"));
+  expect(
+    (screen.getByRole("textbox", { name: "证据原文" }) as HTMLTextAreaElement)
+      .value,
+  ).toBe("保留编辑");
+  expect(saved).toEqual(
+    initial.map((item, index) =>
+      index ? item : { ...item, quote: "保留编辑" },
+    ),
+  );
+});
+
 function editor(
   evidence: Draft["evidence"],
   sources = [knownSource],
   retainedRelations?: components["schemas"]["CrossCardRelation"][],
+  initialRelation = relation,
 ) {
   const onChange = vi.fn();
   const query = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const view = (next: Draft["evidence"], shownRelation = relation) => (
+  const view = (next: Draft["evidence"], shownRelation = initialRelation) => (
     <MemoryRouter>
       <QueryClientProvider client={query}>
         <CrossRelationFields
@@ -91,13 +141,34 @@ function editor(
   return { ...render(view(evidence)), onChange, view };
 }
 
+async function openRelation() {
+  await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+  await userEvent.click(await screen.findByText("跨卡关系 1 · 已绑定卡片"));
+}
+
+test("cross-card target validation starts only when its individual editor opens", async () => {
+  const fetch = vi.fn(async () => Response.json(target));
+  vi.stubGlobal("fetch", fetch);
+  editor([own, copied], [knownSource], undefined, { ...relation, reason: "" });
+  expect(document.querySelectorAll("input,textarea,select")).toHaveLength(0);
+  expect(fetch).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+  expect(document.querySelectorAll("input,textarea,select")).toHaveLength(1);
+  expect(fetch).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByText("跨卡关系 1 · 已绑定卡片"));
+  await screen.findByRole("group", { name: "对方卡片依据" });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await userEvent.click(screen.getByText("跨卡关系 1 · 已绑定卡片"));
+  expect(document.querySelectorAll("input,textarea,select")).toHaveLength(1);
+});
+
 test("target choices follow newly edited draft evidence and known source aliases, not retained evidence IDs", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => Response.json(target)),
   );
   const rendered = editor([own, { ...copied, article_id: "primary" }]);
-  await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+  await openRelation();
   await screen.findByRole("group", { name: "目标卡片" });
   expect(screen.queryByRole("group", { name: "对方卡片依据" })).toBeNull();
 
@@ -131,7 +202,7 @@ test("an existing binding keeps its registered source alias while allowing new l
     [knownSource, currentNoteSource],
     [{ ...relation, target_evidence_ids: ["retained-id"] }],
   );
-  await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+  await openRelation();
   const choices = within(
     await screen.findByRole("group", { name: "对方卡片依据" }),
   );
@@ -180,7 +251,7 @@ test("retargeting a relation does not reuse the previous target's registered sou
     [knownSource, newSource],
     [{ ...relation, target_evidence_ids: ["retained-id"] }],
   );
-  await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+  await openRelation();
   await screen.findByRole("group", { name: "目标卡片" });
   rendered.rerender(
     rendered.view([own, copied, newSource], {
@@ -227,7 +298,7 @@ test("target choices exclude owner citations mapped to another book, publication
     },
   ];
   editor([own, copied, ...others], [knownSource, ...others]);
-  await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+  await openRelation();
   const choices = within(
     await screen.findByRole("group", { name: "对方卡片依据" }),
   );
@@ -248,7 +319,7 @@ test("a new relation without a retained target quote explains how to add evidenc
     vi.fn(async () => Response.json(target)),
   );
   editor([own], []);
-  await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+  await openRelation();
   await screen.findByRole("group", { name: "目标卡片" });
   expect(
     screen.getByText(/请先在本卡中补充并核对对方冻结版本的原文/),
@@ -274,7 +345,7 @@ test.each([
       vi.fn(async () => Response.json({ ...target, ...changed })),
     );
     editor([own, copied]);
-    await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+    await openRelation();
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.queryByRole("group", { name: "对方卡片依据" })).toBeNull();
   },

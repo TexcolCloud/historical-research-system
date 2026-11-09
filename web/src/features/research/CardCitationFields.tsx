@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,13 @@ import { Input } from "@/components/ui/input";
 import { client } from "@/client/api";
 import type { components } from "@/client/schema";
 import { research, researchKeys, type ResearchCard } from "./api";
-import { References, certainty, newId, type Draft } from "./CardFields";
+import {
+  DeferredFields,
+  References,
+  certainty,
+  newId,
+  type Draft,
+} from "./CardFields";
 import { crossRelationLabels } from "./relation-labels";
 import { isFrozenTarget } from "./cross-card-target";
 type S = components["schemas"];
@@ -347,49 +353,59 @@ export function CitationFields({
   card?: ResearchCard;
 }) {
   return (
-    <details>
-      <summary>引文与原文范围</summary>
-      {value.map((item, index) => (
-        <fieldset className="research-edit-group" key={item.id}>
-          <legend>证据 {index + 1}</legend>
-          <EvidenceText
-            value={item}
-            chapterId={
-              card?.evidence.find((ref) => ref.id === item.id)?.reading_target
-                ?.chapter_id
-            }
-            expectedSha={
-              card?.evidence.find((ref) => ref.id === item.id)?.reading_target
-                ?.text_sha256
-            }
-            onChange={(next) =>
-              onChange(value.map((old, at) => (at === index ? next : old)))
-            }
-          />
-          <label>
-            注释标识（每行一项）
-            <textarea
-              value={(item.footnote_ids ?? []).join("\n")}
-              onChange={(event) =>
-                onChange(
-                  value.map((old, at) =>
-                    at === index
-                      ? {
-                          ...old,
-                          footnote_ids: event.target.value
-                            .split("\n")
-                            .map((line) => line.trim())
-                            .filter(Boolean),
-                        }
-                      : old,
-                  ),
-                )
-              }
-            />
-          </label>
-        </fieldset>
-      ))}
-    </details>
+    <DeferredFields summary="引文与原文范围">
+      {() =>
+        value.map((item, index) => (
+          <DeferredFields
+            key={item.id}
+            summary={`证据 ${index + 1} · ${item.quote.slice(0, 30)}`}
+          >
+            {() => (
+              <fieldset className="research-edit-group">
+                <legend>证据 {index + 1}</legend>
+                <EvidenceText
+                  value={item}
+                  chapterId={
+                    card?.evidence.find((ref) => ref.id === item.id)
+                      ?.reading_target?.chapter_id
+                  }
+                  expectedSha={
+                    card?.evidence.find((ref) => ref.id === item.id)
+                      ?.reading_target?.text_sha256
+                  }
+                  onChange={(next) =>
+                    onChange(
+                      value.map((old, at) => (at === index ? next : old)),
+                    )
+                  }
+                />
+                <label>
+                  注释标识（每行一项）
+                  <textarea
+                    value={(item.footnote_ids ?? []).join("\n")}
+                    onChange={(event) =>
+                      onChange(
+                        value.map((old, at) =>
+                          at === index
+                            ? {
+                                ...old,
+                                footnote_ids: event.target.value
+                                  .split("\n")
+                                  .map((line) => line.trim())
+                                  .filter(Boolean),
+                              }
+                            : old,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+              </fieldset>
+            )}
+          </DeferredFields>
+        ))
+      }
+    </DeferredFields>
   );
 }
 export function CrossRelationFields({
@@ -405,41 +421,56 @@ export function CrossRelationFields({
   retainedRelations?: S["CrossCardRelation"][];
   onChange: (value: NonNullable<Draft["cross_relations"]>) => void;
 }) {
+  const initialIds = useRef(new Set(value.map((item) => item.id)));
   return (
-    <details>
-      <summary>跨卡文书及证据关系</summary>
-      {value.map((item, index) => (
-        <CrossRelationEditor
-          key={item.id}
-          value={item}
-          evidence={evidence}
-          sourceEvidence={sourceEvidence}
-          retainedRelations={retainedRelations}
-          onChange={(next) =>
-            onChange(value.map((old, at) => (at === index ? next : old)))
-          }
-          onRemove={() => onChange(value.filter((_, at) => at !== index))}
-        />
-      ))}
-      <TargetCardPicker
-        onSelect={(target) => {
-          if (typeof target.publication_sha256 !== "string") return;
-          onChange([
-            ...value,
-            {
-              id: newId("cross"),
-              target_card_id: target.id,
-              target_card_version: target.version,
-              target_publication_sha256: target.publication_sha256,
-              kind: "association",
-              reason: "",
-              certainty: "inferred",
-              source_evidence_ids: [],
-              target_evidence_ids: [],
-            },
-          ]);
-        }}
-      />
-    </details>
+    <DeferredFields summary="跨卡文书及证据关系">
+      {() => (
+        <>
+          {value.map((item, index) => (
+            <DeferredFields
+              key={item.id}
+              summary={`跨卡关系 ${index + 1} · 已绑定卡片`}
+              initiallyOpen={!initialIds.current.has(item.id)}
+            >
+              {() => (
+                <CrossRelationEditor
+                  value={item}
+                  evidence={evidence}
+                  sourceEvidence={sourceEvidence}
+                  retainedRelations={retainedRelations}
+                  onChange={(next) =>
+                    onChange(
+                      value.map((old, at) => (at === index ? next : old)),
+                    )
+                  }
+                  onRemove={() =>
+                    onChange(value.filter((_, at) => at !== index))
+                  }
+                />
+              )}
+            </DeferredFields>
+          ))}
+          <TargetCardPicker
+            onSelect={(target) => {
+              if (typeof target.publication_sha256 !== "string") return;
+              onChange([
+                ...value,
+                {
+                  id: newId("cross"),
+                  target_card_id: target.id,
+                  target_card_version: target.version,
+                  target_publication_sha256: target.publication_sha256,
+                  kind: "association",
+                  reason: "",
+                  certainty: "inferred",
+                  source_evidence_ids: [],
+                  target_evidence_ids: [],
+                },
+              ]);
+            }}
+          />
+        </>
+      )}
+    </DeferredFields>
   );
 }

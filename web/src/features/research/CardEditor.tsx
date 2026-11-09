@@ -7,6 +7,8 @@ import type { components } from "@/client/schema";
 import { research, researchKeys, isCardOnly } from "./api";
 import {
   DateEditor,
+  DeferredFields,
+  CardEditorReveal,
   SourceEditor,
   emptyValue,
   emptyDate,
@@ -73,6 +75,9 @@ function DraftForm({
   const [draft, setDraft] = useState(() => structuredClone(initial));
   const [baseVersion, setBaseVersion] = useState(version);
   const [validation, setValidation] = useState("");
+  const [validationTarget, setValidationTarget] = useState<string[]>([]);
+  const [validationLabel, setValidationLabel] = useState("");
+  const [reveal, setReveal] = useState<readonly string[]>([]);
   const query = useQueryClient();
   const pendingNavigation = useResearchPendingNavigation();
   const card = useQuery({
@@ -105,6 +110,12 @@ function DraftForm({
   function change<K extends keyof Draft>(field: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
   }
+  function reportValidation(message: string, keys: string[], label: string) {
+    setValidation(message);
+    setValidationTarget(keys);
+    setValidationLabel(label);
+    setReveal(keys);
+  }
   const mentions = (draft.mentions ?? []).map((item) => ({
       ...item,
       locations: item.locations ?? [],
@@ -114,346 +125,408 @@ function DraftForm({
     relations = draft.relations ?? [],
     evidence = draft.evidence;
   return (
-    <div className="research-editor-comparison">
-      <form
-        className="research-card-editor"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const missing = Object.entries(metadataLabels).flatMap(
-            ([key, label]) => {
-              const value =
-                draft.metadata?.[key as keyof typeof metadataLabels];
-              return !sourceCards &&
-                value?.certainty === "unknown" &&
-                !value.note.trim()
-                ? [label]
-                : [];
-            },
-          );
-          const missingLocations =
-            sourceCards &&
-            (draft.mentions ?? []).some((item) => !item.locations?.length);
-          if (missing.length || missingLocations) {
-            setValidation(
-              missing.length
-                ? `请说明以下未明字段的原因：${missing.join("、")}`
-                : "请从本卡原文为新增实体选取称呼位置。",
+    <CardEditorReveal.Provider value={reveal}>
+      <div className="research-editor-comparison">
+        <form
+          className="research-card-editor"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const missing = Object.entries(metadataLabels).flatMap(
+              ([key, label]) => {
+                const value =
+                  draft.metadata?.[key as keyof typeof metadataLabels];
+                return !sourceCards &&
+                  value?.certainty === "unknown" &&
+                  !value.note.trim()
+                  ? [{ key, label }]
+                  : [];
+              },
             );
-            event.currentTarget
-              .querySelectorAll("details")
-              .forEach((item) => (item.open = true));
-            return;
-          }
-          const prepared = sourceCards
-            ? synchronizeCardCoverage(draft, initial)
-            : { card: draft, missing: [] };
-          if (
-            sourceCards &&
-            (!draft.coverage?.length || prepared.missing.length)
-          ) {
-            setValidation(
-              prepared.missing.length
-                ? `无法对应本篇原文位置：${prepared.missing.join("、")}。请补充本篇原文引用或重新选取称呼位置。`
-                : "全文覆盖位置不可用，请重新读取当前卡片后修订。",
-            );
-            event.currentTarget
-              .querySelectorAll("details")
-              .forEach((item) => (item.open = true));
-            return;
-          }
-          setValidation("");
-          setDraft(prepared.card);
-          save.mutate(prepared.card);
-        }}
-      >
-        <header>
-          <h3>修订完整史料卡</h3>
-          <p>
-            修订将建立新版本并交独立核验。现有卡片、引文和人工决定继续保留。
-          </p>
-        </header>
-        <fieldset disabled={save.isPending || save.isSuccess}>
-          <label>
-            卡片标题
-            <Input
-              value={draft.title}
-              onChange={(event) => change("title", event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            内容提要
-            <textarea
-              aria-label="修订内容提要"
-              value={draft.summary}
-              onChange={(event) => change("summary", event.target.value)}
-              rows={5}
-              required
-            />
-          </label>
-          <div className="research-editor-row">
-            <label>
-              文献类型
-              <Input
-                value={draft.document_type}
-                onChange={(event) =>
-                  change("document_type", event.target.value)
+            const missingLocations = sourceCards
+              ? mentions.find((item) => !item.locations.length)
+              : undefined;
+            if (missing.length || missingLocations) {
+              reportValidation(
+                missing.length
+                  ? `请说明以下未明字段的原因：${missing.map((item) => item.label).join("、")}`
+                  : "请从本卡原文为新增实体选取称呼位置。",
+                missing.length
+                  ? ["metadata", `metadata:${missing[0].key}`]
+                  : ["mentions", `mention:${missingLocations!.id}`],
+                missing.length
+                  ? missing[0].label
+                  : `实体：${missingLocations!.name || "新增实体"}`,
+              );
+              return;
+            }
+            const prepared = sourceCards
+              ? synchronizeCardCoverage(draft, initial)
+              : { card: draft, missing: [] };
+            if (
+              sourceCards &&
+              (!draft.coverage?.length || prepared.missing.length)
+            ) {
+              const missingObject = prepared.missing[0];
+              let target: string[] = [];
+              for (const [collection, prefix, label] of [
+                ["mentions", "mention", "实体"],
+                ["events", "event", "事件"],
+                ["relations", "relation", "关系"],
+              ] as const) {
+                const object = (draft[collection] ?? []).find(
+                  (item) =>
+                    `${label}：${"name" in item ? item.name : item.predicate}` ===
+                    missingObject,
+                );
+                if (object) {
+                  target = [collection, `${prefix}:${object.id}`];
+                  break;
                 }
+              }
+              reportValidation(
+                prepared.missing.length
+                  ? `无法对应本篇原文位置：${prepared.missing.join("、")}。请补充本篇原文引用或重新选取称呼位置。`
+                  : "全文覆盖位置不可用，请重新读取当前卡片后修订。",
+                target,
+                missingObject || "全文覆盖清单",
+              );
+              return;
+            }
+            setValidation("");
+            setDraft(prepared.card);
+            save.mutate(prepared.card);
+          }}
+        >
+          <header>
+            <h3>修订完整史料卡</h3>
+            <p>
+              修订将建立新版本并交独立核验。现有卡片、引文和人工决定继续保留。
+            </p>
+          </header>
+          <fieldset disabled={save.isPending || save.isSuccess}>
+            <label>
+              卡片标题
+              <Input
+                value={draft.title}
+                onChange={(event) => change("title", event.target.value)}
+                required
               />
             </label>
             <label>
-              史料层次
-              <Input
-                value={draft.source_layer}
-                onChange={(event) => change("source_layer", event.target.value)}
+              内容提要
+              <textarea
+                aria-label="修订内容提要"
+                value={draft.summary}
+                onChange={(event) => change("summary", event.target.value)}
+                rows={5}
+                required
               />
             </label>
-          </div>
-          <details>
-            <summary>编目与形成信息</summary>
-            {draft.metadata ? (
-              <>
-                <label>
-                  标题来源
-                  <select
-                    value={draft.metadata.title_origin}
-                    onChange={(event) =>
-                      change("metadata", {
-                        ...draft.metadata!,
-                        title_origin: event.target
-                          .value as Metadata["title_origin"],
-                      })
-                    }
-                  >
-                    <option value="source">原文题名</option>
-                    <option value="supplied">已有书目信息</option>
-                    <option value="system">系统拟题</option>
-                    <option value="unknown">未明</option>
-                  </select>
-                </label>
-                {(
-                  Object.keys(metadataLabels) as Array<
-                    keyof typeof metadataLabels
-                  >
-                ).map((key) => (
-                  <SourceEditor
-                    key={key}
-                    label={metadataLabels[key]}
-                    value={draft.metadata![key] ?? emptyValue()}
-                    evidence={evidence}
-                    onChange={(value) =>
-                      change("metadata", { ...draft.metadata!, [key]: value })
-                    }
-                  />
-                ))}
-              </>
-            ) : (
-              <div>
-                <p className="research-provenance">
-                  旧卡未提取这些编目字段。需要补充时，请逐项记录有据内容或未明原因。
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => change("metadata", emptyMetadata())}
-                >
-                  补充编目信息
-                </Button>
-              </div>
-            )}
-          </details>
-          <div className="research-editor-row">
-            <DateEditor
-              label="成文时间"
-              value={draft.formation_date ?? emptyDate()}
-              evidence={evidence}
-              onChange={(value) => change("formation_date", value)}
-            />
-            <DateEditor
-              label="事件时间"
-              value={draft.event_date ?? emptyDate()}
-              evidence={evidence}
-              onChange={(value) => change("event_date", value)}
-            />
-          </div>
-          <CardItemFields
-            value={items}
-            evidence={evidence}
-            cardOnly={sourceCards}
-            onChange={(value) => change("items", value)}
-            removeBlocked={relations.flatMap((relation) => [
-              relation.subject_id,
-              relation.object_id,
-            ])}
-          />
-          <CitationFields
-            value={evidence}
-            card={card.data}
-            onChange={(value) => change("evidence", value)}
-          />
-          <MentionFields
-            value={mentions}
-            evidence={evidence}
-            cardOnly={sourceCards}
-            articleId={draft.article_id}
-            onChange={(value) => change("mentions", value)}
-            removeBlocked={[
-              ...events.flatMap((event) => event.participant_ids ?? []),
-              ...relations.flatMap((relation) => [
-                relation.subject_id,
-                relation.object_id,
-              ]),
-              ...(draft.identity_links ?? []).map(
-                (link) => link.local_mention_id,
-              ),
-            ]}
-          />
-          <EventFields
-            value={events}
-            mentions={mentions}
-            evidence={evidence}
-            onChange={(value) => change("events", value)}
-            removeBlocked={[
-              ...relations.flatMap((relation) => [
-                relation.subject_id,
-                relation.object_id,
-              ]),
-              ...(draft.identity_links ?? []).map(
-                (link) => link.local_mention_id,
-              ),
-            ]}
-          />
-          <RelationFields
-            value={relations}
-            nodes={[
-              ...mentions,
-              ...events,
-              ...items.map((item) => ({
-                id: item.id,
-                name: item.title || item.text.slice(0, 30),
-              })),
-            ]}
-            evidence={evidence}
-            onChange={(value) => change("relations", value)}
-          />
-          <CrossRelationFields
-            value={draft.cross_relations ?? []}
-            evidence={evidence}
-            sourceEvidence={card.data?.evidence}
-            retainedRelations={card.data?.cross_relations}
-            onChange={(value) => change("cross_relations", value)}
-          />
-          {(["tags", "limitations", "alternatives", "questions"] as const)
-            .filter(
-              (field) =>
-                !sourceCards || !["alternatives", "questions"].includes(field),
-            )
-            .map((field) => (
-              <label key={field}>
-                {
-                  {
-                    tags: "主题词",
-                    limitations: "使用边界",
-                    alternatives: "备选解释",
-                    questions: "待解决问题",
-                  }[field]
-                }
-                （每行一项）
-                <textarea
-                  rows={3}
-                  value={(draft[field] ?? []).join("\n")}
-                  onChange={(event) => change(field, lines(event.target.value))}
+            <div className="research-editor-row">
+              <label>
+                文献类型
+                <Input
+                  value={draft.document_type}
+                  onChange={(event) =>
+                    change("document_type", event.target.value)
+                  }
                 />
               </label>
-            ))}
-          <p className="research-provenance">
-            {sourceCards
-              ? "修订将保留完整引文和原件依据，并重新独立审核。"
-              : "全文覆盖、检索计划和模型查证记录会随新修订再次独立核验。"}
-            实体身份的合并与拆分请在实体详情中处理。
-          </p>
-          {validation && <p role="alert">{validation}</p>}
-          <Button type="submit" disabled={Boolean(sourceUnavailable)}>
-            提交修订核验
-          </Button>
-        </fieldset>
-        <Button
-          type="button"
-          variant="ghost"
-          disabled={save.isPending}
-          onClick={onClose}
-        >
-          {save.isSuccess ? "返回卡片" : "取消修订"}
-        </Button>
-        {save.isPending && <p role="status">正在保存修订并安排独立核验…</p>}
-        {save.isSuccess && (
-          <p role="status">修订已提交独立核验，原有卡片和人工决定继续保留。</p>
-        )}
-        {pendingNavigation.notice && (
-          <p role="status">{pendingNavigation.notice}</p>
-        )}
-        {save.isError && (
-          <p role="alert">
-            {save.error.message} 当前草稿仍保留。
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={latest.isPending}
-              onClick={() => latest.mutate()}
-            >
-              核对当前卡片
-            </Button>
-          </p>
-        )}
-        {latest.isPending && (
-          <p role="status">正在读取最新可修订版本，当前草稿保留…</p>
-        )}
-        {latest.isError && (
-          <p role="alert">{latest.error.message} 当前草稿仍保留。</p>
-        )}
-        {latest.data && (
-          <section className="workspace-status-note" aria-label="修订版本对照">
-            <h4>最新卡片 · 第 {latest.data.version} 版</h4>
-            <p>{latest.data.card.title}</p>
-            <p className="research-preserve">{latest.data.card.summary}</p>
-            <Link
-              className="research-source-link"
-              target="_blank"
-              to={`/research?card=${encodeURIComponent(cardId)}`}
-            >
-              另开页核对最新卡片与原件
-            </Link>
-            {sameSourceCard ? (
-              <>
-                <p>
-                  核对最新内容后，可保留当前完整草稿，作为新修订重新提交独立核验。读取最新版本不会替换你的输入。
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setBaseVersion(latest.data.version);
-                    save.reset();
-                    latest.reset();
-                  }}
-                >
-                  已核对最新版本，保留草稿继续修订
-                </Button>
-              </>
-            ) : (
-              <p>原文或研究版本已更新，当前草稿保留，不能提交到旧来源。</p>
+              <label>
+                史料层次
+                <Input
+                  value={draft.source_layer}
+                  onChange={(event) =>
+                    change("source_layer", event.target.value)
+                  }
+                />
+              </label>
+            </div>
+            <DeferredFields summary="编目与形成信息" editorKey="metadata">
+              {() => (
+                <>
+                  {draft.metadata ? (
+                    <>
+                      <label>
+                        标题来源
+                        <select
+                          value={draft.metadata.title_origin}
+                          onChange={(event) =>
+                            change("metadata", {
+                              ...draft.metadata!,
+                              title_origin: event.target
+                                .value as Metadata["title_origin"],
+                            })
+                          }
+                        >
+                          <option value="source">原文题名</option>
+                          <option value="supplied">已有书目信息</option>
+                          <option value="system">系统拟题</option>
+                          <option value="unknown">未明</option>
+                        </select>
+                      </label>
+                      {(
+                        Object.keys(metadataLabels) as Array<
+                          keyof typeof metadataLabels
+                        >
+                      ).map((key) => (
+                        <DeferredFields
+                          key={key}
+                          summary={metadataLabels[key]}
+                          editorKey={`metadata:${key}`}
+                        >
+                          {() => (
+                            <SourceEditor
+                              label={metadataLabels[key]}
+                              value={draft.metadata![key] ?? emptyValue()}
+                              evidence={evidence}
+                              onChange={(value) =>
+                                change("metadata", {
+                                  ...draft.metadata!,
+                                  [key]: value,
+                                })
+                              }
+                            />
+                          )}
+                        </DeferredFields>
+                      ))}
+                    </>
+                  ) : (
+                    <div>
+                      <p className="research-provenance">
+                        旧卡未提取这些编目字段。需要补充时，请逐项记录有据内容或未明原因。
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => change("metadata", emptyMetadata())}
+                      >
+                        补充编目信息
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </DeferredFields>
+            <DeferredFields summary="时间信息">
+              {() => (
+                <div className="research-editor-row">
+                  <DateEditor
+                    label="成文时间"
+                    value={draft.formation_date ?? emptyDate()}
+                    evidence={evidence}
+                    onChange={(value) => change("formation_date", value)}
+                  />
+                  <DateEditor
+                    label="事件时间"
+                    value={draft.event_date ?? emptyDate()}
+                    evidence={evidence}
+                    onChange={(value) => change("event_date", value)}
+                  />
+                </div>
+              )}
+            </DeferredFields>
+            <CardItemFields
+              value={items}
+              evidence={evidence}
+              cardOnly={sourceCards}
+              onChange={(value) => change("items", value)}
+              removeBlocked={relations.flatMap((relation) => [
+                relation.subject_id,
+                relation.object_id,
+              ])}
+            />
+            <CitationFields
+              value={evidence}
+              card={card.data}
+              onChange={(value) => change("evidence", value)}
+            />
+            <MentionFields
+              value={mentions}
+              evidence={evidence}
+              cardOnly={sourceCards}
+              articleId={draft.article_id}
+              onChange={(value) => change("mentions", value)}
+              removeBlocked={[
+                ...events.flatMap((event) => event.participant_ids ?? []),
+                ...relations.flatMap((relation) => [
+                  relation.subject_id,
+                  relation.object_id,
+                ]),
+                ...(draft.identity_links ?? []).map(
+                  (link) => link.local_mention_id,
+                ),
+              ]}
+            />
+            <EventFields
+              value={events}
+              mentions={mentions}
+              evidence={evidence}
+              onChange={(value) => change("events", value)}
+              removeBlocked={[
+                ...relations.flatMap((relation) => [
+                  relation.subject_id,
+                  relation.object_id,
+                ]),
+                ...(draft.identity_links ?? []).map(
+                  (link) => link.local_mention_id,
+                ),
+              ]}
+            />
+            <RelationFields
+              value={relations}
+              nodes={[
+                ...mentions,
+                ...events,
+                ...items.map((item) => ({
+                  id: item.id,
+                  name: item.title || item.text.slice(0, 30),
+                })),
+              ]}
+              evidence={evidence}
+              onChange={(value) => change("relations", value)}
+            />
+            <CrossRelationFields
+              value={draft.cross_relations ?? []}
+              evidence={evidence}
+              sourceEvidence={card.data?.evidence}
+              retainedRelations={card.data?.cross_relations}
+              onChange={(value) => change("cross_relations", value)}
+            />
+            {(["tags", "limitations", "alternatives", "questions"] as const)
+              .filter(
+                (field) =>
+                  !sourceCards ||
+                  !["alternatives", "questions"].includes(field),
+              )
+              .map((field) => (
+                <label key={field}>
+                  {
+                    {
+                      tags: "主题词",
+                      limitations: "使用边界",
+                      alternatives: "备选解释",
+                      questions: "待解决问题",
+                    }[field]
+                  }
+                  （每行一项）
+                  <textarea
+                    rows={3}
+                    value={(draft[field] ?? []).join("\n")}
+                    onChange={(event) =>
+                      change(field, lines(event.target.value))
+                    }
+                  />
+                </label>
+              ))}
+            <p className="research-provenance">
+              {sourceCards
+                ? "修订将保留完整引文和原件依据，并重新独立审核。"
+                : "全文覆盖、检索计划和模型查证记录会随新修订再次独立核验。"}
+              实体身份的合并与拆分请在实体详情中处理。
+            </p>
+            {validation && (
+              <div role="alert">
+                <p>{validation}</p>
+                <p>需要补充：{validationLabel}</p>
+                {validationTarget.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setReveal([...validationTarget])}
+                  >
+                    定位需要补充的位置
+                  </Button>
+                )}
+              </div>
             )}
-          </section>
-        )}
-      </form>
-      <aside className="research-source-pane">
-        <EvidenceOriginal evidence={card.data?.evidence ?? []} />
-      </aside>
-    </div>
+            <Button type="submit" disabled={Boolean(sourceUnavailable)}>
+              提交修订核验
+            </Button>
+          </fieldset>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={save.isPending}
+            onClick={onClose}
+          >
+            {save.isSuccess ? "返回卡片" : "取消修订"}
+          </Button>
+          {save.isPending && <p role="status">正在保存修订并安排独立核验…</p>}
+          {save.isSuccess && (
+            <p role="status">
+              修订已提交独立核验，原有卡片和人工决定继续保留。
+            </p>
+          )}
+          {pendingNavigation.notice && (
+            <p role="status">{pendingNavigation.notice}</p>
+          )}
+          {save.isError && (
+            <p role="alert">
+              {save.error.message} 当前草稿仍保留。
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={latest.isPending}
+                onClick={() => latest.mutate()}
+              >
+                核对当前卡片
+              </Button>
+            </p>
+          )}
+          {latest.isPending && (
+            <p role="status">正在读取最新可修订版本，当前草稿保留…</p>
+          )}
+          {latest.isError && (
+            <p role="alert">{latest.error.message} 当前草稿仍保留。</p>
+          )}
+          {latest.data && (
+            <section
+              className="workspace-status-note"
+              aria-label="修订版本对照"
+            >
+              <h4>最新卡片 · 第 {latest.data.version} 版</h4>
+              <p>{latest.data.card.title}</p>
+              <p className="research-preserve">{latest.data.card.summary}</p>
+              <Link
+                className="research-source-link"
+                target="_blank"
+                to={`/research?card=${encodeURIComponent(cardId)}`}
+              >
+                另开页核对最新卡片与原件
+              </Link>
+              {sameSourceCard ? (
+                <>
+                  <p>
+                    核对最新内容后，可保留当前完整草稿，作为新修订重新提交独立核验。读取最新版本不会替换你的输入。
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setBaseVersion(latest.data.version);
+                      save.reset();
+                      latest.reset();
+                    }}
+                  >
+                    已核对最新版本，保留草稿继续修订
+                  </Button>
+                </>
+              ) : (
+                <p>原文或研究版本已更新，当前草稿保留，不能提交到旧来源。</p>
+              )}
+            </section>
+          )}
+        </form>
+        <aside className="research-source-pane">
+          <EvidenceOriginal evidence={card.data?.evidence ?? []} />
+        </aside>
+      </div>
+    </CardEditorReveal.Provider>
   );
 }
 
-export default function CardEditor({
+function CardEditorSession({
   cardId,
   onClose,
 }: {
@@ -508,4 +581,11 @@ export default function CardEditor({
       onClose={onClose}
     />
   );
+}
+
+export default function CardEditor(props: {
+  cardId: string;
+  onClose: () => void;
+}) {
+  return <CardEditorSession key={props.cardId} {...props} />;
 }

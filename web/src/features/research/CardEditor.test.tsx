@@ -285,10 +285,13 @@ test.each([false, true])(
     );
     await screen.findByRole("textbox", { name: "修订内容提要" });
     await userEvent.click(screen.getByText("本卡关系与依据"));
+    await userEvent.click(await screen.findByText(/^关系 1 ·/));
     await userEvent.click(screen.getByRole("button", { name: "移除本卡关系" }));
     await userEvent.click(screen.getByText("事件及参与者角色"));
+    await userEvent.click(await screen.findByText(/^事件 1 ·/));
     await userEvent.click(screen.getByRole("button", { name: "移除事件 1" }));
     await userEvent.click(screen.getByText("实体记载"));
+    await userEvent.click(await screen.findByText(/^实体 1 ·/));
     await userEvent.click(screen.getByRole("button", { name: "移除实体 1" }));
     await userEvent.click(screen.getByRole("button", { name: "提交修订核验" }));
     await screen.findByText("修订已提交独立核验，原有卡片和人工决定继续保留。");
@@ -435,6 +438,7 @@ test.each([
     );
     await screen.findByRole("textbox", { name: "修订内容提要" });
     await userEvent.click(screen.getByText("跨卡文书及证据关系"));
+    await userEvent.click(await screen.findByText("跨卡关系 1 · 已绑定卡片"));
     const choices = within(
       await screen.findByRole("group", { name: "对方卡片依据" }),
     );
@@ -668,10 +672,14 @@ test("a full card revision submits edited item and date with its source version 
       </QueryClientProvider>
     </MemoryRouter>,
   );
+  await screen.findByRole("textbox", { name: "修订内容提要" });
+  await userEvent.click(screen.getByText("内容条目"));
+  await userEvent.click(await screen.findByText(/^条目 1 ·/));
   const item = await screen.findByRole("textbox", { name: "条目 1 正文" });
   await userEvent.clear(item);
   await userEvent.type(item, "申请拨款不代表已经拨付");
-  const date = screen.getByRole("textbox", { name: "成文时间原文" });
+  await userEvent.click(screen.getByText("时间信息"));
+  const date = await screen.findByRole("textbox", { name: "成文时间原文" });
   await userEvent.clear(date);
   await userEvent.type(date, "五月十二日，年份未详");
   await userEvent.click(screen.getByRole("button", { name: "提交修订核验" }));
