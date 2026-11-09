@@ -94,9 +94,14 @@ export function useWorkspaceEvents() {
       void query.invalidateQueries({
         predicate: (entry) =>
           (entry.queryKey[0] === "research" &&
-            ["book", "run", "question", "questions", "pending"].includes(
-              String(entry.queryKey[1]),
-            )) ||
+            [
+              "book",
+              "run",
+              "catalogue",
+              "question",
+              "questions",
+              "pending",
+            ].includes(String(entry.queryKey[1]))) ||
           (entry.queryKey[0] === "platform" &&
             [
               "books",

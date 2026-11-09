@@ -1,7 +1,7 @@
-"""Complete-document extraction and independent omission checks for policy v5."""
+"""Complete-document extraction and policy-bound independent omission checks."""
 
 from hrs.processing.errors import EvidenceMismatch
-from hrs.research.models import DocumentMetadata, IndependentFinding
+from hrs.research.models import CardOnlyIndependentFinding, DocumentMetadata, IndependentFinding
 
 
 class AssessmentMismatch(EvidenceMismatch):
@@ -16,7 +16,7 @@ def coverage_ranges(article):
     return [[part["start"], part["end"]] for part in article["parts"]]
 
 
-def complete_checks(cards):
+def complete_checks(cards, *, card_only=False):
     checks = {}
     for field, collection in (
         ("checked_entity_ids", "mentions"),
@@ -26,6 +26,8 @@ def complete_checks(cards):
         ("checked_cross_relation_ids", "cross_relations"),
         ("checked_question_finding_ids", "question_findings"),
     ):
+        if card_only and collection in {"research_plan", "question_findings"}:
+            continue
         checks[field] = [
             f"{card['id']}/{item['id']}" for card in cards for item in card[collection]
         ]
@@ -36,17 +38,26 @@ def complete_checks(cards):
 
 
 def validate_complete_cards(
-    cards, article, *, stage, planned_questions=None, questions=(), receipt_ids=()
+    cards, article, *, stage, planned_questions=None, questions=(), receipt_ids=(), card_only=False
 ):
     if len(cards) != 1:
-        raise EvidenceMismatch("Policy v5 requires one complete document master card per article")
+        raise EvidenceMismatch(
+            "Policy v6 requires one complete source card per article"
+            if card_only
+            else "Policy v5 requires one complete document master card per article"
+        )
     card = cards[0]
     if card.get("metadata") is None:
         raise EvidenceMismatch(
             "Complete cards require explicit bibliographic and formation metadata"
         )
     for key, value in card["metadata"].items():
-        if key != "title_origin" and value["certainty"] == "unknown" and not value["note"].strip():
+        if (
+            not card_only
+            and key != "title_origin"
+            and value["certainty"] == "unknown"
+            and not value["note"].strip()
+        ):
             raise EvidenceMismatch(
                 "Unknown metadata requires an explicit source limitation: " + key
             )
@@ -68,7 +79,7 @@ def validate_complete_cards(
         ):
             if not set(unit[field]) <= available[collection]:
                 raise EvidenceMismatch("Extraction coverage references an absent candidate object")
-            if not unit[field] and not unit[reason].strip():
+            if not card_only and not unit[field] and not unit[reason].strip():
                 raise EvidenceMismatch(
                     "An empty extraction category requires a source-specific explanation"
                 )
@@ -131,7 +142,9 @@ def validate_complete_cards(
                     or "none"
                 )
                 if len(cited) > 3:
-                    ranges += f"; +{len(cited) - 3} further cited spans; inspect the retained proposal"
+                    ranges += (
+                        f"; +{len(cited) - 3} further cited spans; inspect the retained proposal"
+                    )
                 message += (
                     f": mention {context['qualified_mention_id']}; "
                     f"location {location['article_id']}[{location['start']},{location['end']}); "
@@ -157,8 +170,14 @@ def validate_complete_cards(
         roles = [role["mention_id"] for role in event["participant_roles"]]
         if set(roles) != set(event["participant_ids"]) or len(roles) != len(set(roles)):
             raise EvidenceMismatch("Each event participant requires exactly one source-backed role")
-        if event["place"]["certainty"] == "unknown" and not event["place"]["note"].strip():
+        if (
+            not card_only
+            and event["place"]["certainty"] == "unknown"
+            and not event["place"]["note"].strip()
+        ):
             raise EvidenceMismatch("Unknown event location requires an explicit limitation")
+    if card_only:
+        return
     if not card["research_plan"]:
         raise EvidenceMismatch(
             "Author must include a proposed card.research_plan; only enrich/repair call research_plan to persist it"
@@ -197,11 +216,13 @@ def validate_complete_cards(
         raise EvidenceMismatch("User research question definition changed")
 
 
-def validate_inventory(observations, article):
+def validate_inventory(observations, article, *, card_only=False):
     inventory = observations.get("inventory")
     if not isinstance(inventory, dict):
         raise EvidenceMismatch(
-            "Policy v5 independent reading requires a source-first extraction inventory"
+            "Policy v6 independent reading requires a source-first important-fact inventory"
+            if card_only
+            else "Policy v5 independent reading requires a source-first extraction inventory"
         )
     coverage = inventory.get("coverage", [])
     if [[unit.get("start"), unit.get("end")] for unit in coverage] != coverage_ranges(article):
@@ -210,9 +231,9 @@ def validate_inventory(observations, article):
         not isinstance(unit.get("summary"), str) or not unit["summary"].strip() for unit in coverage
     ):
         raise EvidenceMismatch("Independent coverage requires actual reading summaries")
+    finding_model = CardOnlyIndependentFinding if card_only else IndependentFinding
     findings = [
-        IndependentFinding.model_validate(item).model_dump()
-        for item in inventory.get("findings", [])
+        finding_model.model_validate(item).model_dump() for item in inventory.get("findings", [])
     ]
     if len({item["id"] for item in findings}) != len(findings):
         raise EvidenceMismatch("Independent finding IDs must be unique")
@@ -234,7 +255,7 @@ def validate_inventory(observations, article):
     }
 
 
-def validate_assessments(assessments, inventory, cards, *, decision):
+def validate_assessments(assessments, inventory, cards, *, decision, card_only=False):
     findings = {item["id"]: item for item in inventory["findings"]}
     if {item["finding_id"] for item in assessments} != set(findings) or len(assessments) != len(
         findings
@@ -243,6 +264,7 @@ def validate_assessments(assessments, inventory, cards, *, decision):
             "Independent verification must assess every pre-candidate source finding"
         )
     candidates = {}
+    aliases = {}
     for card in cards:
         evidence = {item["id"]: item for item in card["evidence"]}
         for collection in ("mentions", "events", "relations"):
@@ -256,6 +278,32 @@ def validate_assessments(assessments, inventory, cards, *, decision):
                     [evidence[eid] for eid in item["evidence_ids"]],
                     item.get("event_status", "unknown"),
                 )
+        if card_only:
+            for mention in card["mentions"]:
+                aliases[f"{card['id']}/{mention['id']}"] = [
+                    (alias["name"], evidence[eid])
+                    for alias in mention["aliases"]
+                    for eid in alias["evidence_ids"]
+                    if evidence[eid]["article_id"] == card["article_id"]
+                ]
+            fact_fields = [(item["id"], item) for item in card["items"]]
+            fact_fields.extend(
+                (f"metadata/{key}", value)
+                for key, value in card["metadata"].items()
+                if key != "title_origin" and value["certainty"] != "unknown"
+            )
+            fact_fields.extend(
+                (key, card[key])
+                for key in ("formation_date", "event_date")
+                if card[key]["certainty"] != "unknown"
+            )
+            for identity, item in fact_fields:
+                if item.get("evidence_ids"):
+                    candidates[f"{card['id']}/{identity}"] = (
+                        "fact",
+                        [evidence[eid] for eid in item["evidence_ids"]],
+                        "unknown",
+                    )
     errors = []
     for index, assessment in enumerate(assessments):
         finding = findings[assessment["finding_id"]]
@@ -264,7 +312,16 @@ def validate_assessments(assessments, inventory, cards, *, decision):
                 raise EvidenceMismatch("Covered source findings require candidate object IDs")
             for candidate_index, identity in enumerate(assessment["candidate_ids"]):
                 candidate = candidates.get(identity)
-                if (
+                retained_alias = (
+                    card_only
+                    and finding["kind"] == "relation"
+                    and finding.get("relation_kind") == "alias"
+                    and any(
+                        _alias_overlap(name, span, finding)
+                        for name, span in aliases.get(identity, [])
+                    )
+                )
+                if not retained_alias and (
                     candidate is None
                     or candidate[0] != finding["kind"]
                     or not any(
@@ -317,3 +374,15 @@ def validate_assessments(assessments, inventory, cards, *, decision):
             )
     if errors:
         raise AssessmentMismatch(errors)
+
+
+def _alias_overlap(name, span, finding):
+    """The alias literal itself must survive in the same overlapping source quotation."""
+    if span["article_id"] != finding["article_id"]:
+        return False
+    start, end = max(span["start"], finding["start"]), min(span["end"], finding["end"])
+    if start >= end:
+        return False
+    retained = span["quote"][start - span["start"] : end - span["start"]]
+    original = finding["quote"][start - finding["start"] : end - finding["start"]]
+    return name in retained and retained == original

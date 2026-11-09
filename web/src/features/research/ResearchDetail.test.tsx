@@ -110,6 +110,79 @@ const card = {
   questions: [],
 };
 
+test.each([true, false])(
+  "source cards retain original viewpoints and documents while old research remains readable: card_only=%s",
+  async (cardOnly) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          ...card,
+          card_only: cardOnly,
+          processing_mode: cardOnly ? "source_cards" : "legacy_research",
+          items: [
+            {
+              id: "view",
+              kind: "argument",
+              title: "原作者的判断",
+              text: "作者认为组织工作尚待巩固",
+              evidence_ids: ["ev"],
+              epistemic_state: "stated",
+              attribution: "原作者",
+              limitations: [],
+            },
+            {
+              id: "use",
+              kind: "paper_use",
+              title: "旧自动写作用途",
+              text: "旧流程保留的自动建议",
+              evidence_ids: [],
+            },
+          ],
+          mentions: [
+            {
+              id: "doc",
+              kind: "document",
+              name: "某文件",
+              canonical_id: "canonical-doc",
+              evidence_ids: ["ev"],
+            },
+          ],
+          alternatives: ["旧自动解释"],
+          questions: ["旧研究问题"],
+          research_plan: [
+            {
+              id: "plan",
+              question: "旧补证计划",
+              evaluation: "旧查证过程",
+              evidence_ids: [],
+            },
+          ],
+        }),
+      ),
+    );
+    render(
+      <MemoryRouter initialEntries={["/research?card=last-card"]}>
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <ResearchDetail />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByText("作者认为组织工作尚待巩固");
+    expect(screen.getByRole("button", { name: "某文件" })).toBeTruthy();
+    expect(screen.getByText("· 文献")).toBeTruthy();
+    expect(screen.getByText(cardOnly ? /原文观点/ : /^论证/)).toBeTruthy();
+    expect(Boolean(screen.queryByText("旧自动写作用途"))).toBe(!cardOnly);
+    expect(Boolean(screen.queryByText("旧研究问题"))).toBe(!cardOnly);
+    expect(Boolean(screen.queryByText("旧补证计划"))).toBe(!cardOnly);
+    expect(screen.queryByRole("button", { name: "保存到研究问题" })).toBeNull();
+  },
+);
+
 test("a card citation focuses its own source even when another relationship packet reuses the local evidence id", async () => {
   const scrolled: string[] = [];
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
@@ -218,6 +291,7 @@ test("saving a pending card opens the next identity task rather than returning t
           id: "person",
           name: "张某",
           kind: "person",
+          card_id: "next-card",
           evidence: [],
           mentions: [],
         });

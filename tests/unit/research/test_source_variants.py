@@ -7,10 +7,10 @@ import pytest
 
 from hrs.processing.errors import EvidenceMismatch
 from hrs.processing.hashing import digest
-from hrs.processing.research_workflow import POLICY, ResearchWorkflow
+from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
 from hrs.research.projection import located_card
-from tests.unit.research.test_workflow import verify
+from tests.unit.research.test_workflow import legacy_policy, verify
 
 TEXT = "Memo[^1][^2].\n\n[^1]: Sent.\n[^2]: Copied.\n"
 
@@ -68,7 +68,7 @@ def prepare(workflow, snapshot, *, revision_of=None):
         snapshot,
         revision_of=revision_of,
         reason="Synthetic retained-source revision" if revision_of else None,
-        _policy={**POLICY, "version": 4, "complete_research": False},
+        _policy=legacy_policy(4),
     )
     packet = workflow.claim(run["run_id"], "author-" + snapshot["book_id"], stage="author")
     workflow.read_source(packet["task_token"])
@@ -529,7 +529,7 @@ def test_complete_v5_same_as_keeps_real_local_and_target_material_pair(tmp_path)
     entity = next(
         item for item in workflow.list_entities(run_id=target["run_id"]) if item["name"] == "张三"
     )
-    run = workflow.enqueue(source("v5-primary"))
+    run = workflow.enqueue(source("v5-primary"), _policy=legacy_policy(5))
     card = draft("v5-primary")
     submit_author(workflow, run, card)
     card["identity_links"] = [

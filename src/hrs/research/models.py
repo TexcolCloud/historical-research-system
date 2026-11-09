@@ -215,6 +215,25 @@ class IndependentObservation(Contract):
     inventory: ReadingInventory
 
 
+class CardOnlyIndependentFinding(IndependentFinding):
+    kind: Literal["person", "organization", "place", "document", "event", "relation", "fact"]
+    event_status: Literal["reported", "planned", "conditional", "negated", "unknown"] = "unknown"
+    relation_kind: Literal["alias", "other"] = Field(
+        default="other",
+        description="Only source-observed alias/name equivalence uses kind=relation, relation_kind=alias. "
+        "This permits an explicitly evidenced retained alias to cover that relationship without a "
+        "duplicate edge. Other relationships cannot use an alias to establish coverage.",
+    )
+
+
+class CardOnlyReadingInventory(ReadingInventory):
+    findings: list[CardOnlyIndependentFinding] = Field(default_factory=list)
+
+
+class CardOnlyIndependentObservation(IndependentObservation):
+    inventory: CardOnlyReadingInventory
+
+
 class EntityMention(Contract):
     """A source mention, never a name-only identity merge across publications."""
 
@@ -445,6 +464,24 @@ class CompleteCardDraft(CardDraft):
     events: list[CompleteEvent] = Field(default_factory=list)
 
 
+class CardOnlyMention(CompleteMention):
+    """Policy-v6 source mentions; older entity enums retain their frozen meanings."""
+
+    kind: Literal["person", "organization", "place", "document", "event"]
+
+
+class CardOnlyCardDraft(CardDraft):
+    """One complete source card, without a mandatory research-question workflow."""
+
+    metadata: CompleteMetadata = Field(
+        description="Retain every metadata field. Missing facts remain explicit unknown values; "
+        "do not invent facts or repeat the same source limitation in each field."
+    )
+    coverage: list[CoverageUnit] = Field(min_length=1)
+    mentions: list[CardOnlyMention] = Field(default_factory=list)
+    events: list[CompleteEvent] = Field(default_factory=list)
+
+
 class EvaluatedResearchQuestion(ResearchQuestion):
     status: Literal["answered", "partial", "conflicting", "unresolved"]
     evaluation: str = Field(min_length=1)
@@ -464,6 +501,10 @@ class CompleteDraftSubmission(DraftSubmission):
 
 class CompleteEnrichedDraftSubmission(DraftSubmission):
     cards: list[CompleteEnrichedCardDraft] = Field(min_length=1, max_length=1)
+
+
+class CardOnlyDraftSubmission(DraftSubmission):
+    cards: list[CardOnlyCardDraft] = Field(min_length=1, max_length=1)
 
 
 class CardPatchValue(Contract):
@@ -493,6 +534,10 @@ class IncrementalDraftSubmission(
     RootModel[CompleteEnrichedDraftSubmission | NativeDeltaSubmission]
 ):
     """Prefer a frozen-baseline delta; the original complete submission remains compatible."""
+
+
+class CardOnlyIncrementalSubmission(RootModel[CardOnlyDraftSubmission | NativeDeltaSubmission]):
+    """A v6 repair retains the same source-card contract after delta materialization."""
 
 
 class VerificationSubmission(Contract):
@@ -544,10 +589,46 @@ class VerificationSubmission(Contract):
         return self
 
 
+class CardOnlyCoverageAssessment(CoverageAssessment):
+    candidate_ids: list[str] = Field(
+        default_factory=list,
+        description="Qualified source-backed candidate IDs. Entity/event/relation findings use "
+        "objects of the same kind with overlapping evidence; an explicitly retained, evidenced alias "
+        "may cover a relation_kind=alias source finding without a duplicate relation edge. Important fact "
+        "findings may cite card_id/item_id, card_id/metadata/field, card_id/formation_date or "
+        "card_id/event_date. An event finding still requires an event with unchanged modality. "
+        "Missing important facts require status=missing, a precise reason and decision=pending.",
+    )
+
+
+class CardOnlyVerificationSubmission(VerificationSubmission):
+    coverage_assessments: list[CardOnlyCoverageAssessment] = Field(default_factory=list)
+
+
+def is_card_only(policy):
+    return policy.get("version", 1) >= 6 and bool(policy.get("card_only"))
+
+
+def card_model(policy):
+    return CardOnlyCardDraft if is_card_only(policy) else CardDraft
+
+
+def observation_model(policy):
+    return CardOnlyIndependentObservation if is_card_only(policy) else IndependentObservation
+
+
 def submission_model(policy, stage, *, frozen_name=None):
     """One selection point for displayed schemas and native write validation."""
     if stage in {"verify", "reverify"}:
-        expected = VerificationSubmission
+        expected = (
+            CardOnlyVerificationSubmission if is_card_only(policy) else VerificationSubmission
+        )
+    elif is_card_only(policy):
+        expected = (
+            CardOnlyIncrementalSubmission
+            if stage == "repair" and policy.get("incremental_updates", False)
+            else CardOnlyDraftSubmission
+        )
     elif policy.get("version", 1) >= 5 and policy.get("complete_research"):
         expected = CompleteDraftSubmission
         if stage in {"enrich", "repair"}:
@@ -558,9 +639,17 @@ def submission_model(policy, stage, *, frozen_name=None):
             )
     else:
         expected = DraftSubmission
-    if frozen_name == "DraftSubmission" and stage not in {"verify", "reverify"}:
+    if (
+        not is_card_only(policy)
+        and frozen_name == "DraftSubmission"
+        and stage not in {"verify", "reverify"}
+    ):
         return DraftSubmission  # Already-leased old packets retain their displayed structural contract.
-    if frozen_name == "CompleteEnrichedDraftSubmission" and stage in {"enrich", "repair"}:
+    if (
+        not is_card_only(policy)
+        and frozen_name == "CompleteEnrichedDraftSubmission"
+        and stage in {"enrich", "repair"}
+    ):
         return CompleteEnrichedDraftSubmission
     if frozen_name is not None and frozen_name != expected.__name__:
         raise ValueError("Frozen native submission contract does not match its policy/stage")

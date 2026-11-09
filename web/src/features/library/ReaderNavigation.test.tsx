@@ -223,7 +223,7 @@ test("an outdated research citation rejects highlighting and retains its exact r
   expect(document.querySelectorAll("mark[data-reading-focus]")).toHaveLength(0);
   expect(await screen.findByAltText("原书第 7 页")).toBeTruthy();
   expect(
-    screen.getByRole("link", { name: "返回研究检索" }).getAttribute("href"),
+    screen.getByRole("link", { name: "返回卡片与实体" }).getAttribute("href"),
   ).toBe(returnTo);
 });
 

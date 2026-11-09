@@ -3,7 +3,7 @@
 import logging
 import time
 
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from hrs.library.books import get_run
@@ -13,7 +13,7 @@ from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
 from hrs.processing.workspace import resolve_workspace
 from hrs.research.projection import ResearchProjection
-from hrs.research.sources import ResearchEvidence, indexed_version, publication_snapshot
+from hrs.research.sources import indexed_version, publication_snapshot
 from hrs.storage import models as db
 
 logger = logging.getLogger(__name__)
@@ -44,113 +44,17 @@ class ResearchBridge:
         self.index_worker = None
         self.notebook_versions = {}
 
-    def _link_questions(self, card, book_ids):
-        """Prioritize an existing card's question links within a fixed context budget."""
-        from hrs.research.notebook import ResearchNotebook
-
-        notebook, limit = ResearchNotebook(self.store), 10
-        context = notebook.research_context(book_ids=book_ids)
-        previous = list(
-            dict.fromkeys(finding["question_id"] for finding in card.get("question_findings", []))
-        )
-        priority, extra, uncovered = {}, 0, max(0, len(previous) - limit)
-        for question_id in previous[:limit]:
-            try:
-                question = notebook.question(question_id)
-                if question["status"] == "archived":
-                    continue
-                frozen = notebook.research_context(book_ids=book_ids, question_id=question_id)
-            except (FileNotFoundError, ValueError):
-                uncovered += 1
-                continue
-            priority[question_id] = frozen["questions"][0]
-            extra += question["status"] == "resolved"
-        questions = {**priority}
-        for question in context["questions"]:
-            if len(questions) >= limit:
-                break
-            questions.setdefault(question["id"], question)
-        return {
-            "questions": list(questions.values()),
-            "omitted": max(0, context["total"] + extra - len(questions)),
-            "previous_omitted": len(previous) - len(priority),
-            "preserve_source_card": bool(uncovered),
-        }
-
     def enqueue_links(self, book_id):
-        """Freeze bounded cross-book leads; native author/enrich/verify decide their meaning."""
-        evidence = ResearchEvidence(self.settings, self.engine)
-        cards, queued = {}, []
+        from hrs.library.errors import ServiceError
 
-        def current(card_id):
-            if card_id not in cards:
-                try:
-                    evidence.require_card(card_id)
-                    cards[card_id] = self.workflow.card(card_id)
-                except (FileNotFoundError, ValueError):
-                    cards[card_id] = None
-                except Exception as error:
-                    from hrs.library.errors import ServiceError
-
-                    if not isinstance(error, ServiceError) or error.status_code not in {404, 409}:
-                        raise
-                    cards[card_id] = None
-            return cards[card_id]
-
-        for group in self.workflow.link_refresh_candidates(book_id, limit=100):
-            targets = [card for target in group["target_card_ids"] if (card := current(target))]
-            retained_targets = targets[:10]
-            descriptors = [
-                {
-                    "card_id": card["id"],
-                    "version": card["version"],
-                    "title": card["title"],
-                    "publication_sha256": card["publication_sha256"],
-                }
-                for card in retained_targets
-            ]
-            if not descriptors:
-                continue
-            for card_id in group["card_ids"]:
-                card = current(card_id)
-                if card is None:
-                    continue
-                source = self.source_run(card["book_id"])
-                snapshot = publication_snapshot(
-                    self.settings,
-                    self.engine,
-                    self.store,
-                    self.objects,
-                    source,
-                    article_ids=[card["article_id"]],
-                )
-                snapshot["research_scope"] = {
-                    "kind": "link_refresh",
-                    "source_card_id": card_id,
-                    "source_card_version": card["version"],
-                    "book_ids": sorted(
-                        {card["book_id"], *[t["book_id"] for t in retained_targets]}
-                    ),
-                    "targets_omitted": max(0, len(targets) - len(descriptors)),
-                }
-                context = self._link_questions(card, snapshot["research_scope"]["book_ids"])
-                snapshot["research_questions"] = context["questions"]
-                snapshot["research_questions_omitted"] = context["omitted"]
-                snapshot["research_scope"].update(
-                    source_findings_omitted=context["previous_omitted"],
-                    preserve_source_card=context["preserve_source_card"],
-                )
-                snapshot["link_target_cards"] = descriptors
-                status = self.workflow.enqueue(snapshot, purpose="link_refresh")
-                self.projection.sync(status)
-                queued.append(status["run_id"])
-        return queued
+        raise ServiceError(410, "自动研究补链已停用；新资料通过自动制卡整理实体和原文关系。")
 
     def refresh_links(self):
-        with self.engine.connect() as connection:
+        """Acknowledge retired work without starting a second research workflow."""
+        with self.engine.begin() as connection:
             events = (
                 connection.execute(
-                    select(db.outbox)
+                    select(db.runs, db.outbox.c.id.label("outbox_id"))
                     .join(db.runs)
                     .where(
                         db.outbox.c.kind == "link_research",
@@ -158,22 +62,34 @@ class ResearchBridge:
                         workspace_runs(self.store),
                     )
                     .order_by(db.outbox.c.id)
-                    .limit(10)
+                    .limit(50)
                 )
                 .mappings()
                 .all()
             )
-        for event in events:
-            try:
-                self.enqueue_links(event["payload"]["book_id"])
-                with self.engine.begin() as connection:
+            for event in events:
+                try:
+                    require_workspace(self.engine, event, self.store, connection=connection)
+                except WrongWorkspace:
+                    continue
+                retired = connection.execute(
+                    update(db.outbox)
+                    .where(db.outbox.c.id == event["outbox_id"], db.outbox.c.delivered.is_(False))
+                    .values(delivered=True)
+                    .returning(db.outbox.c.id)
+                ).scalar_one_or_none()
+                if retired is not None:
                     connection.execute(
-                        update(db.outbox)
-                        .where(db.outbox.c.id == event["id"])
-                        .values(delivered=True)
+                        insert(db.events).values(
+                            run_id=event["id"],
+                            book_id=event["book_id"],
+                            kind="cards.legacy_link_retired",
+                            payload={
+                                "outbox_id": event["outbox_id"],
+                                "reason": "source_cards_only",
+                            },
+                        )
                     )
-            except Exception:  # noqa: BLE001 - checkpoint retained; retry never blocks source publication
-                logger.exception("Incremental research linking retained for retry: %s", event["id"])
 
     def start_indexing(self):
         from hrs.research.discovery import DiscoveryWorker, ResearchDiscovery
@@ -259,31 +175,20 @@ class ResearchBridge:
         purpose="book",
         research_scope=None,
     ):
-        from hrs.research.notebook import ResearchNotebook
+        from hrs.library.errors import ServiceError
 
+        if question_id is not None or purpose not in {"book", "card_revision"}:
+            raise ServiceError(410, "研究问题及自动论证已停用；原文索引完成后会自动制卡。")
         run = self.source_run(book_id)
         snapshot = publication_snapshot(
             self.settings, self.engine, self.store, self.objects, run, article_ids=article_ids
         )
-        context_books = (research_scope or {}).get("book_ids", [str(book_id)])
-        if question_id and (research_scope or {}).get("selection") == "workspace_all":
-            # The user's unrestricted definition is distinct from an external
-            # notebook request selecting at most 200 books.
-            context_books = None
-        context = ResearchNotebook(self.store).research_context(
-            book_ids=context_books, question_id=question_id
-        )
-        expected_definition = (research_scope or {}).get("definition_version")
-        if (
-            question_id
-            and expected_definition is not None
-            and context["questions"][0]["definition_version"] != expected_definition
-        ):
-            from hrs.library.errors import ServiceError
-
-            raise ServiceError(409, "研究问题已变化，请重新读取后启动。")
-        snapshot["research_questions"] = context["questions"]
-        snapshot["research_questions_omitted"] = context["omitted"]
+        snapshot["research_questions"] = []
+        snapshot["research_questions_omitted"] = 0
+        if not revision_of and purpose == "book":
+            retained = self._retained_source(snapshot)
+            if retained is not None:
+                return retained
         if research_scope:
             snapshot["research_scope"] = research_scope
         status = self.workflow.enqueue(
@@ -291,6 +196,19 @@ class ResearchBridge:
         )
         self.projection.sync(status)
         return status
+
+    def _retained_source(self, snapshot):
+        """Policy upgrades or index rebuilds never reprocess an existing source version."""
+        for status in self.workflow.list_runs(str(snapshot["book_id"])):
+            if (
+                status.get("purpose", "book") == "book"
+                and status["source_run_id"] == snapshot["source_run_id"]
+                and status["publication_sha256"] == snapshot["publication_sha256"]
+                and self.workflow.snapshot(status["run_id"])["chapters_sha256"]
+                == snapshot["chapters_sha256"]
+            ):
+                return status
+        return None
 
     def reconcile(self):
         with self.engine.connect() as connection:
@@ -345,22 +263,9 @@ class ResearchBridge:
                     snapshot = publication_snapshot(
                         self.settings, self.engine, self.store, self.objects, run
                     )
-                    from hrs.research.notebook import ResearchNotebook
-
-                    context = ResearchNotebook(self.store).research_context(
-                        book_ids=[str(run["book_id"])]
-                    )
-                    snapshot["research_questions"] = context["questions"]
-                    snapshot["research_questions_omitted"] = context["omitted"]
-                    retained = any(
-                        status.get("purpose", "book") == "book"
-                        and status["source_run_id"] == str(run["id"])
-                        and status["publication_sha256"] == snapshot["publication_sha256"]
-                        and self.workflow.snapshot(status["run_id"])["chapters_sha256"]
-                        == snapshot["chapters_sha256"]
-                        for status in self.workflow.list_runs(str(run["book_id"]))
-                    )
-                    if not retained:
+                    snapshot["research_questions"] = []
+                    snapshot["research_questions_omitted"] = 0
+                    if self._retained_source(snapshot) is None:
                         self.workflow.enqueue(snapshot)
                 with self.engine.begin() as connection:
                     connection.execute(
@@ -384,7 +289,10 @@ class ResearchBridge:
                     self.projection.sync(status)
                 # HTTP decisions and controls may already have updated SQL. The
                 # notebook independently replays each native authority version.
-                if self.notebook_versions.get(status["run_id"]) != status["version"]:
+                if (
+                    not status.get("policy", {}).get("card_only")
+                    and self.notebook_versions.get(status["run_id"]) != status["version"]
+                ):
                     notebook.sync_run(status)
                     snapshot = self.workflow.snapshot(status["run_id"])
                     external = self.workflow.sources(status["run_id"])

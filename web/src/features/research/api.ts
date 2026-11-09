@@ -1,6 +1,14 @@
 import type { components } from "@/client/schema";
 
 type Schemas = components["schemas"];
+export function isCardOnly(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (("card_only" in value && value.card_only === true) ||
+      ("processing_mode" in value && value.processing_mode === "source_cards"))
+  );
+}
 export type ResearchRun = Schemas["ResearchRunResponse"];
 export type ResearchBook = Schemas["ResearchBookResponse"];
 export type ResearchSearchResult = Omit<
@@ -90,15 +98,6 @@ export type ResearchPending = {
   version?: number;
   superseded?: boolean;
 };
-export type QuestionEvidenceInput = {
-  kind: ResearchSelection["kind"];
-  target_id: string;
-  title?: string;
-  start?: number;
-  end?: number;
-  text_sha256?: string;
-  evidence_ids?: string[];
-};
 export type ResearchReading = {
   chapter_id: string;
   run_id: string;
@@ -181,6 +180,7 @@ function normalizeEntity(entity: Schemas["ResearchEntityResponse"]) {
 export type ResearchCard = ReturnType<typeof normalizeCard>;
 export type ResearchEvidence = ReturnType<typeof normalizeEvidence>;
 export type ResearchEntity = ReturnType<typeof normalizeEntity>;
+export type CardNotes = Schemas["CardNotesResponse"];
 
 export class ResearchError extends Error {
   constructor(
@@ -256,9 +256,9 @@ export const research = {
       `/entities/${id(entity)}`,
       signal,
     ).then(normalizeEntity),
-  catalogue: (q: string, kind: string, signal?: AbortSignal) =>
+  catalogue: (q: string, kind: string, signal?: AbortSignal, offset = 0) =>
     request<Schemas["ResearchEntityPage"]>(
-      `/entities?${new URLSearchParams({ q, kind, limit: "30", offset: "0" })}`,
+      `/entities?${new URLSearchParams({ q, kind, limit: "30", offset: String(offset) })}`,
       signal,
     ),
   timeline: async (entity: string, signal?: AbortSignal) => {
@@ -284,21 +284,6 @@ export const research = {
     ),
   run: (run: string, signal?: AbortSignal) =>
     request<ResearchRun>(`/runs/${id(run)}`, signal),
-  start: (
-    book: string,
-    revisionOf?: string,
-    reason = "研究来源更新，重新核验",
-  ) =>
-    request<ResearchRun>(
-      `/books/${id(book)}/runs`,
-      undefined,
-      revisionOf
-        ? ({
-            revision_of: revisionOf,
-            reason,
-          } satisfies Schemas["StartResearch"])
-        : {},
-    ),
   control: (run: string, action: "pause" | "resume") =>
     request<ResearchRun>(`/runs/${id(run)}/${action}`, undefined, {}),
   decision: (
@@ -344,6 +329,15 @@ export const research = {
       `/cards/${id(card)}/draft`,
       signal,
     ),
+  notes: (card: string, signal?: AbortSignal) =>
+    request<CardNotes>(`/cards/${id(card)}/notes`, signal),
+  updateNotes: (card: string, expected_version: number, text: string) =>
+    request<CardNotes>(
+      `/cards/${id(card)}/notes`,
+      undefined,
+      { expected_version, text },
+      "PATCH",
+    ),
   questions: (signal?: AbortSignal) =>
     request<ResearchPage<ResearchQuestionSummary>>(
       "/questions?offset=0&limit=100",
@@ -351,65 +345,6 @@ export const research = {
     ),
   question: (question: string, signal?: AbortSignal) =>
     request<ResearchQuestion>(`/questions/${id(question)}`, signal),
-  createQuestion: (title: string, book_ids: string[], notes = "") =>
-    request<ResearchQuestion>("/questions", undefined, {
-      title,
-      book_ids,
-      notes,
-    }),
-  updateQuestion: (
-    question: string,
-    expected_version: number,
-    patch: Partial<
-      Pick<ResearchQuestion, "title" | "book_ids" | "notes" | "status">
-    >,
-  ) =>
-    request<ResearchQuestion>(
-      `/questions/${id(question)}`,
-      undefined,
-      { expected_version, ...patch },
-      "PATCH",
-    ),
-  questionEvidence: (
-    question: string,
-    expected_version: number,
-    input: QuestionEvidenceInput,
-    decision: ResearchSelection["decision"],
-    note: string,
-  ) =>
-    request<ResearchQuestion>(
-      `/questions/${id(question)}/evidence`,
-      undefined,
-      {
-        expected_version,
-        kind: input.kind,
-        target_id: input.target_id,
-        start: input.start ?? 0,
-        end: input.end,
-        text_sha256: input.text_sha256,
-        evidence_ids: input.evidence_ids,
-        decision,
-        note,
-      } satisfies Schemas["QuestionEvidence"],
-    ),
-  updateSelection: (
-    question: string,
-    selection: string,
-    expected_version: number,
-    patch: { decision?: ResearchSelection["decision"]; note?: string },
-  ) =>
-    request<ResearchQuestion>(
-      `/questions/${id(question)}/evidence/${id(selection)}`,
-      undefined,
-      { expected_version, ...patch },
-      "PATCH",
-    ),
-  investigate: (question: string, expected_version: number) =>
-    request<ResearchQuestion>(
-      `/questions/${id(question)}/research`,
-      undefined,
-      { expected_version },
-    ),
   exportHref: (card: string) => `${base}/cards/${id(card)}/export`,
 };
 export const researchKeys = {

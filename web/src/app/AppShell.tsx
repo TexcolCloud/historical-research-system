@@ -76,7 +76,7 @@ export default function AppShell() {
             待办
           </Link>
           <Link to="/research" aria-current={researching ? "page" : undefined}>
-            研究检索
+            实体库
           </Link>
         </nav>
         <div className="platform-header-actions">

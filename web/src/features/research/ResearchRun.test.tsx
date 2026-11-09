@@ -11,6 +11,51 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+test("automatic cards expose leased stages and separate machine progress from human approval", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        run_id: "run",
+        book_id: "book",
+        state: "running",
+        version: 3,
+        card_only: true,
+        counts: {
+          articles_total: 2,
+          articles_completed: 0,
+          articles_pending: 1,
+        },
+        card_ids: ["pending-card"],
+        tasks: [
+          { task_id: "author", stage: "author", state: "completed" },
+          { task_id: "verify", stage: "verify", state: "completed" },
+          { task_id: "repair", stage: "repair", state: "completed" },
+          { task_id: "reverify", stage: "reverify", state: "leased" },
+        ],
+      }),
+    ),
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <ResearchRunPanel runId="run" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("史料卡正在修正复核");
+  expect(screen.getByText(/修正复核.*处理中/)).toBeTruthy();
+  expect(
+    screen
+      .getByRole("progressbar", { name: "制卡机器处理进度" })
+      .getAttribute("value"),
+  ).toBe("1");
+  expect(screen.getByText(/已办结 0.*待人工核对 1/)).toBeTruthy();
+  expect(screen.queryByText("史料卡已完成")).toBeNull();
+});
+
 test("automatic repair and re-verification remain machine work and expose their actual stage names", async () => {
   vi.stubGlobal(
     "fetch",
@@ -129,19 +174,21 @@ test("a late running response cannot undo a successful pause", async () => {
       <ResearchRunPanel runId="run" />
     </QueryClientProvider>,
   );
-  await screen.findByRole("button", { name: "暂停研究任务" });
+  await screen.findByRole("button", { name: "暂停旧任务" });
   act(() => {
     void query.refetchQueries({ queryKey: ["research", "run", "run"] });
   });
   await vi.waitFor(() => expect(reads).toBe(2));
-  await userEvent.click(screen.getByRole("button", { name: "暂停研究任务" }));
+  await userEvent.click(screen.getByRole("button", { name: "暂停旧任务" }));
   await screen.findByText("研究任务已暂停");
   await act(async () => {
     resolveLate(Response.json({ ...running, version: 2 }));
   });
   expect(screen.getByText("研究任务已暂停")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "暂停研究任务" })).toBeNull();
-  expect(screen.getByRole("button", { name: "继续研究任务" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "暂停旧任务" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "恢复旧任务（保留原流程）" }),
+  ).toBeTruthy();
   expect(query.getQueryData(["research", "run", "run"])).toMatchObject({
     state: "paused",
     version: 3,

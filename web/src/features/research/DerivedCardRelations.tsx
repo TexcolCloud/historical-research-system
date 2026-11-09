@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import type { components } from "@/client/schema";
 import Evidence from "./ResearchEvidence";
-import QuestionPicker from "./QuestionPicker";
 import { relationLabel } from "./relation-labels";
 
 export default function DerivedCardRelations({
@@ -20,16 +19,6 @@ export default function DerivedCardRelations({
         <article className="research-relation" key={relation.id}>
           <h4>{relationLabel(relation.predicate, relation.kind)}</h4>
           <p>{relation.reason}</p>
-          {relation.source_current !== false &&
-            relation.target_current !== false && (
-              <QuestionPicker
-                material={{
-                  kind: "relation",
-                  target_id: relation.id,
-                  title: relationLabel(relation.predicate, relation.kind),
-                }}
-              />
-            )}
           {(relation.source_current === false ||
             relation.target_current === false) && (
             <p className="workspace-status-note">

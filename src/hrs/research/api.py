@@ -14,8 +14,11 @@ from hrs.library.footnotes import export_footnotes, resolve_footnotes
 from hrs.library.native_workspace import require_workspace
 from hrs.processing.workspace import identity
 from hrs.research.bridge import ResearchBridge
+from hrs.research.card_notes import CardNotes
 from hrs.research.models import (
     CardDraft,
+    CardOnlyCardDraft,
+    CardOnlyVerificationSubmission,
     EntityMention,
     EventDraft,
     EvidenceSpan,
@@ -75,6 +78,7 @@ class ResearchEvidenceResponse(EvidenceSpan):
 
 
 class ResearchMentionResponse(EntityMention):
+    kind: Literal["person", "organization", "place", "event", "document"]
     entity_id: str
     canonical_id: str | None = None
     source_mention_id: str | None = None
@@ -100,7 +104,12 @@ class ResearchCardResponse(CardDraft):
     version: int
     approval_type: str | None = None
     book_title: str = ""
-    checks: VerificationSubmission
+    checks: VerificationSubmission | CardOnlyVerificationSubmission
+    card_only: bool = False
+    processing_mode: Literal["source_cards", "legacy_research"] = "legacy_research"
+    human_notes: str = ""
+    notes_version: int = 0
+    notes_updated_at: float | None = None
     human_decision: ResearchHumanDecision | None = None
     source_current: bool = True
     needs_update: bool = False
@@ -123,10 +132,24 @@ class ResearchCardResponse(CardDraft):
 
 
 class EditableCardResponse(BaseModel):
-    card: CardDraft
+    card: CardDraft | CardOnlyCardDraft
     version: int
     source_current: bool
     superseded: bool
+    card_only: bool = False
+    processing_mode: Literal["source_cards", "legacy_research"] = "legacy_research"
+
+
+class CardNotesResponse(BaseModel):
+    text: str
+    version: int
+    updated_at: float | None = None
+
+
+class CardNotesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=0)
+    text: str = Field(max_length=60000)
 
 
 class ResearchCardSummary(BaseModel):
@@ -158,6 +181,8 @@ class ResearchCardSummary(BaseModel):
     superseded: bool = False
     replaces_card_id: str | None = None
     lineage_id: str | None = None
+    card_only: bool = False
+    processing_mode: Literal["source_cards", "legacy_research"] = "legacy_research"
 
 
 class ResearchTaskResponse(BaseModel):
@@ -181,6 +206,8 @@ class ResearchRunResponse(BaseModel):
     counts: dict[str, int]
     tasks: list[ResearchTaskResponse]
     card_ids: list[str] = Field(default_factory=list)
+    card_only: bool = False
+    processing_mode: Literal["source_cards", "legacy_research"] = "legacy_research"
 
 
 class ResearchIdentityLinkResponse(IdentityLink):
@@ -366,7 +393,7 @@ class ResearchBookResponse(BaseModel):
     source_revision_pending: bool = False
     needs_upgrade: bool = False
     research_policy_version: int | None = None
-    required_research_policy_version: int = 5
+    required_research_policy_version: int = 6
 
 
 class ResearchCardPage(BaseModel):
@@ -611,6 +638,9 @@ class Research:
                         .as_float()
                         .label("research_created"),
                         db.research_runs.c.summary["purpose"].astext.label("research_purpose"),
+                        db.research_runs.c.summary["policy"]["card_only"]
+                        .as_boolean()
+                        .label("card_only"),
                     )
                     .select_from(
                         db.runs.join(db.books, db.books.c.id == db.runs.c.book_id).outerjoin(
@@ -693,10 +723,29 @@ class Research:
             else "current",
             "research_current": research_current,
             "superseded": superseded,
+            "card_only": bool(source["card_only"] or card.get("card_only")),
+            "processing_mode": "source_cards"
+            if source["card_only"] or card.get("card_only")
+            else "legacy_research",
         }
         if include_relations:
             result["derived_relations"] = self.card_relations(card_id)
+        notes = CardNotes(self.bridge.store).read(card)
+        result.update(
+            human_notes=notes["text"],
+            notes_version=notes["version"],
+            notes_updated_at=notes["updated_at"],
+        )
         return result
+
+    def card_notes(self, card_id):
+        return CardNotes(self.bridge.store).read(self.card(card_id, include_relations=False))
+
+    def update_card_notes(self, card_id, request):
+        card = self.card(card_id, include_relations=False)
+        return self.invoke(
+            CardNotes(self.bridge.store).save, card, request.expected_version, request.text
+        )
 
     def card_relations(self, card_id):
         result = self.invoke(self.workflow.card_relationships, card_id, limit=100)
@@ -893,6 +942,10 @@ class Research:
         return result
 
     def start(self, book_id, request):
+        if request.revision_of is None:
+            raise ServiceError(409, "史料卡会在原文索引完成后自动制作，请查看进度或恢复现有任务。")
+        if not request.reason or not request.reason.strip():
+            raise ServiceError(400, "更新已有卡片需要说明本次修订原因。")
         return self.invoke(self.bridge.start, book_id, **request.model_dump())
 
     def control(self, run_id, action):
@@ -1306,8 +1359,16 @@ class Research:
             ("checked_cross_relation_ids", "核验跨卡关系"),
             ("checked_question_finding_ids", "核验研究问题结论"),
         ):
+            if card.get("card_only") and key in {
+                "checked_search_receipt_ids",
+                "checked_research_question_ids",
+                "checked_cross_relation_ids",
+                "checked_question_finding_ids",
+            }:
+                continue
             field(label, "、".join(checks.get(key, [])))
-        field("补充研究判定已核验", checks.get("checked_research_disposition"))
+        if not card.get("card_only"):
+            field("补充研究判定已核验", checks.get("checked_research_disposition"))
         field("未解决事项", "；".join(checks.get("issues", [])))
         decision = card.get("human_decision") or {}
         field("人工决定", decision.get("action"))
@@ -1319,6 +1380,9 @@ class Research:
             for key in ("mode", "category", "reason"):
                 field(key, disposition.get(key))
             field("判定依据", references(disposition.get("evidence_ids", [])))
+        if card.get("human_notes"):
+            lines.extend(["", "## 个人备注（用户记录，非原文）", "", card["human_notes"], ""])
+            field("备注版本", card["notes_version"])
         lines.append("")
         lines.extend(["## 原文证据", ""])
         for index, span in enumerate(card["evidence"], 1):

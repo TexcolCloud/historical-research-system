@@ -2606,6 +2606,98 @@
         }
       }
     },
+    "/api/v2/research/cards/{card_id}/notes": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Card Notes",
+        "operationId": "card_notes_api_v2_research_cards__card_id__notes_get",
+        "parameters": [
+          {
+            "name": "card_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Card Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardNotesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Update Card Notes",
+        "operationId": "update_card_notes_api_v2_research_cards__card_id__notes_patch",
+        "parameters": [
+          {
+            "name": "card_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Card Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardNotesUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardNotesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/research/cards/{card_id}/revisions": {
       "post": {
         "tags": [
@@ -4011,6 +4103,491 @@
         ],
         "title": "CardItem"
       },
+      "CardNotesResponse": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "version"
+        ],
+        "title": "CardNotesResponse"
+      },
+      "CardNotesUpdate": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 60000,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version",
+          "text"
+        ],
+        "title": "CardNotesUpdate"
+      },
+      "CardOnlyCardDraft": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "article_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Article Id"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Summary"
+          },
+          "document_type": {
+            "type": "string",
+            "title": "Document Type",
+            "default": ""
+          },
+          "source_layer": {
+            "type": "string",
+            "title": "Source Layer",
+            "default": ""
+          },
+          "formation_date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "event_date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CardItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceSpan"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Evidence"
+          },
+          "mentions": {
+            "items": {
+              "$ref": "#/components/schemas/CardOnlyMention"
+            },
+            "type": "array",
+            "title": "Mentions"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CompleteEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/RelationDraft"
+            },
+            "type": "array",
+            "title": "Relations"
+          },
+          "identity_links": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityLink"
+            },
+            "type": "array",
+            "title": "Identity Links"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          },
+          "alternatives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Alternatives"
+          },
+          "questions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Questions"
+          },
+          "no_argument_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Argument Reason"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/CompleteMetadata",
+            "description": "Retain every metadata field. Missing facts remain explicit unknown values; do not invent facts or repeat the same source limitation in each field."
+          },
+          "coverage": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageUnit"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Coverage"
+          },
+          "research_plan": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchQuestion"
+            },
+            "type": "array",
+            "title": "Research Plan"
+          },
+          "cross_relations": {
+            "items": {
+              "$ref": "#/components/schemas/CrossCardRelation"
+            },
+            "type": "array",
+            "title": "Cross Relations"
+          },
+          "question_findings": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionFinding"
+            },
+            "type": "array",
+            "title": "Question Findings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "article_id",
+          "title",
+          "summary",
+          "evidence",
+          "metadata",
+          "coverage"
+        ],
+        "title": "CardOnlyCardDraft",
+        "description": "One complete source card, without a mandatory research-question workflow."
+      },
+      "CardOnlyCoverageAssessment": {
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Finding Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "covered",
+              "missing",
+              "not_applicable"
+            ],
+            "title": "Status"
+          },
+          "candidate_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Candidate Ids",
+            "description": "Qualified source-backed candidate IDs. Entity/event/relation findings use objects of the same kind with overlapping evidence; an explicitly retained, evidenced alias may cover a relation_kind=alias source finding without a duplicate relation edge. Important fact findings may cite card_id/item_id, card_id/metadata/field, card_id/formation_date or card_id/event_date. An event finding still requires an event with unchanged modality. Missing important facts require status=missing, a precise reason and decision=pending."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "finding_id",
+          "status",
+          "reason"
+        ],
+        "title": "CardOnlyCoverageAssessment"
+      },
+      "CardOnlyMention": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "person",
+              "organization",
+              "place",
+              "document",
+              "event"
+            ],
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "identity_basis": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Identity Basis"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Evidence Ids"
+          },
+          "identity_key": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Identity Key"
+          },
+          "aliases": {
+            "items": {
+              "$ref": "#/components/schemas/AliasDraft"
+            },
+            "type": "array",
+            "title": "Aliases"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/MentionLocation"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Locations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "identity_basis",
+          "evidence_ids",
+          "identity_key",
+          "locations"
+        ],
+        "title": "CardOnlyMention",
+        "description": "Policy-v6 source mentions; older entity enums retain their frozen meanings."
+      },
+      "CardOnlyVerificationSubmission": {
+        "properties": {
+          "input_hash": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Input Hash"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "pending"
+            ],
+            "title": "Decision"
+          },
+          "checked_card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Checked Card Ids"
+          },
+          "checked_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Item Ids",
+            "description": "Checked card_id/item_id values from candidate.required_checks"
+          },
+          "checked_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Evidence Ids",
+            "description": "Checked card_id/evidence_id values from candidate.required_checks"
+          },
+          "checked_relation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Relation Ids",
+            "description": "Checked card_id/relation_id values from candidate.required_checks"
+          },
+          "checked_identity_links": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Identity Links",
+            "description": "Checked card_id/link_index values from candidate.required_checks"
+          },
+          "checked_research_disposition": {
+            "type": "boolean",
+            "title": "Checked Research Disposition",
+            "default": false
+          },
+          "checked_search_receipt_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Search Receipt Ids",
+            "description": "Every server search receipt ID in candidate.required_checks"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "checked_mechanical_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Mechanical Evidence Ids",
+            "description": "Every decoded mechanical evidence receipt ID in candidate.required_checks; semantic review remains separate"
+          },
+          "checked_metadata_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Metadata Fields"
+          },
+          "checked_entity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Entity Ids"
+          },
+          "checked_event_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Event Ids"
+          },
+          "checked_coverage_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Coverage Ids"
+          },
+          "checked_research_question_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Research Question Ids"
+          },
+          "checked_cross_relation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Cross Relation Ids"
+          },
+          "checked_question_finding_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Question Finding Ids"
+          },
+          "coverage_assessments": {
+            "items": {
+              "$ref": "#/components/schemas/CardOnlyCoverageAssessment"
+            },
+            "type": "array",
+            "title": "Coverage Assessments"
+          },
+          "checked_inventory_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Inventory Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "input_hash",
+          "decision",
+          "checked_card_ids"
+        ],
+        "title": "CardOnlyVerificationSubmission"
+      },
       "CardQuoteLocation": {
         "properties": {
           "item_id": {
@@ -4088,7 +4665,15 @@
             "title": "Expected Version"
           },
           "card": {
-            "$ref": "#/components/schemas/CardDraft-Input"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardDraft-Input"
+              },
+              {
+                "$ref": "#/components/schemas/CardOnlyCardDraft"
+              }
+            ],
+            "title": "Card"
           },
           "reason": {
             "type": "string",
@@ -4372,6 +4957,158 @@
           "codepoints"
         ],
         "title": "ChapterSummary"
+      },
+      "CompleteEvent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Description"
+          },
+          "date": {
+            "$ref": "#/components/schemas/ResearchDate",
+            "description": "Use an explicit unknown date when the source supplies none."
+          },
+          "participant_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Participant Ids"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Evidence Ids"
+          },
+          "identity_key": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Identity Key"
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Action"
+          },
+          "place": {
+            "$ref": "#/components/schemas/SourceValue",
+            "description": "Explicit source place or unknown value='' with a note."
+          },
+          "participant_roles": {
+            "items": {
+              "$ref": "#/components/schemas/ParticipantRole"
+            },
+            "type": "array",
+            "title": "Participant Roles",
+            "description": "One evidenced role per retained participant, or [] if none is identified."
+          },
+          "event_status": {
+            "type": "string",
+            "enum": [
+              "reported",
+              "planned",
+              "conditional",
+              "negated",
+              "unknown"
+            ],
+            "title": "Event Status"
+          },
+          "status_note": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Status Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "date",
+          "evidence_ids",
+          "identity_key",
+          "action",
+          "place",
+          "participant_roles",
+          "event_status",
+          "status_note"
+        ],
+        "title": "CompleteEvent"
+      },
+      "CompleteMetadata": {
+        "properties": {
+          "title_origin": {
+            "type": "string",
+            "enum": [
+              "source",
+              "supplied",
+              "system",
+              "unknown"
+            ],
+            "title": "Title Origin"
+          },
+          "original_title": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "authors": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "recipients": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "editors": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "publication": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "volume": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "archive_id": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "formation_place": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "testimony": {
+            "$ref": "#/components/schemas/SourceValue"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title_origin",
+          "original_title",
+          "authors",
+          "recipients",
+          "editors",
+          "publication",
+          "volume",
+          "archive_id",
+          "formation_place",
+          "purpose",
+          "testimony"
+        ],
+        "title": "CompleteMetadata"
       },
       "ConversionPage": {
         "properties": {
@@ -4967,7 +5704,15 @@
       "EditableCardResponse": {
         "properties": {
           "card": {
-            "$ref": "#/components/schemas/hrs__research__models__CardDraft"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/hrs__research__models__CardDraft"
+              },
+              {
+                "$ref": "#/components/schemas/CardOnlyCardDraft"
+              }
+            ],
+            "title": "Card"
           },
           "version": {
             "type": "integer",
@@ -4980,6 +5725,20 @@
           "superseded": {
             "type": "boolean",
             "title": "Superseded"
+          },
+          "card_only": {
+            "type": "boolean",
+            "title": "Card Only",
+            "default": false
+          },
+          "processing_mode": {
+            "type": "string",
+            "enum": [
+              "source_cards",
+              "legacy_research"
+            ],
+            "title": "Processing Mode",
+            "default": "legacy_research"
           }
         },
         "type": "object",
@@ -7162,7 +7921,7 @@
           "required_research_policy_version": {
             "type": "integer",
             "title": "Required Research Policy Version",
-            "default": 5
+            "default": 6
           }
         },
         "type": "object",
@@ -7400,7 +8159,50 @@
             "default": ""
           },
           "checks": {
-            "$ref": "#/components/schemas/VerificationSubmission"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerificationSubmission"
+              },
+              {
+                "$ref": "#/components/schemas/CardOnlyVerificationSubmission"
+              }
+            ],
+            "title": "Checks"
+          },
+          "card_only": {
+            "type": "boolean",
+            "title": "Card Only",
+            "default": false
+          },
+          "processing_mode": {
+            "type": "string",
+            "enum": [
+              "source_cards",
+              "legacy_research"
+            ],
+            "title": "Processing Mode",
+            "default": "legacy_research"
+          },
+          "human_notes": {
+            "type": "string",
+            "title": "Human Notes",
+            "default": ""
+          },
+          "notes_version": {
+            "type": "integer",
+            "title": "Notes Version",
+            "default": 0
+          },
+          "notes_updated_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes Updated At"
           },
           "human_decision": {
             "anyOf": [
@@ -7686,6 +8488,20 @@
               }
             ],
             "title": "Lineage Id"
+          },
+          "card_only": {
+            "type": "boolean",
+            "title": "Card Only",
+            "default": false
+          },
+          "processing_mode": {
+            "type": "string",
+            "enum": [
+              "source_cards",
+              "legacy_research"
+            ],
+            "title": "Processing Mode",
+            "default": "legacy_research"
           }
         },
         "type": "object",
@@ -8614,7 +9430,8 @@
               "person",
               "organization",
               "place",
-              "event"
+              "event",
+              "document"
             ],
             "title": "Kind"
           },
@@ -9204,6 +10021,20 @@
             },
             "type": "array",
             "title": "Card Ids"
+          },
+          "card_only": {
+            "type": "boolean",
+            "title": "Card Only",
+            "default": false
+          },
+          "processing_mode": {
+            "type": "string",
+            "enum": [
+              "source_cards",
+              "legacy_research"
+            ],
+            "title": "Processing Mode",
+            "default": "legacy_research"
           }
         },
         "additionalProperties": true,

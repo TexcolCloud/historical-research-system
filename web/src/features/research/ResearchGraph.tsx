@@ -6,7 +6,6 @@ import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
 import { research, type ResearchGraphData } from "./api";
 import Evidence from "./ResearchEvidence";
-import QuestionPicker from "./QuestionPicker";
 import { relationLabel } from "./relation-labels";
 
 type GraphNode = ResearchGraphData["nodes"][number];
@@ -77,7 +76,7 @@ export default function ResearchGraph({
   );
   const edge = graph.data?.edges.find((item) => item.id === selected);
   function open(node: GraphNode) {
-    if (node.kind === "card" || node.kind === "document") {
+    if (node.kind === "card") {
       if (node.card_id) onCard(node.card_id);
     } else onEntity(node.canonical_id || node.id);
   }
@@ -109,7 +108,7 @@ export default function ResearchGraph({
         </div>
       </header>
       <p className="research-provenance">
-        点击人物、事件或关系查看来源。关系线索本身不代替原文依据。
+        点击实体或关系查看来源。关系线索本身不代替原文依据。
       </p>
       {graph.isPending && <p role="status">正在读取关系与证据…</p>}
       {graph.isError && (
@@ -156,7 +155,7 @@ export default function ResearchGraph({
             </p>
           )}
           <div className="research-graph-list">
-            <h4>关系中的人物与材料</h4>
+            <h4>关系中的实体与卡片</h4>
             {graph.data.nodes.map((node) => (
               <Button
                 variant="ghost"
@@ -191,14 +190,6 @@ export default function ResearchGraph({
             <section className="research-selected-relation">
               <h4>{relationLabel(edge.predicate, edge.kind)}</h4>
               <p>{edge.reason}</p>
-              <QuestionPicker
-                key={edge.id}
-                material={{
-                  kind: "relation",
-                  target_id: edge.id,
-                  title: relationLabel(edge.predicate, edge.kind),
-                }}
-              />
               <Button variant="ghost" onClick={() => onCard(edge.card_id)}>
                 查看出处卡片
               </Button>

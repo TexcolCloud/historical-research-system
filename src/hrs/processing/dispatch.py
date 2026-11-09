@@ -33,6 +33,21 @@ class Dispatch:
         return self.ledger.sessions()
 
     def reserve(self, document_id, *, active_session_tokens=()):
+        created = []
+        try:
+            return self._reserve(document_id, active_session_tokens, created)
+        except BaseException:
+            # A batch can commit several claims before a later validation fails.
+            # None of those undisclosed reservations may retain native capacity.
+            with self.store.lock:
+                committed = {session["session_token"]: session for session in self.sessions()}
+                for session in created:
+                    current = committed.get(session["session_token"], session)
+                    if current["state"] in {"starting", "idle"}:
+                        self.end_session(current, "dispatch_reservation_failed")
+            raise
+
+    def _reserve(self, document_id, active_session_tokens, created):
         """Lease concrete work before allocating shared capacity to speculative warmup."""
         from hrs.processing.runtime_control import effective_policy
         from hrs.processing.scheduling import ready_tasks
@@ -90,6 +105,7 @@ class Dispatch:
                         session = self.new_session(document_id, stage, plan)
                         if session is None:
                             break
+                        created.append(session)
                     token = session["session_token"]
                     # Evidence hashing remains outside the command mutex, so pause stays responsive.
                     try:
@@ -129,6 +145,7 @@ class Dispatch:
                         warm = self.new_session(document_id, stage, plan, prewarm=True)
                         if warm is None:
                             break
+                        created.append(warm)
                         warm.update(
                             task_id=None, prewarmed=True, overlap_reading=policy["overlap_reading"]
                         )

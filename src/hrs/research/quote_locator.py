@@ -1,6 +1,26 @@
 """Locate literal quotes in a frozen source without interpreting or normalizing it."""
 
 
+def _owned_footnote_ids(source, start, end):
+    owned = []
+    for note in source["footnotes"]:
+        if not isinstance(note, dict) or not isinstance(note.get("id"), str) or not note["id"]:
+            continue
+        references = note.get("references", [])
+        ranges = [note.get("note", {}), *(references if isinstance(references, list) else [])]
+        if any(
+            isinstance(item, dict)
+            and type(item.get("start")) is int
+            and type(item.get("end")) is int
+            and 0 <= item["start"] < item["end"] <= len(source["text"])
+            and item.get("start", end) < end
+            and item.get("end", start) > start
+            for item in ranges
+        ):
+            owned.append(note["id"])
+    return owned
+
+
 def locate_quotes(source: dict, quotes: list[str], offset=0, limit=20):
     """Return codepoint offsets and complete ambiguity counts with bounded result memory."""
     if (
@@ -21,7 +41,10 @@ def locate_quotes(source: dict, quotes: list[str], offset=0, limit=20):
         cursor, count = 0, 0
         while (start := text.find(quote, cursor)) >= 0:
             if offset <= total < offset + limit:
-                matches.append({"quote_index": index, "start": start, "end": start + len(quote)})
+                match = {"quote_index": index, "start": start, "end": start + len(quote)}
+                if isinstance(source.get("footnotes"), list):
+                    match["footnote_ids"] = _owned_footnote_ids(source, start, match["end"])
+                matches.append(match)
             total += 1
             count += 1
             cursor = start + 1

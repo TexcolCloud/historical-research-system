@@ -1,13 +1,13 @@
 ---
 name: historical-research
-description: 导入 PDF 或图片史料、继续处理任务、打开人工待审页面、检索已入库资料，或处理研究卡片与人物事件证据时使用。
+description: 导入 PDF 或图片史料、继续处理任务、打开人工待审页面、检索已入库资料，或处理自动史料卡与实体事件证据时使用。
 ---
 
 # Historical research
 
 Use the `historical_research` MCP and native Codex subagents. Read
 `workflow_instructions` for the current processing contract; it is the single
-source for PDF routing, original-first review, publication and post-index research.
+source for PDF routing, original-first review, publication and post-index source cards.
 
 1. Call `workspace_status`. Keep its workspace ID for this request. The tools,
    dashboard and executor must use that same workspace; report a mismatch instead
@@ -40,23 +40,23 @@ source for PDF routing, original-first review, publication and post-index resear
    Markdown and original-page evidence. A revision keeps the previous published
    version searchable until its replacement passes.
 
-For research cards and person/event evidence, open the workbench's research view
-and inspect `research_status(run_id)`. Research starts from published, indexed,
-content-verified articles and has an independent queue; original reading does not
-wait for cards. Its author, enrich, independent verify and, when required, one
-directed repair followed by fresh independent reverify use native Sol workers
-and their `research_claim` packets. Follow the research section of
-`workflow_instructions` for complete source reads, candidate gates, cross-book
-freezing, source-first omission inventories and submission coverage. New complete
-cards retain metadata, every source part, named entities, event modalities and
-participant roles. Enrichment persists its question plan before retrieval;
-cross-card relationships freeze both card versions and complete sources.
-Use the research workspace for question scope, adopted/excluded evidence,
-unresolved findings and source-bound person/event navigation. Search hits and
-graph neighbours are leads; retain identity uncertainty. Canonical identity
-changes and structured card revisions are explicit local human actions.
-Old frozen policies remain unchanged; upgrade a basic card through an explicit
-research revision. Old `kind=cards` execution stays retired.
+For source cards and entity/event evidence, open the workbench's card view and
+inspect `research_status(run_id)`. Matching published, indexed, content-verified
+articles automatically enter a separate queue; original reading remains available.
+New v6 cards use native Sol author → independent verify and, when required, one
+directed repair → fresh independent reverify. Read each `research_claim` packet's
+frozen policy and schema. Follow the source-card section of `workflow_instructions`
+for complete source reads, candidate gates, omission inventories and coverage.
+Retain metadata, every source part, exact quotations/footnotes, source limitations,
+people, organizations, places, documents, event modalities and participant roles.
+OpenSearch is an optional author/repair tool; new cards require no question plan
+or mandatory search receipt. Cross-card claims still require frozen complete
+sources and both card versions. Search hits and graph neighbours remain leads.
+Canonical identity changes and structured card revisions are explicit local human
+actions. Personal notes are separately versioned and remain distinct from source
+claims. Existing v1–v5 runs keep their frozen contracts; index rebuilding never
+upgrades them. New research-question and automatic link-refresh execution is
+retired; prior history remains readable/exportable. Old `kind=cards` stays retired.
 
 If independent original-image audits still disagree after detail inspection,
 use `request_human_review` with current evidence hashes and the exact unresolved

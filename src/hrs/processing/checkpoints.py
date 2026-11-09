@@ -6,6 +6,7 @@ from pathlib import Path
 
 from filelock import FileLock
 
+from hrs.processing.errors import EvidenceValidationConflict
 from hrs.processing.hashing import digest
 from hrs.processing.ledger import Ledger
 from hrs.processing.migration import migrate
@@ -85,24 +86,31 @@ class Checkpoints:
         return self.ledger.events_after(sequence, limit)
 
     @contextmanager
-    def validated(self, document_id, validate, select=None):
+    def validated(self, document_id, validate, select=None, *, retry_scope=None):
         """Validate an immutable snapshot without blocking readers or lease heartbeats."""
-        for _ in range(8):
+        conflicts = {}
+        while True:
             revision = self.revision(document_id)
             doc = self.read(document_id)
             selected = select(doc) if select else None
+            scope = retry_scope(selected) if retry_scope else None
             validate(doc)
             with self.lock:
-                if self.revision(document_id) != revision:
-                    current = self.read(document_id)
-                    if not select or select(current) != selected:
-                        continue
-                    doc = current
-                yield doc
+                changed = self.revision(document_id) != revision
+                current = self.read(document_id) if changed else doc
+                # Lease expiry can change the selected work without any write.
+                if (select and select(current) != selected) or (changed and not select):
+                    # A dispatcher may advance through many different ready
+                    # pages. Only repeated conflicts of the same checked
+                    # evidence scope consume that scope's fixed retry budget.
+                    conflicts[scope] = conflicts.get(scope, 0) + 1
+                    if conflicts[scope] >= 8:
+                        raise EvidenceValidationConflict(
+                            "Document changed during evidence validation; retry with the current snapshot"
+                        )
+                    continue
+                yield current
                 return
-        raise ValueError(
-            "Document changed during evidence validation; retry with the current snapshot"
-        )
 
     def evidence_path(self, doc: dict, relative: str) -> Path:
         directory = self.directory(doc["id"]).resolve()

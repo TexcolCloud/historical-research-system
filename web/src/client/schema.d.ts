@@ -821,6 +821,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/research/cards/{card_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Card Notes */
+        get: operations["card_notes_api_v2_research_cards__card_id__notes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Card Notes */
+        patch: operations["update_card_notes_api_v2_research_cards__card_id__notes_patch"];
+        trace?: never;
+    };
     "/api/v2/research/cards/{card_id}/revisions": {
         parameters: {
             query?: never;
@@ -1249,6 +1267,189 @@ export interface components {
             /** Limitations */
             limitations?: string[];
         };
+        /** CardNotesResponse */
+        CardNotesResponse: {
+            /** Text */
+            text: string;
+            /** Version */
+            version: number;
+            /** Updated At */
+            updated_at?: number | null;
+        };
+        /** CardNotesUpdate */
+        CardNotesUpdate: {
+            /** Expected Version */
+            expected_version: number;
+            /** Text */
+            text: string;
+        };
+        /**
+         * CardOnlyCardDraft
+         * @description One complete source card, without a mandatory research-question workflow.
+         */
+        CardOnlyCardDraft: {
+            /** Id */
+            id: string;
+            /** Article Id */
+            article_id: string;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /**
+             * Document Type
+             * @default
+             */
+            document_type: string;
+            /**
+             * Source Layer
+             * @default
+             */
+            source_layer: string;
+            formation_date?: components["schemas"]["ResearchDate"];
+            event_date?: components["schemas"]["ResearchDate"];
+            /** Items */
+            items?: components["schemas"]["CardItem"][];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceSpan"][];
+            /** Mentions */
+            mentions?: components["schemas"]["CardOnlyMention"][];
+            /** Events */
+            events?: components["schemas"]["CompleteEvent"][];
+            /** Relations */
+            relations?: components["schemas"]["RelationDraft"][];
+            /** Identity Links */
+            identity_links?: components["schemas"]["IdentityLink"][];
+            /** Tags */
+            tags?: string[];
+            /** Limitations */
+            limitations?: string[];
+            /** Alternatives */
+            alternatives?: string[];
+            /** Questions */
+            questions?: string[];
+            /** No Argument Reason */
+            no_argument_reason?: string | null;
+            /** @description Retain every metadata field. Missing facts remain explicit unknown values; do not invent facts or repeat the same source limitation in each field. */
+            metadata: components["schemas"]["CompleteMetadata"];
+            /** Coverage */
+            coverage: components["schemas"]["CoverageUnit"][];
+            /** Research Plan */
+            research_plan?: components["schemas"]["ResearchQuestion"][];
+            /** Cross Relations */
+            cross_relations?: components["schemas"]["CrossCardRelation"][];
+            /** Question Findings */
+            question_findings?: components["schemas"]["QuestionFinding"][];
+        };
+        /** CardOnlyCoverageAssessment */
+        CardOnlyCoverageAssessment: {
+            /** Finding Id */
+            finding_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "covered" | "missing" | "not_applicable";
+            /**
+             * Candidate Ids
+             * @description Qualified source-backed candidate IDs. Entity/event/relation findings use objects of the same kind with overlapping evidence; an explicitly retained, evidenced alias may cover a relation_kind=alias source finding without a duplicate relation edge. Important fact findings may cite card_id/item_id, card_id/metadata/field, card_id/formation_date or card_id/event_date. An event finding still requires an event with unchanged modality. Missing important facts require status=missing, a precise reason and decision=pending.
+             */
+            candidate_ids?: string[];
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * CardOnlyMention
+         * @description Policy-v6 source mentions; older entity enums retain their frozen meanings.
+         */
+        CardOnlyMention: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "person" | "organization" | "place" | "document" | "event";
+            /** Name */
+            name: string;
+            /** Identity Basis */
+            identity_basis: string;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Identity Key */
+            identity_key: string;
+            /** Aliases */
+            aliases?: components["schemas"]["AliasDraft"][];
+            /** Locations */
+            locations: components["schemas"]["MentionLocation"][];
+        };
+        /** CardOnlyVerificationSubmission */
+        CardOnlyVerificationSubmission: {
+            /** Input Hash */
+            input_hash: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "pending";
+            /** Checked Card Ids */
+            checked_card_ids: string[];
+            /**
+             * Checked Item Ids
+             * @description Checked card_id/item_id values from candidate.required_checks
+             */
+            checked_item_ids?: string[];
+            /**
+             * Checked Evidence Ids
+             * @description Checked card_id/evidence_id values from candidate.required_checks
+             */
+            checked_evidence_ids?: string[];
+            /**
+             * Checked Relation Ids
+             * @description Checked card_id/relation_id values from candidate.required_checks
+             */
+            checked_relation_ids?: string[];
+            /**
+             * Checked Identity Links
+             * @description Checked card_id/link_index values from candidate.required_checks
+             */
+            checked_identity_links?: string[];
+            /**
+             * Checked Research Disposition
+             * @default false
+             */
+            checked_research_disposition: boolean;
+            /**
+             * Checked Search Receipt Ids
+             * @description Every server search receipt ID in candidate.required_checks
+             */
+            checked_search_receipt_ids?: string[];
+            /** Issues */
+            issues?: string[];
+            /**
+             * Checked Mechanical Evidence Ids
+             * @description Every decoded mechanical evidence receipt ID in candidate.required_checks; semantic review remains separate
+             */
+            checked_mechanical_evidence_ids?: string[];
+            /** Checked Metadata Fields */
+            checked_metadata_fields?: string[];
+            /** Checked Entity Ids */
+            checked_entity_ids?: string[];
+            /** Checked Event Ids */
+            checked_event_ids?: string[];
+            /** Checked Coverage Ids */
+            checked_coverage_ids?: string[];
+            /** Checked Research Question Ids */
+            checked_research_question_ids?: string[];
+            /** Checked Cross Relation Ids */
+            checked_cross_relation_ids?: string[];
+            /** Checked Question Finding Ids */
+            checked_question_finding_ids?: string[];
+            /** Coverage Assessments */
+            coverage_assessments?: components["schemas"]["CardOnlyCoverageAssessment"][];
+            /** Checked Inventory Ids */
+            checked_inventory_ids?: string[];
+        };
         /** CardQuoteLocation */
         CardQuoteLocation: {
             /** Item Id */
@@ -1276,7 +1477,8 @@ export interface components {
         CardRevision: {
             /** Expected Version */
             expected_version: number;
-            card: components["schemas"]["CardDraft-Input"];
+            /** Card */
+            card: components["schemas"]["CardDraft-Input"] | components["schemas"]["CardOnlyCardDraft"];
             /**
              * Reason
              * @default
@@ -1413,6 +1615,57 @@ export interface components {
             pages: number[];
             /** Codepoints */
             codepoints: number;
+        };
+        /** CompleteEvent */
+        CompleteEvent: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** @description Use an explicit unknown date when the source supplies none. */
+            date: components["schemas"]["ResearchDate"];
+            /** Participant Ids */
+            participant_ids?: string[];
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Identity Key */
+            identity_key: string;
+            /** Action */
+            action: string;
+            /** @description Explicit source place or unknown value='' with a note. */
+            place: components["schemas"]["SourceValue"];
+            /**
+             * Participant Roles
+             * @description One evidenced role per retained participant, or [] if none is identified.
+             */
+            participant_roles: components["schemas"]["ParticipantRole"][];
+            /**
+             * Event Status
+             * @enum {string}
+             */
+            event_status: "reported" | "planned" | "conditional" | "negated" | "unknown";
+            /** Status Note */
+            status_note: string;
+        };
+        /** CompleteMetadata */
+        CompleteMetadata: {
+            /**
+             * Title Origin
+             * @enum {string}
+             */
+            title_origin: "source" | "supplied" | "system" | "unknown";
+            original_title: components["schemas"]["SourceValue"];
+            authors: components["schemas"]["SourceValue"];
+            recipients: components["schemas"]["SourceValue"];
+            editors: components["schemas"]["SourceValue"];
+            publication: components["schemas"]["SourceValue"];
+            volume: components["schemas"]["SourceValue"];
+            archive_id: components["schemas"]["SourceValue"];
+            formation_place: components["schemas"]["SourceValue"];
+            purpose: components["schemas"]["SourceValue"];
+            testimony: components["schemas"]["SourceValue"];
         };
         /** ConversionPage */
         ConversionPage: {
@@ -1656,13 +1909,25 @@ export interface components {
         };
         /** EditableCardResponse */
         EditableCardResponse: {
-            card: components["schemas"]["hrs__research__models__CardDraft"];
+            /** Card */
+            card: components["schemas"]["hrs__research__models__CardDraft"] | components["schemas"]["CardOnlyCardDraft"];
             /** Version */
             version: number;
             /** Source Current */
             source_current: boolean;
             /** Superseded */
             superseded: boolean;
+            /**
+             * Card Only
+             * @default false
+             */
+            card_only: boolean;
+            /**
+             * Processing Mode
+             * @default legacy_research
+             * @enum {string}
+             */
+            processing_mode: "source_cards" | "legacy_research";
         };
         /**
          * EntityMention
@@ -2441,7 +2706,7 @@ export interface components {
             research_policy_version?: number | null;
             /**
              * Required Research Policy Version
-             * @default 5
+             * @default 6
              */
             required_research_policy_version: number;
         };
@@ -2524,7 +2789,31 @@ export interface components {
              * @default
              */
             book_title: string;
-            checks: components["schemas"]["VerificationSubmission"];
+            /** Checks */
+            checks: components["schemas"]["VerificationSubmission"] | components["schemas"]["CardOnlyVerificationSubmission"];
+            /**
+             * Card Only
+             * @default false
+             */
+            card_only: boolean;
+            /**
+             * Processing Mode
+             * @default legacy_research
+             * @enum {string}
+             */
+            processing_mode: "source_cards" | "legacy_research";
+            /**
+             * Human Notes
+             * @default
+             */
+            human_notes: string;
+            /**
+             * Notes Version
+             * @default 0
+             */
+            notes_version: number;
+            /** Notes Updated At */
+            notes_updated_at?: number | null;
             human_decision?: components["schemas"]["ResearchHumanDecision"] | null;
             /**
              * Source Current
@@ -2661,6 +2950,17 @@ export interface components {
             replaces_card_id?: string | null;
             /** Lineage Id */
             lineage_id?: string | null;
+            /**
+             * Card Only
+             * @default false
+             */
+            card_only: boolean;
+            /**
+             * Processing Mode
+             * @default legacy_research
+             * @enum {string}
+             */
+            processing_mode: "source_cards" | "legacy_research";
         };
         /** ResearchDate */
         ResearchDate: {
@@ -3013,7 +3313,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "person" | "organization" | "place" | "event";
+            kind: "person" | "organization" | "place" | "event" | "document";
             /** Name */
             name: string;
             /** Identity Basis */
@@ -3297,6 +3597,17 @@ export interface components {
             tasks: components["schemas"]["ResearchTaskResponse"][];
             /** Card Ids */
             card_ids?: string[];
+            /**
+             * Card Only
+             * @default false
+             */
+            card_only: boolean;
+            /**
+             * Processing Mode
+             * @default legacy_research
+             * @enum {string}
+             */
+            processing_mode: "source_cards" | "legacy_research";
         } & {
             [key: string]: unknown;
         };
@@ -5939,6 +6250,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditableCardResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    card_notes_api_v2_research_cards__card_id__notes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardNotesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_card_notes_api_v2_research_cards__card_id__notes_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CardNotesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardNotesResponse"];
                 };
             };
             /** @description Validation Error */

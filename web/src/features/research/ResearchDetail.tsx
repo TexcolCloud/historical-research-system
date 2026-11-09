@@ -5,14 +5,15 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Evidence from "./ResearchEvidence";
 import EvidenceOriginal from "./EvidenceOriginal";
-import QuestionPicker from "./QuestionPicker";
 import CardEditor from "./CardEditor";
+import CardNotes from "./CardNotes";
 import IdentityEditor from "./IdentityEditor";
 import CrossCardRelations from "./CrossCardRelations";
 import EventNature from "./EventNature";
 import EntityTimeline from "./EntityTimeline";
 import DerivedCardRelations from "./DerivedCardRelations";
 import { relationLabel } from "./relation-labels";
+import { entityLabels, sourceItemLabels } from "./labels";
 import { useResearchPendingNavigation } from "./pending-navigation";
 const ResearchGraph = lazy(() => import("./ResearchGraph"));
 import {
@@ -20,6 +21,7 @@ import {
   researchKeys,
   ResearchError,
   type ResearchCard,
+  isCardOnly,
 } from "./api";
 
 export const cardStateLabel = (state: string) =>
@@ -45,10 +47,7 @@ const kindLabels: Record<string, string> = {
   argument: "论证",
   issue: "问题",
   paper_use: "论文用途",
-  person: "人物",
-  event: "事件",
-  organization: "机构",
-  place: "地点",
+  ...entityLabels,
 };
 
 function SourceNotice({
@@ -169,6 +168,7 @@ function CardContent({ card }: { card: ResearchCard }) {
       </button>
     );
   }
+  const cardOnly = isCardOnly(card);
   const adopted = card.state === "human_accepted",
     excluded = card.state === "excluded",
     pending = card.state === "pending";
@@ -224,11 +224,7 @@ function CardContent({ card }: { card: ResearchCard }) {
           {historical ? "导出历史卡片" : "导出 Markdown"}
         </a>
       </header>
-      {!historical && (
-        <QuestionPicker
-          material={{ kind: "card", target_id: card.id, title: card.title }}
-        />
-      )}
+      <CardNotes key={card.id} cardId={card.id} />
       {!historical && (
         <Button
           variant="outline"
@@ -311,23 +307,27 @@ function CardContent({ card }: { card: ResearchCard }) {
             </h3>
             <p className="research-preserve">{card.summary}</p>
           </section>
-          {card.items.map((item) => (
-            <section key={item.id}>
-              <p className="research-provenance">
-                {kindLabels[item.kind] ?? item.kind}
-                {item.epistemic_state
-                  ? ` · ${certaintyLabels[item.epistemic_state] ?? item.epistemic_state}`
-                  : ""}
-              </p>
-              <h3>{item.title}</h3>
-              <p className="research-preserve">{item.text}</p>
-              {item.attribution && <p>归属：{item.attribution}</p>}
-              {refs(item.evidence_ids)}
-              {!!item.limitations?.length && (
-                <p>使用边界：{item.limitations.join("；")}</p>
-              )}
-            </section>
-          ))}
+          {card.items
+            .filter((item) => !cardOnly || item.kind !== "paper_use")
+            .map((item) => (
+              <section key={item.id}>
+                <p className="research-provenance">
+                  {(cardOnly
+                    ? sourceItemLabels[item.kind]
+                    : kindLabels[item.kind]) ?? item.kind}
+                  {item.epistemic_state
+                    ? ` · ${certaintyLabels[item.epistemic_state] ?? item.epistemic_state}`
+                    : ""}
+                </p>
+                <h3>{item.title}</h3>
+                <p className="research-preserve">{item.text}</p>
+                {item.attribution && <p>归属：{item.attribution}</p>}
+                {refs(item.evidence_ids)}
+                {!!item.limitations?.length && (
+                  <p>使用边界：{item.limitations.join("；")}</p>
+                )}
+              </section>
+            ))}
           <section className="research-boundaries">
             <h3>使用边界</h3>
             {card.limitations.length ? (
@@ -339,8 +339,10 @@ function CardContent({ card }: { card: ResearchCard }) {
             ) : (
               <p>尚未记录额外使用边界，引用前仍需核对原文与上下文。</p>
             )}
-            {card.no_argument_reason && <p>{card.no_argument_reason}</p>}
-            {!!card.alternatives.length && (
+            {!cardOnly && card.no_argument_reason && (
+              <p>{card.no_argument_reason}</p>
+            )}
+            {!cardOnly && !!card.alternatives.length && (
               <>
                 <h4>其他解释</h4>
                 <ul>
@@ -350,7 +352,7 @@ function CardContent({ card }: { card: ResearchCard }) {
                 </ul>
               </>
             )}
-            {!!card.questions.length && (
+            {!cardOnly && !!card.questions.length && (
               <>
                 <h4>待解决问题</h4>
                 <ul>
@@ -363,7 +365,7 @@ function CardContent({ card }: { card: ResearchCard }) {
           </section>
           {!!card.mentions.length && (
             <section>
-              <h3>人物与实体</h3>
+              <h3>关联实体</h3>
               {card.mentions.map((item) => (
                 <p key={item.id}>
                   {entity(item.id)}
@@ -464,7 +466,7 @@ function CardContent({ card }: { card: ResearchCard }) {
               ))}
             </details>
           )}
-          {!!card.research_plan?.length && (
+          {!cardOnly && !!card.research_plan?.length && (
             <details className="research-investigation">
               <summary>补证问题与未解事项</summary>
               {card.research_plan.map((item) => (
@@ -629,7 +631,7 @@ function ResearchEntityDetail({ entityId }: { entityId: string }) {
     staleTime: 30000,
     refetchOnWindowFocus: false,
   });
-  if (detail.isPending) return <p role="status">正在读取人物与事件…</p>;
+  if (detail.isPending) return <p role="status">正在读取实体…</p>;
   if (detail.isError)
     return (
       <p role="alert">
@@ -641,7 +643,7 @@ function ResearchEntityDetail({ entityId }: { entityId: string }) {
           </Link>
         ) : (
           <Button onClick={() => void detail.refetch()}>
-            重新读取人物与事件
+            重新读取实体
           </Button>
         )}
       </p>
@@ -728,13 +730,6 @@ function ResearchEntityDetail({ entityId }: { entityId: string }) {
       )}
       {entity.canonical_id && !historical && (
         <div className="research-decision-actions">
-          <QuestionPicker
-            material={{
-              kind: "entity",
-              target_id: entity.canonical_id,
-              title: entity.name,
-            }}
-          />
           <Button variant="outline" onClick={() => setEditingIdentity(true)}>
             核对身份与别名
           </Button>
@@ -833,7 +828,7 @@ function ResearchEntityDetail({ entityId }: { entityId: string }) {
       )}
       {!!entity.participations.length && (
         <section>
-          <h3>{entity.kind === "event" ? "参与者与角色" : "人物活动与角色"}</h3>
+          <h3>{entity.kind === "event" ? "参与者与角色" : "相关活动与角色"}</h3>
           {entity.participations.map((item) => (
             <article className="research-result" key={item.id}>
               <button
@@ -866,13 +861,6 @@ function ResearchEntityDetail({ entityId }: { entityId: string }) {
             <article className="research-relation" key={item.id}>
               <strong>{relationLabel(item.predicate, item.kind)}</strong>
               <p>{item.reason}</p>
-              <QuestionPicker
-                material={{
-                  kind: "relation",
-                  target_id: item.id,
-                  title: relationLabel(item.predicate, item.kind),
-                }}
-              />
               <div className="research-decision-actions">
                 <Button
                   variant="ghost"
@@ -1003,7 +991,7 @@ export default function ResearchDetail() {
   return (
     <aside className="research-detail-pane">
       <div className="research-detail-toolbar">
-        <span>{cardId ? "史料卡详情" : "人物与事件详情"}</span>
+        <span>{cardId ? "史料卡详情" : "实体详情"}</span>
         {readerReturn && <Link to={readerReturn}>返回阅读位置</Link>}
         <Button
           size="icon"

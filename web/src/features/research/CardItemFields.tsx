@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { References, certainty, newId, type Draft } from "./CardFields";
+import { sourceItemLabels } from "./labels";
 
 type Item = NonNullable<Draft["items"]>[number];
 const kinds = {
@@ -15,11 +16,13 @@ export default function CardItemFields({
   evidence,
   onChange,
   removeBlocked,
+  cardOnly = false,
 }: {
   value: Item[];
   evidence: Draft["evidence"];
   onChange: (value: Item[]) => void;
   removeBlocked: string[];
+  cardOnly?: boolean;
 }) {
   function patch(index: number, next: Partial<Item>) {
     onChange(
@@ -40,11 +43,13 @@ export default function CardItemFields({
                 patch(index, { kind: event.target.value as Item["kind"] })
               }
             >
-              {Object.entries(kinds).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
+              {Object.entries(cardOnly ? sourceItemLabels : kinds).map(
+                ([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ),
+              )}
             </select>
           </label>
           <label>

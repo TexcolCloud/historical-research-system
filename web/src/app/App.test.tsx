@@ -64,6 +64,8 @@ test("retired introduction redirects to books while navigation retains one strea
     </MemoryRouter>,
   );
   expect(screen.queryByRole("link", { name: "史料卡" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "研究检索" })).toBeNull();
+  expect(screen.getByRole("link", { name: "实体库" })).toBeTruthy();
   const user = userEvent.setup();
   await user.click(
     await screen.findByRole("button", { name: "导入书籍" }, { timeout: 5000 }),

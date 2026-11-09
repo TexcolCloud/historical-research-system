@@ -1,19 +1,13 @@
 import { Link, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import type { Book } from "@/client/api";
-import {
-  research,
-  researchKeys,
-  ResearchError,
-  type ResearchBook,
-} from "./api";
+import { research, researchKeys, ResearchError } from "./api";
 import ResearchDetail, { cardStateLabel } from "./ResearchDetail";
 import ResearchRunPanel from "./ResearchRun";
 
 function PublishedBookResearch({ book }: { book: Book }) {
-  const query = useQueryClient();
   const [params, setParams] = useSearchParams();
   const requestedOffset = Number(params.get("cardsOffset"));
   const offset =
@@ -25,6 +19,13 @@ function PublishedBookResearch({ book }: { book: Book }) {
     queryFn: ({ signal }) => research.book(book.id, signal),
     staleTime: 30000,
     refetchOnWindowFocus: false,
+    refetchInterval: (current) =>
+      current.state.data?.indexed &&
+      !current.state.data.runs.some(
+        (run) => run.publication_sha256 === current.state.data?.source_version,
+      )
+        ? 5000
+        : false,
   });
   const cards = useQuery({
     queryKey: [...researchKeys.cards(book.id), offset],
@@ -52,44 +53,12 @@ function PublishedBookResearch({ book }: { book: Book }) {
     latestCurrent?.state === "completed"
       ? latestCurrent
       : undefined;
-  const upgradeRun =
-    detail.data?.needs_upgrade && latestCurrent?.state === "completed"
-      ? latestCurrent
-      : undefined;
   const requestedRunId = params.get("researchRun");
   const active = requestedRunId
     ? detail.data?.runs.find((run) => run.run_id === requestedRunId)
     : outdatedRun
       ? undefined
       : latestCurrent;
-  const start = useMutation({
-    mutationFn: () =>
-      research.start(
-        book.id,
-        upgradeRun?.run_id || outdatedRun?.run_id,
-        upgradeRun ? "升级完整研究" : "研究来源更新，重新核验",
-      ),
-    onSuccess: (run) => {
-      query.setQueryData(researchKeys.run(run.run_id), run);
-      query.setQueryData<ResearchBook>(
-        researchKeys.book(book.id),
-        (old) =>
-          old && {
-            ...old,
-            runs: [
-              run,
-              ...old.runs.filter((item) => item.run_id !== run.run_id),
-            ],
-          },
-      );
-      void query.invalidateQueries({ queryKey: researchKeys.book(book.id) });
-      if (requestedRunId) {
-        const next = new URLSearchParams(params);
-        next.set("researchRun", run.run_id);
-        setParams(next);
-      }
-    },
-  });
   const selected = params.get("card");
   const hasDetail = Boolean(selected || params.get("entity"));
   function page(nextOffset: number) {
@@ -118,9 +87,9 @@ function PublishedBookResearch({ book }: { book: Book }) {
       <div className="research-book-tools">
         <Link
           className="research-source-link"
-          to={`/research?${new URLSearchParams({ book_id: book.id })}`}
+          to={`/books/${encodeURIComponent(book.id)}?tab=reader&section=search`}
         >
-          检索本书原文与史料卡
+          检索本书原文
         </Link>
         <Button
           variant="ghost"
@@ -133,18 +102,18 @@ function PublishedBookResearch({ book }: { book: Book }) {
           刷新清单
         </Button>
       </div>
-      {detail.isPending && <p role="status">正在读取研究任务…</p>}
+      {detail.isPending && <p role="status">正在读取史料卡进展…</p>}
       {detail.isError && (
         <p role="alert">
           {detail.error.message}
           <Button onClick={() => void detail.refetch()}>
-            重新读取研究任务
+            重新读取史料卡进展
           </Button>
         </p>
       )}
       {detail.data?.source_revision_pending && (
         <p className="workspace-status-note" role="note">
-          原文修订核验中，当前研究仍基于此前已发布的版本。新原文发布后需更新核验。
+          原文修订核验中，卡片继续保留此前发布版本的依据。新原文入库并完成索引后自动更新制卡任务。
         </p>
       )}
       {staleCount > 0 && (
@@ -155,7 +124,7 @@ function PublishedBookResearch({ book }: { book: Book }) {
               : `已保留 ${staleCount} 张旧版卡片`}
           </strong>
           <p>
-            旧版记录和原始证据继续保留，当前清单使用当前原文对应的研究结果。
+            旧版卡片和原始证据继续保留，新原文入库并完成索引后自动制作当前版本的卡片。
           </p>
         </div>
       )}
@@ -164,7 +133,7 @@ function PublishedBookResearch({ book }: { book: Book }) {
           key={requestedRunId || active!.run_id}
           runId={requestedRunId || active!.run_id}
           initial={active}
-          legacy={Boolean(upgradeRun && active?.run_id === upgradeRun.run_id)}
+          legacy={active?.card_only !== true}
           onOpenCard={openCard}
         />
       ) : (
@@ -172,48 +141,26 @@ function PublishedBookResearch({ book }: { book: Book }) {
           <div className="research-start">
             <div>
               <h2>
-                {outdatedRun
-                  ? "研究来源已更新，需重新核验"
-                  : staleCount > 0
-                    ? "当前原文尚无研究任务"
-                    : "本书尚未制作史料卡"}
+                {staleCount > 0 ? "史料卡待自动更新" : "史料卡待自动制作"}
               </h2>
               <p>
                 {detail.data.indexed
-                  ? "基于已入库篇章制作卡片，并逐项核对原文证据。"
-                  : "本书检索索引尚未就绪，完成入库后开放史料卡制作。"}
+                  ? "原文已入库并完成索引，系统会自动按篇章制作史料卡并独立审核，无需手动开始。"
+                  : "原文已入库，正在等待检索索引就绪；完成后自动制作史料卡，阅读和导出不受影响。"}
               </p>
             </div>
-            <Button
-              disabled={start.isPending || !detail.data.indexed}
-              onClick={() => start.mutate()}
-            >
-              {staleCount > 0 ? "更新史料卡" : "开始制作史料卡"}
-            </Button>
           </div>
         )
       )}
-      {upgradeRun && (
+      {detail.data?.needs_upgrade && (
         <div className="research-source-notice" role="note">
-          <strong>旧版基础卡 · 尚未补充完整研究信息</strong>
+          <strong>旧流程记录 · 保留原卡与审核依据</strong>
           <p>
             当前结果来自第 {detail.data?.research_policy_version ?? "旧"}{" "}
-            版研究流程，保留原卡与人工决定。升级后会补充全文覆盖、人物身份、事件性质与材料关系，并重新独立核验。
+            版流程，仍可阅读和导出。新导入资料自动采用史料卡制作流程，不改写旧任务和人工决定。
           </p>
-          <Button
-            disabled={
-              start.isPending ||
-              !detail.data?.indexed ||
-              detail.data.source_revision_pending
-            }
-            onClick={() => start.mutate()}
-          >
-            补充完整研究信息
-          </Button>
         </div>
       )}
-      {start.isPending && <p role="status">正在创建研究任务…</p>}
-      {start.isError && <p role="alert">{start.error.message}</p>}
       {active &&
         [
           "ready",
@@ -226,8 +173,8 @@ function PublishedBookResearch({ book }: { book: Book }) {
         cards.data?.items.some((card) => card.run_id !== active.run_id) && (
           <p className="workspace-status-note" role="note">
             {["ready", "running"].includes(active.state)
-              ? "新研究修订正在处理，清单保留此前完成的卡片。"
-              : "新研究修订尚未完成，清单保留此前完成的卡片。"}
+              ? "新卡片修订正在处理，清单保留此前完成的卡片。"
+              : "新卡片修订尚未完成，清单保留此前完成的卡片。"}
           </p>
         )}
       <div className="research-book-layout" data-detail={hasDetail}>
@@ -265,7 +212,7 @@ function PublishedBookResearch({ book }: { book: Book }) {
           {cards.data?.items.length === 0 && (
             <p className="research-empty">
               {staleCount > 0
-                ? "当前版本尚无卡片。完成新研究后会更新此清单。"
+                ? "当前版本尚无卡片。自动制卡完成后会更新此清单。"
                 : "尚无卡片。任务生成的结果会保存在这里。"}
             </p>
           )}
@@ -297,7 +244,10 @@ function PublishedBookResearch({ book }: { book: Book }) {
         ) : (
           <div className="research-selection-empty">
             <h2>选择史料卡</h2>
-            <p>查看原文证据、模型提要、使用边界及人物事件关系。</p>
+            <p>
+              查看摘要、原文证据、实体关系与使用边界，对照原图核验并导出
+              Markdown。
+            </p>
           </div>
         )}
       </div>
@@ -310,7 +260,7 @@ export default function BookResearch({ book }: { book: Book }) {
     return (
       <section className="workspace-empty">
         <h2>本书尚未完成入库</h2>
-        <p>完成正文核对、篇章整理和入库后，即可基于正式资料制作史料卡。</p>
+        <p>原文完成核对、篇章整理、入库和检索索引后，系统会自动制作史料卡。</p>
         <Link
           className="research-source-link"
           to={`/books/${encodeURIComponent(book.id)}?tab=reader`}

@@ -179,6 +179,8 @@ test("reading opens an exact person mention and its related card without linking
         relation_count: 0,
         cross_relation_count: 0,
         coverage_count: 0,
+        card_only: false,
+        processing_mode: "legacy_research" as const,
         source_current: true,
         needs_update: false,
         source_status: "current",

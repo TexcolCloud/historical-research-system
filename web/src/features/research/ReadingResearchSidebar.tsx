@@ -34,7 +34,7 @@ export default function ReadingResearchSidebar({
         <p role="status">正在读取研究标注…</p>
       ) : (
         <>
-          {!data.cards?.length && <p>这一篇尚无当前版本的已核验研究卡。</p>}
+          {!data.cards?.length && <p>这一篇尚无当前版本的已核验史料卡。</p>}
           {data.cards?.map((card) => (
             <article className="research-result" key={card.id}>
               <h3>
@@ -49,7 +49,7 @@ export default function ReadingResearchSidebar({
           ))}
           {!!data.annotations?.length && (
             <>
-              <h3>文中人物与事件</h3>
+              <h3>文中实体</h3>
               <div className="research-entity-chips">
                 {[
                   ...new Map(

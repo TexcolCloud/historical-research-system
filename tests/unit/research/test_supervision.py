@@ -12,6 +12,7 @@ from hrs.processing.store import Store
 from hrs.research import execution
 from hrs.research.supervision import task_limits
 from tests.unit.research.test_complete_workflow import draft, source
+from tests.unit.research.test_workflow import legacy_policy
 
 
 @pytest.mark.parametrize("frozen_fallback", [False, True])
@@ -248,7 +249,7 @@ def test_changed_rejected_proposal_is_activity_without_approval_or_repeated_payl
     clock = [execution.time.time()]
     monkeypatch.setattr(execution.time, "time", lambda: clock[0])
     workflow = ResearchWorkflow(Store(tmp_path / "native"))
-    run = workflow.enqueue(source())
+    run = workflow.enqueue(source(), _policy=legacy_policy(5))
     workflow.start_execution(run["run_id"], "rejection-execution")
     packet = workflow.claim(run["run_id"], "writer", stage="author")
     workflow.bind_native_worker(run["run_id"], "writer", "native-writer", "rejection-execution")

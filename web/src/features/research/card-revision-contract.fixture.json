@@ -1,0 +1,273 @@
+{
+  "article": {
+    "id": "primary",
+    "text": "前🀄《某文件》后\n李四另记。",
+    "parts": [
+      {
+        "start": 0,
+        "end": 9
+      },
+      {
+        "start": 9,
+        "end": 14
+      }
+    ]
+  },
+  "initial": {
+    "id": "owner",
+    "article_id": "primary",
+    "title": "资料",
+    "summary": "原文摘要",
+    "document_type": "报告",
+    "source_layer": "正文",
+    "metadata": {
+      "title_origin": "unknown",
+      "original_title": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "authors": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "recipients": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "editors": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "publication": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "volume": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "archive_id": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "formation_place": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "purpose": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      },
+      "testimony": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": "原文未记载，保留未明。"
+      }
+    },
+    "items": [],
+    "evidence": [
+      {
+        "id": "first",
+        "article_id": "primary",
+        "start": 0,
+        "end": 9,
+        "quote": "前🀄《某文件》后\n",
+        "footnote_ids": []
+      },
+      {
+        "id": "second",
+        "article_id": "primary",
+        "start": 9,
+        "end": 14,
+        "quote": "李四另记。",
+        "footnote_ids": []
+      }
+    ],
+    "mentions": [
+      {
+        "id": "li",
+        "kind": "person",
+        "name": "李四",
+        "identity_key": "primary:li",
+        "identity_basis": "原文明确提及该人。",
+        "evidence_ids": ["second"],
+        "locations": [
+          {
+            "article_id": "primary",
+            "start": 9,
+            "end": 11,
+            "quote": "李四"
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "id": "record",
+        "name": "另记事项",
+        "description": "该段记载另记事项。",
+        "identity_key": "primary:record",
+        "action": "另记",
+        "date": {
+          "text": "",
+          "normalized": null,
+          "certainty": "unknown",
+          "evidence_ids": []
+        },
+        "place": {
+          "value": "",
+          "certainty": "unknown",
+          "evidence_ids": [],
+          "note": "原文未记载，保留未明。"
+        },
+        "participant_ids": ["li"],
+        "participant_roles": [
+          {
+            "mention_id": "li",
+            "role": "记载者",
+            "description": "本篇明确记载的称呼。",
+            "evidence_ids": ["second"]
+          }
+        ],
+        "event_status": "reported",
+        "status_note": "按原文作为材料报告保留。",
+        "evidence_ids": ["second"]
+      }
+    ],
+    "relations": [
+      {
+        "id": "participates",
+        "subject_id": "li",
+        "object_id": "record",
+        "predicate": "参与记载",
+        "role": "association",
+        "reason": "依据原文保留关联。",
+        "evidence_ids": ["second"]
+      }
+    ],
+    "identity_links": [],
+    "tags": [],
+    "limitations": [],
+    "alternatives": [],
+    "questions": [],
+    "coverage": [
+      {
+        "id": "part-first",
+        "article_id": "primary",
+        "start": 0,
+        "end": 9,
+        "summary": "文献记载，保留本段覆盖摘要。",
+        "mention_ids": [],
+        "event_ids": [],
+        "relation_ids": [],
+        "no_mentions_reason": "此前未提取本段实体。",
+        "no_events_reason": "本段未提取事件。",
+        "no_relations_reason": "本段未提取关系。"
+      },
+      {
+        "id": "part-second",
+        "article_id": "primary",
+        "start": 9,
+        "end": 14,
+        "summary": "人名与另记事项，保留本段覆盖摘要。",
+        "mention_ids": ["li"],
+        "event_ids": ["record"],
+        "relation_ids": ["participates"],
+        "no_mentions_reason": "",
+        "no_events_reason": "",
+        "no_relations_reason": ""
+      }
+    ],
+    "cross_relations": [],
+    "research_plan": [],
+    "question_findings": []
+  },
+  "document": {
+    "id": "mention-12345678",
+    "kind": "document",
+    "name": "某文件",
+    "identity_key": "mention-12345678",
+    "identity_basis": "原文明确提及该文件",
+    "evidence_ids": ["first"],
+    "aliases": [],
+    "locations": [
+      {
+        "article_id": "primary",
+        "start": 3,
+        "end": 6,
+        "quote": "某文件"
+      }
+    ]
+  },
+  "new_event": {
+    "id": "event-23456789",
+    "name": "文献记载",
+    "description": "原文明确记载文献",
+    "date": {
+      "text": "",
+      "normalized": null,
+      "certainty": "unknown",
+      "evidence_ids": []
+    },
+    "participant_ids": [],
+    "evidence_ids": ["first"],
+    "identity_key": "event-23456789",
+    "action": "记载",
+    "place": {
+      "value": "",
+      "certainty": "unknown",
+      "evidence_ids": [],
+      "note": "本次尚未补充该项的可靠依据。"
+    },
+    "participant_roles": [],
+    "event_status": "unknown",
+    "status_note": "本次尚未核对该事项的发生性质。"
+  },
+  "expected_coverage": [
+    {
+      "id": "part-first",
+      "article_id": "primary",
+      "start": 0,
+      "end": 9,
+      "summary": "文献记载，保留本段覆盖摘要。",
+      "mention_ids": ["mention-12345678"],
+      "event_ids": [],
+      "relation_ids": [],
+      "no_mentions_reason": "此前未提取本段实体。",
+      "no_events_reason": "本段未提取事件。",
+      "no_relations_reason": "本段未提取关系。"
+    },
+    {
+      "id": "part-second",
+      "article_id": "primary",
+      "start": 9,
+      "end": 14,
+      "summary": "人名与另记事项，保留本段覆盖摘要。",
+      "mention_ids": ["li"],
+      "event_ids": ["record"],
+      "relation_ids": ["participates"],
+      "no_mentions_reason": "",
+      "no_events_reason": "",
+      "no_relations_reason": ""
+    }
+  ]
+}

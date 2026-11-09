@@ -5,9 +5,17 @@ from pydantic import ValidationError
 
 from hrs.processing.errors import EvidenceMismatch
 from hrs.processing.hashing import digest
-from hrs.processing.research_workflow import POLICY, ResearchWorkflow
+from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
 from tests.unit.research.test_complete_workflow import draft, read, source, submit_author, verify
+from tests.unit.research.test_workflow import legacy_policy
+
+POLICY = legacy_policy(5)
+
+
+@pytest.fixture(autouse=True)
+def frozen_v5_policy(monkeypatch):
+    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", POLICY)
 
 
 def prepared(workflow, *, incremental=True, missing_event=False, version=5):

@@ -1,6 +1,5 @@
 """Source-authorized research workspace operations behind the HTTP boundary."""
 
-from collections import defaultdict
 from copy import deepcopy
 from typing import Literal
 from uuid import UUID
@@ -11,7 +10,7 @@ from sqlalchemy import select
 from hrs.library.catalog import Library
 from hrs.library.errors import ServiceError
 from hrs.processing.hashing import digest
-from hrs.research.models import CardDraft
+from hrs.research.models import CardDraft, CardOnlyCardDraft
 from hrs.research.notebook import ResearchNotebook
 from hrs.storage import models as db
 
@@ -33,7 +32,7 @@ class IdentityDecision(Request):
 
 class CardRevision(Request):
     expected_version: int = Field(ge=1)
-    card: CardDraft
+    card: CardDraft | CardOnlyCardDraft
     reason: str = Field(default="", max_length=2000)
 
 
@@ -328,7 +327,7 @@ class ResearchWorkspace:
         cards, nodes = {}, []
         for node in result["nodes"]:
             try:
-                if node.get("kind") in {"card", "document"}:
+                if node.get("kind") == "card":
                     card_id = node.get("card_id", node["id"])
                     card = self.current_card(card_id, cards=cards)
                     node = {
@@ -652,45 +651,7 @@ class ResearchWorkspace:
         return self.question(question_id)
 
     def start_question(self, question_id, request):
-        question = self.research.invoke(self.notebook.question, question_id)
-        if question["version"] != request.expected_version:
-            raise ServiceError(409, "研究问题已变化，请重新读取后启动。")
-        all_books = not question["book_ids"]
-        books = self.available_books() if all_books else self.books(question["book_ids"])
-        if not books:
-            raise ServiceError(409, "当前工作区还没有已发布并完成索引的可用原文，请先处理资料。")
-        hits = self.research.evidence.search(
-            question["title"], book_ids=books, trusted_scope=all_books, limit=20
-        )["hits"]
-        article_ids = defaultdict(set)
-        for hit in hits:
-            article_ids[str(hit["book_id"])].add(str(hit["chapter_id"]))
-        if not article_ids:
-            raise ServiceError(409, "选定资料中尚未找到可供完整审读的文章，请调整问题或范围。")
-        scope = {
-            "kind": "question",
-            "book_ids": books,
-            "question_id": question_id,
-            "definition_version": question["definition_version"],
-            "selection": "workspace_all" if all_books else "selected_books",
-        }
-        runs = [
-            self.research.bridge.start(
-                book,
-                question_id=question_id,
-                article_ids=sorted(articles),
-                purpose="question",
-                research_scope=scope,
-            )
-            for book, articles in article_ids.items()
-        ]
-        self.research.invoke(
-            self.notebook.attach_runs,
-            question_id,
-            request.expected_version,
-            [r["run_id"] for r in runs],
-        )
-        return self.question(question_id)
+        raise ServiceError(410, "研究问题自动查证已停用；史料卡在原文索引完成后自动制作。")
 
     def available_books(self):
         """Freeze the current workspace's available corpus before the shared retrieval call."""

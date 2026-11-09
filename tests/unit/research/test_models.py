@@ -3,10 +3,18 @@
 import pytest
 from pydantic import ValidationError
 
-from hrs.processing.research_workflow import POLICY, ResearchWorkflow
+from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
 from hrs.research.models import DraftSubmission, SourceValue, submission_model
 from tests.unit.research.test_complete_workflow import draft, read, source
+from tests.unit.research.test_workflow import legacy_policy
+
+POLICY = legacy_policy(5)
+
+
+@pytest.fixture(autouse=True)
+def frozen_v5_policy(monkeypatch):
+    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", POLICY)
 
 
 def test_submission_schema_explains_unknown_values_without_relaxing_the_validator():

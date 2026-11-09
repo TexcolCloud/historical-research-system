@@ -76,11 +76,16 @@ def test_recovery_has_only_one_control_session_before_any_probe_starts(tmp_path)
     )
 
 
+@pytest.mark.parametrize("scopes", [(), ("account",), ("model",), ("account", "model")])
 def test_two_books_run_together_and_shutdown_retains_both_receipts_and_checkpoints(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, scopes
 ):
+    from tests.unit.processing.test_coordinator_recovery import recovering
+
     store = Store(tmp_path / "native")
-    configure_execution(store.root, capacity=4)
+    configure_execution(store.root, capacity=6 if scopes else 4)
+    if scopes:
+        recovering(store, scopes, now=execution.time.time())
     workflow = ResearchWorkflow(store)
     runs = [workflow.enqueue(snapshot(book)) for book in ("first-book", "second-book")]
     input_hashes = {run["run_id"]: run["input_hash"] for run in runs}
@@ -141,7 +146,8 @@ def test_two_books_run_together_and_shutdown_retains_both_receipts_and_checkpoin
     runner.start()
     try:
         assert both_started.wait(8), "second book must start while the first one remains in flight"
-        assert store.checkpoints.ledger.capacity_used() == 4
+        assert store.checkpoints.ledger.capacity_used() == (3 if "account" in scopes else 4)
+        assert store.checkpoints.ledger.model_capacity_used(SOL) == (3 if "model" in scopes else 4)
     finally:
         runner.stop()
     assert not runner.thread.is_alive()

@@ -35,19 +35,51 @@ const run = {
   counts: { articles_total: 1, articles_completed: 0, articles_pending: 0 },
   card_ids: [],
   tasks: [],
+  card_only: true,
 };
 
-test("legacy completed research offers a normal v5 revision without overwriting its source cards", async () => {
-  const old = { ...run, state: "completed", run_id: "legacy-v4" };
-  let body: unknown;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+test("indexed books wait for automatic card creation without exposing a start action or sending a mutation", async () => {
+  const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+    String(input).includes("/cards?")
+      ? Response.json({ items: [], total: 0, offset: 0, limit: 50 })
+      : Response.json({
+          book_id: "book",
+          runs: [],
+          indexed: true,
+          source_version: "a".repeat(64),
+          cards_count: 0,
+          entities_count: 0,
+        }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  render(
+    <MemoryRouter>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <BookResearch book={book} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByText("史料卡待自动制作");
+  expect(screen.queryByRole("button", { name: /开始制作/ })).toBeNull();
+  expect(
+    fetch.mock.calls.every((call) => call.length === 1 || !call[1]?.method),
+  ).toBe(true);
+});
+
+test("legacy research cards remain readable without offering a new research upgrade", async () => {
+  const old = {
+    ...run,
+    card_only: false,
+    state: "completed",
+    run_id: "legacy-v4",
+  };
+  const request = vi.fn(
+    async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
-      if (init?.method === "POST") {
-        body = JSON.parse(String(init.body));
-        return Response.json({ ...run, state: "ready" });
-      }
       if (url.includes("/cards?"))
         return Response.json({ items: [], total: 0, offset: 0, limit: 50 });
       if (url.includes("/runs/")) return Response.json(old);
@@ -60,12 +92,13 @@ test("legacy completed research offers a normal v5 revision without overwriting 
         entities_count: 0,
         needs_upgrade: true,
         research_policy_version: 4,
-        required_research_policy_version: 5,
+        required_research_policy_version: 6,
       });
-    }),
+    },
   );
+  vi.stubGlobal("fetch", request);
   render(
-    <MemoryRouter initialEntries={["/books/book?tab=research"]}>
+    <MemoryRouter>
       <QueryClientProvider
         client={
           new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -75,13 +108,9 @@ test("legacy completed research offers a normal v5 revision without overwriting 
       </QueryClientProvider>
     </MemoryRouter>,
   );
-  await userEvent.click(
-    await screen.findByRole("button", { name: "补充完整研究信息" }),
-  );
-  expect(body).toMatchObject({
-    revision_of: "legacy-v4",
-    reason: "升级完整研究",
-  });
+  await screen.findByText("旧流程记录 · 保留原卡与审核依据");
+  expect(screen.queryByRole("button", { name: "补充完整研究信息" })).toBeNull();
+  expect(request.mock.calls.every((call) => !call[1]?.method)).toBe(true);
 });
 
 test("a new research revision has its own progress while prior completed cards remain readable", async () => {
@@ -132,9 +161,9 @@ test("a new research revision has its own progress while prior completed cards r
       </QueryClientProvider>
     </MemoryRouter>,
   );
-  await screen.findByText("新研究修订正在处理，清单保留此前完成的卡片。");
+  await screen.findByText("新卡片修订正在处理，清单保留此前完成的卡片。");
   expect(screen.getByText("此前完成的卡片")).toBeTruthy();
-  expect(screen.getByText("研究任务正在处理")).toBeTruthy();
+  expect(screen.getByText("史料卡正在制作")).toBeTruthy();
   expect(requests.some((url) => url.endsWith("/runs/old-run"))).toBe(false);
 });
 
@@ -171,33 +200,19 @@ test("new source publication reports historical cards pending update instead of 
     </MemoryRouter>,
   );
   await screen.findByText("3 张历史卡片待更新");
-  expect(screen.getByText("当前原文尚无研究任务")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "更新史料卡" })).toBeTruthy();
+  expect(screen.getByText("史料卡待自动更新")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "更新史料卡" })).toBeNull();
   expect(screen.queryByText("研究任务已完成")).toBeNull();
 });
 
-test("changed external evidence starts a reviewed revision instead of reusing a completed run with the same source publication", async () => {
-  let body: unknown;
-  let started = false;
-  const nextRun = { ...run, run_id: "renewed-run" };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (init?.method === "POST") {
-        body = JSON.parse(String(init.body));
-        started = true;
-        return Response.json(nextRun);
-      }
-      if (url.includes("/runs/"))
-        return Response.json(
-          started ? nextRun : { ...run, state: "completed" },
-        );
-      if (url.includes("/cards?"))
+test("outdated evidence waits for an automatic revision without creating one from the page", async () => {
+  const request = vi.fn(
+    async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(input).includes("/cards?"))
         return Response.json({ items: [], total: 0, offset: 0, limit: 50 });
       return Response.json({
         book_id: "book",
-        runs: [started ? nextRun : { ...run, state: "completed" }],
+        runs: [{ ...run, state: "completed" }],
         indexed: true,
         source_version: run.publication_sha256,
         cards_count: 0,
@@ -206,10 +221,11 @@ test("changed external evidence starts a reviewed revision instead of reusing a 
         needs_update: true,
         source_revision_pending: false,
       });
-    }),
+    },
   );
+  vi.stubGlobal("fetch", request);
   render(
-    <MemoryRouter initialEntries={["/books/book?tab=research"]}>
+    <MemoryRouter>
       <QueryClientProvider
         client={
           new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -219,14 +235,9 @@ test("changed external evidence starts a reviewed revision instead of reusing a 
       </QueryClientProvider>
     </MemoryRouter>,
   );
-  await userEvent.click(
-    await screen.findByRole("button", { name: "更新史料卡" }),
-  );
-  expect(body).toEqual({
-    revision_of: "new-run",
-    reason: "研究来源更新，重新核验",
-  });
-  await screen.findByText("研究任务正在处理");
+  await screen.findByText("史料卡待自动更新");
+  expect(screen.queryByRole("button", { name: "更新史料卡" })).toBeNull();
+  expect(request.mock.calls.every((call) => !call[1]?.method)).toBe(true);
 });
 
 test("excluding the last card on a later page returns to a valid page of remaining cards", async () => {

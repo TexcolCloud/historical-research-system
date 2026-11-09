@@ -7,6 +7,8 @@ from fastapi.responses import Response
 
 from hrs.api.deps import ResearchDep
 from hrs.research.api import (
+    CardNotesResponse,
+    CardNotesUpdate,
     EditableCardResponse,
     ResearchBookResponse,
     ResearchCardPage,
@@ -29,6 +31,12 @@ from hrs.research.workspace import (
 )
 
 router = APIRouter(prefix="/api/v2/research", tags=["research"])
+
+
+def _retired_research_write():
+    from hrs.library.errors import ServiceError
+
+    raise ServiceError(410, "研究问题工作台已停用；历史记录仍可查看，史料卡会自动制作。")
 
 
 @router.get("/books/{book_id}", response_model=ResearchBookResponse)
@@ -131,7 +139,19 @@ def card_draft(service: ResearchDep, card_id: str):
         "version": card["version"],
         "source_current": card["source_current"],
         "superseded": card["superseded"],
+        "card_only": card["card_only"],
+        "processing_mode": card["processing_mode"],
     }
+
+
+@router.get("/cards/{card_id}/notes", response_model=CardNotesResponse)
+def card_notes(service: ResearchDep, card_id: str):
+    return service.card_notes(card_id)
+
+
+@router.patch("/cards/{card_id}/notes", response_model=CardNotesResponse)
+def update_card_notes(service: ResearchDep, card_id: str, body: CardNotesUpdate):
+    return service.update_card_notes(card_id, body)
 
 
 @router.post("/cards/{card_id}/revisions", response_model=ResearchRunResponse)
@@ -193,7 +213,7 @@ def questions(
 
 @router.post("/questions")
 def create_question(service: ResearchDep, body: QuestionCreate):
-    return service.workspace.create_question(body)
+    _retired_research_write()
 
 
 @router.get("/questions/{question_id}")
@@ -203,24 +223,24 @@ def question(service: ResearchDep, question_id: str):
 
 @router.patch("/questions/{question_id}")
 def update_question(service: ResearchDep, question_id: str, body: QuestionUpdate):
-    return service.workspace.update_question(question_id, body)
+    _retired_research_write()
 
 
 @router.post("/questions/{question_id}/evidence")
 def select_evidence(service: ResearchDep, question_id: str, body: QuestionEvidence):
-    return service.workspace.select_evidence(question_id, body)
+    _retired_research_write()
 
 
 @router.patch("/questions/{question_id}/evidence/{selection_id}")
 def update_selection(
     service: ResearchDep, question_id: str, selection_id: str, body: SelectionUpdate
 ):
-    return service.workspace.update_selection(question_id, selection_id, body)
+    _retired_research_write()
 
 
 @router.post("/questions/{question_id}/research")
 def research_question(service: ResearchDep, question_id: str, body: Version):
-    return service.workspace.start_question(question_id, body)
+    _retired_research_write()
 
 
 @router.post("/cards/{card_id}/decision", response_model=ResearchCardResponse)

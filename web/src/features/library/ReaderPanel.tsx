@@ -78,7 +78,9 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
     returnTo.slice(returnTo.indexOf("?") + 1),
   );
   const returnLabel = returnTo.startsWith("/research")
-    ? "返回研究检索"
+    ? returnParams.get("view") === "questions"
+      ? "返回历史记录"
+      : "返回卡片与实体"
     : returnParams.get("tab") === "research"
       ? "返回史料卡"
       : returnParams.get("section") === "search" ||

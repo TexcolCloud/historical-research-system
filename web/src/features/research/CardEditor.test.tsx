@@ -4,11 +4,311 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import type { Draft } from "./CardFields";
 import CardEditor from "./CardEditor";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
+
+test("adding a document entity records an explicitly chosen Unicode source location before revision submission", async () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      resolve(
+        process.cwd(),
+        "src/features/research/card-revision-contract.fixture.json",
+      ),
+      "utf8",
+    ),
+  ) as {
+    initial: Draft;
+    document: NonNullable<Draft["mentions"]>[number];
+    expected_coverage: NonNullable<Draft["coverage"]>;
+  };
+  const draft = fixture.initial;
+  vi.spyOn(crypto, "randomUUID").mockReturnValue(
+    "12345678-0000-0000-0000-000000000000",
+  );
+  let submitted: unknown;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/revisions")) {
+        submitted = JSON.parse(String(init?.body));
+        return Response.json({
+          run_id: "revision",
+          state: "ready",
+          card_only: true,
+        });
+      }
+      if (url.endsWith("/draft"))
+        return Response.json({
+          card: draft,
+          version: 1,
+          source_current: true,
+          superseded: false,
+          card_only: true,
+          processing_mode: "source_cards",
+        });
+      return Response.json({
+        ...draft,
+        book_id: "book",
+        version: 1,
+        source_current: true,
+        superseded: false,
+        card_only: true,
+      });
+    }),
+  );
+  render(
+    <MemoryRouter>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <CardEditor cardId="owner" onClose={() => {}} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByRole("textbox", { name: "修订内容提要" });
+  await userEvent.click(screen.getByText("实体记载"));
+  await userEvent.click(screen.getByRole("button", { name: "添加实体记载" }));
+  const group = within(screen.getByRole("group", { name: "实体 2" }));
+  await userEvent.type(group.getByRole("textbox", { name: "名称" }), "某文件");
+  await userEvent.selectOptions(
+    group.getByRole("combobox", { name: "类型" }),
+    "document",
+  );
+  await userEvent.type(
+    group.getByRole("textbox", { name: "身份依据" }),
+    "原文明确提及该文件",
+  );
+  await userEvent.click(screen.getByRole("button", { name: "提交修订核验" }));
+  await screen.findByText("请从本卡原文为新增实体选取称呼位置。");
+  expect(submitted).toBeUndefined();
+  await userEvent.click(group.getByRole("button", { name: "查找精确位置" }));
+  await userEvent.click(
+    group.getByRole("button", { name: "使用位置 3–6：某文件" }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "提交修订核验" }));
+  await screen.findByText("修订已提交独立核验，原有卡片和人工决定继续保留。");
+  // The same complete two-part fixture is checked by Python's v6 model and validator.
+  expect(submitted).toEqual({
+    expected_version: 1,
+    card: {
+      ...draft,
+      mentions: [...(draft.mentions ?? []), fixture.document],
+      coverage: fixture.expected_coverage,
+    },
+  });
+  expect(screen.queryByRole("option", { name: "论文用途" })).toBeNull();
+});
+
+test.each([false, true])(
+  "new event revisions use primary coverage and retain the draft when only external evidence is chosen: external=%s",
+  async (external) => {
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve(
+          process.cwd(),
+          "src/features/research/card-revision-contract.fixture.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      initial: Draft;
+      new_event: NonNullable<Draft["events"]>[number];
+    };
+    const initial = fixture.initial;
+    if (external)
+      initial.evidence.push({
+        ...initial.evidence[0],
+        id: "external",
+        article_id: "frozen-notes-alias",
+      });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      "23456789-0000-0000-0000-000000000000",
+    );
+    let submitted: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/revisions")) {
+          submitted = JSON.parse(String(init?.body));
+          return Response.json({
+            run_id: "revision",
+            state: "ready",
+            card_only: true,
+          });
+        }
+        if (String(input).endsWith("/draft"))
+          return Response.json({
+            card: initial,
+            version: 1,
+            source_current: true,
+            superseded: false,
+            card_only: true,
+          });
+        return Response.json({
+          ...initial,
+          book_id: "book",
+          version: 1,
+          source_current: true,
+          card_only: true,
+        });
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <CardEditor cardId="owner" onClose={() => {}} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("textbox", { name: "修订内容提要" });
+    await userEvent.click(screen.getByText("事件及参与者角色"));
+    await userEvent.click(screen.getByRole("button", { name: "添加事件" }));
+    const group = within(screen.getByRole("group", { name: "事件 2" }));
+    await userEvent.type(
+      group.getByRole("textbox", { name: "事件名称" }),
+      fixture.new_event.name,
+    );
+    await userEvent.type(
+      group.getByRole("textbox", { name: "具体行为" }),
+      fixture.new_event.action!,
+    );
+    await userEvent.type(
+      group.getByRole("textbox", { name: "事件描述" }),
+      fixture.new_event.description,
+    );
+    await userEvent.click(
+      within(group.getByRole("group", { name: "事件依据" })).getAllByRole(
+        "checkbox",
+      )[external ? 2 : 0],
+    );
+    await userEvent.click(screen.getByRole("button", { name: "提交修订核验" }));
+    if (external) {
+      await screen.findByText(/无法对应本篇原文位置：事件：文献记载/);
+      expect(submitted).toBeUndefined();
+      expect(
+        (group.getByRole("textbox", { name: "事件名称" }) as HTMLInputElement)
+          .value,
+      ).toBe(fixture.new_event.name);
+      expect(
+        (
+          within(group.getByRole("group", { name: "事件依据" })).getAllByRole(
+            "checkbox",
+          )[2] as HTMLInputElement
+        ).checked,
+      ).toBe(true);
+      return;
+    }
+    await screen.findByText("修订已提交独立核验，原有卡片和人工决定继续保留。");
+    expect(submitted).toEqual({
+      expected_version: 1,
+      card: {
+        ...initial,
+        events: [...(initial.events ?? []), fixture.new_event],
+        coverage: initial.coverage?.map((unit, index) =>
+          index ? unit : { ...unit, event_ids: [fixture.new_event.id] },
+        ),
+      },
+    });
+  },
+);
+
+test.each([false, true])(
+  "removing objects submits full v6 coverage without imposing legacy per-field unknown notes: emptyNotes=%s",
+  async (emptyNotes) => {
+    const initial = JSON.parse(
+      readFileSync(
+        resolve(
+          process.cwd(),
+          "src/features/research/card-revision-contract.fixture.json",
+        ),
+        "utf8",
+      ),
+    ).initial as Draft;
+    if (emptyNotes)
+      for (const value of Object.values(initial.metadata!)) {
+        if (typeof value === "object" && value.certainty === "unknown")
+          value.note = "";
+      }
+    let submitted: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/revisions")) {
+          submitted = JSON.parse(String(init?.body));
+          return Response.json({
+            run_id: "revision",
+            state: "ready",
+            card_only: true,
+          });
+        }
+        if (String(input).endsWith("/draft"))
+          return Response.json({
+            card: initial,
+            version: 1,
+            source_current: true,
+            superseded: false,
+            card_only: true,
+          });
+        return Response.json({
+          ...initial,
+          book_id: "book",
+          version: 1,
+          source_current: true,
+          card_only: true,
+        });
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <CardEditor cardId="owner" onClose={() => {}} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("textbox", { name: "修订内容提要" });
+    await userEvent.click(screen.getByText("本卡关系与依据"));
+    await userEvent.click(screen.getByRole("button", { name: "移除本卡关系" }));
+    await userEvent.click(screen.getByText("事件及参与者角色"));
+    await userEvent.click(screen.getByRole("button", { name: "移除事件 1" }));
+    await userEvent.click(screen.getByText("实体记载"));
+    await userEvent.click(screen.getByRole("button", { name: "移除实体 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "提交修订核验" }));
+    await screen.findByText("修订已提交独立核验，原有卡片和人工决定继续保留。");
+    expect(submitted).toEqual({
+      expected_version: 1,
+      card: {
+        ...initial,
+        mentions: [],
+        events: [],
+        relations: [],
+        coverage: initial.coverage?.map((unit) => ({
+          ...unit,
+          mention_ids: [],
+          event_ids: [],
+          relation_ids: [],
+        })),
+      },
+    });
+  },
+);
 
 test.each([
   { id: "target-own-local", quote: "对方保留原文" },

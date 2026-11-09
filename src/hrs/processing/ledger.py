@@ -11,6 +11,8 @@ import time
 from contextlib import closing, contextmanager
 from pathlib import Path
 
+import psutil
+
 from hrs.processing.workflow_rules import metadata_work_remaining
 
 
@@ -345,6 +347,22 @@ class Ledger:
             )
 
     @staticmethod
+    def coordinator_alive(admission):
+        """New dispatcher receipts bind a process identity; old ones retain their lease expiry."""
+        if "pid" not in admission and "process_create_time" not in admission:
+            return True
+        try:
+            if type(admission.get("pid")) is not int or admission["pid"] <= 0:
+                return False
+            process = psutil.Process(admission["pid"])
+            return (
+                abs(process.create_time() - admission["process_create_time"]) <= 0.01
+                and process.status() != psutil.STATUS_ZOMBIE
+            )
+        except (psutil.Error, KeyError, TypeError, ValueError):
+            return False
+
+    @staticmethod
     def _research_capacity(connection, *, now, model=None):
         """New research leases share native admission without changing old ledger schemas."""
         tables = {
@@ -377,13 +395,15 @@ class Ledger:
                 + (" AND json_extract(payload,'$.model')=?" if model else ""),
                 (now, model) if model else (now,),
             )
-            count += sum(
-                all(
-                    states.get(scope, {}).get("state", "normal") == "normal"
-                    for scope in ("account", "model:" + admission["model"])
+            for admission in (json.loads(row[0]) for row in coordinators):
+                scope = "model:" + admission["model"] if model else "account"
+                free = (
+                    admission.get("control_only") is True
+                    and scope
+                    in admission.get("control_scopes", ("account", "model:" + admission["model"]))
+                    and states.get(scope, {}).get("state", "normal") != "normal"
                 )
-                for admission in (json.loads(row[0]) for row in coordinators)
-            )
+                count += Ledger.coordinator_alive(admission) and not free
         return count
 
     def model_capacity_used(self, model, excluding_session=None, *, now=None):

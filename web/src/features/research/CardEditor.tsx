@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { components } from "@/client/schema";
-import { research, researchKeys } from "./api";
+import { research, researchKeys, isCardOnly } from "./api";
 import {
   DateEditor,
   SourceEditor,
@@ -17,6 +17,7 @@ import { MentionFields, EventFields, RelationFields } from "./CardEntityFields";
 import CardItemFields from "./CardItemFields";
 import EvidenceOriginal from "./EvidenceOriginal";
 import { useResearchPendingNavigation } from "./pending-navigation";
+import { synchronizeCardCoverage } from "./card-coverage";
 
 type S = components["schemas"];
 type Metadata = S["DocumentMetadata"];
@@ -61,11 +62,13 @@ function DraftForm({
   version,
   cardId,
   onClose,
+  cardOnly,
 }: {
   initial: Draft;
   version: number;
   cardId: string;
   onClose: () => void;
+  cardOnly: boolean;
 }) {
   const [draft, setDraft] = useState(() => structuredClone(initial));
   const [baseVersion, setBaseVersion] = useState(version);
@@ -78,7 +81,8 @@ function DraftForm({
     staleTime: 30000,
   });
   const save = useMutation({
-    mutationFn: () => research.reviseCard(cardId, baseVersion, draft),
+    mutationFn: (submitted: Draft) =>
+      research.reviseCard(cardId, baseVersion, submitted),
     onSuccess: (run) => {
       query.setQueryData(researchKeys.run(run.run_id), run);
       void query.invalidateQueries({ queryKey: ["research"] });
@@ -97,10 +101,14 @@ function DraftForm({
     (latest.data && !sameSourceCard) ||
     card.data?.source_current === false ||
     card.data?.superseded === true;
+  const sourceCards = cardOnly || isCardOnly(card.data);
   function change<K extends keyof Draft>(field: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
   }
-  const mentions = draft.mentions ?? [],
+  const mentions = (draft.mentions ?? []).map((item) => ({
+      ...item,
+      locations: item.locations ?? [],
+    })),
     events = draft.events ?? [],
     items = draft.items ?? [],
     relations = draft.relations ?? [],
@@ -115,20 +123,47 @@ function DraftForm({
             ([key, label]) => {
               const value =
                 draft.metadata?.[key as keyof typeof metadataLabels];
-              return value?.certainty === "unknown" && !value.note.trim()
+              return !sourceCards &&
+                value?.certainty === "unknown" &&
+                !value.note.trim()
                 ? [label]
                 : [];
             },
           );
-          if (missing.length) {
-            setValidation(`请说明以下未明字段的原因：${missing.join("、")}`);
+          const missingLocations =
+            sourceCards &&
+            (draft.mentions ?? []).some((item) => !item.locations?.length);
+          if (missing.length || missingLocations) {
+            setValidation(
+              missing.length
+                ? `请说明以下未明字段的原因：${missing.join("、")}`
+                : "请从本卡原文为新增实体选取称呼位置。",
+            );
+            event.currentTarget
+              .querySelectorAll("details")
+              .forEach((item) => (item.open = true));
+            return;
+          }
+          const prepared = sourceCards
+            ? synchronizeCardCoverage(draft, initial)
+            : { card: draft, missing: [] };
+          if (
+            sourceCards &&
+            (!draft.coverage?.length || prepared.missing.length)
+          ) {
+            setValidation(
+              prepared.missing.length
+                ? `无法对应本篇原文位置：${prepared.missing.join("、")}。请补充本篇原文引用或重新选取称呼位置。`
+                : "全文覆盖位置不可用，请重新读取当前卡片后修订。",
+            );
             event.currentTarget
               .querySelectorAll("details")
               .forEach((item) => (item.open = true));
             return;
           }
           setValidation("");
-          save.mutate();
+          setDraft(prepared.card);
+          save.mutate(prepared.card);
         }}
       >
         <header>
@@ -244,6 +279,7 @@ function DraftForm({
           <CardItemFields
             value={items}
             evidence={evidence}
+            cardOnly={sourceCards}
             onChange={(value) => change("items", value)}
             removeBlocked={relations.flatMap((relation) => [
               relation.subject_id,
@@ -258,6 +294,8 @@ function DraftForm({
           <MentionFields
             value={mentions}
             evidence={evidence}
+            cardOnly={sourceCards}
+            articleId={draft.article_id}
             onChange={(value) => change("mentions", value)}
             removeBlocked={[
               ...events.flatMap((event) => event.participant_ids ?? []),
@@ -305,8 +343,12 @@ function DraftForm({
             retainedRelations={card.data?.cross_relations}
             onChange={(value) => change("cross_relations", value)}
           />
-          {(["tags", "limitations", "alternatives", "questions"] as const).map(
-            (field) => (
+          {(["tags", "limitations", "alternatives", "questions"] as const)
+            .filter(
+              (field) =>
+                !sourceCards || !["alternatives", "questions"].includes(field),
+            )
+            .map((field) => (
               <label key={field}>
                 {
                   {
@@ -323,10 +365,12 @@ function DraftForm({
                   onChange={(event) => change(field, lines(event.target.value))}
                 />
               </label>
-            ),
-          )}
+            ))}
           <p className="research-provenance">
-            全文覆盖、检索计划和模型查证记录会随新修订再次独立核验。人物身份的跨卡合并与拆分请在人物详情中处理。
+            {sourceCards
+              ? "修订将保留完整引文和原件依据，并重新独立审核。"
+              : "全文覆盖、检索计划和模型查证记录会随新修订再次独立核验。"}
+            实体身份的合并与拆分请在实体详情中处理。
           </p>
           {validation && <p role="alert">{validation}</p>}
           <Button type="submit" disabled={Boolean(sourceUnavailable)}>
@@ -431,6 +475,7 @@ export default function CardEditor({
     return (
       <DraftForm
         initial={started.card}
+        cardOnly={isCardOnly(started)}
         version={started.version}
         cardId={cardId}
         onClose={onClose}
@@ -457,6 +502,7 @@ export default function CardEditor({
   return (
     <DraftForm
       initial={draft.data.card}
+      cardOnly={isCardOnly(draft.data)}
       version={draft.data.version}
       cardId={cardId}
       onClose={onClose}

@@ -9,7 +9,7 @@ from hrs.codex.research_tools import register_research_tools, status_summary
 from hrs.processing.errors import LeaseConflict
 from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
-from tests.unit.research.test_workflow import read_all, snapshot, submit_draft
+from tests.unit.research.test_workflow import legacy_policy, read_all, snapshot, submit_draft
 
 
 class Server:
@@ -67,24 +67,23 @@ def test_dispatch_contract_waits_for_leased_generation_and_stays_alive_between_s
     )
     continuation = status_summary(workflow.status(run))
     assert continuation["counts"]["completed"] == 1
-    assert continuation["ready_by_stage"]["enrich"] == 1
+    assert continuation["ready_by_stage"]["verify"] == 1
     assert continuation["dispatch_action"] == "dispatch"
     workflow.pause(run)
     assert status_summary(workflow.status(run))["dispatch_action"] == "stop"
     workflow.resume(run)
     assert status_summary(workflow.status(run))["dispatch_action"] == "dispatch"
-    workflow.claim(run, "enricher", stage="enrich")
+    workflow.claim(run, "verifier", stage="verify")
     assert status_summary(workflow.status(run))["dispatch_action"] == "wait"
 
 
 def test_live_lease_precedes_external_fetch_and_search_audit_is_server_owned(tmp_path, monkeypatch):
-    from hrs.processing.research_workflow import POLICY
 
     store = Store(tmp_path / "native")
     workflow = ResearchWorkflow(store)
     # Preserve the original v4 lease/transport contract; v5 extraction coverage
     # and independent inventory are exercised in the complete-workflow suite.
-    run = workflow.enqueue(snapshot(), _policy={**POLICY, "version": 4, "complete_research": False})
+    run = workflow.enqueue(snapshot(), _policy=legacy_policy(4))
     submit_draft(workflow, run["run_id"], "author", "author")
     packet = workflow.claim(run["run_id"], "enricher", stage="enrich")
     calls = []

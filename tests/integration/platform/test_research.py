@@ -18,9 +18,11 @@ from hrs.library.native_workspace import WrongWorkspace
 from hrs.library.projection.facts import PROJECTION_POLICY
 from hrs.library.projection.publication import NativePublication
 from hrs.library.records import text_digest
+from hrs.processing.research_workflow import POLICY as CURRENT_CARD_POLICY
 from hrs.processing.workspace import identity
 from hrs.research.api import Research, ResearchDecision
 from hrs.research.bridge import ResearchBridge
+from hrs.research.workspace import QuestionCreate, QuestionEvidence, QuestionUpdate
 from hrs.storage import models as db
 
 
@@ -34,6 +36,13 @@ def research_book(platform, monkeypatch):
     # never native v5 coverage or content-accuracy acceptance.
     retained_policy = deepcopy(research_workflow.POLICY)
     retained_policy["version"] = 4
+    retained_policy["card_only"] = False
+    retained_policy["enrichment_search_required"] = True
+    retained_policy["models"] = dict.fromkeys(research_workflow.STAGES, research_workflow.SOL)
+    retained_policy["stages"] = {
+        stage: {"model": research_workflow.SOL, "reasoning_effort": "high"}
+        for stage in research_workflow.STAGES
+    }
     retained_policy.pop("complete_research", None)
     monkeypatch.setattr(research_workflow, "POLICY", retained_policy)
     settings, engine = platform
@@ -129,6 +138,22 @@ def research_book(platform, monkeypatch):
     return settings, engine, bridge, book_id, run_id, chapter_id, text
 
 
+def retained_research_run(bridge, book_id, *, purpose, scope, questions=(), targets=()):
+    """Seed a previously frozen legacy run without reopening retired public entry points."""
+    from hrs.research.sources import publication_snapshot
+
+    snapshot = publication_snapshot(
+        bridge.settings, bridge.engine, bridge.store, bridge.objects, bridge.source_run(book_id)
+    )
+    snapshot.update(
+        research_scope=scope,
+        research_questions=list(questions),
+        research_questions_omitted=0,
+        link_target_cards=list(targets),
+    )
+    return bridge.workflow.enqueue(snapshot, purpose=purpose)
+
+
 def test_indexed_reconciliation_is_durable_idempotent_and_freezes_full_article(research_book):
     _, engine, bridge, book_id, source_run, chapter_id, text = research_book
     bridge.tick()
@@ -206,34 +231,35 @@ def test_research_multi_book_scope_is_one_authorized_union(research_book):
     assert evidence.article_scope(book_ids=[str(uuid4())]) == set()
 
 
-def test_question_http_preserves_selected_card_evidence_and_requires_cas(research_book):
+def test_retained_question_http_preserves_evidence_and_rejects_new_writes(research_book):
     settings, engine, bridge, book_id, _, _, _ = research_book
     _, card = finish_contract_run(bridge, bridge.start(book_id), "Selected source card")
     service = Research(settings, engine)
     service.bridge, service.workflow = bridge, bridge.workflow
+    question = service.workspace.create_question(
+        QuestionCreate(title="What does this source support?", book_ids=[book_id])
+    )
+    assert question["selections"] == question["findings"] == question["runs"] == []
+    chosen = service.workspace.select_evidence(
+        question["id"],
+        QuestionEvidence(
+            expected_version=question["version"],
+            kind="card",
+            target_id=card["id"],
+            decision="adopted",
+        ),
+    )
     app = create_app(settings, engine)
     app.state.research = service
     with TestClient(app) as client:
-        created = client.post(
+        retired = client.post(
             "/api/v2/research/questions",
             json={"title": "What does this source support?", "book_ids": [book_id]},
         )
-        assert created.status_code == 200
-        question = created.json()
-        assert (
-            question["selections"] == [] and question["findings"] == [] and question["runs"] == []
-        )
-        chosen = client.post(
-            f"/api/v2/research/questions/{question['id']}/evidence",
-            json={
-                "expected_version": question["version"],
-                "kind": "card",
-                "target_id": card["id"],
-                "decision": "adopted",
-            },
-        )
-        assert chosen.status_code == 200
-        selected = chosen.json()["selections"][0]
+        assert retired.status_code == 410
+        selected = client.get(f"/api/v2/research/questions/{question['id']}").json()["selections"][
+            0
+        ]
         assert selected["evidence"][0]["quote"] == "人物甲"
         assert selected["evidence"][0]["text_sha256"]
         summary = client.get("/api/v2/research/questions").json()["items"][0]
@@ -251,8 +277,26 @@ def test_question_http_preserves_selected_card_evidence_and_requires_cas(researc
                     "notes": "stale write",
                 },
             ).status_code
-            == 409
+            == 410
         )
+        for method, path, body in (
+            ("post", "/evidence", {"kind": "card", "target_id": card["id"]}),
+            ("patch", f"/evidence/{selected['id']}", {"decision": "excluded"}),
+            ("post", "/research", {}),
+        ):
+            response = client.request(
+                method,
+                f"/api/v2/research/questions/{question['id']}{path}",
+                json={"expected_version": chosen["version"], **body},
+            )
+            assert response.status_code == 410
+        assert client.get(f"/api/v2/research/questions/{question['id']}").json() == chosen
+    with pytest.raises(ServiceError) as conflict:
+        service.workspace.update_question(
+            question["id"],
+            QuestionUpdate(expected_version=question["version"], notes="stale write"),
+        )
+    assert conflict.value.status_code == 409
 
 
 def test_complete_card_selection_keeps_all_evidence_and_marks_only_changed_derived_record(
@@ -275,42 +319,38 @@ def test_complete_card_selection_keeps_all_evidence_and_marks_only_changed_deriv
     )
     service = Research(settings, engine)
     service.bridge, service.workflow = bridge, bridge.workflow
+    question = service.workspace.create_question(
+        QuestionCreate(title="Complete reviewed source", book_ids=[book_id])
+    )
+    saved = service.workspace.select_evidence(
+        question["id"],
+        QuestionEvidence(
+            expected_version=question["version"],
+            kind="card",
+            target_id=card["id"],
+            decision="adopted",
+        ),
+    )
+    assert len(saved["selections"][0]["evidence"]) == 133
+    assert saved["selections"][0]["record_ref"]["version"] == card["version"]
+    explicit = service.workspace.select_evidence(
+        question["id"],
+        QuestionEvidence(
+            expected_version=saved["version"],
+            kind="card",
+            target_id=card["id"],
+            evidence_ids=[f"e{index}" for index in range(100)],
+        ),
+    )
+    assert sorted(len(item["evidence"]) for item in explicit["selections"]) == [100, 133]
     app = create_app(settings, engine)
     app.state.research = service
     with TestClient(app) as client:
-        question = client.post(
-            "/api/v2/research/questions",
-            json={"title": "Complete reviewed source", "book_ids": [book_id]},
-        ).json()
-        selected = client.post(
-            f"/api/v2/research/questions/{question['id']}/evidence",
-            json={
-                "expected_version": question["version"],
-                "kind": "card",
-                "target_id": card["id"],
-                "decision": "adopted",
-            },
-        )
-        assert selected.status_code == 200, selected.text
-        saved = selected.json()
-        assert len(saved["selections"][0]["evidence"]) == 133
-        assert saved["selections"][0]["record_ref"]["version"] == card["version"]
-        explicit = client.post(
-            f"/api/v2/research/questions/{question['id']}/evidence",
-            json={
-                "expected_version": saved["version"],
-                "kind": "card",
-                "target_id": card["id"],
-                "evidence_ids": [f"e{index}" for index in range(100)],
-            },
-        )
-        assert explicit.status_code == 200, explicit.text
-        assert sorted(len(item["evidence"]) for item in explicit.json()["selections"]) == [100, 133]
         assert (
             client.post(
                 f"/api/v2/research/questions/{question['id']}/evidence",
                 json={
-                    "expected_version": explicit.json()["version"],
+                    "expected_version": explicit["version"],
                     "kind": "card",
                     "target_id": card["id"],
                     "evidence_ids": [f"e{index}" for index in range(101)],
@@ -469,7 +509,7 @@ def test_graph_drops_stale_owner_edges_after_entities_merge_into_current_books(r
         )
 
 
-def test_all_library_question_freezes_authorized_books_before_joint_retrieval(
+def test_retired_question_start_preserves_legacy_authorized_scope_without_retrieval(
     research_book, monkeypatch
 ):
     settings, engine, bridge, book_id, source_run, chapter_id, _ = research_book
@@ -497,32 +537,48 @@ def test_all_library_question_freezes_authorized_books_before_joint_retrieval(
 
     def retrieve(query, **options):
         calls.append(options)
-        assert options["book_ids"] == [book_id] and options["trusted_scope"]
-        return {"hits": [{"book_id": book_id, "chapter_id": chapter_id}]}
+        raise AssertionError("Retired question starts must not invoke retrieval")
 
     monkeypatch.setattr(service.evidence, "search", retrieve)
+    assert service.workspace.available_books() == [book_id]
+    created = service.workspace.create_question(QuestionCreate(title="All current sources"))
+    scope = {
+        "kind": "question",
+        "book_ids": [book_id],
+        "question_id": created["id"],
+        "definition_version": created["definition_version"],
+        "selection": "workspace_all",
+    }
+    frozen_question = service.workspace.notebook.research_context(question_id=created["id"])[
+        "questions"
+    ][0]
+    legacy = retained_research_run(
+        bridge, book_id, purpose="question", scope=scope, questions=[frozen_question]
+    )
+    bridge.projection.sync(legacy)
+    service.workspace.notebook.attach_runs(created["id"], created["version"], [legacy["run_id"]])
+    bridge.tick()
     app = create_app(settings, engine)
     app.state.research = service
     with TestClient(app) as client:
-        created = client.post(
-            "/api/v2/research/questions", json={"title": "All current sources", "book_ids": []}
-        ).json()
         response = client.post(
             f"/api/v2/research/questions/{created['id']}/research",
             json={"expected_version": created["version"]},
         )
-        assert response.status_code == 200, response.text
-        assert response.json()["book_ids"] == []
-        assert response.json()["runs"][0]["book_id"] == book_id
+        assert response.status_code == 410, response.text
+        retained = client.get(f"/api/v2/research/questions/{created['id']}").json()
+        assert retained["book_ids"] == []
+        assert retained["runs"][0]["book_id"] == book_id
         summary = client.get("/api/v2/research/questions").json()["items"][0]
         assert summary["run_count"] == 1 and "runs" not in summary
-    assert len(calls) == 1
+    assert calls == []
     runs = bridge.workflow.list_runs(book_id)
     question_run = next(run for run in runs if run.get("purpose") == "question")
     frozen = bridge.workflow.snapshot(question_run["run_id"])
     assert frozen["research_scope"]["book_ids"] == [book_id]
     assert frozen["research_scope"]["selection"] == "workspace_all"
     assert frozen["research_questions"][0]["id"] == created["id"]
+    assert len([run for run in runs if run.get("purpose") == "question"]) == 1
 
 
 def test_source_hits_advertise_only_current_verified_card_targets(research_book, monkeypatch):
@@ -595,7 +651,7 @@ def later_source(engine, source_run, chapter_id):
 
 
 @pytest.mark.parametrize("human", [False, True])
-def test_link_refresh_freezes_questions_and_retains_current_notebook_findings(research_book, human):
+def test_retained_link_refresh_keeps_frozen_questions_and_notebook_findings(research_book, human):
     from hrs.research.notebook import ResearchNotebook
     from hrs.research.projection import located_card
 
@@ -635,11 +691,29 @@ def test_link_refresh_freezes_questions_and_retains_current_notebook_findings(re
         "Later question card",
         draft_patch=named_patch(other_article, text),
     )
-    links = bridge.enqueue_links(other_book)
-    refresh = next(
-        bridge.workflow.status(run_id)
-        for run_id in links
-        if bridge.workflow.status(run_id)["research_scope"]["source_card_id"] == original["id"]
+    with pytest.raises(ServiceError) as retired:
+        bridge.enqueue_links(other_book)
+    assert retired.value.status_code == 410
+    assert not any(run.get("purpose") == "link_refresh" for run in bridge.workflow.list_runs())
+    refresh = retained_research_run(
+        bridge,
+        book_id,
+        purpose="link_refresh",
+        scope={
+            "kind": "link_refresh",
+            "source_card_id": original["id"],
+            "source_card_version": original["version"],
+            "book_ids": sorted([book_id, other_book]),
+        },
+        questions=notebook.research_context(book_ids=[book_id, other_book])["questions"],
+        targets=[
+            {
+                "card_id": counterpart["id"],
+                "version": counterpart["version"],
+                "title": counterpart["title"],
+                "publication_sha256": counterpart["publication_sha256"],
+            }
+        ],
     )
     snapshot = bridge.workflow.snapshot(refresh["run_id"])
     assert snapshot["research_questions"][0]["id"] == question["id"]
@@ -674,29 +748,31 @@ def test_link_refresh_freezes_questions_and_retains_current_notebook_findings(re
         assert replacement["replaces_card_id"] == original["id"]
 
 
-def test_link_context_prioritizes_current_definitions_and_bounds_prior_findings(research_book):
+def test_new_cards_do_not_inject_notebook_context_or_rewrite_frozen_question_scope(research_book):
     from hrs.research.notebook import ResearchNotebook
 
     _, _, bridge, book_id, _, _, _ = research_book
     notebook = ResearchNotebook(bridge.store)
     first = notebook.create("Original global question", [])
+    frozen_questions = notebook.research_context(book_ids=[book_id])["questions"]
+    legacy = retained_research_run(
+        bridge,
+        book_id,
+        purpose="question",
+        scope={"kind": "question", "book_ids": [book_id], "question_id": first["id"]},
+        questions=frozen_questions,
+    )
     notebook.update(first["id"], first["version"], title="Current global question definition")
-    additional = [notebook.create(f"Other active question {index}", []) for index in range(12)]
-    card = {"question_findings": [{"question_id": first["id"], "definition_version": 1}]}
-    context = bridge._link_questions(card, [book_id])
-    assert len(context["questions"]) == 10 and context["omitted"] == 3
-    assert context["questions"][0]["id"] == first["id"]
-    assert (
-        context["questions"][0]["definition_version"] == 2
-        and context["questions"][0]["book_ids"] == []
-    )
-    assert not context["preserve_source_card"]
-    card["question_findings"].extend(
-        {"question_id": question["id"], "definition_version": 1} for question in additional
-    )
-    context = bridge._link_questions(card, [book_id])
-    assert len(context["questions"]) == 10 and context["omitted"] == 3
-    assert context["previous_omitted"] == 3 and context["preserve_source_card"]
+    for index in range(12):
+        notebook.create(f"Other active question {index}", [])
+    current = bridge.start(book_id)
+    snapshot = bridge.workflow.snapshot(current["run_id"])
+    assert not snapshot.get("research_questions")
+    assert not snapshot.get("research_scope")
+    bridge.tick()
+    assert bridge.workflow.snapshot(legacy["run_id"])["research_questions"] == frozen_questions
+    assert frozen_questions[0]["definition_version"] == 1
+    assert notebook.question(first["id"])["definition_version"] == 2
 
 
 def test_notebook_syncs_http_decisions_and_controls_even_when_projection_is_current(research_book):
@@ -749,12 +825,12 @@ def test_notebook_syncs_http_decisions_and_controls_even_when_projection_is_curr
             "question_id": question["id"],
             "definition_version": 1,
         }
-        pending_run = bridge.start(
+        pending_run = retained_research_run(
+            bridge,
             book_id,
-            question_id=question["id"],
-            article_ids=[chapter_id],
             purpose="question",
-            research_scope=scope,
+            scope=scope,
+            questions=notebook.research_context(question_id=question["id"])["questions"],
         )
         notebook.attach_runs(question["id"], current_question["version"], [pending_run["run_id"]])
         for action in ("pause", "resume"):
@@ -915,7 +991,7 @@ def test_reading_annotations_bind_exact_quote_version_and_canonical_entity(
         service.workspace.reading(chapter_id, expected_sha256="0" * 64)
 
 
-def test_new_book_completion_durably_queues_native_link_refresh_without_human_overwrite(
+def test_new_book_completion_retires_auto_links_and_preserves_legacy_two_sided_evidence(
     research_book,
 ):
     settings, engine, bridge, book_id, source_run, chapter_id, text = research_book
@@ -956,22 +1032,66 @@ def test_new_book_completion_durably_queues_native_link_refresh_without_human_ov
     )
     bridge.refresh_links()
     links = [run for run in bridge.workflow.list_runs() if run.get("purpose") == "link_refresh"]
-    assert len(links) == 2
-    assert {run["research_scope"]["source_card_id"] for run in links} == {
-        original["id"],
-        second["id"],
-    }
+    assert links == []
+    with engine.begin() as connection:
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(db.outbox)
+                .where(db.outbox.c.kind == "link_research")
+            )
+            == 0
+        )
+        connection.execute(
+            insert(db.outbox).values(
+                dedup_key="retained-link-" + uuid4().hex,
+                run_id=source_run,
+                kind="link_research",
+                payload={"book_id": book_id},
+            )
+        )
+    refresh = retained_research_run(
+        bridge,
+        book_id,
+        purpose="link_refresh",
+        scope={
+            "kind": "link_refresh",
+            "source_card_id": original["id"],
+            "source_card_version": original["version"],
+            "book_ids": sorted([book_id, other_book]),
+        },
+        targets=[
+            {
+                "card_id": second["id"],
+                "version": second["version"],
+                "title": second["title"],
+                "publication_sha256": second["publication_sha256"],
+            }
+        ],
+    )
     old = bridge.workflow.card(original["id"])
     assert old["state"] == "human_accepted" and old["human_decision"] == original["human_decision"]
-    for run in links:
-        frozen = bridge.workflow.snapshot(run["run_id"])
-        assert frozen["link_target_cards"][0]["card_id"] in {original["id"], second["id"]}
-        assert len(frozen["articles"]) == 1
+    frozen = bridge.workflow.snapshot(refresh["run_id"])
+    assert frozen["link_target_cards"][0]["card_id"] == second["id"]
+    assert len(frozen["articles"]) == 1
     bridge.refresh_links()
-    assert len([r for r in bridge.workflow.list_runs() if r.get("purpose") == "link_refresh"]) == 2
-    refresh = next(
-        run for run in links if run["research_scope"]["source_card_id"] == original["id"]
-    )
+    bridge.refresh_links()
+    assert len([r for r in bridge.workflow.list_runs() if r.get("purpose") == "link_refresh"]) == 1
+    with engine.connect() as connection:
+        assert (
+            connection.scalar(
+                select(db.outbox.c.delivered).where(db.outbox.c.kind == "link_research")
+            )
+            is True
+        )
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(db.events)
+                .where(db.events.c.kind == "cards.legacy_link_retired")
+            )
+            == 1
+        )
     _, package = finish_contract_run(
         bridge, refresh, "Independent relation package", counterpart=second
     )
@@ -989,8 +1109,6 @@ def test_new_book_completion_durably_queues_native_link_refresh_without_human_ov
         other_chapter,
     }
     assert service.card(second["id"])["derived_relations"]["items"][0]["id"] == edge["id"]
-    from hrs.research.workspace import QuestionCreate, QuestionEvidence
-
     question = service.workspace.create_question(
         QuestionCreate(title="Select both retained sides", book_ids=[book_id, other_book])
     )
@@ -1131,9 +1249,7 @@ def test_retained_policy_is_visible_as_upgrade_without_automatic_rewriting(
 
     settings, engine, bridge, book_id, _, _, _ = research_book
     status, _ = finish_contract_run(bridge, bridge.start(book_id), "Retained v4 source")
-    current = deepcopy(research_workflow.POLICY)
-    current["version"] = 5
-    current["complete_research"] = True
+    current = deepcopy(CURRENT_CARD_POLICY)
     monkeypatch.setattr(research_workflow, "POLICY", current)
     bridge.tick()
     assert (
@@ -1151,7 +1267,7 @@ def test_retained_policy_is_visible_as_upgrade_without_automatic_rewriting(
     result = service.overview(book_id)
     assert result["needs_upgrade"] and result["needs_update"]
     assert (
-        result["research_policy_version"] == 4 and result["required_research_policy_version"] == 5
+        result["research_policy_version"] == 4 and result["required_research_policy_version"] == 6
     )
     assert result["runs"][0]["run_id"] == status["run_id"]
 

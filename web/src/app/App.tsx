@@ -15,7 +15,7 @@ export default function App() {
         <Route
           path="/research"
           element={
-            <Suspense fallback={<p role="status">正在打开研究检索…</p>}>
+            <Suspense fallback={<p role="status">正在打开实体与卡片…</p>}>
               <ResearchPage />
             </Suspense>
           }

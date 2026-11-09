@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import QuestionWorkspace from "./QuestionWorkspace";
@@ -9,6 +8,55 @@ import QuestionWorkspace from "./QuestionWorkspace";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+test("historical research records remain readable and exportable without new research or editing actions", async () => {
+  const question = {
+    id: "q",
+    title: "此前的研究问题",
+    book_ids: [],
+    notes: "我此前的人工笔记",
+    status: "ready",
+    version: 7,
+    definition_version: 2,
+    selections: [],
+    findings: [],
+    runs: [],
+  };
+  const request = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+    Response.json(
+      String(input).includes("/questions?")
+        ? { items: [question], total: 1, offset: 0, limit: 100 }
+        : question,
+    ),
+  );
+  vi.stubGlobal("fetch", request);
+  render(
+    <MemoryRouter initialEntries={["/research?view=questions&question=q"]}>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <QuestionWorkspace />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByRole("heading", { name: "此前的研究问题" });
+  expect(screen.queryByRole("button", { name: "继续查证" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "新建研究问题" })).toBeNull();
+  expect(screen.queryByRole("textbox", { name: "研究笔记" })).toBeNull();
+  expect(screen.getByText("我此前的人工笔记")).toBeTruthy();
+  const exported = screen
+    .getByRole("link", { name: "导出历史记录 Markdown" })
+    .getAttribute("href")!;
+  expect(decodeURIComponent(exported)).toContain("我此前的人工笔记");
+  expect(decodeURIComponent(exported)).toContain('"version": 7');
+  expect(
+    request.mock.calls.every(
+      (call) => !call[1]?.method || call[1].method === "GET",
+    ),
+  ).toBe(true);
 });
 
 test("derived record changes preserve selection decisions and valid source links without claiming the source is outdated", async () => {
@@ -245,117 +293,4 @@ test("retained selections and findings show their authoritative per-source or ca
   expect(screen.getByText("选材保留引文")).toBeTruthy();
   expect(screen.queryByRole("link", { name: "核对原文证据 1" })).toBeNull();
   expect(screen.queryByText("已人工确认")).toBeNull();
-});
-test("a research question persists notes through a version conflict instead of discarding the local draft", async () => {
-  const question = {
-    id: "question",
-    title: "拨款是否落实",
-    book_ids: [],
-    notes: "已有笔记",
-    status: "open",
-    version: 1,
-    definition_version: 1,
-    selections: [],
-    findings: [],
-    runs: [],
-  };
-  let patch: unknown;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (init?.method === "PATCH") {
-        patch = JSON.parse(String(init.body));
-        return Response.json(
-          { detail: "问题已经更新，请重新读取。" },
-          { status: 409 },
-        );
-      }
-      return Response.json(
-        url.includes("/questions?")
-          ? { items: [question], total: 1, offset: 0, limit: 100 }
-          : question,
-      );
-    }),
-  );
-  render(
-    <MemoryRouter
-      initialEntries={["/research?view=questions&question=question"]}
-    >
-      <QueryClientProvider
-        client={
-          new QueryClient({ defaultOptions: { queries: { retry: false } } })
-        }
-      >
-        <QuestionWorkspace />
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
-  const notes = await screen.findByRole("textbox", { name: "研究笔记" });
-  await userEvent.clear(notes);
-  await userEvent.type(notes, "保留我的新判断");
-  await userEvent.click(screen.getByRole("button", { name: "保存问题与笔记" }));
-  await screen.findByText("问题已经更新，请重新读取。");
-  expect(patch).toMatchObject({ expected_version: 1, notes: "保留我的新判断" });
-  expect((notes as HTMLTextAreaElement).value).toBe("保留我的新判断");
-});
-
-test("stopped research with pending and blocked runs remains actionable without submitting machine status as a user decision", async () => {
-  const question = {
-    id: "question",
-    title: "查证拨款",
-    book_ids: [],
-    notes: "",
-    status: "ready",
-    version: 3,
-    definition_version: 1,
-    selections: [],
-    findings: [],
-    runs: [
-      { run_id: "pending-run", state: "pending", book_id: "book" },
-      { run_id: "blocked-run", state: "technical_blocked", book_id: "book" },
-    ],
-  };
-  let body: Record<string, unknown> | undefined;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "PATCH") body = JSON.parse(String(init.body));
-      return Response.json(
-        String(input).includes("/questions?")
-          ? { items: [question], total: 1, offset: 0, limit: 100 }
-          : question,
-      );
-    }),
-  );
-  render(
-    <MemoryRouter
-      initialEntries={["/research?view=questions&question=question"]}
-    >
-      <QueryClientProvider
-        client={
-          new QueryClient({ defaultOptions: { queries: { retry: false } } })
-        }
-      >
-        <QuestionWorkspace />
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
-  await screen.findByRole("textbox", { name: "研究笔记" });
-  expect(screen.queryByText("查证结果已保存")).toBeNull();
-  expect(await screen.findByText("需要人工核对")).toBeTruthy();
-  expect(await screen.findByText("技术阻塞，需要恢复")).toBeTruthy();
-  expect(screen.queryByRole("option", { name: "查证结果已保存" })).toBeNull();
-  await userEvent.type(
-    screen.getByRole("textbox", { name: "研究笔记" }),
-    "补充笔记",
-  );
-  await userEvent.click(screen.getByRole("button", { name: "保存问题与笔记" }));
-  expect(body?.notes).toBe("补充笔记");
-  expect(body).not.toHaveProperty("status");
-  expect(
-    screen
-      .getAllByRole("link", { name: "查看任务与恢复操作" })[0]
-      .getAttribute("href"),
-  ).toContain("researchRun=pending-run");
 });

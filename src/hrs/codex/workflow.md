@@ -418,7 +418,7 @@ canonical title/body vectors. Chapter-set hashes keep locator and index offsets 
 to the same visible publication. Default content search
 excludes only explicitly tagged directory carriers; users may include directories.
 
-## Research after indexed publication
+## Source cards after indexed publication
 
 Research consumes complete content-verified articles whose publication and chapter
 hashes match the finished index. Workflow-test publications are ineligible. Source
@@ -426,7 +426,58 @@ reading remains available while research runs; card failure or human pending doe
 not revoke source publication. The SQLite research workflow owns frozen sources,
 leases, decisions and revisions; SQL/S3 are its read projections.
 
-The research coordinator dispatches native Sol children with fresh contexts:
+### Default v6 source cards
+
+Publication and matching OpenSearch source-index completion automatically enqueue
+one source-card run. The durable key binds source run, publication and chapter
+hashes; reconciliation and index rebuilding reuse the existing run even when its
+policy is older or it is human pending. An explicit source/card revision preserves
+previous publications and decisions. Do not create a second task to start cards.
+
+The default v6 coordinator spawns native Sol `research_card_author` → independent
+`research_verifier`. One failed content verification may schedule
+`research_repairer` → fresh `research_reverification`; a failed reverify stays human
+pending. There is no enrich stage. The following shared source-reading, candidate,
+identity-attestation and evidence checks remain mandatory. Frozen v1–v5 runs keep
+their stage contracts below, including enrich and any required search plan.
+
+Create one complete source card per independent article. Preserve formation,
+event and publication dates as distinct concepts, source metadata, faithful
+summary, source-attributed facts/views, exact quotations and footnote ownership,
+every source part and limitations. Unknown metadata is permitted as unknown;
+unknown fields or empty extraction categories alone do not require human review.
+Record people, organizations, places, documents and events only when supported.
+Event modalities distinguish reported occurrence, plans, conditions and negation.
+
+Author/repair may optionally use `research_search`, `research_entities`,
+`research_related` and frozen target-card tools. A query plan and search minimum
+are unnecessary for v6. External claims require complete frozen source reads and
+exact evidence; independent verify/reverify reads those sources before candidates
+and checks retained search receipts, rather than performing fresh live searches.
+Source cards do not answer notebook questions or automatically build arguments.
+Prior question records and findings remain readable/exportable; new question
+execution and automatic link-refresh production are retired.
+
+Exact quote lookup also returns source-owned `footnote_ids` when the frozen source
+has note metadata. Use those ranges rather than repeated printed labels to select
+note IDs; still inspect the source to establish meaning and note ownership.
+
+Before candidate exposure the verifier inventories every source part and required
+fact, identity, document, event or relationship. Coverage maps each finding to
+supported objects with overlapping source evidence. An explicitly marked alias
+finding may be covered by the exact source-backed alias already saved on a mention;
+other relationship findings still need relationship objects. Avoid duplicate
+representations while preserving omission, attribution and event-modality checks.
+Identity suggestions retain `possible_same_as` uncertainty; canonical merge,
+distinct, split and alias changes require explicit local human action.
+
+Personal notes use a separate lineage-based versioned ledger with compare-and-swap
+saves. Model revisions preserve them; notes are neither model evidence nor source
+approval and are not added to source/entity embeddings.
+
+### Shared contracts and retained v1–v5 research
+
+Retained policies dispatch native Sol children with fresh contexts:
 `author` uses `research_card_author`, `enrich` uses `research_searcher`, and
 `verify` uses `research_verifier`; v5 directed `repair` uses `research_repairer`
 and `reverify` uses `research_reverification`. A verifier must be independent of
@@ -449,7 +500,12 @@ packet/source reading and independent observations still precede candidate acces
 
 The host supervises at most two research-book coordinators. Coordinators and
 children share source-work account/model admission; ready source work keeps
-priority, and recovery admits one control coordinator at a time.
+priority. Recovery retains one control-only reservation for the worker probe.
+Once both scopes permit normal or recovering work, a second coordinator may use
+ordinary budget only when a worker slot remains; it stays counted on renewal.
+New provider pressure stops that counted execution before releasing its capacity,
+retaining checkpoints and pressure evidence without charging an expected yield
+as a content failure or technical retry. Cooldown and probing retain their bounds.
 
 Runtime supervisors bind the literal parent-assigned `worker_id` in each spawn
 prompt to the native thread and current execution from structured host events.
@@ -459,7 +515,7 @@ child or copy an earlier execution's name. Workers retain that identity;
 if attestation is pending, wait rather than rename.
 A native thread that authored or enriched material cannot verify it under a new
 worker name. MCP callers cannot grant this host-only identity attestation.
-Complete v5 work has bounded generation time based on stage and source length,
+Complete v5/v6 work has bounded generation time based on stage and source length,
 plus an absolute deadline from its claim. Only the current host-bound active
 execution receives that budget and matching lease renewal. Tool activity cannot
 extend the absolute deadline. Unobserved/old execution identities retain the
@@ -592,10 +648,10 @@ Evidence-backed merge/distinct/split/alias changes retain revision receipts;
 event participation supports person-to-event and event-to-person navigation.
 Structured card revisions preserve the previous publication until replacement
 passes. Completed old-policy cards remain basic research until explicitly upgraded.
-Newly completed books queue bounded native link-refresh work in both directions.
-Machine cards receive lineage revisions; human cards keep their content and
-decisions, with separately verified relationship packages. A link-refresh does
-not recursively enqueue itself. Reading annotations bind to exact source run,
+Retained link-refresh runs and their relationship packages remain readable with
+their frozen policy. Undelivered legacy link-refresh requests are retired with an
+audit event instead of creating new research tasks. Human cards keep their content
+and decisions. Reading annotations bind to exact source run,
 text hash and quotation; research questions retain adopted/excluded source
 snapshots, notes and version-bound findings without automatically granting human
 approval or declaring every research question resolved.

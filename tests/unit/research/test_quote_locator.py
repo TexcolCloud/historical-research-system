@@ -74,3 +74,101 @@ def test_invalid_quote_inputs_are_rejected(quotes):
 def test_pagination_requires_strict_integer_offsets_and_bounded_limits(offset, limit):
     with pytest.raises(ValueError):
         locate_quotes(source("甲"), ["甲"], offset=offset, limit=limit)
+
+
+def footnoted_source():
+    original = source("🙂甲页[1]。\n[1]: 甲说明。\n乙页[1]。\n[1]: 乙说明。\n未关联[9]。")
+    text = original["text"]
+    split = text.index("乙页")
+    original["footnotes"] = [
+        {
+            "id": identity,
+            "label": "1",
+            "page": page,
+            "note": {"start": note, "end": text.index("\n", note) + 1},
+            "references": [{"start": ref, "end": ref + 3}],
+        }
+        for identity, page, ref, note in [
+            ("page-three-one", 3, text.index("[1]"), text.index("[1]:")),
+            ("page-nine-one", 9, text.index("[1]", split), text.index("[1]:", split)),
+        ]
+    ]
+    return original
+
+
+def test_same_printed_label_on_two_pages_returns_only_each_exact_match_owned_note_id():
+    from copy import deepcopy
+
+    original = footnoted_source()
+    frozen = deepcopy(original)
+    result = locate_quotes(original, ["[1]", "未关联[9]"])
+    assert [match["footnote_ids"] for match in result["matches"]] == [
+        ["page-three-one"],
+        ["page-three-one"],
+        ["page-nine-one"],
+        ["page-nine-one"],
+        [],
+    ]
+    assert result["quote_counts"] == [
+        {"quote_index": 0, "total_matches": 4},
+        {"quote_index": 1, "total_matches": 1},
+    ]
+    assert result["text_sha256"] == original["text_sha256"]
+    assert result["matches"][0]["start"] == 3  # The emoji is one Unicode codepoint.
+    assert original == frozen
+
+
+def test_quote_in_note_definition_is_owned_but_touching_either_boundary_is_not():
+    original = footnoted_source()
+    result = locate_quotes(original, ["甲说明", "甲页", "。\n乙页", "未关联"])
+    assert [match["footnote_ids"] for match in result["matches"]] == [
+        ["page-three-one"],
+        [],
+        ["page-three-one"],
+        [],
+    ]
+    # The note ends just before 乙页; a quote beginning there must not inherit it.
+    second = locate_quotes(original, ["乙页"])
+    assert second["matches"][0]["footnote_ids"] == []
+    before = locate_quotes(original, ["🙂甲页"])
+    assert before["matches"][0]["footnote_ids"] == []
+
+
+def test_multiple_owned_notes_follow_source_order_and_unparsed_ranges_never_guess():
+    original = footnoted_source()
+    original["footnotes"] = [
+        original["footnotes"][1],
+        original["footnotes"][0],
+        {"id": "unknown", "label": "1"},
+        {"label": "1", "references": [{"start": 0, "end": 10}]},
+        {"id": "invalid", "references": [{"start": -1, "end": 99999}]},
+        {"id": "unparsed", "note": "[1]: undecoded"},
+    ]
+    result = locate_quotes(original, [original["text"]])
+    assert result["matches"][0]["footnote_ids"] == ["page-nine-one", "page-three-one"]
+    assert result["total"] == 1
+
+
+def test_footnote_hints_do_not_change_pagination_ambiguity_or_legacy_shape():
+    original = footnoted_source()
+    result = locate_quotes(original, ["[1]", "[1]"], offset=3, limit=2)
+    assert [(match["quote_index"], match["footnote_ids"]) for match in result["matches"]] == [
+        (0, ["page-nine-one"]),
+        (1, ["page-three-one"]),
+    ]
+    assert result["total"] == 8 and result["truncated"]
+    assert locate_quotes(source("甲"), ["甲"])["matches"] == [
+        {"quote_index": 0, "start": 0, "end": 1},
+    ]
+
+
+def test_only_new_v6_instructions_prefer_mechanical_note_ids_without_skipping_source_reading():
+    from hrs.processing.research_workflow import POLICY
+    from hrs.research.execution import role_configs
+    from tests.unit.research.test_workflow import legacy_policy
+
+    phrase = "Prefer each locate match's owned footnote_ids"
+    assert all(phrase in role["instructions"] for role in role_configs(POLICY).values())
+    assert all(
+        phrase not in role["instructions"] for role in role_configs(legacy_policy(5)).values()
+    )

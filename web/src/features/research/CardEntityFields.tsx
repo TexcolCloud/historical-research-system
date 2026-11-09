@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { eventNatureLabels } from "./EventNature";
+import type { components } from "@/client/schema";
+import { useEffect, useState } from "react";
 import {
   DateEditor,
   References,
@@ -10,20 +12,144 @@ import {
   newId,
   type Draft,
 } from "./CardFields";
-type Mention = NonNullable<Draft["mentions"]>[number];
+type Mention = components["schemas"]["CardOnlyMention"];
 type Event = NonNullable<Draft["events"]>[number];
 type Relation = NonNullable<Draft["relations"]>[number];
+
+function MentionLocations({
+  value,
+  evidence,
+  onChange,
+}: {
+  value: Mention;
+  evidence: Draft["evidence"];
+  onChange: (change: Partial<Mention>) => void;
+}) {
+  const [literal, setLiteral] = useState("");
+  const [matches, setMatches] = useState<
+    Array<{ evidenceId: string; location: Mention["locations"][number] }>
+  >([]);
+  const [searched, setSearched] = useState(false);
+  useEffect(() => {
+    setMatches([]);
+    setSearched(false);
+  }, [value.name, evidence]);
+  function locate() {
+    const text = literal || value.name;
+    const found: typeof matches = [];
+    if (text)
+      for (const span of evidence) {
+        let at = span.quote.indexOf(text);
+        // ponytail: show 25 exact matches; users narrow the literal for longer lists.
+        while (at >= 0 && found.length < 25) {
+          const start = span.start + Array.from(span.quote.slice(0, at)).length;
+          const location = {
+            article_id: span.article_id,
+            start,
+            end: start + Array.from(text).length,
+            quote: text,
+          };
+          if (
+            !found.some(
+              (item) =>
+                item.location.article_id === location.article_id &&
+                item.location.start === start &&
+                item.location.end === location.end,
+            )
+          )
+            found.push({ evidenceId: span.id, location });
+          at = span.quote.indexOf(text, at + 1);
+        }
+        if (found.length >= 25) break;
+      }
+    setMatches(found);
+    setSearched(true);
+  }
+  return (
+    <div className="research-edit-group">
+      <p>原文称呼位置</p>
+      {value.locations.map((location, index) => (
+        <p key={`${location.article_id}:${location.start}:${location.end}`}>
+          {location.quote} · 字符 {location.start}–{location.end}
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() =>
+              onChange({
+                locations: value.locations.filter((_, at) => at !== index),
+              })
+            }
+          >
+            移除此处位置
+          </Button>
+        </p>
+      ))}
+      <label>
+        原文中的称呼
+        <Input
+          aria-label={`定位 ${value.name || "新实体"} 的原文称呼`}
+          value={literal}
+          placeholder={value.name || "输入原文中的完整称呼"}
+          onChange={(event) => {
+            setLiteral(event.target.value);
+            setMatches([]);
+            setSearched(false);
+          }}
+        />
+      </label>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={!(literal || value.name)}
+        onClick={locate}
+      >
+        查找精确位置
+      </Button>
+      {searched && !matches.length && (
+        <p>当前引文未找到这个称呼，请核对原文文字并补充对应引文。</p>
+      )}
+      {matches.map(({ evidenceId, location }) => (
+        <Button
+          key={`${location.article_id}:${location.start}:${location.end}`}
+          type="button"
+          variant="outline"
+          disabled={value.locations.some(
+            (old) =>
+              old.article_id === location.article_id &&
+              old.start === location.start &&
+              old.end === location.end,
+          )}
+          onClick={() =>
+            onChange({
+              locations: [...value.locations, location],
+              evidence_ids: [...new Set([...value.evidence_ids, evidenceId])],
+            })
+          }
+        >
+          使用位置 {location.start}–{location.end}：{location.quote}
+        </Button>
+      ))}
+      {matches.length >= 25 && (
+        <p>仅显示前 25 处，请补全更具体的称呼后重新查找。</p>
+      )}
+    </div>
+  );
+}
 
 export function MentionFields({
   value,
   evidence,
   onChange,
   removeBlocked = [],
+  cardOnly = false,
+  articleId,
 }: {
   value: Mention[];
   evidence: Draft["evidence"];
   onChange: (value: Mention[]) => void;
   removeBlocked?: string[];
+  cardOnly?: boolean;
+  articleId: string;
 }) {
   function patch(index: number, change: Partial<Mention>) {
     onChange(
@@ -32,7 +158,7 @@ export function MentionFields({
   }
   return (
     <details>
-      <summary>人物、机构与地点</summary>
+      <summary>实体记载</summary>
       {value.map((item, index) => (
         <fieldset className="research-edit-group" key={item.id}>
           <legend>{item.name || `实体 ${index + 1}`}</legend>
@@ -55,6 +181,7 @@ export function MentionFields({
               <option value="person">人物</option>
               <option value="organization">机构</option>
               <option value="place">地点</option>
+              {cardOnly && <option value="document">文献</option>}
               <option value="event">事件提及</option>
             </select>
           </label>
@@ -75,6 +202,15 @@ export function MentionFields({
             evidence={evidence}
             onChange={(evidence_ids) => patch(index, { evidence_ids })}
           />
+          {cardOnly && (
+            <MentionLocations
+              value={item}
+              evidence={evidence.filter(
+                (span) => span.article_id === articleId,
+              )}
+              onChange={(next) => patch(index, next)}
+            />
+          )}
           {(item.aliases ?? []).map((alias, at) => (
             <fieldset className="research-edit-group" key={at}>
               <legend>来源别名 {at + 1}</legend>
@@ -147,20 +283,22 @@ export function MentionFields({
       <Button
         type="button"
         variant="outline"
-        onClick={() =>
+        onClick={() => {
+          const id = newId("mention");
           onChange([
             ...value,
             {
-              id: newId("mention"),
+              id,
               kind: "person",
               name: "",
               identity_basis: "",
               evidence_ids: [],
-              identity_key: "",
+              identity_key: id,
               aliases: [],
+              locations: [],
             },
-          ])
-        }
+          ]);
+        }}
       >
         添加实体记载
       </Button>
@@ -446,25 +584,26 @@ export function EventFields({
       <Button
         type="button"
         variant="outline"
-        onClick={() =>
+        onClick={() => {
+          const id = newId("event");
           onChange([
             ...value,
             {
-              id: newId("event"),
+              id,
               name: "",
               description: "",
               date: emptyDate(),
               participant_ids: [],
               evidence_ids: [],
-              identity_key: "",
+              identity_key: id,
               action: "",
               place: emptyValue(),
               participant_roles: [],
               event_status: "unknown",
               status_note: "本次尚未核对该事项的发生性质。",
             },
-          ])
-        }
+          ]);
+        }}
       >
         添加事件
       </Button>

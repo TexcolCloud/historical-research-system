@@ -18,6 +18,21 @@ from hrs.research.graph import ResearchGraph
 from hrs.research.models import CardDraft, ResearchDate
 
 
+def legacy_policy(version=5):
+    """Explicit retained policy; a new product default must not rewrite old-contract tests."""
+    from hrs.processing.research_workflow import POLICY, STAGES
+
+    return {
+        **deepcopy(POLICY),
+        "version": version,
+        "card_only": False,
+        "complete_research": version >= 5,
+        "enrichment_search_required": True,
+        "models": dict.fromkeys(STAGES, SOL),
+        "stages": {stage: {"model": SOL, "reasoning_effort": "high"} for stage in STAGES},
+    }
+
+
 def snapshot(book_id="book-1", text="第一頁記張三。第二頁記張三參與會議。"):
     split = len(text) // 2
     return {
@@ -93,9 +108,7 @@ def workflow(tmp_path, monkeypatch):
     # its own inventory, metadata, repair and catalogue acceptance fixtures.
     from hrs.processing import research_workflow as module
 
-    monkeypatch.setattr(
-        module, "POLICY", {**deepcopy(module.POLICY), "version": 4, "complete_research": False}
-    )
+    monkeypatch.setattr(module, "POLICY", legacy_policy(4))
     return ResearchWorkflow(Store(tmp_path / "workspace"))
 
 
@@ -155,12 +168,8 @@ def verify(workflow, run_id, decision="approve", worker="independent-verifier"):
 
 
 def completed(workflow, book_id="book-1"):
-    from hrs.processing import research_workflow as module
 
-    run = workflow.enqueue(
-        snapshot(book_id),
-        _policy={**deepcopy(module.POLICY), "version": 4, "complete_research": False},
-    )
+    run = workflow.enqueue(snapshot(book_id), _policy=legacy_policy(4))
     submit_draft(workflow, run["run_id"], "author", "author")
     submit_draft(workflow, run["run_id"], "enrich", "enricher")
     verify(workflow, run["run_id"])
@@ -560,16 +569,16 @@ def test_recovery_coordinator_does_not_steal_the_only_probe_or_worker_slot(
     assert control.reserve_coordinator(SOL, owner)["allowed"]
     assert workflow.ledger.capacity_used() == 1
     failure = control.failure("capacity", "fixture-provider-outage", scope=scope, model=SOL)
-    assert (
-        workflow.ledger.capacity_used() == 0
-    )  # existing normal reservation also yields during recovery
+    assert workflow.ledger.capacity_used() == 1  # It stays counted until its executor yields.
+    assert not control.renew(SOL, owner, expires_at=now[0] + 900)
+    control.release(owner)
     now[0] = failure["retry_at"] + 1
     reservation = control.reserve_coordinator(SOL, owner)
     assert reservation["allowed"] and reservation["control_only"]
     assert all(state["probe_owner"] is None for state in control.snapshot()["scopes"])
     run = workflow.enqueue(snapshot())
     packet = workflow.claim(run["run_id"], "probe-author", stage="author")
-    assert packet and workflow.ledger.capacity_used() == 1
+    assert packet and workflow.ledger.capacity_used() == 1 + int(scope == "model")
     assert not control.reserve_coordinator(SOL, "research-coordinator:another")["allowed"]
     before = control.snapshot()
     control.success(SOL, owner, "coordinator-start-is-not-evidence")
@@ -581,7 +590,7 @@ def test_recovery_coordinator_does_not_steal_the_only_probe_or_worker_slot(
         {"input_hash": packet["input_hash"], "cards": [draft()]},
     )
     assert control.gate(SOL)["state"] == "recovering"
-    assert workflow.ledger.capacity_used() == 0
+    assert workflow.ledger.capacity_used() == int(scope == "model")
     submit_draft(workflow, run["run_id"], "enrich", "recovery-enricher")
     now[0] += 31
     verify(workflow, run["run_id"], worker="recovery-verifier")

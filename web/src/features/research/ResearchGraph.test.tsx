@@ -15,6 +15,54 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test("a document entity opens its identity rather than its source card", async () => {
+  const entity = vi.fn(),
+    card = vi.fn();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        entity_id: "person",
+        hops: 1,
+        limit: 50,
+        truncated: false,
+        nodes: [
+          {
+            id: "doc",
+            canonical_id: "canonical-document",
+            kind: "document",
+            name: "某文献",
+            card_id: "source-card",
+          },
+          {
+            id: "card-node",
+            kind: "card",
+            name: "出处卡",
+            card_id: "source-card",
+          },
+        ],
+        edges: [],
+      }),
+    ),
+  );
+  render(
+    <MemoryRouter>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ResearchGraph entityId="person" onEntity={entity} onCard={card} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "某文献" }));
+  expect(entity).toHaveBeenCalledWith("canonical-document");
+  expect(card).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "出处卡" }));
+  expect(card).toHaveBeenCalledWith("source-card");
+});
+
 test("system graph edges have Chinese labels in their action and selected evidence heading", async () => {
   vi.stubGlobal(
     "fetch",

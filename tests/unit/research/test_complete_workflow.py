@@ -9,8 +9,14 @@ from hrs.processing.hashing import digest
 from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
 from hrs.research.models import CardDraft, DocumentMetadata
+from tests.unit.research.test_workflow import legacy_policy
 
 TEXT = "1939年2月，张三在南京致函李四，申请经费。"
+
+
+@pytest.fixture(autouse=True)
+def frozen_v5_policy(monkeypatch):
+    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", legacy_policy(5))
 
 
 def source(book="book-a"):
@@ -364,7 +370,7 @@ def test_v5_independent_inventory_catches_empty_events_and_repairs_before_human_
 
 
 def completed(workflow, book="book-a"):
-    run = workflow.enqueue(source(book))
+    run = workflow.enqueue(source(book), _policy=legacy_policy(5))
     submit_author(workflow, run, draft(book))
     enrich(workflow, run, draft(book))
     final = verify(workflow, run, book=book)

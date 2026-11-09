@@ -47,8 +47,12 @@ class WorkflowContext:
         return self._scoped(document_id, page_for)
 
     def _scoped(self, document_id, page_for, validate=None):
+        selected_page = None
+
         def select(doc):
+            nonlocal selected_page
             page = page_for(doc)
+            selected_page = page
             selected = {
                 "page": page,
                 "fields": {
@@ -67,16 +71,30 @@ class WorkflowContext:
                     for key in ("state", "token", "owner", "pause_requested", "cancel_requested")
                 },
                 "pages": [row for row in doc["pages"] if page is None or row["page"] == page],
-                "tasks": [task for task in doc["tasks"] if page is None or task["page"] == page],
+                "tasks": [
+                    {
+                        **task,
+                        "claim": {
+                            key: value
+                            for key, value in task["claim"].items()
+                            if key != "expires_at"
+                        },
+                    }
+                    if task.get("claim")
+                    else task
+                    for task in doc["tasks"]
+                    if page is None or task["page"] == page
+                ],
             }
             if page is None:
                 selected["organization"] = doc.get("organization")
-            return digest(selected)
+            return page, digest(selected)
 
         def validate_snapshot(doc):
             if validate is not None:
                 return validate(doc)
-            page = page_for(doc)
-            self.evidence.verify(doc, None if page is None else [page])
+            self.evidence.verify(doc, None if selected_page is None else [selected_page])
 
-        return self.repository.validated(document_id, validate_snapshot, select)
+        return self.repository.validated(
+            document_id, validate_snapshot, select, retry_scope=lambda selected: selected[0]
+        )

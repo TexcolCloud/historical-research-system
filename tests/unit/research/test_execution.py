@@ -11,7 +11,7 @@ from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
 from hrs.research import execution
 from hrs.research.diagnostics import failure_details
-from tests.unit.research.test_workflow import draft, read_all, snapshot, submit_draft
+from tests.unit.research.test_workflow import draft, legacy_policy, read_all, snapshot, submit_draft
 
 
 def test_runtime_diagnostics_keep_retry_metadata_but_exclude_credentials_and_reasoning():
@@ -46,9 +46,7 @@ def test_runtime_diagnostics_keep_retry_metadata_but_exclude_credentials_and_rea
 def runtime(tmp_path, monkeypatch):
     from hrs.processing import research_workflow as module
 
-    monkeypatch.setattr(
-        module, "POLICY", {**module.POLICY, "version": 4, "complete_research": False}
-    )
+    monkeypatch.setattr(module, "POLICY", legacy_policy(4))
     store = Store(tmp_path / "native")
     workflow = ResearchWorkflow(store)
     run_id = workflow.enqueue(snapshot())["run_id"]
@@ -493,6 +491,103 @@ def test_real_admission_deferral_yields_without_a_false_no_progress_failure(runt
     saved = receipt(store, run_id)
     assert saved["stopped"] == "admission_yield" and saved["failure"] is None
     assert result.get("runtime_failures", 0) == 0
+
+
+@pytest.mark.parametrize("observed_pressure", [False, True])
+def test_counted_coordinator_yields_on_new_pressure_before_expected_child_shutdown_is_drained(
+    runtime, monkeypatch, observed_pressure
+):
+    store, workflow, run_id = runtime
+    clock = [0.0]
+    monkeypatch.setattr(execution.time, "monotonic", lambda: clock[0])
+    started = workflow.status(run_id)["input_hash"]
+
+    class Process:
+        returncode = None
+
+        def __init__(self, *args, stdout, **kwargs):
+            self.stdout = stdout
+            execution_id = workflow.status(run_id)["native_execution_id"]
+            self.worker = f"{run_id}-{execution_id}-author-0001"
+            packet = workflow.claim(run_id, self.worker, stage="author")
+            assert packet
+            read_all(workflow, packet)
+            stdout.write(
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "collab_tool_call",
+                            "tool": "spawn_agent",
+                            "prompt": f"worker_id={self.worker} stage=author",
+                            "receiver_thread_ids": ["native-yield-worker"],
+                            "agents_states": {"native-yield-worker": {"status": "running"}},
+                        },
+                    }
+                )
+                + "\n"
+            )
+            stdout.flush()
+
+        def communicate(self, **kwargs):
+            store.runtime_control.failure("capacity", "synthetic-relapse", model="gpt-6.1-sol")
+            if observed_pressure:
+                self.stdout.write(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "code": "rate_limit_exceeded",
+                            "scope": "account",
+                            "retry_after": 120,
+                            "message": "Synthetic account provider pressure already observed before yield",
+                        }
+                    )
+                    + "\n"
+                )
+                self.stdout.flush()
+            clock[0] += 31
+            raise subprocess.TimeoutExpired("synthetic-codex", 1)
+
+        def poll(self):
+            return self.returncode
+
+    def stop(process):
+        # The existing worker and coordinator remain counted until their real
+        # shutdown completes; another admission must not take the worker's slot.
+        assert store.checkpoints.ledger.capacity_used() == 2
+        process.stdout.write(
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "collab_tool_call",
+                        "tool": "close_agent",
+                        "status": "completed",
+                        "receiver_thread_ids": ["native-yield-worker"],
+                        "agents_states": {"native-yield-worker": {"status": "shutdown"}},
+                    },
+                }
+            )
+            + "\n"
+        )
+        process.stdout.flush()
+        process.returncode = -15
+
+    monkeypatch.setattr(execution.subprocess, "Popen", Process)
+    monkeypatch.setattr(execution, "stop_owned_process", stop)
+    result = execution.run_research(store, run_id)
+    saved = receipt(store, run_id)
+    assert saved["stopped"] == "admission_yield" and saved["failure"] is None
+    assert result["input_hash"] == started and result.get("runtime_failures", 0) == 0
+    assert result["counts"]["leased"] == 0
+    assert not any(task.get("last_failure") for task in result["tasks"])
+    assert store.checkpoints.ledger.capacity_used() == 0
+    if observed_pressure:
+        assert saved["observed_failure"]["code"] == "rate_limit"
+        assert saved["observed_failure"]["scope"] == "account"
+        assert store.runtime_control.snapshot()["account"]["state"] == "cooldown"
+    else:
+        assert saved["observed_failure"] is None
 
 
 def test_only_exposed_active_native_agents_receive_bounded_lease_renewal(runtime, tmp_path):

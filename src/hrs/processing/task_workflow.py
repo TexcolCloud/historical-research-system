@@ -215,7 +215,10 @@ class TaskWorkflow:
         if not 1 <= lease_seconds <= 86400:
             raise ValueError("Lease must be between 1 and 86400 seconds")
 
-        def select_candidate(doc):
+        selected_task_id = None
+
+        def select_candidate(doc, *, candidate_id=None):
+            nonlocal selected_task_id
             from hrs.processing.scheduling import task_priority
 
             reservations = {}
@@ -232,6 +235,7 @@ class TaskWorkflow:
                 task
                 for task in doc["tasks"]
                 if task["stage"] == stage
+                and (candidate_id is None or task["task_id"] == candidate_id)
                 and task["state"] in {"ready", "leased"}
                 and not task.get("technical_blocked")
                 and task.get("retry_after", 0) <= time.time()
@@ -255,7 +259,10 @@ class TaskWorkflow:
                     or reservations[task["page"]] == (session or {}).get("session_token")
                 )
             ]
-            return min(candidates, key=lambda task: task_priority(doc, task), default=None)
+            selected = min(candidates, key=lambda task: task_priority(doc, task), default=None)
+            if candidate_id is None:
+                selected_task_id = selected["task_id"] if selected else None
+            return selected
 
         with (
             self.context.verified_task(document_id, selector=select_candidate) as doc,
@@ -302,7 +309,11 @@ class TaskWorkflow:
                     worker_id not in active and len(active) >= plan["workers"][stage]
                 ):
                     return None
-            task = select_candidate(doc)
+            # Eligibility can change with the wall clock while admission checks
+            # run. Recheck only the exact task whose page was actually validated.
+            task = (
+                select_candidate(doc, candidate_id=selected_task_id) if selected_task_id else None
+            )
             if task is None:
                 return None
             inputs = self.context.inputs(doc, task)

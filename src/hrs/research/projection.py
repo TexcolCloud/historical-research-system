@@ -258,21 +258,6 @@ class ResearchProjection:
             from hrs.research.discovery import enqueue_discovery
 
             enqueue_discovery(connection, snapshot["source_run_id"], run_id, discovery_input)
-            if status["state"] == "completed" and status.get("purpose", "book") in {
-                "book",
-                "card_revision",
-            }:
-                # Completion can expose a counterpart after an earlier book's enrichment finished.
-                connection.execute(
-                    pg_insert(db.outbox)
-                    .values(
-                        dedup_key=f"link-research:{run_id}:{discovery_input}",
-                        run_id=snapshot["source_run_id"],
-                        kind="link_research",
-                        payload={"book_id": snapshot["book_id"]},
-                    )
-                    .on_conflict_do_nothing(index_elements=[db.outbox.c.dedup_key])
-                )
             if previous is None or previous["version"] < status["version"] or artifacts_changed:
                 connection.execute(
                     insert(db.events).values(
@@ -337,6 +322,8 @@ def card_summary(card):
     )
     return {
         **{key: card.get(key) for key in fields},
+        "card_only": bool(card.get("card_only")),
+        "processing_mode": "source_cards" if card.get("card_only") else "legacy_research",
         "evidence_count": len(card.get("evidence", [])),
         "item_count": len(card.get("items", [])),
         "entity_count": len(card.get("mentions", [])) + len(card.get("events", [])),
