@@ -52,7 +52,8 @@ def test_large_task_book_mcp_status_retains_counts_without_returning_unbounded_m
 
 
 def test_dispatch_contract_waits_for_leased_generation_and_stays_alive_between_stages(tmp_path):
-    from tests.unit.research.test_complete_workflow import draft, read, source
+    from tests.unit.research.test_complete_workflow import read, source
+    from tests.unit.research.test_dossier_cards import draft
 
     workflow = ResearchWorkflow(Store(tmp_path / "native"))
     run = workflow.enqueue(source())["run_id"]

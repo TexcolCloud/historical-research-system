@@ -3865,6 +3865,69 @@
         ],
         "title": "CardDetail"
       },
+      "CardDossier": {
+        "properties": {
+          "research_scope": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "formation_background": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "text_structure": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "source_nature": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "source_role": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "research_value": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "can_support": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "cannot_support": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "needs_corroboration": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "argument_units": {
+            "items": {
+              "$ref": "#/components/schemas/DossierArgumentUnit"
+            },
+            "type": "array",
+            "title": "Argument Units"
+          },
+          "argument_units_note": {
+            "type": "string",
+            "title": "Argument Units Note",
+            "default": ""
+          },
+          "citation": {
+            "$ref": "#/components/schemas/DossierCitation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "research_scope",
+          "formation_background",
+          "text_structure",
+          "source_nature",
+          "source_role",
+          "research_value",
+          "can_support",
+          "cannot_support",
+          "needs_corroboration",
+          "argument_units",
+          "citation"
+        ],
+        "title": "CardDossier",
+        "description": "Interpretive reading and bibliographic boundaries tied to this card's actual evidence."
+      },
       "CardDraft-Input": {
         "properties": {
           "id": {
@@ -4671,6 +4734,9 @@
               },
               {
                 "$ref": "#/components/schemas/CardOnlyCardDraft"
+              },
+              {
+                "$ref": "#/components/schemas/DossierCardDraft"
               }
             ],
             "title": "Card"
@@ -5443,6 +5509,439 @@
         "type": "object",
         "title": "DocumentMetadata"
       },
+      "DossierArgumentUnit": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title"
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Claim"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Evidence Ids"
+          },
+          "applicability_limit": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Applicability Limit"
+          },
+          "corroboration_needed": {
+            "type": "string",
+            "title": "Corroboration Needed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "claim",
+          "evidence_ids",
+          "applicability_limit",
+          "corroboration_needed"
+        ],
+        "title": "DossierArgumentUnit",
+        "description": "A source-bound interpretation with explicit limits, never an automatic paper conclusion."
+      },
+      "DossierCardDraft": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "article_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Article Id"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Summary"
+          },
+          "document_type": {
+            "type": "string",
+            "title": "Document Type",
+            "default": ""
+          },
+          "source_layer": {
+            "type": "string",
+            "title": "Source Layer",
+            "default": ""
+          },
+          "formation_date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "event_date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CardItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceSpan"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Evidence"
+          },
+          "mentions": {
+            "items": {
+              "$ref": "#/components/schemas/CardOnlyMention"
+            },
+            "type": "array",
+            "title": "Mentions"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CompleteEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/RelationDraft"
+            },
+            "type": "array",
+            "title": "Relations"
+          },
+          "identity_links": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityLink"
+            },
+            "type": "array",
+            "title": "Identity Links"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          },
+          "alternatives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Alternatives"
+          },
+          "questions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Questions"
+          },
+          "no_argument_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "No Argument Reason"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/CompleteMetadata",
+            "description": "Retain every metadata field. Missing facts remain explicit unknown values; do not invent facts or repeat the same source limitation in each field."
+          },
+          "coverage": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageUnit"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Coverage"
+          },
+          "research_plan": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchQuestion"
+            },
+            "type": "array",
+            "title": "Research Plan"
+          },
+          "cross_relations": {
+            "items": {
+              "$ref": "#/components/schemas/CrossCardRelation"
+            },
+            "type": "array",
+            "title": "Cross Relations"
+          },
+          "question_findings": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionFinding"
+            },
+            "type": "array",
+            "title": "Question Findings"
+          },
+          "dossier": {
+            "$ref": "#/components/schemas/CardDossier"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "article_id",
+          "title",
+          "summary",
+          "evidence",
+          "metadata",
+          "coverage",
+          "dossier"
+        ],
+        "title": "DossierCardDraft",
+        "description": "Frozen-v7 source dossier; earlier cards keep their original content contracts."
+      },
+      "DossierCitation": {
+        "properties": {
+          "full": {
+            "$ref": "#/components/schemas/SourceValue",
+            "description": "Source-backed full citation or unknown; never invent a publisher, edition or archive locator."
+          },
+          "short": {
+            "$ref": "#/components/schemas/SourceValue"
+          },
+          "printed_pages": {
+            "$ref": "#/components/schemas/SourceValue",
+            "description": "Only actual printed page labels explicitly supported by source text or frozen source provenance and cited evidence; never infer them from PDF/image ordinals."
+          },
+          "publication_date": {
+            "$ref": "#/components/schemas/ResearchDate",
+            "description": "Publication date of the carrier, separate from document formation and historical event dates. Unknown is allowed."
+          },
+          "completeness": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Completeness"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Fields"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "full",
+          "short",
+          "printed_pages",
+          "publication_date",
+          "completeness",
+          "missing_fields"
+        ],
+        "title": "DossierCitation"
+      },
+      "DossierVerificationSubmission": {
+        "properties": {
+          "input_hash": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Input Hash"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "pending"
+            ],
+            "title": "Decision"
+          },
+          "checked_card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Checked Card Ids"
+          },
+          "checked_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Item Ids",
+            "description": "Checked card_id/item_id values from candidate.required_checks"
+          },
+          "checked_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Evidence Ids",
+            "description": "Checked card_id/evidence_id values from candidate.required_checks"
+          },
+          "checked_relation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Relation Ids",
+            "description": "Checked card_id/relation_id values from candidate.required_checks"
+          },
+          "checked_identity_links": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Identity Links",
+            "description": "Checked card_id/link_index values from candidate.required_checks"
+          },
+          "checked_research_disposition": {
+            "type": "boolean",
+            "title": "Checked Research Disposition",
+            "default": false
+          },
+          "checked_search_receipt_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Search Receipt Ids",
+            "description": "Every server search receipt ID in candidate.required_checks"
+          },
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "checked_mechanical_evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Mechanical Evidence Ids",
+            "description": "Every decoded mechanical evidence receipt ID in candidate.required_checks; semantic review remains separate"
+          },
+          "checked_metadata_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Metadata Fields"
+          },
+          "checked_entity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Entity Ids"
+          },
+          "checked_event_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Event Ids"
+          },
+          "checked_coverage_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Coverage Ids"
+          },
+          "checked_research_question_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Research Question Ids"
+          },
+          "checked_cross_relation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Cross Relation Ids"
+          },
+          "checked_question_finding_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Question Finding Ids"
+          },
+          "coverage_assessments": {
+            "items": {
+              "$ref": "#/components/schemas/CardOnlyCoverageAssessment"
+            },
+            "type": "array",
+            "title": "Coverage Assessments"
+          },
+          "checked_inventory_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checked Inventory Ids"
+          },
+          "checked_dossier_fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Checked Dossier Fields",
+            "description": "Every exact card_id/dossier/... field path in candidate.required_checks, including all reading/citation fields and argument units. Check source support, inference limits and bibliographic honesty; mechanical checks alone never approve a source claim."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "input_hash",
+          "decision",
+          "checked_card_ids",
+          "checked_dossier_fields"
+        ],
+        "title": "DossierVerificationSubmission"
+      },
       "DraftEntity": {
         "properties": {
           "kind": {
@@ -5710,6 +6209,9 @@
               },
               {
                 "$ref": "#/components/schemas/CardOnlyCardDraft"
+              },
+              {
+                "$ref": "#/components/schemas/DossierCardDraft"
               }
             ],
             "title": "Card"
@@ -7971,6 +8473,54 @@
       },
       "ResearchCardResponse": {
         "properties": {
+          "display_id": {
+            "type": "string",
+            "title": "Display Id",
+            "default": ""
+          },
+          "authors": {
+            "type": "string",
+            "title": "Authors",
+            "default": ""
+          },
+          "formation_date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "publication_date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Pages"
+          },
+          "printed_pages": {
+            "type": "string",
+            "title": "Printed Pages",
+            "default": ""
+          },
+          "source_citation": {
+            "type": "string",
+            "title": "Source Citation",
+            "default": ""
+          },
+          "citation_completeness": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Citation Completeness",
+            "default": "unknown"
+          },
+          "dossier_available": {
+            "type": "boolean",
+            "title": "Dossier Available",
+            "default": false
+          },
           "id": {
             "type": "string",
             "minLength": 1,
@@ -8000,9 +8550,6 @@
             "type": "string",
             "title": "Source Layer",
             "default": ""
-          },
-          "formation_date": {
-            "$ref": "#/components/schemas/ResearchDate"
           },
           "event_date": {
             "$ref": "#/components/schemas/ResearchDate"
@@ -8165,9 +8712,22 @@
               },
               {
                 "$ref": "#/components/schemas/CardOnlyVerificationSubmission"
+              },
+              {
+                "$ref": "#/components/schemas/DossierVerificationSubmission"
               }
             ],
             "title": "Checks"
+          },
+          "dossier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardDossier"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "card_only": {
             "type": "boolean",
@@ -8333,6 +8893,54 @@
       },
       "ResearchCardSummary": {
         "properties": {
+          "display_id": {
+            "type": "string",
+            "title": "Display Id",
+            "default": ""
+          },
+          "authors": {
+            "type": "string",
+            "title": "Authors",
+            "default": ""
+          },
+          "formation_date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "publication_date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Pages"
+          },
+          "printed_pages": {
+            "type": "string",
+            "title": "Printed Pages",
+            "default": ""
+          },
+          "source_citation": {
+            "type": "string",
+            "title": "Source Citation",
+            "default": ""
+          },
+          "citation_completeness": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Citation Completeness",
+            "default": "unknown"
+          },
+          "dossier_available": {
+            "type": "boolean",
+            "title": "Dossier Available",
+            "default": false
+          },
           "id": {
             "type": "string",
             "title": "Id"

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -175,9 +175,15 @@ test.each([true, false])(
     await screen.findByText("作者认为组织工作尚待巩固");
     expect(screen.getByRole("button", { name: "某文件" })).toBeTruthy();
     expect(screen.getByText("· 文献")).toBeTruthy();
-    expect(screen.getByText(cardOnly ? /原文观点/ : /^论证/)).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "核心内容" })).getByText(
+        cardOnly ? /原作者观点/ : /^论证/,
+      ),
+    ).toBeTruthy();
     expect(Boolean(screen.queryByText("旧自动写作用途"))).toBe(!cardOnly);
     expect(Boolean(screen.queryByText("旧研究问题"))).toBe(!cardOnly);
+    if (!cardOnly)
+      await userEvent.click(screen.getByText("补证问题与未解事项（旧记录）"));
     expect(Boolean(screen.queryByText("旧补证计划"))).toBe(!cardOnly);
     expect(screen.queryByRole("button", { name: "保存到研究问题" })).toBeNull();
   },
@@ -330,6 +336,7 @@ test("saving a pending card opens the next identity task rather than returning t
 });
 
 test("accepting the final pending card retains its evidence and refreshes the task and book state", async () => {
+  vi.spyOn(libraryApi, "readOriginalPage").mockResolvedValue("/source.png");
   let decision: unknown;
   vi.stubGlobal(
     "fetch",
@@ -359,10 +366,17 @@ test("accepting the final pending card retains its evidence and refreshes the ta
     </MemoryRouter>,
   );
   await userEvent.click(
+    await screen.findByRole("button", { name: "核对本卡" }),
+  );
+  await userEvent.click(
     await screen.findByRole("button", { name: "确认采用此卡" }),
   );
-  await screen.findByText("已人工确认");
+  await screen.findByText("用户已确认");
   expect(decision).toEqual({ action: "accept", expected_version: 1 });
+  await userEvent.click(screen.getByText("引文与页码索引 · 1 条"));
+  await userEvent.click(
+    await screen.findByRole("button", { name: "查看证据 1" }),
+  );
   expect(screen.getByText("原文证据")).toBeTruthy();
   expect(
     screen.getByRole("link", { name: /阅读原文.*9/ }).getAttribute("href"),
@@ -400,13 +414,16 @@ test("a stale card read cannot replace a saved human decision", async () => {
       </QueryClientProvider>
     </MemoryRouter>,
   );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "核对本卡" }),
+  );
   await screen.findByRole("button", { name: "确认采用此卡" });
   act(() => {
     void query.refetchQueries({ queryKey: ["research", "card", "last-card"] });
   });
   await vi.waitFor(() => expect(reads).toBe(2));
   await userEvent.click(screen.getByRole("button", { name: "确认采用此卡" }));
-  await screen.findByText("已人工确认");
+  await screen.findByText("用户已确认");
   await act(async () => {
     resolveLate(Response.json(card));
   });
@@ -418,6 +435,7 @@ test("a stale card read cannot replace a saved human decision", async () => {
 });
 
 test("linked editorial footnotes retain their text and their own exact source location", async () => {
+  vi.spyOn(libraryApi, "readOriginalPage").mockResolvedValue("/source.png");
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
@@ -456,6 +474,10 @@ test("linked editorial footnotes retain their text and their own exact source lo
       </QueryClientProvider>
     </MemoryRouter>,
   );
+  await userEvent.click(await screen.findByText("引文与页码索引 · 1 条"));
+  await userEvent.click(
+    await screen.findByRole("button", { name: "查看证据 1" }),
+  );
   await userEvent.click(await screen.findByText("关联注释 · 1 项"));
   expect(screen.getByText("① 编者注：此处年份存疑。")).toBeTruthy();
   const link = screen.getByRole("link", { name: "阅读注释 ①" });
@@ -466,6 +488,7 @@ test("linked editorial footnotes retain their text and their own exact source lo
 });
 
 test("a direct link to an old-publication card labels its history and cannot accept it as current research", async () => {
+  vi.spyOn(libraryApi, "readOriginalPage").mockResolvedValue("/source.png");
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
@@ -494,6 +517,10 @@ test("a direct link to an old-publication card labels its history and cannot acc
   expect(
     screen.getByRole("link", { name: "导出历史卡片" }).getAttribute("href"),
   ).toContain("/last-card/export");
+  await userEvent.click(screen.getByText("引文与页码索引 · 1 条"));
+  await userEvent.click(
+    await screen.findByRole("button", { name: "查看证据 1" }),
+  );
   const source = screen.getByRole("link", { name: /阅读历史原文.*9/ });
   const href = new URL(source.getAttribute("href")!, "http://local");
   expect(href.searchParams.get("textSha")).toBe("a".repeat(64));

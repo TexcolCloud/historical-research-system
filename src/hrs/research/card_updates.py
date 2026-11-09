@@ -6,7 +6,7 @@ from copy import deepcopy
 
 from hrs.processing.errors import EvidenceMismatch
 from hrs.processing.hashing import digest
-from hrs.research.models import CardDraft
+from hrs.research.models import CardDraft, DossierCardDraft
 
 _READONLY = {
     "state",
@@ -94,7 +94,9 @@ def _index(part, size, *, add=False):
     return index
 
 
-def apply_card_changes(baseline: list[dict], base_sha256: str, changes: list[dict]) -> list[dict]:
+def apply_card_changes(
+    baseline: list[dict], base_sha256: str, changes: list[dict], *, dossier=False
+) -> list[dict]:
     """Materialize a CAS-bound proposal atomically; callers still validate and review the full card."""
     if digest(baseline) != base_sha256:
         raise EvidenceMismatch("Card change baseline digest does not match the frozen candidate")
@@ -107,7 +109,8 @@ def apply_card_changes(baseline: list[dict], base_sha256: str, changes: list[dic
     if not isinstance(changes, list) or not 1 <= len(changes) <= 128:
         raise ValueError("Card changes require between 1 and 128 operations")
     result = {"cards": deepcopy(baseline)}
-    fields = CardDraft.model_fields.keys() - {"id", "article_id"}
+    model = DossierCardDraft if dossier else CardDraft
+    fields = model.model_fields.keys() - {"id", "article_id"}
     for change in changes:
         if (
             not isinstance(change, dict)

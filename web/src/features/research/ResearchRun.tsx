@@ -35,14 +35,17 @@ export default function ResearchRunPanel({
   initial,
   onOpenCard,
   legacy = false,
+  compact = false,
 }: {
   runId: string;
   initial?: ResearchRun;
   onOpenCard?: (id: string) => void;
   legacy?: boolean;
+  compact?: boolean;
 }) {
   const query = useQueryClient();
   const [candidateGroup, setCandidateGroup] = useState(0);
+  const [expanded, setExpanded] = useState(false);
   const key = researchKeys.run(runId);
   const run = useQuery({
     queryKey: key,
@@ -154,20 +157,19 @@ export default function ResearchRunPanel({
     Math.max(0, Math.ceil(cardIds.length / 10) - 1),
   );
   const batchStart = group * 10;
-  return (
+  const title = cardOnly
+    ? (cardLabels[data.state] ?? "制卡状态待确认")
+    : legacy && data.state === "completed"
+      ? "旧流程记录已完成"
+      : (runLabels[data.state] ?? "研究任务状态待确认");
+  const content = () => (
     <section
       className="research-run"
       data-state={data.state}
       aria-label={cardOnly ? "史料卡制作进展" : "旧流程任务进展"}
     >
       <div>
-        <h2>
-          {cardOnly
-            ? (cardLabels[data.state] ?? "制卡状态待确认")
-            : legacy && data.state === "completed"
-              ? "旧流程记录已完成"
-              : (runLabels[data.state] ?? "研究任务状态待确认")}
-        </h2>
+        <h2>{title}</h2>
         <p>
           {cardOnly
             ? "原文已入库；卡片独立制作和审核，阅读、原文检索及导出可继续。"
@@ -352,5 +354,24 @@ export default function ResearchRunPanel({
         {control.isError && <p role="alert">{control.error.message}</p>}
       </div>
     </section>
+  );
+  return compact ? (
+    <details
+      className="research-run-compact"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary>
+        <span>原文已入库</span>
+        <strong data-state={data.state}>{title}</strong>
+        <span>
+          已办结 {completed} / {total} · 待人工 {pending}
+        </span>
+        <span>查看处理详情</span>
+      </summary>
+      {expanded && content()}
+    </details>
+  ) : (
+    content()
   );
 }

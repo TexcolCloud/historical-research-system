@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from hrs.library.deletion import require_active
 from hrs.processing.hashing import digest
 from hrs.processing.workspace import identity
+from hrs.research.models import DOSSIER_SOURCE_FIELDS
 from hrs.research.sources import current_card_ids, current_source_conditions
 from hrs.search.compute import (
     EMBEDDING_IDENTITY,
@@ -29,7 +30,7 @@ from hrs.search.inputs import ranking_windows
 from hrs.search.ranking import fuse
 from hrs.storage import models as db
 
-DISCOVERY_RULE = "research-derived-1400-v2"
+DISCOVERY_RULE = "research-derived-1400-v3"
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +52,30 @@ def discovery_records(cards, entities, *, workspace_id, generation):
                 for alias in record.get("aliases", [])
             )
             fields.extend(record.get("limitations", []))
+            dossier = record.get("dossier") or {}
+            fields.extend(
+                text
+                for key in DOSSIER_SOURCE_FIELDS
+                for text in (
+                    (dossier.get(key) or {}).get("value", ""),
+                    (dossier.get(key) or {}).get("note", ""),
+                )
+            )
+            fields.extend(
+                text
+                for unit in dossier.get("argument_units", [])
+                for text in (
+                    unit["title"],
+                    unit["claim"],
+                    unit["applicability_limit"],
+                    unit["corroboration_needed"],
+                )
+            )
+            fields.extend(
+                (value or {}).get("value", "")
+                for key, value in (dossier.get("citation") or {}).items()
+                if key in {"full", "short", "printed_pages"}
+            )
             fields.extend(record.get("questions", []))
             fields.extend(
                 " ".join(filter(None, [value.get("value"), value.get("note")]))

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from hrs.library.catalog import Library
 from hrs.library.errors import ServiceError
 from hrs.processing.hashing import digest
-from hrs.research.models import CardDraft, CardOnlyCardDraft
+from hrs.research.models import CardDraft, CardOnlyCardDraft, DossierCardDraft
 from hrs.research.notebook import ResearchNotebook
 from hrs.storage import models as db
 
@@ -32,7 +32,7 @@ class IdentityDecision(Request):
 
 class CardRevision(Request):
     expected_version: int = Field(ge=1)
-    card: CardDraft | CardOnlyCardDraft
+    card: CardDraft | CardOnlyCardDraft | DossierCardDraft
     reason: str = Field(default="", max_length=2000)
 
 

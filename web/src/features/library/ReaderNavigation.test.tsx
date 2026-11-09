@@ -207,7 +207,7 @@ test("an outdated target exposes the original instead of highlighting another pu
   setup(readingHref("book", { ...target, text_sha256: "c".repeat(64) }));
   await screen.findByText(/定位依据已更新|无法精确对应/);
   expect(document.querySelectorAll("mark[data-reading-focus]")).toHaveLength(0);
-  expect(await screen.findByAltText("原书第 7 页")).toBeTruthy();
+  expect(await screen.findByAltText("PDF 第 7 页")).toBeTruthy();
 });
 
 test("an outdated research citation rejects highlighting and retains its exact research return route", async () => {
@@ -221,7 +221,7 @@ test("an outdated research citation rejects highlighting and retains its exact r
   );
   await screen.findByText(/定位依据已更新|无法精确对应/);
   expect(document.querySelectorAll("mark[data-reading-focus]")).toHaveLength(0);
-  expect(await screen.findByAltText("原书第 7 页")).toBeTruthy();
+  expect(await screen.findByAltText("PDF 第 7 页")).toBeTruthy();
   expect(
     screen.getByRole("link", { name: "返回卡片与实体" }).getAttribute("href"),
   ).toBe(returnTo);

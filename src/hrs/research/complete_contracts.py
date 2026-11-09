@@ -1,7 +1,15 @@
 """Complete-document extraction and policy-bound independent omission checks."""
 
 from hrs.processing.errors import EvidenceMismatch
-from hrs.research.models import CardOnlyIndependentFinding, DocumentMetadata, IndependentFinding
+from hrs.research.models import (
+    DOSSIER_SOURCE_FIELDS,
+    CardOnlyIndependentFinding,
+    DocumentMetadata,
+    DossierArgumentUnit,
+    DossierCardDraft,
+    DossierCitation,
+    IndependentFinding,
+)
 
 
 class AssessmentMismatch(EvidenceMismatch):
@@ -16,7 +24,7 @@ def coverage_ranges(article):
     return [[part["start"], part["end"]] for part in article["parts"]]
 
 
-def complete_checks(cards, *, card_only=False):
+def complete_checks(cards, *, card_only=False, dossier=False):
     checks = {}
     for field, collection in (
         ("checked_entity_ids", "mentions"),
@@ -34,11 +42,37 @@ def complete_checks(cards, *, card_only=False):
     checks["checked_metadata_fields"] = [
         f"{card['id']}/metadata/{key}" for card in cards for key in DocumentMetadata.model_fields
     ]
+    if dossier:
+        checks["checked_dossier_fields"] = []
+        for card in cards:
+            prefix = f"{card['id']}/dossier/"
+            checks["checked_dossier_fields"].extend(
+                prefix + field for field in DOSSIER_SOURCE_FIELDS
+            )
+            checks["checked_dossier_fields"].extend(
+                prefix + "citation/" + field for field in DossierCitation.model_fields
+            )
+            checks["checked_dossier_fields"].extend(
+                prefix + field for field in ("argument_units", "argument_units_note")
+            )
+            checks["checked_dossier_fields"].extend(
+                prefix + "argument_units/" + unit["id"] + "/" + field
+                for unit in card["dossier"]["argument_units"]
+                for field in DossierArgumentUnit.model_fields
+            )
     return checks
 
 
 def validate_complete_cards(
-    cards, article, *, stage, planned_questions=None, questions=(), receipt_ids=(), card_only=False
+    cards,
+    article,
+    *,
+    stage,
+    planned_questions=None,
+    questions=(),
+    receipt_ids=(),
+    card_only=False,
+    dossier=False,
 ):
     if len(cards) != 1:
         raise EvidenceMismatch(
@@ -47,6 +81,8 @@ def validate_complete_cards(
             else "Policy v5 requires one complete document master card per article"
         )
     card = cards[0]
+    if dossier:
+        DossierCardDraft.model_validate(card)
     if card.get("metadata") is None:
         raise EvidenceMismatch(
             "Complete cards require explicit bibliographic and formation metadata"

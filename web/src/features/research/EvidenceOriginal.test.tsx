@@ -40,13 +40,13 @@ test("evidence opens its retained source run and lets the reader change page and
     </MemoryRouter>,
   );
   await userEvent.click(screen.getByRole("button", { name: "对照原件" }));
-  await screen.findByRole("img", { name: "原书第 9 页" });
+  await screen.findByRole("img", { name: "PDF 第 9 页" });
   expect(seen).toEqual(["retained-run/9"]);
   await userEvent.selectOptions(
     screen.getByRole("combobox", { name: "原件页码" }),
     "10",
   );
-  await screen.findByRole("img", { name: "原书第 10 页" });
+  await screen.findByRole("img", { name: "PDF 第 10 页" });
   expect(seen.at(-1)).toBe("retained-run/10");
   expect(screen.getByText("正在核对的卡片")).toBeTruthy();
   expect(screen.getByRole("slider", { name: "原图放大倍数" })).toBeTruthy();

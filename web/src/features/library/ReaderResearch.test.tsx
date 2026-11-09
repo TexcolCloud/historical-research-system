@@ -160,6 +160,12 @@ test("reading opens an exact person mention and its related card without linking
     cards: [
       {
         id: "card",
+        display_id: "CARD-CARD",
+        authors: "",
+        printed_pages: "",
+        source_citation: "",
+        citation_completeness: "unknown" as const,
+        dossier_available: false,
         book_id: "book",
         run_id: "research",
         article_id: "chapter",

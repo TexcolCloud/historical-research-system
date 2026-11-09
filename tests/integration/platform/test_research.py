@@ -1267,7 +1267,8 @@ def test_retained_policy_is_visible_as_upgrade_without_automatic_rewriting(
     result = service.overview(book_id)
     assert result["needs_upgrade"] and result["needs_update"]
     assert (
-        result["research_policy_version"] == 4 and result["required_research_policy_version"] == 6
+        result["research_policy_version"] == 4
+        and result["required_research_policy_version"] == CURRENT_CARD_POLICY["version"]
     )
     assert result["runs"][0]["run_id"] == status["run_id"]
 

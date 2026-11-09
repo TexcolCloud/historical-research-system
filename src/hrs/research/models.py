@@ -482,6 +482,127 @@ class CardOnlyCardDraft(CardDraft):
     events: list[CompleteEvent] = Field(default_factory=list)
 
 
+DOSSIER_SOURCE_FIELDS = (
+    "research_scope",
+    "formation_background",
+    "text_structure",
+    "source_nature",
+    "source_role",
+    "research_value",
+    "can_support",
+    "cannot_support",
+    "needs_corroboration",
+)
+
+
+class DossierArgumentUnit(Contract):
+    """A source-bound interpretation with explicit limits, never an automatic paper conclusion."""
+
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    claim: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+    applicability_limit: str = Field(min_length=1)
+    corroboration_needed: str
+
+
+class DossierCitation(Contract):
+    full: SourceValue = Field(
+        description="Source-backed full citation or unknown; never invent a publisher, edition or archive locator."
+    )
+    short: SourceValue
+    printed_pages: SourceValue = Field(
+        description="Only actual printed page labels explicitly supported by source text or frozen source provenance and cited evidence; never infer them from PDF/image ordinals."
+    )
+    publication_date: ResearchDate = Field(
+        description="Publication date of the carrier, separate from document formation and historical event dates. Unknown is allowed."
+    )
+    completeness: Literal["complete", "partial", "unknown"]
+    missing_fields: list[str]
+
+    @model_validator(mode="after")
+    def honest_completeness(self):
+        if self.completeness == "complete" and (
+            self.missing_fields
+            or self.full.certainty == "unknown"
+            or self.short.certainty == "unknown"
+        ):
+            raise ValueError(
+                "A complete citation requires supported full/short forms and no missing fields"
+            )
+        if self.completeness == "partial" and not self.missing_fields:
+            raise ValueError("A partial citation must name its missing fields")
+        if any(not field.strip() for field in self.missing_fields) or len(
+            self.missing_fields
+        ) != len(set(self.missing_fields)):
+            raise ValueError("Missing citation fields must be distinct nonempty labels")
+        return self
+
+
+class CardDossier(Contract):
+    """Interpretive reading and bibliographic boundaries tied to this card's actual evidence."""
+
+    research_scope: SourceValue
+    formation_background: SourceValue
+    text_structure: SourceValue
+    source_nature: SourceValue
+    source_role: SourceValue
+    research_value: SourceValue
+    can_support: SourceValue
+    cannot_support: SourceValue
+    needs_corroboration: SourceValue
+    argument_units: list[DossierArgumentUnit]
+    argument_units_note: str = ""
+    citation: DossierCitation
+
+    @model_validator(mode="after")
+    def explicit_argument_scope(self):
+        identities = [unit.id for unit in self.argument_units]
+        if len(identities) != len(set(identities)) or any(
+            not identity.strip() or "/" in identity for identity in identities
+        ):
+            raise ValueError("Dossier argument unit IDs must be unique local IDs without /")
+        if not self.argument_units and not self.argument_units_note.strip():
+            raise ValueError(
+                "An empty argument_units list requires argument_units_note explaining the source limitation"
+            )
+        if any(
+            not unit.title.strip() or not unit.claim.strip() or not unit.applicability_limit.strip()
+            for unit in self.argument_units
+        ):
+            raise ValueError(
+                "Dossier argument units require a claim and explicit applicability limit"
+            )
+        return self
+
+
+class DossierCardDraft(CardOnlyCardDraft):
+    """Frozen-v7 source dossier; earlier cards keep their original content contracts."""
+
+    dossier: CardDossier
+
+    @model_validator(mode="after")
+    def dossier_references_are_local(self):
+        available = {span.id for span in self.evidence}
+        owners = [(field, getattr(self.dossier, field)) for field in DOSSIER_SOURCE_FIELDS]
+        owners.extend(
+            ("citation/" + field, getattr(self.dossier.citation, field))
+            for field in (
+                "full",
+                "short",
+                "printed_pages",
+                "publication_date",
+            )
+        )
+        owners.extend(("argument_units/" + unit.id, unit) for unit in self.dossier.argument_units)
+        for field, owner in owners:
+            if set(owner.evidence_ids) - available:
+                raise ValueError(
+                    "Dossier " + field + " evidence must identify this card's actual evidence"
+                )
+        return self
+
+
 class EvaluatedResearchQuestion(ResearchQuestion):
     status: Literal["answered", "partial", "conflicting", "unresolved"]
     evaluation: str = Field(min_length=1)
@@ -505,6 +626,10 @@ class CompleteEnrichedDraftSubmission(DraftSubmission):
 
 class CardOnlyDraftSubmission(DraftSubmission):
     cards: list[CardOnlyCardDraft] = Field(min_length=1, max_length=1)
+
+
+class DossierDraftSubmission(DraftSubmission):
+    cards: list[DossierCardDraft] = Field(min_length=1, max_length=1)
 
 
 class CardPatchValue(Contract):
@@ -538,6 +663,10 @@ class IncrementalDraftSubmission(
 
 class CardOnlyIncrementalSubmission(RootModel[CardOnlyDraftSubmission | NativeDeltaSubmission]):
     """A v6 repair retains the same source-card contract after delta materialization."""
+
+
+class DossierIncrementalSubmission(RootModel[DossierDraftSubmission | NativeDeltaSubmission]):
+    """A v7 repair materializes and independently verifies the complete dossier."""
 
 
 class VerificationSubmission(Contract):
@@ -605,12 +734,31 @@ class CardOnlyVerificationSubmission(VerificationSubmission):
     coverage_assessments: list[CardOnlyCoverageAssessment] = Field(default_factory=list)
 
 
+class DossierVerificationSubmission(CardOnlyVerificationSubmission):
+    checked_dossier_fields: list[str] = Field(
+        min_length=1,
+        description="Every exact card_id/dossier/... field path in candidate.required_checks, including all reading/citation fields and argument units. Check source support, inference limits and bibliographic honesty; mechanical checks alone never approve a source claim.",
+    )
+
+
 def is_card_only(policy):
     return policy.get("version", 1) >= 6 and bool(policy.get("card_only"))
 
 
+def is_dossier(policy):
+    return (
+        is_card_only(policy) and policy.get("version", 1) >= 7 and bool(policy.get("dossier_cards"))
+    )
+
+
 def card_model(policy):
-    return CardOnlyCardDraft if is_card_only(policy) else CardDraft
+    return (
+        DossierCardDraft
+        if is_dossier(policy)
+        else CardOnlyCardDraft
+        if is_card_only(policy)
+        else CardDraft
+    )
 
 
 def observation_model(policy):
@@ -619,7 +767,17 @@ def observation_model(policy):
 
 def submission_model(policy, stage, *, frozen_name=None):
     """One selection point for displayed schemas and native write validation."""
-    if stage in {"verify", "reverify"}:
+    if is_dossier(policy):
+        expected = (
+            DossierVerificationSubmission
+            if stage in {"verify", "reverify"}
+            else (
+                DossierIncrementalSubmission
+                if stage == "repair" and policy.get("incremental_updates", False)
+                else DossierDraftSubmission
+            )
+        )
+    elif stage in {"verify", "reverify"}:
         expected = (
             CardOnlyVerificationSubmission if is_card_only(policy) else VerificationSubmission
         )

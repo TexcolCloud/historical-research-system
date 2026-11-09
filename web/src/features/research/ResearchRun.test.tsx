@@ -11,6 +11,52 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+test.each([
+  ["ready", "史料卡待制作"],
+  ["pending", "史料卡待人工核对"],
+  ["failed", "史料卡遇到技术故障"],
+  ["completed", "史料卡已完成"],
+])(
+  "compact progress retains actual %s status and mounts management only on demand",
+  async (state, label) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          run_id: "compact",
+          book_id: "book",
+          state,
+          version: 1,
+          card_only: true,
+          counts: {
+            articles_total: 4,
+            articles_completed: state === "completed" ? 4 : 1,
+            articles_pending: state === "pending" ? 1 : 0,
+          },
+          card_ids: [],
+          tasks: [],
+        }),
+      ),
+    );
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ResearchRunPanel runId="compact" compact />
+      </QueryClientProvider>,
+    );
+    await screen.findByText(label);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.queryByText("制卡流程")).toBeNull();
+    await userEvent.click(screen.getByText("查看处理详情"));
+    expect(await screen.findByRole("progressbar")).toBeTruthy();
+    if (state !== "completed")
+      expect(screen.queryByText("史料卡已完成")).toBeNull();
+  },
+);
+
 test("automatic cards expose leased stages and separate machine progress from human approval", async () => {
   vi.stubGlobal(
     "fetch",

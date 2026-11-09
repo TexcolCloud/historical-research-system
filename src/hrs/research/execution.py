@@ -22,7 +22,7 @@ from hrs.processing.errors import LeaseConflict
 from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.snapshots import atomic_json
 from hrs.research.diagnostics import PROVIDER_CODES, failure_details, provider_failure, redact_error
-from hrs.research.models import is_card_only
+from hrs.research.models import is_card_only, is_dossier
 
 logger = logging.getLogger(__name__)
 TOOLS = [
@@ -185,6 +185,22 @@ Missing important facts, changed meaning, misquotes or real ambiguity need corre
 missing metadata, empty graph categories or absent duplicate alias edges are not content errors by themselves.
 Repair only the evidenced issues once, retaining IDs and prior evidence; a fresh independent reverify follows.
 Submit structured research_submit with the exact input_hash; research_fail is only for real technical failures.
+"""
+    if is_dossier(policy):
+        instructions += """Policy v7 literature dossier: preserve every required dossier field, not just summary/events.
+Reading scope, formation background, text structure, source nature/role/value, can_support, cannot_support and
+needs_corroboration are source-bound interpretations with SourceValue certainty and local evidence IDs.
+Argument units cite a concrete claim, applicability_limit and corroboration_needed, never an automatically proven
+paper conclusion. If none is supported, retain [] with argument_units_note instead of manufacturing an argument.
+Write concise source-specific use judgments with direct evidence and limits. Do not answer research questions,
+write cross-card paper arguments or repeat the same long paragraph across sections.
+Keep source-backed full/short citations, printed page labels and publication_date separate from formation/event
+dates and physical PDF/image ordinals. Printed labels require explicit source text or frozen source provenance;
+never convert ordinals into printed pages or invent publisher, edition, archive locator or missing printed pages.
+Unknown bibliographic facts are allowed; mark citation completeness and missing_fields honestly. Core source
+content remains in items with attribution and limits. Verifier/reverifier must inspect originals first, then check
+every exact checked_dossier_fields path for actual evidence, bibliographic support, inference limits and uncertainty.
+Do not approve forged bibliography or unsupported interpretations; absent metadata alone is not an error.
 """
     if policy.get("verify_search_audit"):
         instructions += """Policy v3 business content: never put runtime tool names, read ranges, hashes, query/search counts,

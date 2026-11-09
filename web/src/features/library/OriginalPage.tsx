@@ -41,7 +41,7 @@ export default function OriginalPage({
         </label>
       </div>
       {original.isPending ? (
-        <p role="status">正在读取原书第 {page} 页…</p>
+        <p role="status">正在读取PDF 第 {page} 页…</p>
       ) : original.isError ? (
         <p role="alert">
           {original.error.message}
@@ -52,7 +52,7 @@ export default function OriginalPage({
           <a href={original.data} target="_blank" rel="noreferrer">
             <img
               src={original.data}
-              alt={`原书第 ${page} 页`}
+              alt={`PDF 第 ${page} 页`}
               style={{ width: `${zoom}%`, maxWidth: "none" }}
             />
           </a>

@@ -170,11 +170,15 @@ export function SourceEditor({
   value,
   evidence,
   onChange,
+  multiline = false,
+  unknownHint = "未明时请注明原因，例如旧卡未提取或缺少落款；不要填入猜测。",
 }: {
   label: string;
   value: SourceValue;
   evidence: Draft["evidence"];
   onChange: (value: SourceValue) => void;
+  multiline?: boolean;
+  unknownHint?: string;
 }) {
   return (
     <fieldset className="research-edit-group">
@@ -201,24 +205,47 @@ export function SourceEditor({
       </label>
       <label>
         {label}记载
-        <Input
-          aria-label={`${label}记载`}
-          disabled={value.certainty === "unknown"}
-          value={value.value}
-          onChange={(event) =>
-            onChange({ ...value, value: event.target.value })
-          }
-        />
+        {multiline ? (
+          <textarea
+            aria-label={`${label}记载`}
+            disabled={value.certainty === "unknown"}
+            value={value.value}
+            rows={4}
+            onChange={(event) =>
+              onChange({ ...value, value: event.target.value })
+            }
+          />
+        ) : (
+          <Input
+            aria-label={`${label}记载`}
+            disabled={value.certainty === "unknown"}
+            value={value.value}
+            onChange={(event) =>
+              onChange({ ...value, value: event.target.value })
+            }
+          />
+        )}
       </label>
-      <p className="research-provenance">
-        未明时请注明原因，例如旧卡未提取或缺少落款；不要填入猜测。
-      </p>
+      <p className="research-provenance">{unknownHint}</p>
       <label>
         说明
-        <Input
-          value={value.note}
-          onChange={(event) => onChange({ ...value, note: event.target.value })}
-        />
+        {multiline ? (
+          <textarea
+            aria-label={`${label}说明`}
+            value={value.note}
+            rows={2}
+            onChange={(event) =>
+              onChange({ ...value, note: event.target.value })
+            }
+          />
+        ) : (
+          <Input
+            value={value.note}
+            onChange={(event) =>
+              onChange({ ...value, note: event.target.value })
+            }
+          />
+        )}
       </label>
       <References
         label={`${label}依据`}

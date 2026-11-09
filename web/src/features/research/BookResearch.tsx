@@ -6,6 +6,7 @@ import type { Book } from "@/client/api";
 import { research, researchKeys, ResearchError } from "./api";
 import ResearchDetail, { cardStateLabel } from "./ResearchDetail";
 import ResearchRunPanel from "./ResearchRun";
+import { authorLabel, cardNumber, dateLabel, pageRange } from "./card-reading";
 
 function PublishedBookResearch({ book }: { book: Book }) {
   const [params, setParams] = useSearchParams();
@@ -134,11 +135,12 @@ function PublishedBookResearch({ book }: { book: Book }) {
           runId={requestedRunId || active!.run_id}
           initial={active}
           legacy={active?.card_only !== true}
+          compact
           onOpenCard={openCard}
         />
       ) : (
         detail.data && (
-          <div className="research-start">
+          <div className="research-start research-start-compact">
             <div>
               <h2>
                 {staleCount > 0 ? "史料卡待自动更新" : "史料卡待自动制作"}
@@ -180,8 +182,10 @@ function PublishedBookResearch({ book }: { book: Book }) {
       <div className="research-book-layout" data-detail={hasDetail}>
         <aside className="research-card-list" aria-label="本书史料卡">
           <header>
-            <h2>史料卡</h2>
-            <span>{cards.data?.total ?? detail.data?.cards_count ?? 0} 张</span>
+            <h2>文献清单</h2>
+            <span>
+              {cards.data?.total ?? detail.data?.cards_count ?? 0} 张卡片
+            </span>
           </header>
           {cards.isPending && <p role="status">正在读取卡片清单…</p>}
           {cards.isError && (
@@ -195,18 +199,36 @@ function PublishedBookResearch({ book }: { book: Book }) {
           {cards.data?.items.map((card) => (
             <button
               key={card.id}
-              className="research-card-row"
+              className="research-card-row research-catalogue-row"
+              title={card.title}
               aria-pressed={selected === card.id}
               onClick={() => openCard(card.id)}
             >
-              <span className="research-status" data-state={card.state}>
-                {card.source_current === false || card.source_status === "stale"
-                  ? "旧版卡片 · 待更新"
-                  : cardStateLabel(card.state)}
+              <span className="research-catalogue-identity">
+                <small>卡片编号 {cardNumber(card)}</small>
+                <span className="research-status" data-state={card.state}>
+                  {card.source_current === false ||
+                  card.source_status === "stale"
+                    ? "旧版卡片 · 待更新"
+                    : cardStateLabel(card.state)}
+                </span>
               </span>
-              <strong>{card.title}</strong>
-              <span className="research-card-row-summary">{card.summary}</span>
-              <small>{card.tags.join(" · ")}</small>
+              <strong className="research-catalogue-title" title={card.title}>
+                {card.title}
+              </strong>
+              <small
+                className="research-catalogue-authors"
+                title={authorLabel(card)}
+              >
+                {authorLabel(card)}
+              </small>
+              <small>
+                形成：{dateLabel(card.formation_date) || "日期未详"}
+              </small>
+              <small>
+                PDF 物理页 {pageRange(card.pages) || "待关联"}
+                {card.printed_pages ? ` · 原书页 ${card.printed_pages}` : ""}
+              </small>
             </button>
           ))}
           {cards.data?.items.length === 0 && (
@@ -243,9 +265,9 @@ function PublishedBookResearch({ book }: { book: Book }) {
           <ResearchDetail />
         ) : (
           <div className="research-selection-empty">
-            <h2>选择史料卡</h2>
+            <h2>选择一份文献</h2>
             <p>
-              查看摘要、原文证据、实体关系与使用边界，对照原图核验并导出
+              阅读完整文献的基本资料、核心内容、使用边界与规范引注，按需对照原图，并导出
               Markdown。
             </p>
           </div>

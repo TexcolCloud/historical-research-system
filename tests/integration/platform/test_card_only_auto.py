@@ -23,6 +23,8 @@ from hrs.storage import models as db
 from tests.integration.platform.test_research import research_book as research_book
 
 CARD_ONLY_POLICY = deepcopy(research_workflow.POLICY)
+CARD_ONLY_POLICY.update(version=6, card_only=True)
+CARD_ONLY_POLICY.pop("dossier_cards", None)
 
 
 @pytest.fixture

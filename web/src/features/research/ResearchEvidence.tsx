@@ -10,12 +10,14 @@ export default function ResearchEvidence({
   selected,
   historical = false,
   scope,
+  offset = 0,
 }: {
   evidence: ResearchEvidence[];
   bookId: string;
   selected?: string;
   historical?: boolean;
   scope?: string;
+  offset?: number;
 }) {
   const generatedScope = useId();
   const location = useLocation();
@@ -27,11 +29,11 @@ export default function ResearchEvidence({
         evidence.map((item, index) => (
           <article
             key={`${item.id}:${item.article_id}:${index}`}
-            id={`research-evidence-${scope ?? generatedScope}-${index}`}
+            id={`research-evidence-${scope ?? generatedScope}-${index + offset}`}
             data-selected={selected === item.id}
           >
             <div className="research-evidence-heading">
-              <strong>证据 {index + 1}</strong>
+              <strong>证据 {index + offset + 1}</strong>
               <span>PDF 第 {item.pages.join("、")} 页</span>
             </div>
             <blockquote>{item.quote}</blockquote>

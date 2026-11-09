@@ -11,12 +11,38 @@ from hrs.library.reading_locations import reading_target
 from hrs.processing.hashing import digest
 from hrs.storage import models as db
 
-PROJECTION_POLICY = 3
+PROJECTION_POLICY = 4
+
+
+def reading_identity(card, article=None):
+    """Compact reader labels, kept separate from authoritative source/card identities."""
+    dossier = card.get("dossier") or {}
+    citation = dossier.get("citation") or {}
+    metadata = card.get("metadata") or {}
+    parts = (article or {}).get("parts", [])
+    pages = (
+        sorted({page for part in parts for page in part.get("source", {}).get("pages", [])})
+        or (article or {}).get("pages", [])
+        or card.get("pages", [])
+    )
+    return {
+        "display_id": "CARD-" + card["id"][:12].upper() if card.get("id") else "",
+        "authors": (metadata.get("authors") or {}).get("value", ""),
+        "formation_date": card.get("formation_date") or {"certainty": "unknown"},
+        "publication_date": citation.get("publication_date") or {"certainty": "unknown"},
+        "pages": pages,
+        "printed_pages": (citation.get("printed_pages") or {}).get("value", ""),
+        "source_citation": (citation.get("full") or {}).get("value")
+        or (metadata.get("publication") or {}).get("value", ""),
+        "citation_completeness": citation.get("completeness", "unknown"),
+        "dossier_available": bool(dossier),
+    }
 
 
 def located_card(card, snapshot, external_sources=()):
     card = copy.deepcopy(card)
     articles = {article["id"]: article for article in [*snapshot["articles"], *external_sources]}
+    card.update(reading_identity(card, articles.get(card.get("article_id"))))
     for evidence in card.get("evidence", []):
         article = articles[evidence["article_id"]]
         chapter = {
@@ -322,6 +348,7 @@ def card_summary(card):
     )
     return {
         **{key: card.get(key) for key in fields},
+        **reading_identity(card),
         "card_only": bool(card.get("card_only")),
         "processing_mode": "source_cards" if card.get("card_only") else "legacy_research",
         "evidence_count": len(card.get("evidence", [])),

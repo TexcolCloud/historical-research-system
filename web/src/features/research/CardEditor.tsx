@@ -20,6 +20,7 @@ import CardItemFields from "./CardItemFields";
 import EvidenceOriginal from "./EvidenceOriginal";
 import { useResearchPendingNavigation } from "./pending-navigation";
 import { synchronizeCardCoverage } from "./card-coverage";
+import CardDossierFields, { dossierValidation } from "./CardDossierFields";
 
 type S = components["schemas"];
 type Metadata = S["DocumentMetadata"];
@@ -107,6 +108,7 @@ function DraftForm({
     card.data?.source_current === false ||
     card.data?.superseded === true;
   const sourceCards = cardOnly || isCardOnly(card.data);
+  const dossier = "dossier" in draft ? draft.dossier : undefined;
   function change<K extends keyof Draft>(field: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
   }
@@ -131,6 +133,16 @@ function DraftForm({
           className="research-card-editor"
           onSubmit={(event) => {
             event.preventDefault();
+            const dossierIssue =
+              dossier && dossierValidation(dossier, evidence);
+            if (dossierIssue) {
+              reportValidation(
+                dossierIssue.message,
+                dossierIssue.keys,
+                dossierIssue.label,
+              );
+              return;
+            }
             const missing = Object.entries(metadataLabels).flatMap(
               ([key, label]) => {
                 const value =
@@ -326,6 +338,15 @@ function DraftForm({
                 </div>
               )}
             </DeferredFields>
+            {dossier && (
+              <CardDossierFields
+                value={dossier}
+                evidence={evidence}
+                onChange={(value) =>
+                  setDraft((current) => ({ ...current, dossier: value }))
+                }
+              />
+            )}
             <CardItemFields
               value={items}
               evidence={evidence}

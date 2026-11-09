@@ -70,6 +70,64 @@ test("indexed books wait for automatic card creation without exposing a start ac
   ).toBe(true);
 });
 
+test("the catalogue identifies one complete document by stable display number, author, date and physical pages without expanding its themes", async () => {
+  const entry = {
+    id: "document-full",
+    display_id: "CARD-ABCDEF123456",
+    title: "完整报告题名",
+    authors:
+      "甲作者、乙作者、丙作者、丁作者、戊作者、己作者、庚作者、辛作者、壬作者",
+    formation_date: {
+      text: "1939年5月",
+      certainty: "stated",
+      evidence_ids: [],
+    },
+    pages: [3, 4, 5],
+    printed_pages: "10—12",
+    summary: "这个摘要不应占据文献清单",
+    tags: ["不显示的主题标签"],
+    state: "verified",
+    run_id: "run",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("/cards?")
+        ? Response.json({ items: [entry], total: 1, offset: 0, limit: 50 })
+        : Response.json({
+            book_id: "book",
+            runs: [],
+            indexed: true,
+            source_version: "a".repeat(64),
+            cards_count: 1,
+            entities_count: 0,
+          }),
+    ),
+  );
+  render(
+    <MemoryRouter>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <BookResearch book={book} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByText("完整报告题名");
+  expect(screen.getByText("卡片编号 CARD-ABCDEF123456")).toBeTruthy();
+  expect(screen.getByText(entry.authors).getAttribute("title")).toBe(
+    entry.authors,
+  );
+  expect(screen.getByText(entry.title).getAttribute("title")).toBe(entry.title);
+  expect(screen.getByText("形成：1939年5月")).toBeTruthy();
+  expect(screen.getByText("PDF 物理页 3–5 · 原书页 10—12")).toBeTruthy();
+  expect(screen.getByText("模型核验通过")).toBeTruthy();
+  expect(screen.queryByText(entry.summary)).toBeNull();
+  expect(screen.queryByText(entry.tags[0])).toBeNull();
+});
+
 test("legacy research cards remain readable without offering a new research upgrade", async () => {
   const old = {
     ...run,
@@ -341,6 +399,9 @@ test("excluding the last card on a later page returns to a valid page of remaini
     </MemoryRouter>,
   );
   await userEvent.click(
+    await screen.findByRole("button", { name: "核对本卡" }),
+  );
+  await userEvent.click(
     await screen.findByRole("button", { name: "排除此卡" }),
   );
   await screen.findByText("仍可阅读的卡片");
@@ -447,13 +508,15 @@ test("the new pending revision can be opened and accepted while the old complete
   );
   await screen.findByText("此前已完成卡片");
   await userEvent.click(
-    screen.getByRole("button", { name: /原文核验通过.*此前已完成卡片/ }),
+    screen.getByRole("button", { name: /模型核验通过.*此前已完成卡片/ }),
   );
   await screen.findByRole("heading", { name: "此前已完成卡片" });
+  await userEvent.click(screen.getByText("查看处理详情"));
   await userEvent.click(
     await screen.findByRole("button", { name: "查看本轮卡片 1" }),
   );
   await screen.findByRole("heading", { name: "新修订待核验卡" });
+  await userEvent.click(screen.getByRole("button", { name: "核对本卡" }));
   await userEvent.click(screen.getByRole("button", { name: "确认采用此卡" }));
   await screen.findByText("你的决定已保存，原有证据与版本继续保留。");
   expect(decisionPath).toBe("/api/v2/research/cards/new-card/decision");

@@ -43,7 +43,7 @@ source for PDF routing, original-first review, publication and post-index source
 For source cards and entity/event evidence, open the workbench's card view and
 inspect `research_status(run_id)`. Matching published, indexed, content-verified
 articles automatically enter a separate queue; original reading remains available.
-New v6 cards use native Sol author → independent verify and, when required, one
+New v7 document dossiers use native Sol author → independent verify and, when required, one
 directed repair → fresh independent reverify. Read each `research_claim` packet's
 frozen policy and schema. Follow the source-card section of `workflow_instructions`
 for complete source reads, candidate gates, omission inventories and coverage.
@@ -52,9 +52,16 @@ people, organizations, places, documents, event modalities and participant roles
 OpenSearch is an optional author/repair tool; new cards require no question plan
 or mandatory search receipt. Cross-card claims still require frozen complete
 sources and both card versions. Search hits and graph neighbours remain leads.
+New dossiers add source-bound background, scope, structure, value and three-part
+evidence boundaries; limited argument units retain direct citations, applicability
+limits and what still needs corroboration. Supported full/short citations distinguish
+actual printed pages from PDF physical pages and carrier publication from formation
+and event dates. Missing bibliography stays explicitly partial/unknown. Independent
+verification checks every advertised dossier field; interpretation is not source fact
+or a historical credibility grade. Older cards display their own retained fields.
 Canonical identity changes and structured card revisions are explicit local human
 actions. Personal notes are separately versioned and remain distinct from source
-claims. Existing v1–v5 runs keep their frozen contracts; index rebuilding never
+claims. Existing v1–v6 runs keep their frozen contracts; index rebuilding never
 upgrades them. New research-question and automatic link-refresh execution is
 retired; prior history remains readable/exportable. Old `kind=cards` stays retired.
 

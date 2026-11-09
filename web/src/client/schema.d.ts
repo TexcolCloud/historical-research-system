@@ -1181,6 +1181,29 @@ export interface components {
             /** Quote Locations */
             quote_locations?: components["schemas"]["CardQuoteLocation"][];
         };
+        /**
+         * CardDossier
+         * @description Interpretive reading and bibliographic boundaries tied to this card's actual evidence.
+         */
+        CardDossier: {
+            research_scope: components["schemas"]["SourceValue"];
+            formation_background: components["schemas"]["SourceValue"];
+            text_structure: components["schemas"]["SourceValue"];
+            source_nature: components["schemas"]["SourceValue"];
+            source_role: components["schemas"]["SourceValue"];
+            research_value: components["schemas"]["SourceValue"];
+            can_support: components["schemas"]["SourceValue"];
+            cannot_support: components["schemas"]["SourceValue"];
+            needs_corroboration: components["schemas"]["SourceValue"];
+            /** Argument Units */
+            argument_units: components["schemas"]["DossierArgumentUnit"][];
+            /**
+             * Argument Units Note
+             * @default
+             */
+            argument_units_note: string;
+            citation: components["schemas"]["DossierCitation"];
+        };
         /** CardDraft */
         "CardDraft-Input": {
             /** Id */
@@ -1478,7 +1501,7 @@ export interface components {
             /** Expected Version */
             expected_version: number;
             /** Card */
-            card: components["schemas"]["CardDraft-Input"] | components["schemas"]["CardOnlyCardDraft"];
+            card: components["schemas"]["CardDraft-Input"] | components["schemas"]["CardOnlyCardDraft"] | components["schemas"]["DossierCardDraft"];
             /**
              * Reason
              * @default
@@ -1805,6 +1828,172 @@ export interface components {
             purpose?: components["schemas"]["SourceValue"];
             testimony?: components["schemas"]["SourceValue"];
         };
+        /**
+         * DossierArgumentUnit
+         * @description A source-bound interpretation with explicit limits, never an automatic paper conclusion.
+         */
+        DossierArgumentUnit: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Claim */
+            claim: string;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Applicability Limit */
+            applicability_limit: string;
+            /** Corroboration Needed */
+            corroboration_needed: string;
+        };
+        /**
+         * DossierCardDraft
+         * @description Frozen-v7 source dossier; earlier cards keep their original content contracts.
+         */
+        DossierCardDraft: {
+            /** Id */
+            id: string;
+            /** Article Id */
+            article_id: string;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /**
+             * Document Type
+             * @default
+             */
+            document_type: string;
+            /**
+             * Source Layer
+             * @default
+             */
+            source_layer: string;
+            formation_date?: components["schemas"]["ResearchDate"];
+            event_date?: components["schemas"]["ResearchDate"];
+            /** Items */
+            items?: components["schemas"]["CardItem"][];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceSpan"][];
+            /** Mentions */
+            mentions?: components["schemas"]["CardOnlyMention"][];
+            /** Events */
+            events?: components["schemas"]["CompleteEvent"][];
+            /** Relations */
+            relations?: components["schemas"]["RelationDraft"][];
+            /** Identity Links */
+            identity_links?: components["schemas"]["IdentityLink"][];
+            /** Tags */
+            tags?: string[];
+            /** Limitations */
+            limitations?: string[];
+            /** Alternatives */
+            alternatives?: string[];
+            /** Questions */
+            questions?: string[];
+            /** No Argument Reason */
+            no_argument_reason?: string | null;
+            /** @description Retain every metadata field. Missing facts remain explicit unknown values; do not invent facts or repeat the same source limitation in each field. */
+            metadata: components["schemas"]["CompleteMetadata"];
+            /** Coverage */
+            coverage: components["schemas"]["CoverageUnit"][];
+            /** Research Plan */
+            research_plan?: components["schemas"]["ResearchQuestion"][];
+            /** Cross Relations */
+            cross_relations?: components["schemas"]["CrossCardRelation"][];
+            /** Question Findings */
+            question_findings?: components["schemas"]["QuestionFinding"][];
+            dossier: components["schemas"]["CardDossier"];
+        };
+        /** DossierCitation */
+        DossierCitation: {
+            /** @description Source-backed full citation or unknown; never invent a publisher, edition or archive locator. */
+            full: components["schemas"]["SourceValue"];
+            short: components["schemas"]["SourceValue"];
+            /** @description Only actual printed page labels explicitly supported by source text or frozen source provenance and cited evidence; never infer them from PDF/image ordinals. */
+            printed_pages: components["schemas"]["SourceValue"];
+            /** @description Publication date of the carrier, separate from document formation and historical event dates. Unknown is allowed. */
+            publication_date: components["schemas"]["ResearchDate"];
+            /**
+             * Completeness
+             * @enum {string}
+             */
+            completeness: "complete" | "partial" | "unknown";
+            /** Missing Fields */
+            missing_fields: string[];
+        };
+        /** DossierVerificationSubmission */
+        DossierVerificationSubmission: {
+            /** Input Hash */
+            input_hash: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "pending";
+            /** Checked Card Ids */
+            checked_card_ids: string[];
+            /**
+             * Checked Item Ids
+             * @description Checked card_id/item_id values from candidate.required_checks
+             */
+            checked_item_ids?: string[];
+            /**
+             * Checked Evidence Ids
+             * @description Checked card_id/evidence_id values from candidate.required_checks
+             */
+            checked_evidence_ids?: string[];
+            /**
+             * Checked Relation Ids
+             * @description Checked card_id/relation_id values from candidate.required_checks
+             */
+            checked_relation_ids?: string[];
+            /**
+             * Checked Identity Links
+             * @description Checked card_id/link_index values from candidate.required_checks
+             */
+            checked_identity_links?: string[];
+            /**
+             * Checked Research Disposition
+             * @default false
+             */
+            checked_research_disposition: boolean;
+            /**
+             * Checked Search Receipt Ids
+             * @description Every server search receipt ID in candidate.required_checks
+             */
+            checked_search_receipt_ids?: string[];
+            /** Issues */
+            issues?: string[];
+            /**
+             * Checked Mechanical Evidence Ids
+             * @description Every decoded mechanical evidence receipt ID in candidate.required_checks; semantic review remains separate
+             */
+            checked_mechanical_evidence_ids?: string[];
+            /** Checked Metadata Fields */
+            checked_metadata_fields?: string[];
+            /** Checked Entity Ids */
+            checked_entity_ids?: string[];
+            /** Checked Event Ids */
+            checked_event_ids?: string[];
+            /** Checked Coverage Ids */
+            checked_coverage_ids?: string[];
+            /** Checked Research Question Ids */
+            checked_research_question_ids?: string[];
+            /** Checked Cross Relation Ids */
+            checked_cross_relation_ids?: string[];
+            /** Checked Question Finding Ids */
+            checked_question_finding_ids?: string[];
+            /** Coverage Assessments */
+            coverage_assessments?: components["schemas"]["CardOnlyCoverageAssessment"][];
+            /** Checked Inventory Ids */
+            checked_inventory_ids?: string[];
+            /**
+             * Checked Dossier Fields
+             * @description Every exact card_id/dossier/... field path in candidate.required_checks, including all reading/citation fields and argument units. Check source support, inference limits and bibliographic honesty; mechanical checks alone never approve a source claim.
+             */
+            checked_dossier_fields: string[];
+        };
         /** DraftEntity */
         DraftEntity: {
             /**
@@ -1910,7 +2099,7 @@ export interface components {
         /** EditableCardResponse */
         EditableCardResponse: {
             /** Card */
-            card: components["schemas"]["hrs__research__models__CardDraft"] | components["schemas"]["CardOnlyCardDraft"];
+            card: components["schemas"]["hrs__research__models__CardDraft"] | components["schemas"]["CardOnlyCardDraft"] | components["schemas"]["DossierCardDraft"];
             /** Version */
             version: number;
             /** Source Current */
@@ -2723,6 +2912,41 @@ export interface components {
         };
         /** ResearchCardResponse */
         ResearchCardResponse: {
+            /**
+             * Display Id
+             * @default
+             */
+            display_id: string;
+            /**
+             * Authors
+             * @default
+             */
+            authors: string;
+            formation_date?: components["schemas"]["ResearchDate"];
+            publication_date?: components["schemas"]["ResearchDate"];
+            /** Pages */
+            pages?: number[];
+            /**
+             * Printed Pages
+             * @default
+             */
+            printed_pages: string;
+            /**
+             * Source Citation
+             * @default
+             */
+            source_citation: string;
+            /**
+             * Citation Completeness
+             * @default unknown
+             * @enum {string}
+             */
+            citation_completeness: "complete" | "partial" | "unknown";
+            /**
+             * Dossier Available
+             * @default false
+             */
+            dossier_available: boolean;
             /** Id */
             id: string;
             /** Article Id */
@@ -2741,7 +2965,6 @@ export interface components {
              * @default
              */
             source_layer: string;
-            formation_date?: components["schemas"]["ResearchDate"];
             event_date?: components["schemas"]["ResearchDate"];
             /** Items */
             items?: components["schemas"]["CardItem"][];
@@ -2790,7 +3013,8 @@ export interface components {
              */
             book_title: string;
             /** Checks */
-            checks: components["schemas"]["VerificationSubmission"] | components["schemas"]["CardOnlyVerificationSubmission"];
+            checks: components["schemas"]["VerificationSubmission"] | components["schemas"]["CardOnlyVerificationSubmission"] | components["schemas"]["DossierVerificationSubmission"];
+            dossier?: components["schemas"]["CardDossier"] | null;
             /**
              * Card Only
              * @default false
@@ -2867,6 +3091,41 @@ export interface components {
         };
         /** ResearchCardSummary */
         ResearchCardSummary: {
+            /**
+             * Display Id
+             * @default
+             */
+            display_id: string;
+            /**
+             * Authors
+             * @default
+             */
+            authors: string;
+            formation_date?: components["schemas"]["ResearchDate"];
+            publication_date?: components["schemas"]["ResearchDate"];
+            /** Pages */
+            pages?: number[];
+            /**
+             * Printed Pages
+             * @default
+             */
+            printed_pages: string;
+            /**
+             * Source Citation
+             * @default
+             */
+            source_citation: string;
+            /**
+             * Citation Completeness
+             * @default unknown
+             * @enum {string}
+             */
+            citation_completeness: "complete" | "partial" | "unknown";
+            /**
+             * Dossier Available
+             * @default false
+             */
+            dossier_available: boolean;
             /** Id */
             id: string;
             /** Book Id */

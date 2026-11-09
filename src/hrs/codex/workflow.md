@@ -426,7 +426,7 @@ reading remains available while research runs; card failure or human pending doe
 not revoke source publication. The SQLite research workflow owns frozen sources,
 leases, decisions and revisions; SQL/S3 are its read projections.
 
-### Default v6 source cards
+### Default v7 document dossiers
 
 Publication and matching OpenSearch source-index completion automatically enqueue
 one source-card run. The durable key binds source run, publication and chapter
@@ -434,12 +434,12 @@ hashes; reconciliation and index rebuilding reuse the existing run even when its
 policy is older or it is human pending. An explicit source/card revision preserves
 previous publications and decisions. Do not create a second task to start cards.
 
-The default v6 coordinator spawns native Sol `research_card_author` → independent
+The default v7 coordinator spawns native Sol `research_card_author` → independent
 `research_verifier`. One failed content verification may schedule
 `research_repairer` → fresh `research_reverification`; a failed reverify stays human
 pending. There is no enrich stage. The following shared source-reading, candidate,
-identity-attestation and evidence checks remain mandatory. Frozen v1–v5 runs keep
-their stage contracts below, including enrich and any required search plan.
+identity-attestation and evidence checks remain mandatory. Frozen v1–v6 runs keep their original content contracts; v6 retains its source-card
+flow without dossier fields, while v1–v5 retain any enrich/search requirements below.
 
 Create one complete source card per independent article. Preserve formation,
 event and publication dates as distinct concepts, source metadata, faithful
@@ -451,10 +451,12 @@ Event modalities distinguish reported occurrence, plans, conditions and negation
 
 Author/repair may optionally use `research_search`, `research_entities`,
 `research_related` and frozen target-card tools. A query plan and search minimum
-are unnecessary for v6. External claims require complete frozen source reads and
+are unnecessary for v6/v7. External claims require complete frozen source reads and
 exact evidence; independent verify/reverify reads those sources before candidates
 and checks retained search receipts, rather than performing fresh live searches.
-Source cards do not answer notebook questions or automatically build arguments.
+Source cards do not answer notebook questions. A v7 dossier may describe narrowly
+source-bound use judgments with direct evidence and explicit applicability limits;
+it does not compose a paper argument or a cross-source research conclusion.
 Prior question records and findings remain readable/exportable; new question
 execution and automatic link-refresh production are retired.
 
@@ -475,7 +477,37 @@ Personal notes use a separate lineage-based versioned ledger with compare-and-sw
 saves. Model revisions preserve them; notes are neither model evidence nor source
 approval and are not added to source/entity embeddings.
 
-### Shared contracts and retained v1–v5 research
+### Dossier reading and citation contract (v7)
+
+New cards retain the complete source-card structure and add `dossier` as a separately
+checked reading layer. Its source-valued sections describe research scope, formation
+background, text structure, source nature and role, research value, what this text can
+support, what it cannot directly prove and what still needs corroboration. Distinguish
+source statements from source-bound interpretation; never treat a workflow approval
+as a historical credibility grade. Be concise and do not duplicate whole source text.
+
+Every known section and argument unit cites this card's real evidence IDs. Argument
+units state a limited use judgment, direct evidence, applicability limit and remaining
+corroboration; an empty list needs an honest source-specific explanation. Unknown
+information remains unknown and does not itself cause human pending. Do not invent
+background, effectiveness, receivers' agreement or outcomes to fill a template.
+
+`dossier.citation` preserves supported full/short citation forms, actual printed page
+labels and carrier publication date, with completeness and missing bibliographic
+fields. Keep formation, event and publication dates distinct. Printed pages require
+explicit original wording or actual frozen source provenance plus cited evidence;
+PDF/image ordinals do not establish a printed page label. Partial citations are valid
+partial records; missing publisher, edition, archive identifier or date cannot be guessed.
+
+Verify/reverify retains the complete source-first reading and omission inventory.
+Check every advertised `checked_dossier_fields` entry, including each reading section,
+each argument-unit field, empty-unit note and every citation field. Exact quotations
+alone do not certify the new interpretations or bibliography. A failed final check
+remains in the local human queue after the one permitted repair and fresh reverify.
+Existing v1–v6 cards are displayed from their retained content, with honest missing
+sections, and are never silently regenerated or relabelled as v7.
+
+### Shared evidence contracts and retained policies
 
 Retained policies dispatch native Sol children with fresh contexts:
 `author` uses `research_card_author`, `enrich` uses `research_searcher`, and
@@ -515,7 +547,7 @@ child or copy an earlier execution's name. Workers retain that identity;
 if attestation is pending, wait rather than rename.
 A native thread that authored or enriched material cannot verify it under a new
 worker name. MCP callers cannot grant this host-only identity attestation.
-Complete v5/v6 work has bounded generation time based on stage and source length,
+Complete v5/v6/v7 work has bounded generation time based on stage and source length,
 plus an absolute deadline from its claim. Only the current host-bound active
 execution receives that budget and matching lease renewal. Tool activity cannot
 extend the absolute deadline. Unobserved/old execution identities retain the

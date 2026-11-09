@@ -15,6 +15,13 @@ from tests.unit.research.test_complete_workflow import (
     source,
 )
 
+V6_POLICY = {**deepcopy(POLICY), "version": 6, "dossier_cards": False}
+
+
+@pytest.fixture(autouse=True)
+def retain_v6_policy(monkeypatch):
+    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", V6_POLICY)
+
 
 def card_draft(book="book-a"):
     card = draft(book)
@@ -26,7 +33,7 @@ def card_draft(book="book-a"):
 
 
 def author(workflow, book="book-a", card=None):
-    run = workflow.enqueue(source(book))
+    run = workflow.enqueue(source(book), _policy=V6_POLICY)
     packet = workflow.claim(run["run_id"], "author-" + book, stage="author")
     read(workflow, packet)
     workflow.submit(
@@ -69,7 +76,7 @@ def review(workflow, run, *, book="book-a", stage="verify", decision="approve", 
 
 
 def test_default_cards_go_directly_from_author_to_source_first_verification(tmp_path):
-    assert POLICY["version"] == 6 and POLICY["card_only"]
+    assert V6_POLICY["version"] == 6 and V6_POLICY["card_only"]
     workflow = ResearchWorkflow(Store(tmp_path / "native"))
     run = author(workflow)
     status = workflow.status(run["run_id"])

@@ -16,9 +16,12 @@ from hrs.processing.workspace import identity
 from hrs.research.bridge import ResearchBridge
 from hrs.research.card_notes import CardNotes
 from hrs.research.models import (
+    CardDossier,
     CardDraft,
     CardOnlyCardDraft,
     CardOnlyVerificationSubmission,
+    DossierCardDraft,
+    DossierVerificationSubmission,
     EntityMention,
     EventDraft,
     EvidenceSpan,
@@ -96,7 +99,19 @@ class ResearchHumanDecision(BaseModel):
     previous_version: int
 
 
-class ResearchCardResponse(CardDraft):
+class CardReadingIdentity(BaseModel):
+    display_id: str = ""
+    authors: str = ""
+    formation_date: ResearchDate = Field(default_factory=ResearchDate)
+    publication_date: ResearchDate = Field(default_factory=ResearchDate)
+    pages: list[int] = Field(default_factory=list)
+    printed_pages: str = ""
+    source_citation: str = ""
+    citation_completeness: Literal["complete", "partial", "unknown"] = "unknown"
+    dossier_available: bool = False
+
+
+class ResearchCardResponse(CardDraft, CardReadingIdentity):
     model_config = ConfigDict(extra="allow")
     book_id: str
     run_id: str
@@ -104,7 +119,8 @@ class ResearchCardResponse(CardDraft):
     version: int
     approval_type: str | None = None
     book_title: str = ""
-    checks: VerificationSubmission | CardOnlyVerificationSubmission
+    checks: VerificationSubmission | CardOnlyVerificationSubmission | DossierVerificationSubmission
+    dossier: CardDossier | None = None
     card_only: bool = False
     processing_mode: Literal["source_cards", "legacy_research"] = "legacy_research"
     human_notes: str = ""
@@ -132,7 +148,7 @@ class ResearchCardResponse(CardDraft):
 
 
 class EditableCardResponse(BaseModel):
-    card: CardDraft | CardOnlyCardDraft
+    card: CardDraft | CardOnlyCardDraft | DossierCardDraft
     version: int
     source_current: bool
     superseded: bool
@@ -152,7 +168,7 @@ class CardNotesUpdate(BaseModel):
     text: str = Field(max_length=60000)
 
 
-class ResearchCardSummary(BaseModel):
+class ResearchCardSummary(CardReadingIdentity):
     id: str
     book_id: str
     run_id: str
@@ -1037,6 +1053,12 @@ class Research:
             article["id"]: article
             for article in [*snapshot["articles"], *self.workflow.sources(card["run_id"])]
         }
+        if card.get("dossier"):
+            from hrs.research.dossier_export import export_dossier
+
+            return export_dossier(
+                card, articles, base_url=base_url, render_evidence=evidence_markdown
+            )
         lines = [f"# {card['title']}", ""]
         evidence_anchors = {
             span["id"]: f"research-evidence-{index}"
