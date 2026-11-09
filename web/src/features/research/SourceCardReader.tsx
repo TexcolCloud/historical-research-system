@@ -261,6 +261,9 @@ export default function SourceCardReader({
                   <p>
                     请点引文对照原文或原图，再决定是否采用。模型核验结果不代表你的确认。
                   </p>
+                  <p>
+                    人物、机构、地点、事件或引注需要改动时，请选择“修订完整卡片”；“修订提要”只修改提要。
+                  </p>
                   {editing ? (
                     <>
                       <label htmlFor={`${scope}-summary`}>修订提要</label>

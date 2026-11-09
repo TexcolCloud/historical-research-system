@@ -1,5 +1,5 @@
 import { Link, useSearchParams } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import type { Book } from "@/client/api";
@@ -61,6 +61,21 @@ function PublishedBookResearch({ book }: { book: Book }) {
       ? undefined
       : latestCurrent;
   const selected = params.get("card");
+  const catalogue = useRef<HTMLElement>(null);
+  const revealedCard = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selected) {
+      revealedCard.current = null;
+      return;
+    }
+    if (revealedCard.current === selected) return;
+    const row = catalogue.current?.querySelector<HTMLElement>(
+      '[aria-pressed="true"]',
+    );
+    if (!row) return;
+    row.scrollIntoView({ block: "nearest" });
+    revealedCard.current = selected;
+  }, [selected, cards.data?.items]);
   const hasDetail = Boolean(selected || params.get("entity"));
   function page(nextOffset: number) {
     const next = new URLSearchParams(params);
@@ -180,7 +195,11 @@ function PublishedBookResearch({ book }: { book: Book }) {
           </p>
         )}
       <div className="research-book-layout" data-detail={hasDetail}>
-        <aside className="research-card-list" aria-label="本书史料卡">
+        <aside
+          ref={catalogue}
+          className="research-card-list"
+          aria-label="本书史料卡"
+        >
           <header>
             <h2>文献清单</h2>
             <span>

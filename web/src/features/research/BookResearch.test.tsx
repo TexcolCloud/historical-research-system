@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,6 +9,7 @@ import BookResearch from "./BookResearch";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 function HistoryBack() {
   const navigate = useNavigate();
@@ -70,7 +71,10 @@ test("indexed books wait for automatic card creation without exposing a start ac
   ).toBe(true);
 });
 
-test("the catalogue identifies one complete document by stable display number, author, date and physical pages without expanding its themes", async () => {
+test("the catalogue identifies a complete document and reveals its selection once, without moving it again on refresh", async () => {
+  const scroll = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(() => {});
   const entry = {
     id: "document-full",
     display_id: "CARD-ABCDEF123456",
@@ -88,20 +92,31 @@ test("the catalogue identifies one complete document by stable display number, a
     tags: ["不显示的主题标签"],
     state: "verified",
     run_id: "run",
+    card_only: true,
+    evidence: [],
+    items: [],
+    mentions: [],
+    events: [],
+    relations: [],
+    limitations: [],
+    alternatives: [],
+    questions: [],
   };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) =>
       String(input).includes("/cards?")
         ? Response.json({ items: [entry], total: 1, offset: 0, limit: 50 })
-        : Response.json({
-            book_id: "book",
-            runs: [],
-            indexed: true,
-            source_version: "a".repeat(64),
-            cards_count: 1,
-            entities_count: 0,
-          }),
+        : String(input).includes("/cards/document-full")
+          ? Response.json(entry)
+          : Response.json({
+              book_id: "book",
+              runs: [],
+              indexed: true,
+              source_version: "a".repeat(64),
+              cards_count: 1,
+              entities_count: 0,
+            }),
     ),
   );
   render(
@@ -126,6 +141,20 @@ test("the catalogue identifies one complete document by stable display number, a
   expect(screen.getByText("模型核验通过")).toBeTruthy();
   expect(screen.queryByText(entry.summary)).toBeNull();
   expect(screen.queryByText(entry.tags[0])).toBeNull();
+  const row = screen.getByRole("button", { name: /CARD-ABCDEF123456/ });
+  expect(scroll).not.toHaveBeenCalled();
+  await userEvent.click(row);
+  await waitFor(() => expect(row.getAttribute("aria-pressed")).toBe("true"));
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(scroll.mock.instances[0]).toBe(row);
+  expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+  await userEvent.click(screen.getByRole("button", { name: "刷新清单" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "刷新清单" }).hasAttribute("disabled"),
+    ).toBe(false),
+  );
+  expect(scroll).toHaveBeenCalledTimes(1);
 });
 
 test("legacy research cards remain readable without offering a new research upgrade", async () => {

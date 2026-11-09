@@ -374,7 +374,14 @@ when a newly approved neighbor changes its evidence; the same unresolved snapsho
 does not automatically loop. Retained claimed inputs are never resized.
 An optional `target_title` must describe a visible title variant with `title_relation`
 evidence. Optional `page_observations` require opening those originals under the
-navigation lease. For a TOC range such as `38—130`, `target_label` is the printed
+navigation lease. Page structure may retain `running_headers` and `running_footers`
+as arrays of literal full first/last nonempty Markdown lines, including their folio.
+Declare them only after inspecting the original pixels; actual titles and TOC entries
+are not furniture. Cross-page fragments may skip these hash-bound outer lines. When
+such a line blocks a boundary, include its observation in the same navigation result
+and keep it outside the title fragments. Unobserved, stale, partial and interior lines
+cannot be skipped. Missing fields preserve older structure and receipts unchanged.
+For a TOC range such as `38—130`, `target_label` is the printed
 START label `38`, with optional `target_end_label="130"`; preserve the entire range
 in `source_anchor`. Never use a whole range as a single-page label. Open originals
 for any title alias and do not fabricate a date/author/title relationship.

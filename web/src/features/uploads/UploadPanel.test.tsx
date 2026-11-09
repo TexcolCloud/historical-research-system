@@ -5,7 +5,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import UploadPanel from "./UploadPanel";
 
 const session = vi.hoisted(() => ({
-  files: [] as { progress: { uploadComplete: boolean } }[],
+  files: [] as {
+    progress: { uploadComplete: boolean; uploadStarted?: number };
+    isPaused?: boolean;
+    error?: string;
+  }[],
   callbacks: new Map<string, Set<() => void>>(),
   destroy: vi.fn(),
 }));
@@ -48,7 +52,11 @@ test("minimized uploads retain the session and report count changes without prog
     </QueryClientProvider>
   );
   const mounted = render(view(true));
-  expect(activity).toHaveBeenLastCalledWith({ total: 0, pending: 0 });
+  expect(activity).toHaveBeenLastCalledWith({
+    total: 0,
+    pending: 0,
+    uploading: 0,
+  });
   act(() => {
     session.files = [
       { progress: { uploadComplete: false } },
@@ -56,7 +64,11 @@ test("minimized uploads retain the session and report count changes without prog
     ];
     session.callbacks.get("state-update")?.forEach((callback) => callback());
   });
-  expect(activity).toHaveBeenLastCalledWith({ total: 2, pending: 1 });
+  expect(activity).toHaveBeenLastCalledWith({
+    total: 2,
+    pending: 1,
+    uploading: 0,
+  });
   const count = activity.mock.calls.length;
   act(() =>
     session.callbacks.get("state-update")?.forEach((callback) => callback()),
@@ -67,5 +79,61 @@ test("minimized uploads retain the session and report count changes without prog
   mounted.unmount();
   expect(session.destroy).toHaveBeenCalledTimes(1);
   expect(session.callbacks.get("state-update")?.size).toBe(0);
+  query.clear();
+});
+
+test("selected, paused and failed files are pending, but only a running transfer is uploading", () => {
+  const activity = vi.fn();
+  const query = new QueryClient();
+  render(
+    <QueryClientProvider client={query}>
+      <UploadPanel
+        open={true}
+        onOpenChange={() => undefined}
+        onActivityChange={activity}
+      />
+    </QueryClientProvider>,
+  );
+  const update = (file: (typeof session.files)[number]) =>
+    act(() => {
+      session.files = [file];
+      session.callbacks.get("state-update")?.forEach((callback) => callback());
+    });
+  update({ progress: { uploadComplete: false } });
+  expect(activity).toHaveBeenLastCalledWith({
+    total: 1,
+    pending: 1,
+    uploading: 0,
+  });
+  update({ progress: { uploadComplete: false, uploadStarted: 1 } });
+  expect(activity).toHaveBeenLastCalledWith({
+    total: 1,
+    pending: 1,
+    uploading: 1,
+  });
+  update({
+    progress: { uploadComplete: false, uploadStarted: 1 },
+    isPaused: true,
+  });
+  expect(activity).toHaveBeenLastCalledWith({
+    total: 1,
+    pending: 1,
+    uploading: 0,
+  });
+  update({
+    progress: { uploadComplete: false, uploadStarted: 1 },
+    error: "synthetic connection failure",
+  });
+  expect(activity).toHaveBeenLastCalledWith({
+    total: 1,
+    pending: 1,
+    uploading: 0,
+  });
+  update({ progress: { uploadComplete: true, uploadStarted: 1 } });
+  expect(activity).toHaveBeenLastCalledWith({
+    total: 1,
+    pending: 0,
+    uploading: 0,
+  });
   query.clear();
 });

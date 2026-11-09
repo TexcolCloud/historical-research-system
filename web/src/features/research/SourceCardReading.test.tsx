@@ -181,6 +181,13 @@ test.each([
     expect(
       Boolean(screen.queryByRole("button", { name: "修订完整卡片" })),
     ).toBe(current);
+    expect(
+      Boolean(
+        screen.queryByText(
+          "人物、机构、地点、事件或引注需要改动时，请选择“修订完整卡片”；“修订提要”只修改提要。",
+        ),
+      ),
+    ).toBe(allowed);
     await userEvent.click(screen.getByRole("button", { name: "阅读本卡" }));
     expect(screen.queryByRole("button", { name: "确认采用此卡" })).toBeNull();
   },

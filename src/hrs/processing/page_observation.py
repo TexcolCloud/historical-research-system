@@ -9,10 +9,22 @@ from hrs.processing.hashing import digest
 
 KINDS = {"toc", "text", "frontmatter", "table", "figure", "unknown"}
 FIELDS = ("kind", "printed_label", "headings", "sequence", "reason")
+RUNNING_FIELDS = ("running_headers", "running_footers")
+FIELDS += RUNNING_FIELDS
 
 
 def normalized(text):
     return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text)).casefold()
+
+
+def running_line(text, value, field):
+    """Running furniture must be a unique whole first/last nonempty source line."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return (
+        bool(lines)
+        and text.count(value) == 1
+        and value.strip() == lines[0 if field == "running_headers" else -1]
+    )
 
 
 def structure(value):
@@ -38,12 +50,25 @@ def structure(value):
     reason = value.get("reason")
     if reason is not None and (not isinstance(reason, str) or not reason.strip()):
         raise ValueError("Page structure reason must be nonempty text")
+    furniture = {}
+    for field in RUNNING_FIELDS:
+        if field not in value:
+            continue
+        items = value[field]
+        if (
+            not isinstance(items, list)
+            or any(not isinstance(item, str) or not item.strip() for item in items)
+            or len(items) != len(set(items))
+        ):
+            raise ValueError(f"{field} must contain distinct nonempty literal lines")
+        furniture[field] = list(items)
     return {
         "kind": value["kind"],
         "printed_label": label,
         "headings": list(headings),
         "sequence": sequence,
         **({"reason": reason} if reason else {}),
+        **furniture,
     }
 
 
@@ -55,6 +80,9 @@ def observation(page, value):
         raise ValueError("Printed label must be retained in the approved source text")
     if any(normalized(heading) not in normalized(text) for heading in value["headings"]):
         raise ValueError("Heading observations must occur in approved source text")
+    for field in RUNNING_FIELDS:
+        if any(not running_line(text, line, field) for line in value.get(field, [])):
+            raise ValueError(f"{field} requires a unique complete outer source line")
     return {
         **value,
         "image_sha256": page["image_sha256"],
@@ -114,6 +142,15 @@ def _rebind(page, value):
         else:
             dropped.append("heading:" + heading)
     value["headings"] = retained
+    for field in RUNNING_FIELDS:
+        if field in value:
+            retained = []
+            for line in value[field]:
+                if running_line(text, line, field):
+                    retained.append(line)
+                else:
+                    dropped.append(field + ":" + line)
+            value[field] = retained
     return observation(page, value), dropped
 
 

@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { respondWith } from "@/test/responses";
 import { research } from "@/features/research/api";
+import type { UploadActivity } from "@/features/uploads/UploadPanel";
 
 beforeEach(() =>
   vi
@@ -21,19 +22,96 @@ vi.mock("@/routes/BookPage.tsx", () => ({
 vi.mock("@/features/uploads/UploadPanel.tsx", async () => {
   const { useEffect } = await import("react");
   return {
-    default: function Upload() {
+    default: function Upload({
+      onActivityChange,
+    }: {
+      onActivityChange?: (value: UploadActivity) => void;
+    }) {
       useEffect(() => {
         lifetime.mounts++;
         return () => {
           lifetime.stops++;
         };
       }, []);
-      return <div data-testid="upload-session">synthetic upload</div>;
+      return (
+        <div data-testid="upload-session">
+          synthetic upload
+          <button
+            onClick={() =>
+              onActivityChange?.({ total: 1, pending: 1, uploading: 0 })
+            }
+          >
+            合成选择文件
+          </button>
+          <button
+            onClick={() =>
+              onActivityChange?.({ total: 1, pending: 1, uploading: 1 })
+            }
+          >
+            合成开始上传
+          </button>
+          <button
+            onClick={() =>
+              onActivityChange?.({ total: 1, pending: 0, uploading: 0 })
+            }
+          >
+            合成上传完成
+          </button>
+        </div>
+      );
     },
   };
 });
+
+test("the header distinguishes a selected file from a running transfer and a completed upload", async () => {
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      close() {}
+    },
+  );
+  respondWith((request) =>
+    request.url.includes("/events/snapshot")
+      ? { books: [], cursor: 0 }
+      : request.url.includes("/runtime")
+        ? { validation_scope: "content" }
+        : [],
+  );
+  const query = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const view = render(
+    <MemoryRouter>
+      <QueryClientProvider client={query}>
+        <App />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "导入书籍" }));
+  await user.click(await screen.findByRole("button", { name: "合成选择文件" }));
+  expect(
+    screen.getByRole("button", { name: "查看导入进展" }).textContent,
+  ).toContain("待上传 · 1");
+  await user.click(screen.getByRole("button", { name: "合成开始上传" }));
+  expect(
+    screen.getByRole("button", { name: "查看导入进展" }).textContent,
+  ).toContain("上传中 · 1");
+  await user.click(screen.getByRole("button", { name: "合成选择文件" }));
+  expect(
+    screen.getByRole("button", { name: "查看导入进展" }).textContent,
+  ).toContain("待上传 · 1");
+  await user.click(screen.getByRole("button", { name: "合成上传完成" }));
+  expect(screen.getByRole("button", { name: "查看导入进展" }).textContent).toBe(
+    "上传史料",
+  );
+  view.unmount();
+  query.clear();
+});
 afterEach(() => {
   cleanup();
+  lifetime.mounts = 0;
+  lifetime.stops = 0;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });

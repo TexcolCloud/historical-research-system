@@ -116,3 +116,57 @@ test("notes conflict preserves human input and requires an explicit latest-versi
     requests.every((url) => url === "/api/v2/research/cards/card/notes"),
   ).toBe(true);
 });
+
+test("switching away retains an unsaved per-card draft and refresh warns until it is saved", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      Response.json({
+        text: init?.method === "PATCH" ? "未保存的研究记录" : "已保存备注",
+        version: init?.method === "PATCH" ? 2 : 1,
+        updated_at: 1,
+      }),
+    ),
+  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const view = (id: string) => (
+    <QueryClientProvider client={client}>
+      <CardNotes key={id} cardId={id} />
+    </QueryClientProvider>
+  );
+  const first = render(view("card-a"));
+  await userEvent.click(screen.getByText("人工备注"));
+  const field = await screen.findByRole("textbox", { name: "人工备注内容" });
+  await userEvent.clear(field);
+  await userEvent.type(field, "未保存的研究记录");
+  const before = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(before);
+  expect(before.defaultPrevented).toBe(true);
+  first.unmount();
+  const other = render(view("card-b"));
+  await userEvent.click(screen.getByText("人工备注"));
+  expect(
+    (
+      (await screen.findByRole("textbox", {
+        name: "人工备注内容",
+      })) as HTMLTextAreaElement
+    ).value,
+  ).toBe("已保存备注");
+  other.unmount();
+  render(view("card-a"));
+  await userEvent.click(screen.getByText("人工备注"));
+  expect(
+    (
+      (await screen.findByRole("textbox", {
+        name: "人工备注内容",
+      })) as HTMLTextAreaElement
+    ).value,
+  ).toBe("未保存的研究记录");
+  await userEvent.click(screen.getByRole("button", { name: "保存备注" }));
+  await screen.findByText(/人工备注已保存/);
+  const saved = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(saved);
+  expect(saved.defaultPrevented).toBe(false);
+});

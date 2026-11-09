@@ -49,6 +49,7 @@ export default function AppShell() {
   const [activity, setActivity] = useState<UploadActivity>({
     total: 0,
     pending: 0,
+    uploading: 0,
   });
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -90,7 +91,11 @@ export default function AppShell() {
             aria-label={started ? "查看导入进展" : "上传史料"}
           >
             <Upload size={16} />
-            {activity.pending ? `上传中 · ${activity.pending}` : "上传史料"}
+            {activity.uploading
+              ? `上传中 · ${activity.uploading}`
+              : activity.pending
+                ? `待上传 · ${activity.pending}`
+                : "上传史料"}
           </Button>
         </div>
       </header>
