@@ -5,11 +5,65 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { respondWith } from "@/test/responses.ts";
+import { client } from "@/client/api";
 import SearchPanel from "@/features/search/SearchPanel.tsx";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+test("a pending new query never presents the previous query's empty result as its answer", async () => {
+  let resolve!: (response: Response) => void;
+  const next = new Promise<Response>((done) => {
+    resolve = done;
+  });
+  const middleware = {
+    onRequest: async ({ request }: { request: Request }) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith("reading-navigation"))
+        return Response.json({
+          entries: [],
+          state: "available",
+          version: 1,
+          sha256: "nav",
+        });
+      return url.searchParams.get("q") === "新查询" ? next : Response.json([]);
+    },
+  };
+  client.use(middleware);
+  try {
+    render(
+      <MemoryRouter initialEntries={["/books/book?q=旧查询&semantic=false"]}>
+        <QueryClientProvider client={new QueryClient()}>
+          <SearchPanel bookId="book" />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByText(/^未找到相关内容/);
+    await userEvent.clear(screen.getByLabelText("检索本书正文"));
+    await userEvent.type(screen.getByLabelText("检索本书正文"), "新查询");
+    await userEvent.click(screen.getByRole("button", { name: "查找" }));
+    await screen.findByText("正在按原文查找…");
+    const staleEmpty = screen.queryByText(/^未找到相关内容/);
+    resolve(
+      Response.json([
+        {
+          id: "new-hit",
+          title: "新来源",
+          text: "新查询的原文",
+          pages: [1],
+          book_id: "book",
+          chapter_id: "chapter",
+          context: [],
+        },
+      ]),
+    );
+    await screen.findByText("新查询的原文");
+    expect(staleEmpty).toBeNull();
+  } finally {
+    client.eject(middleware);
+  }
 });
 
 test("search uses precise body targets and explicit directory scopes, with a restorable URL", async () => {

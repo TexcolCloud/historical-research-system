@@ -315,6 +315,16 @@
   padding-inline-start: 20px;
   font-size: 14px;
 }
+.research-verification-issues article {
+  margin-block: 20px;
+}
+.research-verification-issues h4 {
+  font-size: 16px;
+  line-height: 1.6;
+}
+.research-verification-issues details {
+  overflow-wrap: anywhere;
+}
 .research-evidence {
   padding: 24px;
   background: var(--muted-surface);

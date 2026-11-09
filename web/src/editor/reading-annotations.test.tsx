@@ -17,7 +17,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("a whole footnote definition safely falls back while its visible body maps with unchanged source and note ownership", () => {
+test("a whole footnote definition maps its visible body with unchanged source and note ownership", () => {
   const markdown = "标题[^*]。\n\n[^*]: 星注原文。";
   const start = markdown.indexOf("[^*]:"),
     end = markdown.length;
@@ -42,8 +42,10 @@ test("a whole footnote definition safely falls back while its visible body maps 
     />,
   );
   const visibleText = container.textContent;
-  expect(failed).toHaveBeenLastCalledWith(["whole-source-note"]);
-  expect(container.querySelector("mark[data-reading-focus]")).toBeNull();
+  expect(failed).toHaveBeenLastCalledWith([]);
+  expect(container.querySelector("mark[data-reading-focus]")?.textContent).toBe(
+    "星注原文。",
+  );
   rerender(
     <RenderedMarkdown
       markdown={markdown}
@@ -111,6 +113,53 @@ test("reading links and destination focus preserve Unicode and footnote targets"
   await userEvent.click(link);
   expect(navigate).toHaveBeenCalledWith("#/books/book?chapter=body");
 });
+
+test.each([false, true])(
+  "duplicate note text uses exact source boundaries after Unicode; marker-only=%s",
+  (markerOnly) => {
+    const markdown =
+      "😀𠮷甲[^a]，乙[^b]。\n\n[^a]: 相同注释。\n\n[^b]: 相同注释。";
+    const chars = Array.from(markdown);
+    const point = (value: string) =>
+      Array.from(markdown.slice(0, markdown.indexOf(value))).length;
+    const notes = ["a", "b"].map((label, index) => ({
+      id: label,
+      label,
+      note: {
+        start: point(`[^${label}]:`),
+        end: index === 0 ? point("[^b]:") : chars.length,
+        marker_end: point(`[^${label}]:`) + 5,
+      },
+      references: [
+        { start: point(`[^${label}]`), end: point(`[^${label}]`) + 4 },
+      ],
+    }));
+    const failed = vi.fn();
+    const { container } = render(
+      <RenderedMarkdown
+        markdown={markdown}
+        footnotes={notes}
+        readingFocus={{
+          id: "second-note",
+          start: notes[1].note.start,
+          end: markerOnly ? notes[1].note.marker_end : chars.length,
+        }}
+        onReadingFailure={failed}
+      />,
+    );
+    const marks = container.querySelectorAll("mark[data-reading-focus]");
+    if (markerOnly) {
+      expect(marks).toHaveLength(0);
+      expect(failed).toHaveBeenLastCalledWith(["second-note"]);
+    } else {
+      expect(marks).toHaveLength(1);
+      expect(marks[0].textContent).toBe("相同注释。");
+      expect(marks[0].closest("p")?.querySelector('[id$="-b"]')).toBeTruthy();
+      expect(failed).toHaveBeenLastCalledWith([]);
+    }
+    expect(container.querySelectorAll("a[data-note-jump]")).toHaveLength(4);
+  },
+);
 
 test("a source-only destination reports failure without marking another visible word", () => {
   const markdown = "[链接](https://example.test/正文)";

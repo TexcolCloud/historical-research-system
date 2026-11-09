@@ -6,7 +6,7 @@ from uuid import uuid4
 from opensearchpy import helpers
 
 from hrs.library.runs.outputs import fingerprint
-from hrs.search.chunks import retrieval_chunks
+from hrs.search.chunks import indexable_chunks
 from hrs.search.compute import normalizer, query_vector
 from hrs.search.evaluation import evaluate_cases
 from hrs.search.indexing import BookIndexer
@@ -45,7 +45,7 @@ def evaluate_offline(settings, engine, dataset):
             chunks.extend(
                 bounded_chunks(
                     chapter,
-                    retrieval_chunks(chapter, dataset["title"]),
+                    indexable_chunks(chapter, dataset["title"]),
                     search.runtime.tokenizer("BAAI/bge-m3"),
                 )
             )

@@ -56,10 +56,25 @@ export function RenderedMarkdown({
   readingFailureCallback.current = onReadingFailure;
   const renderSource = useMemo<ReviewRenderer>(
     () => (source, insertions) => {
-      const edits = insertions.map((edit) => ({
-        ...edit,
-        at: Array.from(markdown.slice(0, edit.at)).length,
-      }));
+      const chars = Array.from(markdown);
+      const edits = insertions.map((edit) => {
+        const at = Array.from(markdown.slice(0, edit.at)).length;
+        // A definition's Markdown marker is replaced by the note UI. Project
+        // that boundary onto its retained body, using the explicit source map.
+        const note = footnotes.find(
+          (link) => link.note.start <= at && at < link.note.marker_end,
+        );
+        let visible = note?.note.marker_end ?? at;
+        if (note)
+          while (visible < note.note.end && /\s/u.test(chars[visible]))
+            visible++;
+        return { ...edit, at: visible };
+      });
+      if (edits.length) {
+        for (const edit of [...edits].reverse().sort((a, b) => b.at - a.at))
+          chars.splice(edit.at, 0, edit.text);
+        source = chars.join("");
+      }
       const point = (at: number, right: boolean) =>
         at +
         edits.reduce(

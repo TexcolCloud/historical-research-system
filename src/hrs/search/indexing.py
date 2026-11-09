@@ -11,7 +11,7 @@ from hrs.library.catalog import Library
 from hrs.library.runs.outputs import Outputs, fingerprint
 from hrs.library.structure import POLICY as STRUCTURE_POLICY
 from hrs.library.structure import project_structure
-from hrs.search.chunks import CHUNK_RULE, VECTOR_INPUT_RULE, retrieval_chunks
+from hrs.search.chunks import CHUNK_RULE, VECTOR_INPUT_RULE, indexable_chunks
 from hrs.search.compute import (
     EMBEDDING_IDENTITY,
     RetrievalCompute,
@@ -155,7 +155,7 @@ class BookIndexer:
                             "structure": project_structure(structure, chapter["parts"]),
                         }
                     chunks.extend(
-                        bounded_chunks(chapter, retrieval_chunks(chapter, book_title), tokenizer)
+                        bounded_chunks(chapter, indexable_chunks(chapter, book_title), tokenizer)
                     )
             saved = self.embed_cached(run_id, chunks, metrics)
             with measured(metrics, "checkpoint_ms"):

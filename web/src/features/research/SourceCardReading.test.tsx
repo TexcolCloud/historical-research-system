@@ -159,6 +159,83 @@ test("one complete document has chapter navigation and ordered H3 themes, with e
   expect(screen.getByText("原作者提出的判断")).toBeTruthy();
 });
 
+test("pending event findings show named objects and source evidence while retaining the original report collapsed", async () => {
+  const reason =
+    "card-local/ev_meeting 的 participant_ids 和 participant_roles 为空，不能用 planned 代替 reported；依据 e0/e75。";
+  mount({
+    ...sourceCard(),
+    local_id: "card-local",
+    events: [{ id: "ev_meeting", name: "此前会合", evidence_ids: ["e0"] }],
+    checks: {
+      issues: [reason],
+      checked_card_ids: ["card-local"],
+      checked_inventory_ids: ["f1"],
+      coverage_assessments: [
+        {
+          finding_id: "f1",
+          status: "missing",
+          candidate_ids: ["card-local/ev_meeting"],
+          reason,
+        },
+      ],
+    },
+  });
+  await screen.findByRole("button", { name: "核对本卡" });
+  await userEvent.click(screen.getByRole("button", { name: "核对本卡" }));
+  const guidance = screen.getByRole("region", { name: "疑点说明" });
+  expect(guidance.textContent).toContain("此前会合");
+  expect(guidance.textContent).toContain("参与者角色");
+  expect(guidance.textContent).not.toContain("participant_ids");
+  expect(guidance.textContent).not.toContain("card-local/");
+  expect(guidance.textContent).toContain("依据 引文1、引文76");
+  expect(within(guidance).getByRole("button", { name: "证据 1" })).toBeTruthy();
+  expect(
+    within(guidance).getByRole("button", { name: "证据 76" }),
+  ).toBeTruthy();
+  const details = screen.getByText("原始核验记录").closest("details")!;
+  expect(details.open).toBe(false);
+  expect(details.textContent).toContain(reason);
+});
+
+test("review guidance preserves quoted readings and never resolves another card's local identifier", async () => {
+  const reason =
+    "other-card/ev_meeting 的 participant_ids 缺失；原文「planned」和“reported”必须保留。";
+  mount({
+    ...sourceCard(),
+    local_id: "this-card",
+    events: [{ id: "ev_meeting", name: "本卡会合", evidence_ids: ["e0"] }],
+    checks: { issues: [reason], checked_card_ids: ["this-card", "other-card"] },
+  });
+  await userEvent.click(
+    await screen.findByRole("button", { name: "核对本卡" }),
+  );
+  const guidance = screen.getByRole("region", { name: "疑点说明" });
+  expect(guidance.textContent).toContain("other-card/ev_meeting 的 参与者");
+  expect(guidance.textContent).toContain("「planned」和“reported”");
+  expect(guidance.textContent).not.toContain("本卡会合");
+  expect(within(guidance).queryByRole("button", { name: "证据 1" })).toBeNull();
+});
+
+test("not-applicable coverage is not presented as a human review issue", async () => {
+  mount({
+    ...sourceCard(),
+    checks: {
+      issues: [],
+      coverage_assessments: [
+        {
+          finding_id: "f1",
+          status: "not_applicable",
+          reason: "本篇不含该类事项。",
+        },
+      ],
+    },
+  });
+  await userEvent.click(
+    await screen.findByRole("button", { name: "核对本卡" }),
+  );
+  expect(screen.queryByRole("region", { name: "疑点说明" })).toBeNull();
+});
+
 test.each([
   ["pending", true, true],
   ["verified", true, false],

@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import CardEditor from "./CardEditor";
 import CardNotes from "./CardNotes";
+import CardReviewIssues from "./CardReviewIssues";
 import Evidence from "./ResearchEvidence";
 import EvidenceOriginal from "./EvidenceOriginal";
 import CardRelatedSources from "./CardRelatedSources";
@@ -240,16 +241,7 @@ export default function SourceCardReader({
             <p>历史记录保留原有判断，不能向旧来源提交当前决定。</p>
           ) : (
             <>
-              {!!card.checks?.issues.length && (
-                <div className="research-verification-issues">
-                  <h3>需要核验的问题</h3>
-                  <ul>
-                    {card.checks.issues.map((issue, index) => (
-                      <li key={index}>{issue}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              <CardReviewIssues card={card} renderEvidence={refs} />
               {card.state === "human_accepted" ? (
                 <p>你的决定已保存，原有证据与版本继续保留。</p>
               ) : card.state === "excluded" ? (

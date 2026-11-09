@@ -12,7 +12,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("an unchanged footnote source range safely falls back without blaming the source version or directory", async () => {
+test("an unchanged footnote source range highlights its body while ambiguous related links stay unlinked", async () => {
   const sha = "a".repeat(64);
   const text =
     "# 标题[^*]\n\n正文[^1]。\n\n[^*]: 星注提及张某。\n\n（1）数字注原文。";
@@ -111,17 +111,21 @@ test("an unchanged footnote source range safely falls back without blaming the s
   );
   expect(
     await screen.findByText(
-      "此位置暂不能精确对应阅读版。请结合原图核对，未标记其他文字。",
-    ),
-  ).toBeTruthy();
-  expect(
-    await screen.findByText(
       "部分关联位置无法安全显示为链接，可从原书目录或“相关史料”继续查阅。",
     ),
   ).toBeTruthy();
   expect(screen.queryByText(/定位依据已更新/)).toBeNull();
   expect(screen.queryByText(/部分目录文字/)).toBeNull();
-  expect(container.querySelector("mark[data-reading-focus]")).toBeNull();
+  expect(
+    Array.from(container.querySelectorAll("mark[data-reading-focus]"))
+      .map((mark) => mark.textContent)
+      .join(""),
+  ).toBe("星注提及张某。");
+  expect(
+    screen.queryByText(
+      "此位置暂不能精确对应阅读版。请结合原图核对，未标记其他文字。",
+    ),
+  ).toBeNull();
   expect(chapter.text).toBe(text);
   await userEvent.click(screen.getByRole("link", { name: "查看脚注 1" }));
   expect(document.activeElement?.id).toContain("numeric-note");
