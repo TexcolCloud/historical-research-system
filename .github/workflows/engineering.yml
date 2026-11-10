@@ -86,7 +86,8 @@ jobs:
         run: uv run --no-sync --locked ruff check src tests
       - name: Build the Python distribution
         run: |
-          uv build --wheel
+          # Build the wheel from a fresh sdist; checkout build/lib may retain deleted modules.
+          uv build
           wheel=$(find "$PWD/dist" -maxdepth 1 -name '*.whl' -print -quit)
           test -n "$wheel"
           printf 'HRS_TEST_WHEEL=%s\n' "$wheel" >> "$GITHUB_ENV"

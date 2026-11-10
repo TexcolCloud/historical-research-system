@@ -11,10 +11,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 
 from hrs.library.books import get_run
-from hrs.processing import research_workflow
-from hrs.research.api import CardNotesUpdate
+from hrs.research import policy as research_policy
 from hrs.research.discovery import ResearchDiscovery
 from hrs.research.models import DocumentMetadata
+from hrs.research.schemas import CardNotesUpdate
 from hrs.research.sources import publication_snapshot
 from hrs.search.indexing import BookIndexer
 from hrs.storage import models as db
@@ -31,7 +31,7 @@ from tests.integration.platform.test_card_only_auto import (
 from tests.integration.platform.test_research import research_book as research_book
 from tests.unit.research.test_dossier_cards import dossier
 
-DOSSIER_POLICY = deepcopy(research_workflow.POLICY)
+DOSSIER_POLICY = deepcopy(research_policy.POLICY)
 HEADINGS = [
     "一、基本信息与完整出处",
     "二、研究对象与时空边界",
@@ -53,7 +53,7 @@ DERIVED_VALUE = "限于本文陈述的史料价值DossierValue917"
 def dossier_book(research_book, monkeypatch):
     # The reused fixture intentionally installs v4; capture the current v7 at collection.
     assert DOSSIER_POLICY["version"] == 7 and DOSSIER_POLICY["dossier_cards"]
-    monkeypatch.setattr(research_workflow, "POLICY", deepcopy(DOSSIER_POLICY))
+    monkeypatch.setattr(research_policy, "POLICY", deepcopy(DOSSIER_POLICY))
     _, engine, bridge, _, _, chapter_id, first_page = research_book
     with engine.begin() as connection:
         content_ref = connection.scalar(

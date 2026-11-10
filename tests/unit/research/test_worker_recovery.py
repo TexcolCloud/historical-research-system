@@ -26,7 +26,7 @@ from tests.unit.research.test_workflow import legacy_policy
 
 @pytest.fixture(autouse=True)
 def frozen_v5_policy(monkeypatch):
-    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", legacy_policy(5))
+    monkeypatch.setattr("hrs.research.policy.POLICY", legacy_policy(5))
 
 
 def workers(tmp_path):

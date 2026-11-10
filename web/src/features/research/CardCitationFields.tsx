@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { client } from "@/client/api";
+import { readChapter } from "@/features/library/chapter-query";
 import type { components } from "@/client/schema";
 import { research, researchKeys, type ResearchCard } from "./api";
 import {
@@ -34,11 +34,7 @@ function EvidenceText({
     enabled: open && Boolean(chapterId),
     staleTime: Infinity,
     queryFn: async ({ signal }) => {
-      const { data } = await client.GET("/api/v2/chapters/{chapter_id}", {
-        params: { path: { chapter_id: chapterId! } },
-        signal,
-      });
-      if (!data) throw new Error("原文暂时无法读取。");
+      const data = await readChapter(chapterId!, signal, "原文暂时无法读取。");
       if (expectedSha && data.text_sha256 !== expectedSha)
         throw new Error(
           "原文版本已有变化，当前修订草稿保留。请先核对原卡的来源版本。",

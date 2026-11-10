@@ -15,7 +15,7 @@ POLICY = legacy_policy(5)
 
 @pytest.fixture(autouse=True)
 def frozen_v5_policy(monkeypatch):
-    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", POLICY)
+    monkeypatch.setattr("hrs.research.policy.POLICY", POLICY)
 
 
 def prepared(workflow, *, incremental=True, missing_event=False, version=5):

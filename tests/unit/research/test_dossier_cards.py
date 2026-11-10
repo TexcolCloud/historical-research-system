@@ -4,10 +4,11 @@ import pytest
 from pydantic import ValidationError
 
 from hrs.processing.errors import EvidenceMismatch
-from hrs.processing.research_workflow import POLICY, ResearchWorkflow
+from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
 from hrs.research import models
 from hrs.research.complete_contracts import complete_checks
+from hrs.research.policy import POLICY
 from tests.unit.research.test_card_only_contracts import card_only
 from tests.unit.research.test_complete_workflow import observation, read, source
 

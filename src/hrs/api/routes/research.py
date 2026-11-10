@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
 
 from hrs.api.deps import ResearchDep
-from hrs.research.api import (
+from hrs.research.schemas import (
     CardNotesResponse,
     CardNotesUpdate,
     EditableCardResponse,

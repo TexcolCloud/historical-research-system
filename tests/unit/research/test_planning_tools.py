@@ -48,7 +48,7 @@ def test_native_graph_uses_current_full_provenance_before_bounding_discovery(tmp
         }
 
     monkeypatch.setattr(
-        "hrs.research.api.Research",
+        "hrs.research.service.Research",
         lambda actual_settings, actual_engine: (
             SimpleNamespace(
                 workspace=SimpleNamespace(graph=graph),

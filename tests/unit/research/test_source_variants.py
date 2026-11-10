@@ -9,6 +9,7 @@ from hrs.processing.errors import EvidenceMismatch
 from hrs.processing.hashing import digest
 from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
+from hrs.research.packets import source_index
 from hrs.research.projection import located_card
 from tests.unit.research.test_workflow import legacy_policy, verify
 
@@ -164,7 +165,7 @@ def seed_legacy_source(workflow, packet, snapshot):
             }
         )
         workflow._save_task(connection, task)
-    return [workflow._source_index(external)]
+    return [source_index(external)]
 
 
 @pytest.mark.parametrize("current_first", [True, False])

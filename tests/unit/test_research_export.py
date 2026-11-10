@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 from hrs.library.footnotes import resolve_footnotes
 from hrs.library.records import text_digest
-from hrs.research.api import Research
 from hrs.research.models import CardDraft
 from hrs.research.projection import located_card
+from hrs.research.service import Research
 
 
 def test_complete_research_export_keeps_metadata_roles_plans_and_cross_card_versions():

@@ -14,7 +14,7 @@ POLICY = legacy_policy(5)
 
 @pytest.fixture(autouse=True)
 def frozen_v5_policy(monkeypatch):
-    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", POLICY)
+    monkeypatch.setattr("hrs.research.policy.POLICY", POLICY)
 
 
 def test_submission_schema_explains_unknown_values_without_relaxing_the_validator():

@@ -133,3 +133,33 @@ export function safeReaderReturn(value: string | null, bookId: string) {
     ? value
     : `/books/${bookId}?tab=reader&section=directory`;
 }
+
+export function sourcePage(chapter: Chapter, at: number) {
+  let offset = 0;
+  for (const part of chapter.parts) {
+    const stop =
+      offset +
+      (typeof part.text === "string" ? Array.from(part.text).length : 0);
+    const source = part.source;
+    if (offset <= at && at < stop && source && typeof source === "object") {
+      if (
+        "page" in source &&
+        typeof source.page === "number" &&
+        Number.isSafeInteger(source.page) &&
+        source.page > 0
+      )
+        return source.page;
+      if ("pages" in source && Array.isArray(source.pages)) {
+        const page = source.pages.find(
+          (value: unknown) =>
+            typeof value === "number" &&
+            Number.isSafeInteger(value) &&
+            value > 0,
+        );
+        if (typeof page === "number") return page;
+      }
+    }
+    offset = stop;
+  }
+  return chapter.pages[0] ?? 1;
+}

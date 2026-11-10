@@ -163,8 +163,8 @@ def test_footnote_hints_do_not_change_pagination_ambiguity_or_legacy_shape():
 
 
 def test_only_new_v6_instructions_prefer_mechanical_note_ids_without_skipping_source_reading():
-    from hrs.processing.research_workflow import POLICY
     from hrs.research.execution import role_configs
+    from hrs.research.policy import POLICY
     from tests.unit.research.test_workflow import legacy_policy
 
     phrase = "Prefer each locate match's owned footnote_ids"

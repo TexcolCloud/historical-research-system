@@ -1,10 +1,11 @@
 """Readable document dossiers with exact, version-bound source evidence."""
 
 import json
-from urllib.parse import urlencode
+
+from hrs.research.evidence_export import evidence_markdown, evidence_url
 
 
-def export_dossier(card, articles, *, base_url, render_evidence):
+def export_dossier(card, articles, *, base_url, render_evidence=evidence_markdown):
     dossier = card["dossier"]
     citation = dossier["citation"]
     evidence = card["evidence"]
@@ -175,18 +176,11 @@ def export_dossier(card, articles, *, base_url, render_evidence):
         field("对方依据", refs(relation["target_evidence_ids"]))
     section("十一、证据与页码映射")
     for index, span in enumerate(evidence, 1):
-        target = span.get("reading_target") or {}
-        query = urlencode(
-            {
-                "tab": "reader",
-                "section": "text",
-                "chapter": target.get("chapter_id", span["article_id"]),
-                "physicalPage": target.get("physical_page", ""),
-                "start": target.get("start", span["start"]),
-                "end": target.get("end", span["end"]),
-                "textSha": span["text_sha256"],
-                "run": span.get("source_run_id", card["source_run_id"]),
-            }
+        href = evidence_url(
+            span,
+            card,
+            source_run_id=span.get("source_run_id", card["source_run_id"]),
+            base_url=base_url,
         )
         lines.extend(
             [
@@ -196,7 +190,7 @@ def export_dossier(card, articles, *, base_url, render_evidence):
                 "",
                 render_evidence(span, articles[span["article_id"]], f"research-{index}"),
                 "",
-                f"[对照原文]({base_url}/#/books/{span.get('book_id', card['book_id'])}?{query})",
+                f"[对照原文]({href})",
                 "",
             ]
         )

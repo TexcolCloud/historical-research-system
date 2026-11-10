@@ -16,7 +16,7 @@ TEXT = "1939年2月，张三在南京致函李四，申请经费。"
 
 @pytest.fixture(autouse=True)
 def frozen_v5_policy(monkeypatch):
-    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", legacy_policy(5))
+    monkeypatch.setattr("hrs.research.policy.POLICY", legacy_policy(5))
 
 
 def source(book="book-a"):

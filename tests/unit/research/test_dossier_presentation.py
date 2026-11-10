@@ -9,11 +9,11 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from hrs.library.records import text_digest
-from hrs.research.api import CardReadingIdentity
 from hrs.research.discovery import discovery_records
 from hrs.research.dossier_export import export_dossier
 from hrs.research.models import DOSSIER_SOURCE_FIELDS
 from hrs.research.projection import card_summary, located_card, reading_identity
+from hrs.research.schemas import CardReadingIdentity
 
 FIXTURE = (
     Path(__file__).resolve().parents[3]

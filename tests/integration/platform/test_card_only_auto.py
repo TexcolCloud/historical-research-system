@@ -11,18 +11,18 @@ from hrs.library.books import get_run
 from hrs.library.native_workspace import WrongWorkspace, require_workspace
 from hrs.library.projection.facts import PROJECTION_POLICY
 from hrs.library.projection.publication import NativePublication
-from hrs.processing import research_workflow
 from hrs.processing.workspace import identity as workspace_identity
-from hrs.research.api import Research
+from hrs.research import policy as research_policy
 from hrs.research.card_notes import CardNotes
 from hrs.research.models import DocumentMetadata
 from hrs.research.notebook import ResearchNotebook
+from hrs.research.service import Research
 from hrs.research.sources import publication_snapshot
 from hrs.search.indexing import BookIndexer
 from hrs.storage import models as db
 from tests.integration.platform.test_research import research_book as research_book
 
-CARD_ONLY_POLICY = deepcopy(research_workflow.POLICY)
+CARD_ONLY_POLICY = deepcopy(research_policy.POLICY)
 CARD_ONLY_POLICY.update(version=6, card_only=True)
 CARD_ONLY_POLICY.pop("dossier_cards", None)
 
@@ -30,8 +30,8 @@ CARD_ONLY_POLICY.pop("dossier_cards", None)
 @pytest.fixture
 def card_book(research_book, monkeypatch):
     # The shared publication fixture deliberately freezes v4 for its own legacy tests.
-    monkeypatch.setattr(research_workflow, "POLICY", deepcopy(CARD_ONLY_POLICY))
-    assert research_workflow.POLICY["version"] == 6 and research_workflow.POLICY["card_only"]
+    monkeypatch.setattr(research_policy, "POLICY", deepcopy(CARD_ONLY_POLICY))
+    assert research_policy.POLICY["version"] == 6 and research_policy.POLICY["card_only"]
     return research_book
 
 
