@@ -17,7 +17,7 @@ from hrs.library.parsing import TableRows as TableRows
 from hrs.library.parsing import blocks as blocks
 from hrs.processing.navigation import fragment_navigation
 
-CHUNK_RULE = "structure-1400-160-v9-stable-navigation"
+CHUNK_RULE = "structure-1400-160-v11-source-body"
 VECTOR_INPUT_RULE = "canonical-article-context-v1"
 IMAGE = re.compile(r"!\[([^\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\n]|\([^()\n]*\))*)\)")
 
@@ -291,6 +291,38 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
 def context_blocks(text):
     """Read-only Markdown ranges reused during result expansion."""
     return blocks(text)
+
+
+def indexable_chunks(chapter, book_title):
+    """Keep source coverage intact; furniture is context, not a search candidate."""
+    for chunk in retrieval_chunks(chapter, book_title):
+        value = chunk["text"].strip()
+        if not value:
+            continue
+        # A heading-led chunk can also contain its following paragraphs. Only
+        # a wholly heading-only range is furniture; its body remains searchable.
+        if chunk["kind"] == "heading" and all(
+            b["kind"] == "heading" for b in blocks(chunk["text"])
+        ):
+            continue
+        folio = False
+        offset = 0
+        for part in chapter["parts"]:
+            source = part["source"]
+            label = next(
+                (
+                    p["label"]
+                    for p in chunk["printed_pages"]
+                    if source["pages"] == [p["physical_page"]]
+                ),
+                None,
+            )
+            if chunk["start"] == offset and source.get("original_start") == 0 and value == label:
+                folio = True
+                break
+            offset += len(part["text"])
+        if not folio:
+            yield chunk
 
 
 def table_support(text, structure, index):

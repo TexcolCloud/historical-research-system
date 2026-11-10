@@ -140,15 +140,34 @@ def test_live_native_or_retrieval_owner_blocks_snapshot(admission, owner):
 
 
 @pytest.mark.parametrize("active", [False, True])
-def test_only_unexpired_native_worker_sessions_hold_backup_admission(admission, active):
+def test_only_unexpired_native_worker_sessions_hold_backup_admission(admission, active, monkeypatch):
+    from hrs.processing.store import Store
+
     settings, store, _ = admission
+    store = Store(settings.codex_root)
     sessions = [{"state": "busy", "expires_at": time.time() + (60 if active else -60)}]
-    store.checkpoints.ledger = SimpleNamespace(sessions=lambda: sessions)
+    monkeypatch.setattr(store.checkpoints.ledger, "sessions", lambda: sessions)
     if active:
         with pytest.raises(RuntimeError, match="worker sessions"):
             backups.require_quiesced(settings, store)
     else:
         backups.require_quiesced(settings, store)
+
+
+def test_research_worker_without_a_registered_server_blocks_platform_backup(admission):
+    from hrs.processing.research_workflow import ResearchWorkflow
+    from hrs.processing.store import Store
+    from tests.unit.research.test_workflow import snapshot
+
+    settings, _, _ = admission
+    store = Store(settings.codex_root)
+    workflow = ResearchWorkflow(store)
+    run = workflow.enqueue(snapshot())
+    workflow.claim(run["run_id"], "synthetic-author", stage="author")
+    with pytest.raises(RuntimeError, match="Research workers"):
+        backups.require_quiesced(settings, store)
+    workflow.pause(run["run_id"])
+    backups.require_quiesced(settings, store)
 
 
 def test_external_upload_status_cannot_be_silently_assumed_quiescent(admission):

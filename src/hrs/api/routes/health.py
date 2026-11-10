@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from hrs.api.deps import EngineDep, SettingsDep
 from hrs.api.schemas import RuntimeStatus
+from hrs.search.service import configured_broker_health
 from hrs.storage.objects import ObjectStorageError
 from hrs.storage.service import objects_for
 
@@ -46,4 +47,10 @@ def ready(engine: EngineDep, settings: SettingsDep):
         objects_for(settings).check()
     except (SQLAlchemyError, BotoCoreError, ClientError, ObjectStorageError):
         raise HTTPException(503, "Required storage services are unavailable.") from None
+    if settings.retrieval_device == "cuda":
+        try:
+            if configured_broker_health(settings).get("gpu_available") is not True:
+                raise RuntimeError("GPU unavailable")
+        except (OSError, ValueError, RuntimeError):
+            raise HTTPException(503, "Required retrieval service is unavailable.") from None
     return {"status": "ready"}

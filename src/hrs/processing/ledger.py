@@ -11,6 +11,8 @@ import time
 from contextlib import closing, contextmanager
 from pathlib import Path
 
+import psutil
+
 from hrs.processing.workflow_rules import metadata_work_remaining
 
 
@@ -319,9 +321,90 @@ class Ledger:
                     (now,),
                 )
             )
-        return sum(session["session_token"] != excluding_session for session in sessions) + sum(
-            (identity, task) not in managed for identity, task in leases
+            research = self._research_capacity(connection, now=now)
+        return (
+            sum(session["session_token"] != excluding_session for session in sessions)
+            + sum((identity, task) not in managed for identity, task in leases)
+            + research
         )
+
+    def source_work_ready(self, *, now=None):
+        """Read runnable source metadata only; research must leave native processing headroom."""
+        now = time.time() if now is None else now
+        with self.connect() as connection:
+            return bool(
+                connection.execute(
+                    "SELECT 1 FROM records t JOIN records r ON r.document_id=t.document_id "
+                    "AND r.kind='field' AND r.key='run_request' WHERE t.kind='task' "
+                    "AND json_extract(t.value,'$.value.state')='ready' "
+                    "AND json_extract(t.value,'$.value.stage') IN ('ocr','review','verify','organization','navigation') "
+                    "AND json_extract(r.value,'$.state') IN ('pending','running','waiting_workers','retryable_error') "
+                    "AND COALESCE(json_extract(r.value,'$.pause_requested'),0)=0 "
+                    "AND COALESCE(json_extract(r.value,'$.cancel_requested'),0)=0 "
+                    "AND COALESCE(json_extract(r.value,'$.not_before'),0)<=? LIMIT 1",
+                    (now,),
+                ).fetchone()
+            )
+
+    @staticmethod
+    def coordinator_alive(admission):
+        """New dispatcher receipts bind a process identity; old ones retain their lease expiry."""
+        if "pid" not in admission and "process_create_time" not in admission:
+            return True
+        try:
+            if type(admission.get("pid")) is not int or admission["pid"] <= 0:
+                return False
+            process = psutil.Process(admission["pid"])
+            return (
+                abs(process.create_time() - admission["process_create_time"]) <= 0.01
+                and process.status() != psutil.STATUS_ZOMBIE
+            )
+        except (psutil.Error, KeyError, TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _research_capacity(connection, *, now, model=None):
+        """New research leases share native admission without changing old ledger schemas."""
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('research_tasks','runtime_admissions','runtime_control')"
+            )
+        }
+        count = 0
+        if "research_tasks" in tables:
+            count += connection.execute(
+                "SELECT COUNT(*) FROM research_tasks WHERE state='leased' AND expires>?"
+                + (" AND model=?" if model else ""),
+                (now, model) if model else (now,),
+            ).fetchone()[0]
+        if "runtime_admissions" in tables:
+            states = (
+                {
+                    scope: json.loads(payload)
+                    for scope, payload in connection.execute(
+                        "SELECT scope,payload FROM runtime_control"
+                    )
+                }
+                if "runtime_control" in tables
+                else {}
+            )
+            coordinators = connection.execute(
+                "SELECT payload FROM runtime_admissions WHERE owner GLOB 'research-coordinator:*' "
+                "AND json_extract(payload,'$.expires_at')>?"
+                + (" AND json_extract(payload,'$.model')=?" if model else ""),
+                (now, model) if model else (now,),
+            )
+            for admission in (json.loads(row[0]) for row in coordinators):
+                scope = "model:" + admission["model"] if model else "account"
+                free = (
+                    admission.get("control_only") is True
+                    and scope
+                    in admission.get("control_scopes", ("account", "model:" + admission["model"]))
+                    and states.get(scope, {}).get("state", "normal") != "normal"
+                )
+                count += Ledger.coordinator_alive(admission) and not free
+        return count
 
     def model_capacity_used(self, model, excluding_session=None, *, now=None):
         """Count model reservations and unmanaged leases from one ledger snapshot."""
@@ -343,12 +426,16 @@ class Ledger:
                     (now,),
                 )
             ]
-            return sum(
-                session["session_token"] != excluding_session
-                and session.get("actual_model", model_for_stage(session["stage"])) == model
-                for session in sessions
-            ) + sum(
-                (identity, task_id) not in managed
-                and task["claim"].get("actual_model", model_for_stage(task["stage"])) == model
-                for identity, task_id, task in leased
+            return (
+                sum(
+                    session["session_token"] != excluding_session
+                    and session.get("actual_model", model_for_stage(session["stage"])) == model
+                    for session in sessions
+                )
+                + sum(
+                    (identity, task_id) not in managed
+                    and task["claim"].get("actual_model", model_for_stage(task["stage"])) == model
+                    for identity, task_id, task in leased
+                )
+                + self._research_capacity(connection, now=now, model=model)
             )

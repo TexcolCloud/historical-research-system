@@ -31,6 +31,55 @@ def test_consecutive_titles_travel_with_first_body_without_merging_full_sections
     assert hits[0]["section_path"] == ["运输记录", "村长任务", "训练意义"]
 
 
+def test_indexable_projection_omits_furniture_but_retains_canonical_coverage_and_numeric_evidence():
+    from hrs.search.chunks import indexable_chunks
+
+    source = chapter(
+        "7\n\n# 政策批语\n\n正文禁止没收商店[^1]。\n\n## 注释\n\n[^1]: 发生过违纪。\n\n120\n"
+    )
+    source["parts"] = [
+        {
+            "span_id": "p",
+            "start": 0,
+            "text": source["text"],
+            "source": {"pages": [9], "original_start": 0},
+        }
+    ]
+    source["navigation"] = {"page_labels": [{"physical_page": 9, "printed_label": "7"}]}
+    raw = list(retrieval_chunks(source, "书"))
+    assert set().union(*(set(range(h["start"], h["end"])) for h in raw)) == set(
+        range(len(source["text"]))
+    )
+    hits = list(indexable_chunks(source, "书"))
+    assert all(h["text"].strip() not in {"", "7", "## 注释"} for h in hits)
+    assert any("120" in h["text"] for h in hits)
+    assert any("正文禁止没收商店" in h["text"] for h in hits)
+    assert any("违纪" in h["text"] for h in hits)
+    assert any("政策批语" in h["retrieval_text"] for h in hits)
+
+
+@pytest.mark.parametrize("original_start,label", [(0, None), (4, "7"), (0, "8")])
+def test_indexable_projection_retains_numbers_without_exact_page_start_and_printed_label(
+    original_start, label
+):
+    from hrs.search.chunks import indexable_chunks
+
+    source = chapter("7\n\n# 数量\n\n| 项目 | 数量 |\n| --- | --- |\n| 甲 | 7 |\n")
+    source["parts"] = [
+        {
+            "span_id": "p",
+            "start": 0,
+            "text": source["text"],
+            "source": {"pages": [9], "original_start": original_start},
+        }
+    ]
+    if label:
+        source["navigation"] = {"page_labels": [{"physical_page": 9, "printed_label": label}]}
+    hits = list(indexable_chunks(source, "书"))
+    assert any(h["text"].strip() == "7" for h in hits)
+    assert any("| 甲 | 7 |" in h["text"] for h in hits)
+
+
 def test_heading_chain_expands_into_its_list_but_not_the_next_section():
     source = chapter(
         "# 总题\n\n## 条件\n\n须具备：\n\n1. 责任感。\n2. 知识。\n\n## 其他\n\n无关正文。"

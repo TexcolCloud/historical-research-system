@@ -70,6 +70,89 @@ def test_cross_page_fragments_allow_only_source_bound_decorated_folios():
     assert len(validate_proposal(doc, [split_proposal()])[0]["source_spans"]) == 2
 
 
+def test_cross_page_title_skips_an_independently_bound_combined_folio_and_book_header():
+    from hrs.processing.page_observation import observation
+
+    doc = cross_page_document()
+    second = page(2, "2　Collected Documents\n\n工作的决定……12", "toc", "2")
+    second["observation"] = observation(
+        second, {**second["observation"], "running_headers": ["2　Collected Documents"]}
+    )
+    doc["pages"][1] = second
+    entry = validate_proposal(doc, [split_proposal()])[0]
+    assert entry["title"] == "关于甲乙工作的决定"
+    assert entry["source_spans"][1]["anchor"] == "工作的决定……12"
+    assert "Collected Documents" not in entry["title"]
+
+
+@pytest.mark.parametrize("mutation", ["unobserved", "stale_text", "stale_image"])
+def test_a_book_header_cannot_be_inferred_or_reused_from_stale_observations(mutation):
+    doc = cross_page_document()
+    second = page(2, "2　Collected Documents\n\n工作的决定……12", "toc", "2")
+    if mutation != "unobserved":
+        second["observation"]["running_headers"] = ["2　Collected Documents"]
+        second["observation"]["markdown_sha256" if mutation == "stale_text" else "image_sha256"] = (
+            "stale"
+        )
+    doc["pages"][1] = second
+    with pytest.raises(ValueError, match="physical page boundary"):
+        validate_proposal(doc, [split_proposal()])
+
+
+@pytest.mark.parametrize("furniture", ["工作的决定……12", "Collected Documents", "nonexistent"])
+def test_page_header_observations_require_the_whole_unique_outer_line(furniture):
+    from hrs.processing.page_observation import observation
+
+    second = page(2, "2　Collected Documents\n\n工作的决定……12", "toc", "2")
+    with pytest.raises(ValueError, match="running_headers"):
+        observation(second, {**second["observation"], "running_headers": [furniture]})
+
+
+@pytest.mark.parametrize("original_opened", [True, False])
+def test_navigation_submission_binds_furniture_only_after_original_access(original_opened):
+    from hrs.processing.navigation_coverage import coverage_report
+    from hrs.processing.task_results import apply_navigation
+    from tests.unit.processing.test_navigation_batches import claim
+
+    doc = cross_page_document()
+    doc["pages"][1] = page(2, "2　Collected Documents\n\n工作的决定……12", "toc", "2")
+    task = claim(doc)
+    if not original_opened:
+        task["image_accesses"].pop("2")
+    result = {
+        "entries": [split_proposal()],
+        "page_observations": [
+            {
+                "page": 2,
+                "kind": "toc",
+                "printed_label": "2",
+                "running_headers": ["2　Collected Documents"],
+            }
+        ],
+    }
+    if not original_opened:
+        with pytest.raises(ValueError, match="original-image access"):
+            apply_navigation(doc, task, result, {})
+        return
+    text = deepcopy([p["approved"] for p in doc["pages"]])
+    apply_navigation(doc, task, result, {})
+    assert coverage_report(doc)["coverage_complete"]
+    assert doc["navigation"]["source_entries"][0]["title"] == "关于甲乙工作的决定"
+    assert [p["approved"] for p in doc["pages"]] == text
+
+
+def test_independently_observed_running_footer_is_separate_from_title_fragments():
+    from hrs.processing.page_observation import observation
+
+    doc = cross_page_document()
+    first = page(1, "目录\n关于甲乙\n1　Collected Documents", "toc", "1")
+    first["observation"] = observation(
+        first, {**first["observation"], "running_footers": ["1　Collected Documents"]}
+    )
+    doc["pages"][0] = first
+    assert validate_proposal(doc, [split_proposal()])[0]["source_anchor"] == "关于甲乙"
+
+
 @pytest.mark.parametrize(
     ("text", "label", "line"),
     [

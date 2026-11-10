@@ -10,6 +10,30 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("equivalent source annotation refreshes retain the clickable DOM node", () => {
+  const props = {
+    markdown: "张某到访。",
+    readingLinks: [
+      {
+        id: "person",
+        start: 0,
+        end: 2,
+        href: "#/research?entity=person",
+        label: "查看人物",
+      },
+    ],
+  };
+  const view = render(<RenderedMarkdown {...props} />);
+  const link = screen.getByRole("link", { name: "查看人物" });
+  view.rerender(
+    <RenderedMarkdown
+      {...props}
+      readingLinks={props.readingLinks.map((item) => ({ ...item }))}
+    />,
+  );
+  expect(screen.getByRole("link", { name: "查看人物" })).toBe(link);
+});
+
 test("footnote and backlink scroll within the reader without changing the HashRouter URL", async () => {
   window.location.hash = "/books/book?tab=reader";
   const before = window.location.hash;

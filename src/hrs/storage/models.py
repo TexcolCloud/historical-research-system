@@ -4,12 +4,14 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     String,
     Table,
     Text,
     func,
+    literal_column,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
@@ -170,4 +172,81 @@ book_deletions = Table(
     Column("state", String(30), nullable=False),
     Column("manifest", JSONB),
     Column("error", Text),
+)
+
+# Read projections only: native SQLite remains the research task authority.
+research_runs = Table(
+    "research_runs",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("book_id", UUID(as_uuid=False), ForeignKey("books.id"), nullable=False, index=True),
+    Column(
+        "source_run_id",
+        UUID(as_uuid=False),
+        ForeignKey("runs.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("workspace_id", Text, nullable=False),
+    Column("state", String(40), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("input_hash", Text, nullable=False),
+    Column("summary", JSONB, nullable=False),
+    Column("content", JSONB, nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
+research_cards = Table(
+    "research_cards",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column(
+        "run_id",
+        Text,
+        ForeignKey("research_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("book_id", UUID(as_uuid=False), ForeignKey("books.id"), nullable=False, index=True),
+    Column("title", Text, nullable=False),
+    Column("kind", String(40), nullable=False),
+    Column("state", String(40), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("search_text", Text, nullable=False),
+    Column("summary", JSONB, nullable=False),
+    Column("content", JSONB, nullable=False),
+)
+research_entities = Table(
+    "research_entities",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column(
+        "run_id",
+        Text,
+        ForeignKey("research_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    ),
+    Column("book_id", UUID(as_uuid=False), ForeignKey("books.id"), nullable=False, index=True),
+    Column("name", Text, nullable=False),
+    Column("kind", String(40), nullable=False),
+    Column("search_text", Text, nullable=False),
+    Column("summary", JSONB, nullable=False),
+    Column("content", JSONB, nullable=False),
+)
+Index("ix_research_entities_name", research_entities.c.name)
+Index("ix_research_entities_canonical", research_entities.c.summary["canonical_id"].astext)
+Index(
+    "ix_research_entities_search",
+    func.to_tsvector(literal_column("'simple'::regconfig"), research_entities.c.search_text),
+    postgresql_using="gin",
+)
+
+# Rebuildable discovery-generation receipts, never native research task state.
+research_discovery_indexes = Table(
+    "research_discovery_indexes",
+    metadata,
+    Column("id", Text, ForeignKey("research_runs.id", ondelete="CASCADE"), primary_key=True),
+    Column("input_sha256", Text, nullable=False),
+    Column("generation", Text, nullable=False),
+    Column("chunks", Integer, nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
 )

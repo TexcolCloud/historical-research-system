@@ -7,6 +7,7 @@ from collections import defaultdict
 from markdown_it import MarkdownIt
 
 DEFINITION = re.compile(r"^ {0,3}(?:\[\^([^\]\n]+)\]:|([①-⑳]))")
+SECTION_DEFINITION = re.compile(r"^ {0,3}〔([0-9]+)〕")
 REFERENCE = re.compile(
     r"\[\^([^\]\n]+)\](?!:)|([①-⑳])|<sup>\s*(\d{1,2}|[①-⑳])\s*</sup>"
     r"|（([0-9]{1,2})）|〔([0-9]{1,2})〕|\(([0-9]{1,2})\)",
@@ -57,45 +58,100 @@ def _page_at(offset, ranges):
     )
 
 
+def _printed_note_section(text, lines, offsets, excluded):
+    """Recognize printed markers only inside one explicit, top-level notes section."""
+    tokens = MarkdownIt().parse(text)
+    headings = [
+        (token, tokens[index + 1].content)
+        for index, token in enumerate(tokens)
+        if token.type == "heading_open" and token.level == 0 and token.map
+    ]
+    sections = [(token, title) for token, title in headings if title.strip() in {"注释", "注釋"}]
+    if len(sections) != 1:
+        return {}, None, None
+    heading, _ = sections[0]
+    start = heading.map[1]
+    stop = next(
+        (
+            token.map[0]
+            for token, _ in headings
+            if token.map[0] >= start and int(token.tag[1:]) <= int(heading.tag[1:])
+        ),
+        len(lines),
+    )
+    paragraphs = {
+        number
+        for token in tokens
+        if token.type == "paragraph_open" and token.level == 0 and token.map
+        for number in range(*token.map)
+    }
+    markers = {
+        number: match
+        for number in range(start, stop)
+        if number in paragraphs
+        and not _hidden(offsets[number], excluded)
+        and (match := SECTION_DEFINITION.match(lines[number]))
+    }
+    return markers, heading.map[0], stop
+
+
 def _definitions(text, excluded):
     lines, offsets = text.splitlines(keepends=True), [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
+    printed, section_start, section_end = _printed_note_section(text, lines, offsets, excluded)
+    marker_lines = [
+        index
+        for index, line in enumerate(lines)
+        if (index in printed or DEFINITION.match(line)) and not _hidden(offsets[index], excluded)
+    ]
     definitions = []
     for index, line in enumerate(lines):
         match = DEFINITION.match(line)
-        if not match or _hidden(offsets[index], excluded):
+        section_match = printed.get(index)
+        if (not match and not section_match) or _hidden(offsets[index], excluded):
             continue
-        end = index + 1
-        while end < len(lines):
-            if DEFINITION.match(lines[end]):
-                break
-            if not lines[end].strip():
-                following = end + 1
-                while following < len(lines) and not lines[following].strip():
-                    following += 1
-                if following < len(lines) and (
-                    (match[1] and lines[following].startswith(("    ", "\t")))
-                    or re.fullmatch(
-                        r"\s*[—–－-]+\s*(?:译者|译注|编者|编注|作者|原注)[。．.]?\s*",
-                        lines[following],
-                    )
+        if section_match:
+            end = min(
+                [section_end, *[number for number in marker_lines if index < number < section_end]]
+            )
+        else:
+            end = index + 1
+            while end < len(lines):
+                if DEFINITION.match(lines[end]) or end in printed:
+                    break
+                if printed and (
+                    end == section_start or index >= section_start and end == section_end
                 ):
-                    end = following + 1
-                    continue
-                break
-            end += 1
+                    break
+                if not lines[end].strip():
+                    following = end + 1
+                    while following < len(lines) and not lines[following].strip():
+                        following += 1
+                    if following < len(lines) and (
+                        (match[1] and lines[following].startswith(("    ", "\t")))
+                        or re.fullmatch(
+                            r"\s*[—–－-]+\s*(?:译者|译注|编者|编注|作者|原注)[。．.]?\s*",
+                            lines[following],
+                        )
+                    ):
+                        end = following + 1
+                        continue
+                    break
+                end += 1
         start = offsets[index] + len(line) - len(line.lstrip(" "))
+        label = section_match[1] if section_match else match[1] or match[2]
         definitions.append(
             {
                 "id": f"note-{start}",
-                "label": match[1] or match[2],
-                "key": _key(match[1] or match[2]),
-                "explicit": bool(match[1]),
+                "label": label,
+                "key": _key(label),
+                "explicit": bool(match and match[1]),
+                "section_start": offsets[section_start] if section_match else None,
                 "note": {
                     "start": start,
                     "end": offsets[end],
-                    "marker_end": offsets[index] + match.end(),
+                    "marker_end": offsets[index] + (section_match or match).end(),
                 },
                 "references": [],
             }
@@ -257,6 +313,8 @@ def export_footnotes(text, links, prefix, *, parts=None, insertions=()):
 def resolve_footnotes(text, parts):
     """Resolve explicit Markdown IDs and unique same-page printed circles; never nearest-note guessing.
 
+    A unique top-level 注释/注釋 section may also supply unique printed 〔n〕 definitions
+    for explicit preceding [^n] references with known physical-page provenance.
     Returned offsets are Unicode codepoints into the unchanged input, including note markers.
     Unpaired or ambiguous notes remain ordinary source text.
     """
@@ -284,6 +342,20 @@ def resolve_footnotes(text, parts):
         if parenthesized and not text[text.rfind("\n", 0, start) + 1 : start].strip():
             continue  # Numbered paragraph openings are not inferred to be note references.
         candidates = by_key[_key(next(value for value in match.groups() if value))]
+        if any(note["section_start"] is not None for note in candidates):
+            # This compatibility rule requires the explicit source reference and
+            # a unique article-wide definition, never same-page/nearest guessing.
+            if (
+                match[1]
+                and EXPLICIT_REFERENCE.match(text, start)
+                and len(candidates) == 1
+                and start < candidates[0]["section_start"]
+                and page_at(start) is not None
+                and candidates[0]["page"] is not None
+                and text[candidates[0]["note"]["marker_end"] : candidates[0]["note"]["end"]].strip()
+            ):
+                candidates[0]["references"].append({"start": start, "end": match.end()})
+            continue
         explicit = [n for n in candidates if n["explicit"]] if match[1] or parenthesized else []
         if len(explicit) == 1 and len(candidates) == 1:
             chosen = explicit

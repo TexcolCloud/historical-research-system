@@ -182,6 +182,36 @@ def test_existing_service_connections_leave_its_owner_in_control(isolated_runtim
     assert not alive(owner["pid"])
 
 
+def test_first_managed_client_can_exit_while_a_different_data_root_keeps_computing(
+    isolated_runtime, monkeypatch
+):
+    settings = isolated_runtime
+    (settings.project_root / "release").touch()
+    owner_context = service.retrieval_service(settings)
+    owner = owner_context.__enter__()
+    borrower_context = None
+    try:
+        monkeypatch.setenv("HRS_DATA_ROOT", str(settings.project_root / "second-runtime"))
+        borrower_context = service.retrieval_service(settings)
+        borrower = borrower_context.__enter__()
+        assert borrower["owned"] is False and borrower["health"]["pid"] == owner["pid"]
+        owner_context.__exit__(None, None, None)
+        owner_context = None
+        assert alive(owner["pid"]), "The first client must not stop another client's shared broker"
+        response = httpx.post(
+            settings.retrieval_endpoint,
+            json={"operation": "embed", "texts": ["technical fixture"]},
+            timeout=10,
+        )
+        assert response.status_code == 200 and response.json()["vectors"] == [[0.1, 0.2]]
+    finally:
+        if owner_context is not None:
+            owner_context.__exit__(None, None, None)
+        if borrower_context is not None:
+            borrower_context.__exit__(None, None, None)
+    wait_until(lambda: not alive(owner["pid"]))
+
+
 def test_idle_worker_obeys_shutdown_and_unloads_normally(isolated_runtime):
     settings = isolated_runtime
     (settings.project_root / "release").touch()
@@ -268,6 +298,53 @@ def test_parent_death_closes_the_busy_managed_broker(isolated_runtime):
             parent.wait(timeout=5)
         # Clean only identities captured from this test, even if an assertion failed.
         for pid in (worker_pid, broker_pid, owner_pid):
+            if pid and alive(pid):
+                process = psutil.Process(pid)
+                process.kill()
+                process.wait(timeout=5)
+
+
+def test_owner_process_crash_preserves_a_different_data_root_borrower(
+    isolated_runtime, monkeypatch
+):
+    settings = isolated_runtime
+    (settings.project_root / "release").touch()
+    record = settings.project_root / "crashing-owner.json"
+    script = settings.project_root / "crashing-owner.py"
+    script.write_text(
+        "import json,time,os\nfrom pathlib import Path\nfrom hrs.config import Settings\n"
+        "from hrs.search.service import retrieval_service\n"
+        f"settings=Settings.model_validate({settings.model_dump(mode='json')!r})\n"
+        "with retrieval_service(settings) as running:\n"
+        f" Path({str(record)!r}).write_text(json.dumps(dict(running,owner_pid=os.getpid())),'utf-8')\n"
+        " time.sleep(60)\n",
+        "utf-8",
+    )
+    parent = subprocess.Popen([sys.executable, str(script)])
+    broker_pid = owner_pid = None
+    try:
+        wait_until(record.exists)
+        receipt = json.loads(record.read_text("utf-8"))
+        broker_pid, owner_pid = receipt["pid"], receipt["owner_pid"]
+        monkeypatch.setenv("HRS_DATA_ROOT", str(settings.project_root / "borrower-runtime"))
+        with service.retrieval_service(settings) as borrower:
+            assert borrower["health"]["pid"] == broker_pid
+            psutil.Process(owner_pid).kill()
+            parent.wait(timeout=5)
+            time.sleep(0.6)  # More than two broker liveness polls after the original owner died.
+            assert alive(broker_pid)
+            response = httpx.post(
+                settings.retrieval_endpoint,
+                json={"operation": "embed", "texts": ["technical fixture"]},
+                timeout=10,
+            )
+            assert response.status_code == 200 and response.json()["vectors"] == [[0.1, 0.2]]
+        wait_until(lambda: not alive(broker_pid))
+    finally:
+        if parent.poll() is None:
+            parent.terminate()
+            parent.wait(timeout=5)
+        for pid in (broker_pid, owner_pid):
             if pid and alive(pid):
                 process = psutil.Process(pid)
                 process.kill()

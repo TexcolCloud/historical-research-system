@@ -4,6 +4,7 @@ import AppShell from "@/app/AppShell.tsx";
 const BooksPage = lazy(() => import("@/routes/BooksPage.tsx"));
 const BookPage = lazy(() => import("@/routes/BookPage.tsx"));
 const ReviewsPage = lazy(() => import("@/routes/ReviewsPage.tsx"));
+const ResearchPage = lazy(() => import("@/routes/ResearchPage.tsx"));
 
 /** Route composition only; application providers and feature state live elsewhere. */
 export default function App() {
@@ -11,6 +12,14 @@ export default function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/welcome" element={<Navigate to="/" replace />} />
+        <Route
+          path="/research"
+          element={
+            <Suspense fallback={<p role="status">正在打开实体与卡片…</p>}>
+              <ResearchPage />
+            </Suspense>
+          }
+        />
         <Route
           path="/reviews"
           element={

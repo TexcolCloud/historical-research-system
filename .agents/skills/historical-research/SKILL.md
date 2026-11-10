@@ -1,13 +1,13 @@
 ---
 name: historical-research
-description: 处理本地 PDF 或图片史料、继续既有处理任务、打开人工待审页面，或检索已入库史料时使用。
+description: 导入 PDF 或图片史料、继续处理任务、打开人工待审页面、检索已入库资料，或处理自动史料卡与实体事件证据时使用。
 ---
 
 # Historical research
 
 Use the `historical_research` MCP and native Codex subagents. Read
 `workflow_instructions` for the current processing contract; it is the single
-source for PDF routing, original-first review, fallback limits and publication.
+source for PDF routing, original-first review, publication and post-index source cards.
 
 1. Call `workspace_status`. Keep its workspace ID for this request. The tools,
    dashboard and executor must use that same workspace; report a mismatch instead
@@ -33,9 +33,37 @@ source for PDF routing, original-first review, fallback limits and publication.
    without an explicit request.
    Show document IDs, affected physical pages, exact unresolved issues
    and the dashboard link. A queued run or extracted candidate is not acceptance.
-5. After publication, use `search_library` to verify a real query and provide the
-   retained Markdown and original-page evidence. A revision keeps the previous
-   published version searchable until its replacement passes.
+5. After publication, use `search_library` and inspect its reported backend and
+   availability before citing results. It shares platform hybrid retrieval; an
+   unavailable platform may return explicitly labelled local literal matches,
+   never comprehensive evidence or proof of absence. Provide the retained
+   Markdown and original-page evidence. A revision keeps the previous published
+   version searchable until its replacement passes.
+
+For source cards and entity/event evidence, open the workbench's card view and
+inspect `research_status(run_id)`. Matching published, indexed, content-verified
+articles automatically enter a separate queue; original reading remains available.
+New v7 document dossiers use native Sol author → independent verify and, when required, one
+directed repair → fresh independent reverify. Read each `research_claim` packet's
+frozen policy and schema. Follow the source-card section of `workflow_instructions`
+for complete source reads, candidate gates, omission inventories and coverage.
+Retain metadata, every source part, exact quotations/footnotes, source limitations,
+people, organizations, places, documents, event modalities and participant roles.
+OpenSearch is an optional author/repair tool; new cards require no question plan
+or mandatory search receipt. Cross-card claims still require frozen complete
+sources and both card versions. Search hits and graph neighbours remain leads.
+New dossiers add source-bound background, scope, structure, value and three-part
+evidence boundaries; limited argument units retain direct citations, applicability
+limits and what still needs corroboration. Supported full/short citations distinguish
+actual printed pages from PDF physical pages and carrier publication from formation
+and event dates. Missing bibliography stays explicitly partial/unknown. Independent
+verification checks every advertised dossier field; interpretation is not source fact
+or a historical credibility grade. Older cards display their own retained fields.
+Canonical identity changes and structured card revisions are explicit local human
+actions. Personal notes are separately versioned and remain distinct from source
+claims. Existing v1–v6 runs keep their frozen contracts; index rebuilding never
+upgrades them. New research-question and automatic link-refresh execution is
+retired; prior history remains readable/exportable. Old `kind=cards` stays retired.
 
 If independent original-image audits still disagree after detail inspection,
 use `request_human_review` with current evidence hashes and the exact unresolved
@@ -50,8 +78,9 @@ Retained human-only policies stay frozen until explicit migration/resume; protec
 human drafts and decisions. Preserve Markdown footnotes, note ownership, tables, retained
 figure images and exact article boundaries.
 
-Human decisions are made explicitly in the single-user local form. Preserve human drafts and
-receipts; development permission does not authorize approving real source content
+Human page and research-card decisions are made explicitly in the single-user local form;
+research accept/edit/reject is a versioned UI/API action, never an MCP approval tool.
+Preserve human drafts and receipts; development permission does not authorize approving real source content
 on a person's behalf. Explicit user-authorized workflow tests may release real
 source pages only in an isolated authorized workspace, with `workflow_test`
 receipts and `content_verified=false`. They do not certify accuracy. Model and

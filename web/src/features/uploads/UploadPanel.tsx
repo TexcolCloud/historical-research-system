@@ -16,7 +16,11 @@ import "@uppy/core/css/style.min.css";
 import "@uppy/dashboard/css/style.min.css";
 import { Button } from "@/components/ui/button.tsx";
 
-export type UploadActivity = { total: number; pending: number };
+export type UploadActivity = {
+  total: number;
+  pending: number;
+  uploading: number;
+};
 
 export default function UploadPanel({
   open,
@@ -37,8 +41,19 @@ export default function UploadPanel({
       const next = {
         total: files.length,
         pending: files.filter((file) => !file.progress.uploadComplete).length,
+        uploading: files.filter(
+          (file) =>
+            file.progress.uploadStarted &&
+            !file.progress.uploadComplete &&
+            !file.isPaused &&
+            !file.error,
+        ).length,
       };
-      if (previous?.total !== next.total || previous.pending !== next.pending) {
+      if (
+        previous?.total !== next.total ||
+        previous.pending !== next.pending ||
+        previous.uploading !== next.uploading
+      ) {
         previous = next;
         onActivityChange?.(next);
       }

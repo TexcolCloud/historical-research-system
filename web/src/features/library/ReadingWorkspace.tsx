@@ -65,8 +65,10 @@ export default function ReadingWorkspace({ book }: { book: Book }) {
       ) : book.run_id ? (
         <>
           <div className="workspace-status-note">
-            <strong>识别底稿 · 尚未完成整书核对</strong>
-            <p>此处可阅读已保存的文字与原图；正式阅读版将在整书核对后生成。</p>
+            <strong>识别底稿 · 正式阅读版尚未生成</strong>
+            <p>
+              此处可阅读已保存的文字与原图，各页核对状态单独标示；所需核对与结构整理完成后生成正式阅读版。
+            </p>
             {(book.pending_count ?? 0) > 0 && (
               <a href={`#/books/${book.id}?tab=review`}>
                 去核对 {book.pending_count} 页正文

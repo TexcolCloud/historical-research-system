@@ -18,6 +18,22 @@ export type UploadSession = components["schemas"]["UploadSession"];
 export type UploadRequest = components["schemas"]["UploadRequest"];
 
 export type UploadIdentity = { requestId: string; token: string };
+export async function readOriginalPage(
+  runId: string,
+  page: number,
+  signal?: AbortSignal,
+) {
+  const { data } = await client.GET(
+    "/api/v2/runs/{run_id}/review-pages/{page}",
+    {
+      params: { path: { run_id: runId, page } },
+      signal,
+    },
+  );
+  if (!data?.image)
+    throw new Error("本页原图暂时无法读取，可重试或打开原 PDF。");
+  return data.image;
+}
 export async function requestUpload(
   body: UploadRequest,
   identity: UploadIdentity,

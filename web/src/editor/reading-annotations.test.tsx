@@ -17,6 +17,52 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("a whole footnote definition maps its visible body with unchanged source and note ownership", () => {
+  const markdown = "标题[^*]。\n\n[^*]: 星注原文。";
+  const start = markdown.indexOf("[^*]:"),
+    end = markdown.length;
+  const footnotes = [
+    {
+      id: "star-note",
+      label: "*",
+      note: { start, end, marker_end: start + 5 },
+      references: [
+        { start: markdown.indexOf("[^*]"), end: markdown.indexOf("[^*]") + 4 },
+      ],
+    },
+  ];
+  const retained = JSON.stringify(footnotes);
+  const failed = vi.fn();
+  const { container, rerender } = render(
+    <RenderedMarkdown
+      markdown={markdown}
+      footnotes={footnotes}
+      readingFocus={{ id: "whole-source-note", start, end }}
+      onReadingFailure={failed}
+    />,
+  );
+  const visibleText = container.textContent;
+  expect(failed).toHaveBeenLastCalledWith([]);
+  expect(container.querySelector("mark[data-reading-focus]")?.textContent).toBe(
+    "星注原文。",
+  );
+  rerender(
+    <RenderedMarkdown
+      markdown={markdown}
+      footnotes={footnotes}
+      readingFocus={{ id: "visible-note-body", start: start + 6, end }}
+      onReadingFailure={failed}
+    />,
+  );
+  expect(failed).toHaveBeenLastCalledWith([]);
+  expect(container.querySelector("mark[data-reading-focus]")?.textContent).toBe(
+    "星注原文。",
+  );
+  expect(container.textContent).toBe(visibleText);
+  expect(container.querySelector('[id$="star-note"]')).toBeTruthy();
+  expect(JSON.stringify(footnotes)).toBe(retained);
+});
+
 test("reading links and destination focus preserve Unicode and footnote targets", async () => {
   const markdown = "😀目录条目 …… 12\n\n正文[^1]。\n\n[^1]: 原注。";
   const chars = Array.from(markdown),
@@ -67,6 +113,53 @@ test("reading links and destination focus preserve Unicode and footnote targets"
   await userEvent.click(link);
   expect(navigate).toHaveBeenCalledWith("#/books/book?chapter=body");
 });
+
+test.each([false, true])(
+  "duplicate note text uses exact source boundaries after Unicode; marker-only=%s",
+  (markerOnly) => {
+    const markdown =
+      "😀𠮷甲[^a]，乙[^b]。\n\n[^a]: 相同注释。\n\n[^b]: 相同注释。";
+    const chars = Array.from(markdown);
+    const point = (value: string) =>
+      Array.from(markdown.slice(0, markdown.indexOf(value))).length;
+    const notes = ["a", "b"].map((label, index) => ({
+      id: label,
+      label,
+      note: {
+        start: point(`[^${label}]:`),
+        end: index === 0 ? point("[^b]:") : chars.length,
+        marker_end: point(`[^${label}]:`) + 5,
+      },
+      references: [
+        { start: point(`[^${label}]`), end: point(`[^${label}]`) + 4 },
+      ],
+    }));
+    const failed = vi.fn();
+    const { container } = render(
+      <RenderedMarkdown
+        markdown={markdown}
+        footnotes={notes}
+        readingFocus={{
+          id: "second-note",
+          start: notes[1].note.start,
+          end: markerOnly ? notes[1].note.marker_end : chars.length,
+        }}
+        onReadingFailure={failed}
+      />,
+    );
+    const marks = container.querySelectorAll("mark[data-reading-focus]");
+    if (markerOnly) {
+      expect(marks).toHaveLength(0);
+      expect(failed).toHaveBeenLastCalledWith(["second-note"]);
+    } else {
+      expect(marks).toHaveLength(1);
+      expect(marks[0].textContent).toBe("相同注释。");
+      expect(marks[0].closest("p")?.querySelector('[id$="-b"]')).toBeTruthy();
+      expect(failed).toHaveBeenLastCalledWith([]);
+    }
+    expect(container.querySelectorAll("a[data-note-jump]")).toHaveLength(4);
+  },
+);
 
 test("a source-only destination reports failure without marking another visible word", () => {
   const markdown = "[链接](https://example.test/正文)";
@@ -125,10 +218,7 @@ test("the actual backend search target renders an exact cross-block highlight", 
     target: ReadingTarget;
   } = JSON.parse(
     readFileSync(
-      resolve(
-        process.cwd(),
-        "../tests/fixtures/reading_heading_target.json",
-      ),
+      resolve(process.cwd(), "../tests/fixtures/reading_heading_target.json"),
       "utf8",
     ),
   );

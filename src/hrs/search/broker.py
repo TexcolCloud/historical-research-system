@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import multiprocessing
 import os
 import signal
@@ -11,7 +12,7 @@ import threading
 import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psutil
 from filelock import FileLock, Timeout
@@ -27,7 +28,7 @@ from hrs.config import (
 )
 from hrs.processing.snapshots import atomic_json
 from hrs.runtime import lifecycle_lock
-from hrs.search.service import PROTOCOL, SERVICE
+from hrs.search.service import CLIENT_PROTOCOL, PROTOCOL, SERVICE, process_alive
 
 
 def free_gib():
@@ -123,6 +124,75 @@ class RetrievalBroker:
         self.active = None
         self.cancelled_requests = {}
         self.cancelled_tasks = set()
+        self.client_lock = threading.RLock()
+        self.clients = {}
+        self.clients_started = False
+        self.managed = False
+        self.instance_id = uuid4().hex
+        self.endpoint = None
+
+    def _prune_clients(self):
+        self.clients = {key: value for key, value in self.clients.items() if process_alive(*value)}
+
+    def client(self, body):
+        """Register local process identities in the one shared host, not client data roots."""
+        if (
+            not self.managed
+            or not isinstance(body, dict)
+            or set(body)
+            != {
+                "action",
+                "client_id",
+                "pid",
+                "created",
+                "instance_id",
+                "project_root",
+                "models_root",
+                "endpoint",
+            }
+            or body["instance_id"] != self.instance_id
+            or body["endpoint"] != self.endpoint
+            or resolve_path(self.root, body["project_root"]) != self.root
+            or resolve_path(self.root, body["models_root"]) != self.models_root
+        ):
+            raise ValueError("Incompatible managed retrieval client")
+        client_id = str(UUID(body["client_id"]))
+        pid, created = body["pid"], body["created"]
+        if (
+            type(pid) is not int
+            or pid <= 0
+            or type(created) not in (int, float)
+            or not math.isfinite(created)
+            or body["action"] not in {"acquire", "release"}
+        ):
+            raise ValueError("Invalid managed client identity")
+        identity = (pid, created)
+        with self.client_lock:
+            self._prune_clients()
+            previous = self.clients.get(client_id)
+            if previous is not None and previous != identity:
+                raise ValueError("Managed client identity changed")
+            if body["action"] == "acquire":
+                if self.closing.is_set() or not process_alive(*identity):
+                    raise RuntimeError("Managed client or retrieval host is no longer active")
+                self.clients[client_id] = identity
+                self.clients_started = True
+            else:
+                self.clients.pop(client_id, None)
+                if self.clients_started and not self.clients:
+                    self.closing.set()
+            return {
+                "instance_id": self.instance_id,
+                "clients": len(self.clients),
+                "closing": self.closing.is_set(),
+            }
+
+    def clients_finished(self):
+        with self.client_lock:
+            self._prune_clients()
+            if self.clients_started and not self.clients:
+                self.closing.set()
+            return self.clients_started, self.closing.is_set()
 
     def event(self, value):
         with (self.folder / "events.jsonl").open("a", encoding="utf-8") as stream:
@@ -256,6 +326,9 @@ def main(argv=()):
     options = parser.parse_args(argv)
     if (options.owner_pid is None) != (options.owner_created is None):
         raise ValueError("Managed retrieval requires both owner PID and creation time")
+    broker.managed = options.owner_pid is not None
+    broker.endpoint = options.endpoint
+    process_created = psutil.Process(os.getpid()).create_time()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -284,6 +357,12 @@ def main(argv=()):
                     "service": SERVICE,
                     "protocol": PROTOCOL,
                     "pid": os.getpid(),
+                    "process_create_time": process_created,
+                    "instance_id": broker.instance_id,
+                    "project_root": str(broker.root),
+                    "endpoint": broker.endpoint,
+                    "managed": broker.managed,
+                    "client_protocol": CLIENT_PROTOCOL,
                     "model": "BGE-M3",
                     "resident": worker_pid is not None,
                     "worker_pid": worker_pid,
@@ -306,9 +385,13 @@ def main(argv=()):
                     result = broker.cancel(body["request_ids"])
                 elif self.path == "/cancel-tasks":
                     result = broker.cancel(body["task_ids"], tasks=True)
+                elif self.path == "/clients":
+                    result = broker.client(body)
                 else:
                     return self.reply(404, {"error": "unknown_route"})
                 self.reply(200, result)
+                if self.path == "/clients" and result["closing"]:
+                    stop()
             except Exception as error:  # noqa: BLE001 -- bounded HTTP error envelope
                 broker.event({"event": "failed", "error_class": type(error).__name__})
                 self.reply(
@@ -346,14 +429,17 @@ def main(argv=()):
 
     def watch_owner():
         while not done.wait(0.25):
-            stop_requested = options.stop_file is not None and options.stop_file.exists()
-            if options.owner_pid is not None:
-                try:
-                    parent = psutil.Process(options.owner_pid)
-                    stop_requested |= abs(parent.create_time() - options.owner_created) > 0.01
-                    stop_requested |= parent.status() == psutil.STATUS_ZOMBIE
-                except psutil.Error:
-                    stop_requested = True
+            with broker.client_lock:
+                started, stop_requested = broker.clients_finished()
+                if not started:
+                    stop_requested |= options.stop_file is not None and options.stop_file.exists()
+                    if options.owner_pid is not None:
+                        stop_requested |= not process_alive(
+                            options.owner_pid, options.owner_created
+                        )
+                if stop_requested:
+                    # Registration cannot race bootstrap abandonment or last-client death.
+                    broker.closing.set()
             if stop_requested:
                 stop()
                 return
@@ -372,6 +458,8 @@ def main(argv=()):
         finally:
             server.server_close()
             receipt.unlink(missing_ok=True)
+            if options.stop_file is not None:
+                options.stop_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

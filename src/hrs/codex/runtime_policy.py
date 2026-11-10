@@ -118,6 +118,17 @@ def worker_instructions(stage, mode=None):
             else STAGE[stage]
         )
         + ("\n" + ISSUE_INSTRUCTIONS if stage in {"review", "verify"} else "")
+        + (
+            "\nPage structure may include optional running_headers/running_footers: arrays of exact full "
+            "first/last nonempty Markdown lines, including any printed folio. Inspect original pixels to "
+            "identify actual running furniture; never label article titles or TOC entries as furniture. "
+            "For a cross-page source_spans boundary obstructed by a running header/footer, submit it "
+            "in the same navigation result's page_observations after opening that original, and keep "
+            "the title fragments separate from the furniture. Never guess headers from filenames, "
+            "repetition or PDF ordinals; unclear furniture remains unresolved."
+            if stage in {"review", "verify"} or (stage == "navigation" and mode != "verify_links")
+            else ""
+        )
     )
 
 

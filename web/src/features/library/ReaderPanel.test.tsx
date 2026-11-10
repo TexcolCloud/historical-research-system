@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
@@ -8,6 +8,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ReaderPanel from "@/features/library/ReaderPanel.tsx";
 import { respondWith } from "@/test/responses.ts";
 import { readingNavigationOptions } from "./navigation-query";
+import { research } from "@/features/research/api";
+beforeEach(() =>
+  vi.spyOn(research, "reading").mockResolvedValue({
+    chapter_id: "",
+    run_id: "",
+    text_sha256: "",
+    cards: [],
+    annotations: [],
+  }),
+);
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -53,7 +63,7 @@ test("reads a complete logical chapter first and opens only its associated origi
   await userEvent.click(screen.getByText("结构整理结果"));
   expect(screen.queryByTitle("原书 PDF")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "对照原书" }));
-  expect((await screen.findByAltText("原书第 7 页")).getAttribute("src")).toBe(
+  expect((await screen.findByAltText("PDF 第 7 页")).getAttribute("src")).toBe(
     "/original-7.png",
   );
   expect(

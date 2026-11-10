@@ -19,6 +19,7 @@ export type WorkspaceContext = {
 
 export default function AppShell() {
   const location = useLocation();
+  const researching = location.pathname === "/research";
   const reviewing =
     location.pathname === "/reviews" ||
     (location.pathname.startsWith("/books/") &&
@@ -48,6 +49,7 @@ export default function AppShell() {
   const [activity, setActivity] = useState<UploadActivity>({
     total: 0,
     pending: 0,
+    uploading: 0,
   });
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -65,11 +67,17 @@ export default function AppShell() {
           <span>史料研究</span>
         </Link>
         <nav aria-label="主要导航">
-          <Link to="/" aria-current={!reviewing ? "page" : undefined}>
+          <Link
+            to="/"
+            aria-current={!reviewing && !researching ? "page" : undefined}
+          >
             书籍
           </Link>
           <Link to="/reviews" aria-current={reviewing ? "page" : undefined}>
             待办
+          </Link>
+          <Link to="/research" aria-current={researching ? "page" : undefined}>
+            实体库
           </Link>
         </nav>
         <div className="platform-header-actions">
@@ -83,7 +91,11 @@ export default function AppShell() {
             aria-label={started ? "查看导入进展" : "上传史料"}
           >
             <Upload size={16} />
-            {activity.pending ? `上传中 · ${activity.pending}` : "上传史料"}
+            {activity.uploading
+              ? `上传中 · ${activity.uploading}`
+              : activity.pending
+                ? `待上传 · ${activity.pending}`
+                : "上传史料"}
           </Button>
         </div>
       </header>

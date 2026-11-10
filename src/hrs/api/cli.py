@@ -42,6 +42,11 @@ def main():
     )
     parser.add_argument("--run-id", help="Published book run to reindex without repeating OCR")
     parser.add_argument(
+        "--research",
+        action="store_true",
+        help="Queue derived research card/entity index rebuild without inference (reindex only)",
+    )
+    parser.add_argument(
         "--cases", help="Evaluation JSON: query and expected chapter_id/start/end ranges"
     )
     parser.add_argument(
@@ -125,6 +130,10 @@ def main():
                     semantic=args.semantic,
                     limit=args.limit,
                 )
+            elif args.research:
+                from hrs.research.bridge import ResearchBridge
+
+                result = ResearchBridge(settings, engine).rebuild_discovery(run_id)
             else:
                 result = BookIndexer(settings, engine).index(run_id)
             print(json.dumps(result, ensure_ascii=False, indent=2))

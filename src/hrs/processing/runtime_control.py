@@ -11,6 +11,8 @@ import math
 import time
 from pathlib import Path
 
+import psutil
+
 from hrs.processing.contracts import SOL, TERRA
 from hrs.processing.execution_policy import configured_policy
 from hrs.processing.ledger import Ledger, encode
@@ -260,10 +262,22 @@ class RuntimeControl:
             "probe": phase == "probing",
         }
 
-    def admit(self, model, owner, *, occupied=0, total_occupied=None, lease_seconds=900, now=None):
+    def admit(
+        self,
+        model,
+        owner,
+        *,
+        occupied=0,
+        total_occupied=None,
+        lease_seconds=900,
+        now=None,
+        priority="normal",
+    ):
         self._require_writable()
         now = time.time() if now is None else now
         self._key("model", model)
+        if priority not in {"normal", "research"}:
+            raise ValueError("Unsupported runtime admission priority")
         if not isinstance(owner, str) or not owner or lease_seconds <= 0:
             raise ValueError("Admission requires a stable owner and positive lease")
         if (
@@ -292,6 +306,7 @@ class RuntimeControl:
                     )
             stored = self._read(connection)
             decisions, probe_keys = [], []
+            source_ready = priority == "research" and self.ledger.source_work_ready(now=now)
             for key in keys:
                 raw = stored.get(key, self._normal(key))
                 state = self._public(raw, now)
@@ -300,9 +315,18 @@ class RuntimeControl:
                 if state["state"] == "probing":
                     denied = bool(raw["probe_owner"] and raw["probe_owner"] != owner)
                     probe_keys.append(key)
-                if count >= state["limit"]:
+                reserved = (
+                    min(2, max(0, state["limit"] - 1)) if source_ready and key == "account" else 0
+                )
+                if count >= state["limit"] - reserved:
                     denied = True
-                    state = {**state, "reason": "capacity_occupied"}
+                    state = {
+                        **state,
+                        "reason": "source_processing_priority" if reserved else "capacity_occupied",
+                    }
+                if source_ready and state["state"] in {"probing", "recovering"}:
+                    denied = True
+                    state = {**state, "reason": "source_processing_priority"}
                 decisions.append((key, state, denied))
             denial = next((state for _, state, denied in decisions if denied), None)
             if denial:
@@ -343,6 +367,157 @@ class RuntimeControl:
                 "probe": bool(probe_keys),
             }
 
+    def reserve_coordinator(self, model, owner, *, lease_seconds=900, now=None):
+        """Reserve a dispatcher without consuming the worker's recovery probe.
+
+        One recovery dispatcher is free in affected scopes. A second dispatcher
+        consumes ordinary capacity and must leave headroom for its worker.
+        """
+        self._require_writable()
+        self._key("model", model)
+        if (
+            not isinstance(owner, str)
+            or not owner.startswith("research-coordinator:")
+            or type(lease_seconds) is not int
+            or not 1 <= lease_seconds <= 86400
+        ):
+            raise ValueError(
+                "Coordinator reservations require a stable research owner and bounded lease"
+            )
+        now = time.time() if now is None else now
+        with self.ledger.connect(write=True) as connection:
+            self.ledger.ensure_runtime_schema(connection)
+            stored = self._read(connection)
+            for key in ("account", "model:" + model):
+                raw = stored.get(key, self._normal(key))
+                if raw["state"] == "probing" and raw["probe_until"] <= now:
+                    self.failure(
+                        "timeout",
+                        f"probe-expired:{key}:{raw['probe_owner']}:{raw['probe_until']}",
+                        model=raw["model"],
+                        scope=raw["scope"],
+                        now=now,
+                    )
+            stored = self._read(connection)
+            states = [
+                self._public(stored.get(key, self._normal(key)), now)
+                for key in ("account", "model:" + model)
+            ]
+            gate = self.gate(model, now=now)
+            if not gate["allowed"]:
+                return {**gate, "probe": False, "control_only": True}
+            busy_probe = next(
+                (
+                    stored[key]
+                    for key in ("account", "model:" + model)
+                    if stored.get(key, {}).get("state") == "probing"
+                    and stored[key].get("probe_owner")
+                    and stored[key]["probe_until"] > now
+                ),
+                None,
+            )
+            if busy_probe:
+                return {
+                    **gate,
+                    "allowed": False,
+                    "reason": "worker_probe_active",
+                    "retry_at": busy_probe["probe_until"],
+                    "probe": False,
+                    "control_only": True,
+                }
+            coordinators = []
+            for candidate, payload in connection.execute(
+                "SELECT owner,payload FROM runtime_admissions WHERE owner GLOB 'research-coordinator:*'"
+            ).fetchall():
+                value = json.loads(payload)
+                if value["expires_at"] <= now or not self.ledger.coordinator_alive(value):
+                    connection.execute("DELETE FROM runtime_admissions WHERE owner=?", (candidate,))
+                else:
+                    coordinators.append((candidate, value))
+            existing = connection.execute(
+                "SELECT payload FROM runtime_admissions WHERE owner=?", (owner,)
+            ).fetchone()
+            previous = json.loads(existing[0]) if existing else None
+            if previous and previous["expires_at"] > now:
+                if previous["model"] != model or not previous.get("coordinator"):
+                    raise ValueError("Coordinator owner already identifies a different admission")
+                renewed = self.renew(model, owner, expires_at=now + lease_seconds, now=now)
+                return {
+                    **gate,
+                    "allowed": renewed,
+                    "probe": False,
+                    "reason": None if renewed else "admission_yield",
+                    "control_only": previous.get("control_only", False)
+                    and any(state["state"] != "normal" for state in states),
+                }
+            occupancy = (
+                self.ledger.capacity_used(now=now),
+                self.ledger.model_capacity_used(model, now=now),
+            )
+            recovery = any(state["state"] != "normal" for state in states)
+            source_ready = self.ledger.source_work_ready(now=now)
+            if source_ready and recovery:
+                return {
+                    **gate,
+                    "allowed": False,
+                    "probe": False,
+                    "reason": "source_processing_priority",
+                    "control_only": False,
+                }
+            if len(coordinators) >= 2 or (
+                recovery
+                and coordinators
+                and any(state["state"] not in {"normal", "recovering"} for state in states)
+            ):
+                return {
+                    **gate,
+                    "allowed": False,
+                    "probe": False,
+                    "reason": "recovery_coordinator_active",
+                    "control_only": False,
+                }
+            control_only = recovery and not any(
+                value.get("control_only") for _, value in coordinators
+            )
+            control_scopes = [
+                key
+                for key, state in zip(("account", "model:" + model), states)
+                if control_only and state["state"] != "normal"
+            ]
+            for position, (state, count) in enumerate(zip(states, occupancy)):
+                reserved = (
+                    min(2, max(0, state["limit"] - 1)) if source_ready and position == 0 else 0
+                )
+                # Even a free recovery controller counts against an unaffected normal scope.
+                cost = int(("account" if position == 0 else "model:" + model) not in control_scopes)
+                if cost and count + cost >= state["limit"] - reserved:
+                    return {
+                        **gate,
+                        "allowed": False,
+                        "reason": "source_processing_priority" if reserved else "capacity_occupied",
+                        "probe": False,
+                        "control_only": control_only,
+                    }
+            admission = {
+                "model": model,
+                "generations": {
+                    key: stored.get(key, self._normal(key))["generation"]
+                    for key in ("account", "model:" + model)
+                },
+                "probe_keys": [],
+                "coordinator": True,
+                "control_only": control_only,
+                "control_scopes": control_scopes,
+                "expires_at": now + lease_seconds,
+                "pid": psutil.Process().pid,
+                "process_create_time": psutil.Process().create_time(),
+            }
+            connection.execute(
+                "INSERT INTO runtime_admissions VALUES (?,?) ON CONFLICT(owner) DO UPDATE SET payload=excluded.payload",
+                (owner, encode(admission)),
+            )
+            return {**gate, "probe": False, "control_only": control_only}
+
     def renew(self, model, owner, *, expires_at, now=None):
         """Extend one live admission; a stale generation never changes a newer probe or budget."""
         self._require_writable()
@@ -365,6 +540,55 @@ class RuntimeControl:
             if not admission or admission["model"] != model or admission["expires_at"] <= now:
                 return False
             states = self._read(connection)
+            if admission.get("coordinator"):
+                if not self.ledger.coordinator_alive(admission):
+                    return False
+                keys = ("account", "model:" + model)
+                public = {
+                    key: self._public(states.get(key, self._normal(key)), now) for key in keys
+                }
+                control_scopes = set(
+                    admission.get("control_scopes", keys if admission.get("control_only") else ())
+                )
+                for key, state in public.items():
+                    if state["state"] == "normal":
+                        control_scopes.discard(key)
+                    elif (
+                        key in control_scopes
+                        and "control_scopes" in admission
+                        and key not in admission["generations"]
+                    ):
+                        return False
+                    elif (
+                        key in control_scopes
+                        and state["generation"]
+                        > admission["generations"].get(key, state["generation"]) + 1
+                    ):
+                        # Normal recovery and then a relapse can both occur
+                        # between renewals; do not regain a former free scope.
+                        return False
+                    elif key not in control_scopes and (
+                        state["state"] not in {"normal", "recovering"}
+                        or state["generation"] != admission["generations"].get(key)
+                    ):
+                        return False
+                if (
+                    not admission.get("control_only")
+                    and any(state["state"] == "recovering" for state in public.values())
+                    and self.ledger.source_work_ready(now=now)
+                ):
+                    return False
+                admission["control_scopes"] = sorted(control_scopes)
+                admission["control_only"] = bool(control_scopes)
+                admission["generations"] = {
+                    key: state["generation"] for key, state in public.items()
+                }
+                admission["expires_at"] = max(admission["expires_at"], expires_at)
+                connection.execute(
+                    "UPDATE runtime_admissions SET payload=? WHERE owner=?",
+                    (encode(admission), owner),
+                )
+                return True
             for key in admission["probe_keys"]:
                 state = states.get(key)
                 if (
@@ -397,6 +621,8 @@ class RuntimeControl:
             ).fetchone()
             admission = json.loads(row[0]) if row else None
             if not admission or admission["model"] != model or admission["expires_at"] <= now:
+                return self.snapshot(now=now)
+            if admission.get("coordinator"):
                 return self.snapshot(now=now)
             stored = self._read(connection)
             for key, generation in admission["generations"].items():
@@ -483,6 +709,53 @@ class RuntimeControl:
                     else:
                         connection.execute("DELETE FROM runtime_admissions WHERE owner=?", (owner,))
         return self.snapshot(now=now)
+
+    def recover_local_errors(self, *, models, now=None):
+        """Explicit research resume clears legacy local-only pressure without revoking live workers."""
+        self._require_writable()
+        now = time.time() if now is None else now
+        with self.ledger.connect(write=True) as connection:
+            self.ledger.ensure_runtime_schema(connection)
+            recovered = []
+            for key, state in self._read(connection).items():
+                if key not in {"account", *("model:" + model for model in models)} or state.get(
+                    "code"
+                ) not in {"tool_error", "unknown"}:
+                    continue
+                since = state.get("first_at") or state.get("recovery_at") or 0
+                codes = [
+                    json.loads(row[0])["code"]
+                    for row in connection.execute(
+                        "SELECT payload FROM runtime_events WHERE identity LIKE 'failure:%' "
+                        "AND json_extract(payload,'$.scope_key')=? AND json_extract(payload,'$.at')>=?",
+                        (key, since),
+                    )
+                ]
+                if any(code not in {"tool_error", "unknown"} for code in codes):
+                    continue
+                normal = self._normal(key)
+                normal["generation"] = state["generation"] + 1
+                self._save(connection, key, normal)
+                for owner, payload in connection.execute(
+                    "SELECT owner,payload FROM runtime_admissions"
+                ).fetchall():
+                    admission = json.loads(payload)
+                    if key in admission["generations"]:
+                        admission["generations"][key] = normal["generation"]
+                        admission["probe_keys"] = [
+                            scope for scope in admission["probe_keys"] if scope != key
+                        ]
+                        connection.execute(
+                            "UPDATE runtime_admissions SET payload=? WHERE owner=?",
+                            (encode(admission), owner),
+                        )
+                self._event(
+                    connection,
+                    f"research-local-recovery:{key}:{normal['generation']}",
+                    {"scope_key": key, "at": now, "reason": "explicit_research_resume"},
+                )
+                recovered.append(key)
+            return recovered
 
 
 def effective_policy(root):

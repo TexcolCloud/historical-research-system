@@ -337,7 +337,7 @@
     background: #ffe28a;
   }
   100% {
-    background: transparent;
+    background: var(--warning-surface, #fff0c9);
   }
 }
 

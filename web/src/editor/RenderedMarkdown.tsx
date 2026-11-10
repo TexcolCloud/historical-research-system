@@ -56,10 +56,25 @@ export function RenderedMarkdown({
   readingFailureCallback.current = onReadingFailure;
   const renderSource = useMemo<ReviewRenderer>(
     () => (source, insertions) => {
-      const edits = insertions.map((edit) => ({
-        ...edit,
-        at: Array.from(markdown.slice(0, edit.at)).length,
-      }));
+      const chars = Array.from(markdown);
+      const edits = insertions.map((edit) => {
+        const at = Array.from(markdown.slice(0, edit.at)).length;
+        // A definition's Markdown marker is replaced by the note UI. Project
+        // that boundary onto its retained body, using the explicit source map.
+        const note = footnotes.find(
+          (link) => link.note.start <= at && at < link.note.marker_end,
+        );
+        let visible = note?.note.marker_end ?? at;
+        if (note)
+          while (visible < note.note.end && /\s/u.test(chars[visible]))
+            visible++;
+        return { ...edit, at: visible };
+      });
+      if (edits.length) {
+        for (const edit of [...edits].reverse().sort((a, b) => b.at - a.at))
+          chars.splice(edit.at, 0, edit.text);
+        source = chars.join("");
+      }
       const point = (at: number, right: boolean) =>
         at +
         edits.reduce(
@@ -101,6 +116,11 @@ export function RenderedMarkdown({
     () => renderSource(markdown, []),
     [markdown, renderSource],
   );
+  // A background annotation refresh must not replace an identical anchor between
+  // pointer-down and click. Values, rather than response-array identity, own DOM updates.
+  const readingLinksKey = JSON.stringify(readingLinks);
+  const readingFocusKey = JSON.stringify(readingFocus);
+  const highlightsKey = JSON.stringify(highlights);
   useEffect(() => {
     if (root.current) {
       const readingSourceChanged = renderedReadingSource.current !== html;
@@ -142,11 +162,10 @@ export function RenderedMarkdown({
   }, [
     html,
     markdown,
-    highlights,
+    highlightsKey,
     activeHighlight,
-    renderSource,
-    readingLinks,
-    readingFocus,
+    readingLinksKey,
+    readingFocusKey,
   ]);
   return (
     <div

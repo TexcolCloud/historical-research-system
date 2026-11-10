@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
     },
   };
   return {
-    test: { include: ["src/**/*.test.{ts,tsx}"] },
+    test: { include: ["src/**/*.test.{ts,tsx}"], maxWorkers: 4 },
     build: {
       rolldownOptions: {
         input: {

@@ -118,7 +118,48 @@ export function readingRange(target: ReadingTarget, chapter: ReadingChapter) {
 }
 
 export function safeReaderReturn(value: string | null, bookId: string) {
-  return value?.startsWith(`/books/${bookId}?`)
+  const researchPath = /^\/books\/[A-Za-z0-9_-]+\?([^#]*)$/.exec(value ?? "");
+  const researchParams = researchPath
+    ? new URLSearchParams(researchPath[1])
+    : null;
+  const sourceResearch =
+    researchParams?.get("tab") === "research" &&
+    Boolean(researchParams.get("card") || researchParams.get("entity"));
+  return value &&
+    (value.startsWith(`/books/${bookId}?`) ||
+      value === "/research" ||
+      value.startsWith("/research?") ||
+      sourceResearch)
     ? value
     : `/books/${bookId}?tab=reader&section=directory`;
+}
+
+export function sourcePage(chapter: Chapter, at: number) {
+  let offset = 0;
+  for (const part of chapter.parts) {
+    const stop =
+      offset +
+      (typeof part.text === "string" ? Array.from(part.text).length : 0);
+    const source = part.source;
+    if (offset <= at && at < stop && source && typeof source === "object") {
+      if (
+        "page" in source &&
+        typeof source.page === "number" &&
+        Number.isSafeInteger(source.page) &&
+        source.page > 0
+      )
+        return source.page;
+      if ("pages" in source && Array.isArray(source.pages)) {
+        const page = source.pages.find(
+          (value: unknown) =>
+            typeof value === "number" &&
+            Number.isSafeInteger(value) &&
+            value > 0,
+        );
+        if (typeof page === "number") return page;
+      }
+    }
+    offset = stop;
+  }
+  return chapter.pages[0] ?? 1;
 }

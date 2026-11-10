@@ -10,13 +10,19 @@ def engine_for(settings):
     url = make_url(settings.database_url.get_secret_value())
     if url.drivername != "postgresql+psycopg":
         raise ValueError("The platform requires PostgreSQL with psycopg.")
+    configured_options = url.query.get("options", "")
+    if isinstance(configured_options, tuple):
+        configured_options = " ".join(configured_options)
+    # Explicit deployment options come last: schema identity and intentional
+    # timeout overrides survive the driver's connect_args precedence.
+    options = "-cstatement_timeout=30000 -clock_timeout=10000 " + configured_options
     return create_engine(
         url,
         pool_pre_ping=True,
         hide_parameters=True,
         connect_args={
-            "connect_timeout": 5,
-            "options": "-cstatement_timeout=30000 -clock_timeout=10000",
+            "connect_timeout": int(url.query.get("connect_timeout", 5)),
+            "options": options.strip(),
         },
     )
 

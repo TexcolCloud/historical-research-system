@@ -7,6 +7,7 @@ import { client } from "@/client/api.ts";
 import { readingHref } from "@/features/library/reader-location";
 import { readingNavigationOptions } from "@/features/library/navigation-query";
 import { ArrowUpRight, Search, X } from "lucide-react";
+import { matchBasis } from "./match-basis";
 export default function SearchPanel({
   bookId,
   onClose,
@@ -216,11 +217,13 @@ export default function SearchPanel({
           <Button onClick={() => void results.refetch()}>重新查找</Button>
         </p>
       )}
-      {results.data?.length === 0 && (
-        <p>
-          未找到相关内容。可缩短关键词，或在“检索方式”中选择“按原文查词”后重新查找。
-        </p>
-      )}
+      {!results.isFetching &&
+        !results.isError &&
+        results.data?.length === 0 && (
+          <p>
+            未找到相关内容。可缩短关键词，或在“检索方式”中选择“按原文查词”后重新查找。
+          </p>
+        )}
       {!results.isPlaceholderData &&
         results.data?.map((hit) => (
           <article key={hit.id} className="search-result">
@@ -243,6 +246,9 @@ export default function SearchPanel({
               )}
               <p>PDF 第 {hit.pages.join("、")} 页</p>
             </div>
+            <p className="search-result-provenance" aria-label="匹配依据">
+              {matchBasis(hit, request.q)}
+            </p>
             <p className="search-result-excerpt">{hit.text}</p>
             {hit.reading_target && (
               <Link

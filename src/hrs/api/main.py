@@ -1,7 +1,7 @@
 """Application composition and resource lifetime; routes live under api/."""
 
 from contextlib import asynccontextmanager
-from threading import Event
+from threading import Event, Lock
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -51,6 +51,8 @@ def create_app(settings=None, engine=None):
     app.state.outputs = Outputs(settings, engine)
     app.state.cards = Cards(settings, engine)
     app.state.exports = Exports(settings, engine)
+    app.state.research = None
+    app.state.research_lock = Lock()
 
     @app.exception_handler(ServiceError)
     async def rejected_operation(request: Request, error: ServiceError):

@@ -222,5 +222,29 @@ class NativePublication:
                         },
                     )
                 )
+                connection.execute(
+                    insert(db.events).values(
+                        book_id=run["book_id"],
+                        run_id=run["id"],
+                        kind="library.indexed",
+                        payload={
+                            "publication_sha256": publication_sha,
+                            "chapters_sha256": chapter_sha,
+                            "navigation_sha256": navigation_sha,
+                            "retrieval_generation": indexed.get("retrieval_generation"),
+                        },
+                    )
+                )
+                from hrs.research.bridge import enqueue_research_event
+
+                if run["result"].get("content_acceptance") != "workflow_test":
+                    enqueue_research_event(
+                        connection,
+                        run["id"],
+                        {
+                            "publication_sha256": publication_sha,
+                            "chapters_sha256": chapter_sha,
+                        },
+                    )
             run = get_run(self.engine, run["id"])
         return run

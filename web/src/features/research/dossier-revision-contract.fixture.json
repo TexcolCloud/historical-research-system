@@ -1,0 +1,392 @@
+{
+  "article": {
+    "id": "dossier-primary",
+    "text": "李四：《调查札记》，《调查通讯》1936年第2期，第12—14页。\n1936年5月，李四在上海致函研究会，报告调查见闻。函称登记经费120元，仅为申请，不等于已经拨付。\n编者按：本文为存档抄件，原件未见。\n",
+    "parts": [
+      {
+        "start": 0,
+        "end": 34
+      },
+      {
+        "start": 34,
+        "end": 85
+      },
+      {
+        "start": 85,
+        "end": 103
+      }
+    ]
+  },
+  "initial": {
+    "id": "dossier-card",
+    "article_id": "dossier-primary",
+    "title": "调查札记",
+    "summary": "李四报告调查见闻，120元记为经费申请；编者注明材料为抄件。",
+    "document_type": "函件抄件",
+    "source_layer": "正文及编者说明",
+    "formation_date": {
+      "text": "1936年5月",
+      "normalized": "1936-05",
+      "certainty": "stated",
+      "evidence_ids": ["letter"]
+    },
+    "event_date": {
+      "text": "",
+      "normalized": null,
+      "certainty": "unknown",
+      "evidence_ids": []
+    },
+    "items": [
+      {
+        "id": "request",
+        "kind": "evidence",
+        "title": "",
+        "text": "120元只是申请，不等于已经拨付。",
+        "evidence_ids": ["letter"],
+        "epistemic_state": "stated",
+        "attribution": "",
+        "limitations": []
+      }
+    ],
+    "evidence": [
+      {
+        "id": "bib",
+        "article_id": "dossier-primary",
+        "start": 0,
+        "end": 34,
+        "quote": "李四：《调查札记》，《调查通讯》1936年第2期，第12—14页。\n",
+        "footnote_ids": []
+      },
+      {
+        "id": "letter",
+        "article_id": "dossier-primary",
+        "start": 34,
+        "end": 85,
+        "quote": "1936年5月，李四在上海致函研究会，报告调查见闻。函称登记经费120元，仅为申请，不等于已经拨付。\n",
+        "footnote_ids": []
+      },
+      {
+        "id": "editor",
+        "article_id": "dossier-primary",
+        "start": 85,
+        "end": 103,
+        "quote": "编者按：本文为存档抄件，原件未见。\n",
+        "footnote_ids": []
+      }
+    ],
+    "mentions": [],
+    "events": [],
+    "relations": [],
+    "identity_links": [],
+    "tags": [],
+    "limitations": [],
+    "alternatives": [],
+    "questions": [],
+    "no_argument_reason": null,
+    "metadata": {
+      "title_origin": "source",
+      "original_title": {
+        "value": "调查札记",
+        "certainty": "stated",
+        "evidence_ids": ["bib"],
+        "note": ""
+      },
+      "authors": {
+        "value": "李四",
+        "certainty": "stated",
+        "evidence_ids": ["bib"],
+        "note": ""
+      },
+      "recipients": {
+        "value": "研究会",
+        "certainty": "stated",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "editors": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": ""
+      },
+      "publication": {
+        "value": "调查通讯",
+        "certainty": "stated",
+        "evidence_ids": ["bib"],
+        "note": ""
+      },
+      "volume": {
+        "value": "第2期",
+        "certainty": "stated",
+        "evidence_ids": ["bib"],
+        "note": ""
+      },
+      "archive_id": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": [],
+        "note": ""
+      },
+      "formation_place": {
+        "value": "上海",
+        "certainty": "stated",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "purpose": {
+        "value": "报告调查见闻",
+        "certainty": "stated",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "testimony": {
+        "value": "存档抄件",
+        "certainty": "stated",
+        "evidence_ids": ["editor"],
+        "note": "这是编者说明，不作为李四自述。"
+      }
+    },
+    "coverage": [
+      {
+        "id": "part-0",
+        "article_id": "dossier-primary",
+        "start": 0,
+        "end": 34,
+        "summary": "篇首书目信息。",
+        "mention_ids": [],
+        "event_ids": [],
+        "relation_ids": [],
+        "no_mentions_reason": "",
+        "no_events_reason": "",
+        "no_relations_reason": ""
+      },
+      {
+        "id": "part-1",
+        "article_id": "dossier-primary",
+        "start": 34,
+        "end": 85,
+        "summary": "来函正文与申请状态。",
+        "mention_ids": [],
+        "event_ids": [],
+        "relation_ids": [],
+        "no_mentions_reason": "",
+        "no_events_reason": "",
+        "no_relations_reason": ""
+      },
+      {
+        "id": "part-2",
+        "article_id": "dossier-primary",
+        "start": 85,
+        "end": 103,
+        "summary": "编者说明抄件性质。",
+        "mention_ids": [],
+        "event_ids": [],
+        "relation_ids": [],
+        "no_mentions_reason": "",
+        "no_events_reason": "",
+        "no_relations_reason": ""
+      }
+    ],
+    "research_plan": [],
+    "cross_relations": [],
+    "question_findings": [],
+    "dossier": {
+      "research_scope": {
+        "value": "1936年调查组织与经费申请的文书记载",
+        "certainty": "inferred",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "formation_background": {
+        "value": "1936年5月，李四在上海致函研究会",
+        "certainty": "stated",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "text_structure": {
+        "value": "篇首书目、来函正文及编者说明",
+        "certainty": "inferred",
+        "evidence_ids": ["bib", "letter", "editor"],
+        "note": ""
+      },
+      "source_nature": {
+        "value": "存档抄件，原件未见",
+        "certainty": "stated",
+        "evidence_ids": ["editor"],
+        "note": "编者说明的材料性质。"
+      },
+      "source_role": {
+        "value": "调查与经费申请的一份文书记录",
+        "certainty": "inferred",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "research_value": {
+        "value": "可用于比较调查报告与经费申请的记载方式",
+        "certainty": "inferred",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "can_support": {
+        "value": "登记经费120元，仅为申请",
+        "certainty": "stated",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "cannot_support": {
+        "value": "不等于已经拨付",
+        "certainty": "stated",
+        "evidence_ids": ["letter"],
+        "note": ""
+      },
+      "needs_corroboration": {
+        "value": "实际拨付及调查结果仍需核对回函和财务凭证",
+        "certainty": "inferred",
+        "evidence_ids": ["letter", "editor"],
+        "note": ""
+      },
+      "argument_units": [
+        {
+          "id": "request-unit",
+          "title": "经费申请的性质",
+          "claim": "这份函件不能直接证明120元已经拨付。",
+          "evidence_ids": ["letter"],
+          "applicability_limit": "仅限这份申请函，不外推后续执行情况。",
+          "corroboration_needed": "如讨论拨付结果，需核对回函和财务凭证。"
+        }
+      ],
+      "argument_units_note": "",
+      "citation": {
+        "full": {
+          "value": "李四：《调查札记》，《调查通讯》1936年第2期，第12—14页。",
+          "certainty": "stated",
+          "evidence_ids": ["bib"],
+          "note": ""
+        },
+        "short": {
+          "value": "李四：《调查札记》",
+          "certainty": "stated",
+          "evidence_ids": ["bib"],
+          "note": ""
+        },
+        "printed_pages": {
+          "value": "第12—14页",
+          "certainty": "stated",
+          "evidence_ids": ["bib"],
+          "note": ""
+        },
+        "publication_date": {
+          "text": "1936年",
+          "normalized": "1936",
+          "certainty": "stated",
+          "evidence_ids": ["bib"]
+        },
+        "completeness": "complete",
+        "missing_fields": []
+      }
+    }
+  },
+  "edited_dossier": {
+    "research_scope": {
+      "value": "1936年调查报告与经费申请的文书范围",
+      "certainty": "inferred",
+      "evidence_ids": ["letter"],
+      "note": "不将申请写成拨付结果。"
+    },
+    "formation_background": {
+      "value": "1936年5月，李四在上海致函研究会",
+      "certainty": "stated",
+      "evidence_ids": ["letter"],
+      "note": ""
+    },
+    "text_structure": {
+      "value": "篇首书目、来函正文及编者说明",
+      "certainty": "inferred",
+      "evidence_ids": ["bib", "letter", "editor"],
+      "note": ""
+    },
+    "source_nature": {
+      "value": "存档抄件，原件未见",
+      "certainty": "stated",
+      "evidence_ids": ["editor"],
+      "note": "编者说明的材料性质。"
+    },
+    "source_role": {
+      "value": "调查与经费申请的一份文书记录",
+      "certainty": "inferred",
+      "evidence_ids": ["letter"],
+      "note": ""
+    },
+    "research_value": {
+      "value": "可用于比较调查报告与经费申请的记载方式",
+      "certainty": "inferred",
+      "evidence_ids": ["letter"],
+      "note": ""
+    },
+    "can_support": {
+      "value": "登记经费120元，仅为申请",
+      "certainty": "stated",
+      "evidence_ids": ["letter"],
+      "note": ""
+    },
+    "cannot_support": {
+      "value": "不等于已经拨付",
+      "certainty": "stated",
+      "evidence_ids": ["letter"],
+      "note": ""
+    },
+    "needs_corroboration": {
+      "value": "实际拨付及调查结果仍需核对回函和财务凭证",
+      "certainty": "inferred",
+      "evidence_ids": ["letter", "editor"],
+      "note": ""
+    },
+    "argument_units": [
+      {
+        "id": "request-unit",
+        "title": "经费申请的性质",
+        "claim": "120元为所申请的经费，本文不能确认实际拨付。",
+        "evidence_ids": ["letter"],
+        "applicability_limit": "仅就此函的申请语句而言。",
+        "corroboration_needed": "需核对收款凭证及复函。"
+      }
+    ],
+    "argument_units_note": "",
+    "citation": {
+      "full": {
+        "value": "李四：《调查札记》，《调查通讯》1936年第2期，第12—14页。",
+        "certainty": "stated",
+        "evidence_ids": ["bib"],
+        "note": ""
+      },
+      "short": {
+        "value": "李四：《调查札记》，1936年",
+        "certainty": "stated",
+        "evidence_ids": ["bib"],
+        "note": ""
+      },
+      "printed_pages": {
+        "value": "",
+        "certainty": "unknown",
+        "evidence_ids": ["bib"],
+        "note": "印刷页码待核对，暂不用于精确页码引用。"
+      },
+      "publication_date": {
+        "text": "1936年",
+        "normalized": "1936",
+        "certainty": "stated",
+        "evidence_ids": ["bib"]
+      },
+      "completeness": "partial",
+      "missing_fields": ["印刷页码核对"]
+    }
+  },
+  "new_unit": {
+    "id": "argument-3456789a",
+    "title": "抄件的见证限度",
+    "claim": "存档抄件的字句不能直接替代原件核对。",
+    "evidence_ids": ["editor"],
+    "applicability_limit": "仅依编者对载体的说明，不确认抄写是否完整。",
+    "corroboration_needed": ""
+  }
+}

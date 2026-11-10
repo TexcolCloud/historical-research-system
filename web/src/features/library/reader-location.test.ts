@@ -3,6 +3,7 @@ import {
   readingHref,
   readingRange,
   requestedReadingTarget,
+  safeReaderReturn,
 } from "./reader-location";
 
 const target = {
@@ -16,6 +17,17 @@ const target = {
   image_sha256: "b".repeat(64),
 };
 describe("shared source-bound reading targets", () => {
+  it("restores cross-book research results while rejecting external return routes", () => {
+    expect(
+      safeReaderReturn("/research?q=运输&book_id=book-b&card=card-a", "book-a"),
+    ).toBe("/research?q=运输&book_id=book-b&card=card-a");
+    expect(
+      safeReaderReturn("/books/book-a?tab=research&card=card-a", "book-a"),
+    ).toBe("/books/book-a?tab=research&card=card-a");
+    expect(safeReaderReturn("//example.com/research?q=运输", "book-a")).toBe(
+      "/books/book-a?tab=reader&section=directory",
+    );
+  });
   it("opens text even when the caller is in the directory or search section", () => {
     const href = readingHref("book", target, {
       returnTo: "/books/book?tab=reader&section=directory",

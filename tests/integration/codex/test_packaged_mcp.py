@@ -28,6 +28,11 @@ def test_wheel_mcp_preserves_resources_and_workspace_selection_outside_checkout(
         assert packaged_modules == expected_modules, (
             "Wheel contains missing or retired Python modules"
         )
+        outdated = [
+            name for name in sorted(packaged_modules | {"hrs/codex/workflow.md"})
+            if archive.read(name) != (source_root / name).read_bytes()
+        ]
+        assert not outdated, f"Wheel source/resources differ from the checkout: {outdated}"
         assert all(
             (installed / name).resolve().is_relative_to(installed.resolve())
             for name in archive.namelist()
@@ -59,6 +64,17 @@ def test_wheel_mcp_preserves_resources_and_workspace_selection_outside_checkout(
             },
         )
         async with Client(parameters, mode="legacy", read_timeout_seconds=15) as client:
+            listing = await client.list_tools()
+            names = {tool.name for tool in listing.tools}
+            assert {
+                "research_status", "research_claim", "research_source", "research_candidate",
+                "research_packet_text", "research_candidate_text",
+                "research_plan", "research_target_card", "research_target_card_text",
+                "research_locate_quotes",
+                "research_search", "research_read_evidence", "research_original",
+                "research_entities", "research_related", "research_submit", "research_fail",
+            }.issubset(names)
+            assert not any("human" in name and name.startswith("research_") for name in names)
             result = await client.call_tool("workflow_instructions")
             assert not result.is_error
             assert result.content[0].text == instructions

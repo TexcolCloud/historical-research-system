@@ -1,13 +1,26 @@
 // @vitest-environment happy-dom
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import ReaderPanel from "./ReaderPanel";
 import { respondWith } from "@/test/responses";
 import { navigationCompleted } from "./navigation-status.ts";
+import { research } from "@/features/research/api";
+beforeEach(() =>
+  vi.spyOn(research, "reading").mockResolvedValue({
+    chapter_id: "",
+    run_id: "",
+    text_sha256: "",
+    cards: [],
+    annotations: [],
+  }),
+);
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 test("reading distinguishes final no-link, automatic waiting, pending review and a display-only mapping gap", async () => {
   const make = (id: string, status: string, needs_confirmation: boolean) => ({

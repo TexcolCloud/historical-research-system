@@ -4,6 +4,7 @@ import re
 import unicodedata
 
 from hrs.processing.hashing import digest
+from hrs.processing.page_observation import RUNNING_FIELDS, running_line
 
 
 def source_spans(entry):
@@ -79,7 +80,12 @@ def is_page_folio(page, start, end):
 
 
 def _furniture(page, text, *, start=0):
-    """Only page numbers, TOC running headings and Markdown markers may separate fragments."""
+    """Skip only known TOC markers, bound folios and independently observed outer furniture."""
+    approved = page.get("approved") or {}
+    observation = page.get("observation") or {}
+    current = observation.get("markdown_sha256") == approved.get("sha256") and observation.get(
+        "image_sha256"
+    ) == page.get("image_sha256")
     offset = start
     for raw in text.splitlines(keepends=True):
         line = raw.rstrip("\r\n")
@@ -102,6 +108,13 @@ def _furniture(page, text, *, start=0):
         }:
             continue
         if folio:
+            continue
+        if current and any(
+            line.strip() == observed.strip()
+            and running_line(approved.get("markdown", ""), observed, field)
+            for field in RUNNING_FIELDS
+            for observed in observation.get(field, [])
+        ):
             continue
         return False
     return True

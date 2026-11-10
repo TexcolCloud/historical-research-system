@@ -9,6 +9,7 @@ from hrs.api.routes import (
     health,
     library,
     native_workbench,
+    research,
     reviews,
     runs,
     uploads,
@@ -24,3 +25,4 @@ api_router.include_router(uploads.router)
 api_router.include_router(events.router)
 api_router.include_router(health.router)
 api_router.include_router(native_workbench.router)
+api_router.include_router(research.router)

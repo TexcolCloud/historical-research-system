@@ -10,6 +10,7 @@ export function patchBookDeletion(
   bookId: string,
   state: string,
 ) {
+  void query.invalidateQueries({ queryKey: ["research"] });
   query.setQueryData<Book[]>(booksKey, (books) =>
     books?.flatMap((book) =>
       book.id !== bookId
@@ -38,6 +39,8 @@ const eventSchema = z.object({
     state: z.string().optional(),
     book_state: z.string().nullable().optional(),
     revision_pending: z.boolean().optional(),
+    research_run_id: z.string().optional(),
+    artifacts_changed: z.boolean().optional(),
     stage: z.string().optional(),
     run_kind: z.string().optional(),
     revision: z.number().optional(),
@@ -56,8 +59,64 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
   }
   const parsed = eventSchema.safeParse(value);
   if (!parsed.success) return null;
-  const event = parsed.data,
-    books = query.getQueryData<Book[]>(booksKey);
+  const event = parsed.data;
+  if (event.kind === "research.changed") {
+    if (event.payload.artifacts_changed)
+      void query.invalidateQueries({ queryKey: ["research"] });
+    else {
+      void query.invalidateQueries({
+        queryKey: ["research", "book", event.book_id],
+      });
+      void query.invalidateQueries({
+        queryKey: event.payload.research_run_id
+          ? ["research", "run", event.payload.research_run_id]
+          : ["research", "run"],
+      });
+      const runId = event.payload.research_run_id;
+      const runState = event.payload.state;
+      if (runId && runState) {
+        type QuestionProgress = {
+          runs?: Array<{ run_id: string; state?: string }>;
+        };
+        const changed = (question: QuestionProgress) =>
+          question.runs?.some(
+            (run) => run.run_id === runId && run.state !== runState,
+          ) ?? false;
+        void query.invalidateQueries({
+          predicate: (entry) => {
+            if (entry.queryKey[0] !== "research") return false;
+            if (entry.queryKey[1] === "question")
+              return changed((entry.state.data as QuestionProgress) ?? {});
+            if (entry.queryKey[1] === "questions")
+              return (
+                (
+                  entry.state.data as { items?: QuestionProgress[] }
+                )?.items?.some(changed) ?? false
+              );
+            return false;
+          },
+        });
+      }
+    }
+    return event.sequence;
+  }
+  if (event.kind === "library.indexed") {
+    void query.invalidateQueries({ queryKey: ["research"] });
+    void query.invalidateQueries({ queryKey: ["platform", "search"] });
+    return event.sequence;
+  }
+  const books = query.getQueryData<Book[]>(booksKey);
+  const previousRevisionPending =
+    books?.find((book) => book.id === event.book_id)?.revision_pending ??
+    query.getQueryData<Book>(queryKeys.book(event.book_id))?.revision_pending;
+  if (
+    event.kind === "run.changed" &&
+    event.payload.revision_pending !== undefined &&
+    previousRevisionPending !== undefined &&
+    previousRevisionPending !== event.payload.revision_pending
+  ) {
+    void query.invalidateQueries({ queryKey: ["research"] });
+  }
   if (
     ["book.deleting", "book.deleted", "book.delete_failed"].includes(event.kind)
   ) {
@@ -123,6 +182,7 @@ export function applyBookEvent(query: QueryClient, raw: string): number | null {
       });
   }
   if (event.kind === "book.published" || event.kind === "library.revised") {
+    void query.invalidateQueries({ queryKey: ["research"] });
     void query.invalidateQueries({
       queryKey: ["platform", "chapters", event.book_id],
     });
