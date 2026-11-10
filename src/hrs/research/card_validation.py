@@ -5,6 +5,12 @@ from hrs.research.complete_contracts import AssessmentMismatch
 from hrs.research.models import is_card_only
 
 
+def require_checked_ids(checked, required, message):
+    """Keep the frozen contract's ID set and cardinality, independent of ordering."""
+    if set(checked) != set(required) or len(checked) != len(required):
+        raise EvidenceMismatch(message)
+
+
 def validate_card_evidence(cards, article_id, sources):
     evidence_errors, evidence_error_count = [], 0
 

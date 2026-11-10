@@ -2,7 +2,8 @@ import { queryOptions, replaceEqualDeep } from "@tanstack/react-query";
 import { client } from "@/client/api";
 import { queryKeys } from "@/client/query-keys";
 import type { components } from "@/client/schema";
-type NavigationReport = components["schemas"]["NavigationReport"];
+export type NavigationEntry = components["schemas"]["NavigationEntry"];
+export type NavigationReport = components["schemas"]["NavigationReport"];
 
 export function navigationOptions(runId: string) {
   return queryOptions<NavigationReport>({

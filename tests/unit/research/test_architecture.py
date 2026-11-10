@@ -47,3 +47,10 @@ def test_research_contracts_and_projections_do_not_import_lifecycle_or_storage(m
             assert not any(
                 name == prefix or name.startswith(prefix + ".") for prefix in forbidden
             ), (module, name, node.lineno)
+
+
+def test_research_routes_do_not_select_storage_tables():
+    route = Path(hrs.research.__file__).parent.parent / "api/routes/research.py"
+    for node in ast.walk(ast.parse(route.read_text("utf-8"))):
+        if isinstance(node, ast.ImportFrom):
+            assert not (node.module or "").startswith(("hrs.storage", "sqlalchemy"))

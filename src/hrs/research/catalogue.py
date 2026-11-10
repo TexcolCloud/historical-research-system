@@ -121,7 +121,7 @@ class ResearchCatalogue:
         )
 
     def record(self, card, *, connection=None):
-        """Project an already adjudicated card; callers cannot turn drafts into identities."""
+        """Commit every projection in the caller's transaction, or own one transaction."""
         with (
             nullcontext(connection) if connection is not None else self.ledger.connect(write=True)
         ) as conn:
@@ -154,257 +154,281 @@ class ResearchCatalogue:
                 if not self._record_document(conn, card, article_key):
                     return
             evidence = {item["id"]: item for item in card["evidence"]}
-            local = {}
-            for mention in [
-                *card["mentions"],
-                *[
-                    {**event, "kind": "event", "identity_basis": event["description"]}
-                    for event in card["events"]
-                ],
-            ]:
-                source_key = digest(
-                    [article_key, mention["kind"], mention.get("identity_key") or mention["name"]]
-                )
-                earlier = conn.execute(
-                    "SELECT entity_id FROM research_catalogue_members WHERE source_key=? "
-                    "ORDER BY active DESC, rowid DESC LIMIT 1",
-                    (source_key,),
-                ).fetchone()
-                if derived and earlier is None:
-                    candidates = conn.execute(
-                        "SELECT DISTINCT m.entity_id FROM research_catalogue_members m "
-                        "JOIN research_catalogue_documents d ON d.card_id=m.card_id AND d.active=1 "
-                        "WHERE m.active=1 AND d.source_key=? AND json_extract(m.payload,'$.name')=? "
-                        "AND json_extract(m.payload,'$.kind')=? LIMIT 2",
-                        (article_key, mention["name"], mention["kind"]),
-                    ).fetchall()
-                    earlier = candidates[0] if len(candidates) == 1 else None
-                identity = earlier[0] if earlier else "entity-" + source_key[:32]
-                if derived and earlier is None:
-                    continue
-                if earlier:
-                    identity = self._resolve(conn, identity)["id"]
-                else:
-                    self._save(
-                        conn,
-                        {
-                            "id": identity,
-                            "canonical_id": identity,
-                            "version": 1,
-                            "kind": mention["kind"],
-                            "name": mention["name"],
-                            "aliases": [],
-                            "redirect": None,
-                            "created_at": time.time(),
-                        },
-                    )
-                member_id = digest([card["id"], mention["id"]])[:32]
-                local[mention["id"]] = identity
-                if derived:
-                    continue
-                refs = [
-                    {"card_id": card["id"], "card_version": card["version"], "evidence_id": eid}
-                    for eid in mention["evidence_ids"]
-                ]
-                member = {
-                    **mention,
-                    "id": member_id,
+            local = self._record_mentions(conn, card, article_key, derived, evidence)
+            self._record_relations(conn, card, local, evidence)
+            self._record_participations(conn, card, local, evidence)
+            self._record_identity_links(conn, card, local)
+            self._record_cross_relations(conn, card, evidence)
+
+    def _mention_identity(self, conn, card, mention, article_key, derived):
+        source_key = digest(
+            [article_key, mention["kind"], mention.get("identity_key") or mention["name"]]
+        )
+        earlier = conn.execute(
+            "SELECT entity_id FROM research_catalogue_members WHERE source_key=? "
+            "ORDER BY active DESC, rowid DESC LIMIT 1",
+            (source_key,),
+        ).fetchone()
+        if derived and earlier is None:
+            candidates = conn.execute(
+                "SELECT DISTINCT m.entity_id FROM research_catalogue_members m "
+                "JOIN research_catalogue_documents d ON d.card_id=m.card_id AND d.active=1 "
+                "WHERE m.active=1 AND d.source_key=? AND json_extract(m.payload,'$.name')=? "
+                "AND json_extract(m.payload,'$.kind')=? LIMIT 2",
+                (article_key, mention["name"], mention["kind"]),
+            ).fetchall()
+            earlier = candidates[0] if len(candidates) == 1 else None
+        identity = earlier[0] if earlier else "entity-" + source_key[:32]
+        if derived and earlier is None:
+            return source_key, None
+        if earlier:
+            identity = self._resolve(conn, identity)["id"]
+        else:
+            self._save(
+                conn,
+                {
+                    "id": identity,
                     "canonical_id": identity,
-                    "local_id": mention["id"],
-                    "card_id": card["id"],
-                    "card_version": card["version"],
-                    "book_id": card["book_id"],
-                    "run_id": card["run_id"],
-                    "article_id": card["article_id"],
-                    "publication_sha256": card["publication_sha256"],
-                    "state": card["state"],
-                    "approval_type": card["approval_type"],
-                    "card_title": card["title"],
-                    "evidence_refs": refs,
-                    "evidence": [evidence[eid] for eid in mention["evidence_ids"]],
-                    "identity_scope": "source_mention",
-                }
-                conn.execute(
-                    "UPDATE research_catalogue_members SET active=0 WHERE source_key=?",
-                    (source_key,),
+                    "version": 1,
+                    "kind": mention["kind"],
+                    "name": mention["name"],
+                    "aliases": [],
+                    "redirect": None,
+                    "created_at": time.time(),
+                },
+            )
+        return source_key, identity
+
+    def _record_mentions(self, conn, card, article_key, derived, evidence):
+        local = {}
+        for mention in [
+            *card["mentions"],
+            *[
+                {**event, "kind": "event", "identity_basis": event["description"]}
+                for event in card["events"]
+            ],
+        ]:
+            source_key, identity = self._mention_identity(conn, card, mention, article_key, derived)
+            if identity is None:
+                continue
+            local[mention["id"]] = identity
+            if derived:
+                continue
+            member = self._record_member(conn, card, mention, source_key, identity, evidence)
+            self._record_aliases(conn, card, mention, identity)
+            self._record_locations(conn, card, mention, member)
+            self._edge(
+                conn,
+                card,
+                "mentioned-" + mention["id"],
+                identity,
+                card["id"],
+                "mentioned_in",
+                {
+                    "reason": "原文中的来源提及",
+                    "evidence_ids": mention["evidence_ids"],
+                    "source_member_id": member["id"],
+                },
+                evidence,
+            )
+        return local
+
+    def _record_member(self, conn, card, mention, source_key, identity, evidence):
+        member_id = digest([card["id"], mention["id"]])[:32]
+        refs = self._evidence_refs(card, mention["evidence_ids"])
+        member = {
+            **mention,
+            "id": member_id,
+            "canonical_id": identity,
+            "local_id": mention["id"],
+            "card_id": card["id"],
+            "card_version": card["version"],
+            "book_id": card["book_id"],
+            "run_id": card["run_id"],
+            "article_id": card["article_id"],
+            "publication_sha256": card["publication_sha256"],
+            "state": card["state"],
+            "approval_type": card["approval_type"],
+            "card_title": card["title"],
+            "evidence_refs": refs,
+            "evidence": [evidence[eid] for eid in mention["evidence_ids"]],
+            "identity_scope": "source_mention",
+        }
+        conn.execute(
+            "UPDATE research_catalogue_members SET active=0 WHERE source_key=?",
+            (source_key,),
+        )
+        conn.execute(
+            "INSERT INTO research_catalogue_members VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET entity_id=excluded.entity_id, "
+            "card_version=excluded.card_version,active=excluded.active,payload=excluded.payload",
+            (
+                member_id,
+                identity,
+                source_key,
+                card["id"],
+                card["version"],
+                card["book_id"],
+                1,
+                encode(member),
+            ),
+        )
+        return member
+
+    def _record_aliases(self, conn, card, mention, identity):
+        entity = self._latest(conn, identity)
+        new_aliases = [
+            {
+                "name": mention["name"],
+                "evidence_refs": self._evidence_refs(card, mention["evidence_ids"]),
+            }
+        ]
+        new_aliases += [
+            {
+                "name": alias["name"],
+                "evidence_refs": self._evidence_refs(card, alias["evidence_ids"]),
+            }
+            for alias in mention.get("aliases", [])
+        ]
+        for alias in new_aliases:
+            last_decision = conn.execute(
+                "SELECT action FROM research_catalogue_decisions WHERE entity_id=? "
+                "AND action IN ('alias','alias_remove') AND json_extract(payload,'$.alias')=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (identity, alias["name"]),
+            ).fetchone()
+            if last_decision and last_decision[0] == "alias_remove":
+                continue
+            existing_alias = next(
+                (item for item in entity["aliases"] if item["name"] == alias["name"]), None
+            )
+            if existing_alias is None:
+                entity["aliases"].append(alias)
+            else:
+                existing_alias["evidence_refs"].extend(
+                    ref
+                    for ref in alias["evidence_refs"]
+                    if ref not in existing_alias["evidence_refs"]
                 )
-                conn.execute(
-                    "INSERT INTO research_catalogue_members VALUES (?,?,?,?,?,?,?,?) "
-                    "ON CONFLICT(id) DO UPDATE SET entity_id=excluded.entity_id, "
-                    "card_version=excluded.card_version,active=excluded.active,payload=excluded.payload",
-                    (
-                        member_id,
-                        identity,
-                        source_key,
-                        card["id"],
-                        card["version"],
-                        card["book_id"],
-                        1,
-                        encode(member),
-                    ),
-                )
-                entity = self._latest(conn, identity)
-                new_aliases = [{"name": mention["name"], "evidence_refs": refs}]
-                new_aliases += [
-                    {
-                        "name": alias["name"],
-                        "evidence_refs": [
-                            {
-                                "card_id": card["id"],
-                                "card_version": card["version"],
-                                "evidence_id": eid,
-                            }
-                            for eid in alias["evidence_ids"]
-                        ],
-                    }
-                    for alias in mention.get("aliases", [])
-                ]
-                for alias in new_aliases:
-                    last_decision = conn.execute(
-                        "SELECT action FROM research_catalogue_decisions WHERE entity_id=? "
-                        "AND action IN ('alias','alias_remove') AND json_extract(payload,'$.alias')=? "
-                        "ORDER BY created_at DESC LIMIT 1",
-                        (identity, alias["name"]),
-                    ).fetchone()
-                    if last_decision and last_decision[0] == "alias_remove":
-                        continue
-                    existing_alias = next(
-                        (item for item in entity["aliases"] if item["name"] == alias["name"]), None
-                    )
-                    if existing_alias is None:
-                        entity["aliases"].append(alias)
-                    else:
-                        existing_alias["evidence_refs"].extend(
-                            ref
-                            for ref in alias["evidence_refs"]
-                            if ref not in existing_alias["evidence_refs"]
-                        )
-                entity["version"] += 1
-                self._save(conn, entity)
-                self._record_locations(conn, card, mention, member)
+        entity["version"] += 1
+        self._save(conn, entity)
+
+    def _record_relations(self, conn, card, local, evidence):
+        for relation in card["relations"]:
+            if relation["subject_id"] in local and relation["object_id"] in local:
                 self._edge(
                     conn,
                     card,
-                    "mentioned-" + mention["id"],
-                    identity,
-                    card["id"],
-                    "mentioned_in",
+                    relation["id"],
+                    local[relation["subject_id"]],
+                    local[relation["object_id"]],
+                    relation["predicate"],
+                    relation,
+                    evidence,
+                )
+
+    def _record_participations(self, conn, card, local, evidence):
+        for event in card["events"]:
+            if event["id"] not in local:
+                continue
+            roles = {item["mention_id"]: item for item in event.get("participant_roles", [])}
+            for participant in event["participant_ids"]:
+                if participant not in local:
+                    continue
+                role = roles.get(participant, {})
+                self._edge(
+                    conn,
+                    card,
+                    f"participant-{event['id']}-{participant}",
+                    local[event["id"]],
+                    local[participant],
+                    role.get("role", "participant"),
                     {
-                        "reason": "原文中的来源提及",
-                        "evidence_ids": mention["evidence_ids"],
-                        "source_member_id": member_id,
+                        "reason": role.get("description", event["description"]),
+                        "evidence_ids": role.get("evidence_ids", event["evidence_ids"]),
+                        "event_id": local[event["id"]],
+                        "event_name": event["name"],
+                        "event_status": event.get("event_status", "unknown"),
+                        "status_note": event.get("status_note", ""),
+                        "date": event["date"],
+                        "action": event.get("action", ""),
+                        "place": event.get("place", {}),
+                        "role": role.get("role", "participant"),
+                        "source_member_id": digest([card["id"], event["id"]])[:32],
+                        "target_member_id": digest([card["id"], participant])[:32],
                     },
                     evidence,
                 )
-            for relation in card["relations"]:
-                if relation["subject_id"] in local and relation["object_id"] in local:
-                    self._edge(
+
+    def _record_identity_links(self, conn, card, local):
+        for link in card.get("identity_links", []):
+            if link["local_mention_id"] not in local:
+                continue
+            try:
+                target_entity = self._resolve(conn, link["entity_id"])
+            except FileNotFoundError:
+                continue
+            source, target_id = (
+                local[link["local_mention_id"]],
+                target_entity["id"],
+            )
+            if link["relation"] == "same_as" and source != target_id:
+                denied = conn.execute(
+                    "SELECT 1 FROM research_catalogue_decisions WHERE action IN ('distinct','split') AND "
+                    "((entity_id=? AND target_id=?) OR (entity_id=? AND target_id=?))",
+                    (source, target_id, target_id, source),
+                ).fetchone()
+                if not denied:
+                    self._merge(
                         conn,
-                        card,
-                        relation["id"],
-                        local[relation["subject_id"]],
-                        local[relation["object_id"]],
-                        relation["predicate"],
-                        relation,
-                        evidence,
+                        source,
+                        target_id,
+                        provenance="native",
+                        refs=self._evidence_refs(card, link["evidence_ids"]),
+                        reason=link["reason"],
                     )
-            for event in card["events"]:
-                if event["id"] not in local:
-                    continue
-                roles = {item["mention_id"]: item for item in event.get("participant_roles", [])}
-                for participant in event["participant_ids"]:
-                    if participant not in local:
-                        continue
-                    role = roles.get(participant, {})
-                    self._edge(
-                        conn,
-                        card,
-                        f"participant-{event['id']}-{participant}",
-                        local[event["id"]],
-                        local[participant],
-                        role.get("role", "participant"),
-                        {
-                            "reason": role.get("description", event["description"]),
-                            "evidence_ids": role.get("evidence_ids", event["evidence_ids"]),
-                            "event_id": local[event["id"]],
-                            "event_name": event["name"],
-                            "event_status": event.get("event_status", "unknown"),
-                            "status_note": event.get("status_note", ""),
-                            "date": event["date"],
-                            "action": event.get("action", ""),
-                            "place": event.get("place", {}),
-                            "role": role.get("role", "participant"),
-                            "source_member_id": digest([card["id"], event["id"]])[:32],
-                            "target_member_id": digest([card["id"], participant])[:32],
-                        },
-                        evidence,
-                    )
-            for link in card.get("identity_links", []):
-                if link["local_mention_id"] not in local:
-                    continue
-                try:
-                    target_entity = self._resolve(conn, link["entity_id"])
-                except FileNotFoundError:
-                    continue
-                source, target_id = (
-                    local[link["local_mention_id"]],
-                    target_entity["id"],
-                )
-                if link["relation"] == "same_as" and source != target_id:
-                    denied = conn.execute(
-                        "SELECT 1 FROM research_catalogue_decisions WHERE action IN ('distinct','split') AND "
-                        "((entity_id=? AND target_id=?) OR (entity_id=? AND target_id=?))",
-                        (source, target_id, target_id, source),
-                    ).fetchone()
-                    if not denied:
-                        self._merge(
-                            conn,
-                            source,
-                            target_id,
-                            provenance="native",
-                            refs=[
-                                {
-                                    "card_id": card["id"],
-                                    "card_version": card["version"],
-                                    "evidence_id": eid,
-                                }
-                                for eid in link["evidence_ids"]
-                            ],
-                            reason=link["reason"],
-                        )
-            for relation in card.get("cross_relations", []):
-                edge = {
-                    **relation,
-                    "id": digest([card["id"], relation["id"]])[:32],
-                    "source_id": card.get("linked_card_id") or card["id"],
-                    "target_id": relation["target_card_id"],
-                    "card_id": card["id"],
-                    "card_version": card["version"],
-                    "book_id": card["book_id"],
-                    "run_id": card["run_id"],
-                    "approval_type": card["approval_type"],
-                    "usage": "research_lead",
-                    "evidence": [
-                        evidence[eid]
-                        for eid in [
-                            *relation["source_evidence_ids"],
-                            *relation["target_evidence_ids"],
-                        ]
-                    ],
-                }
-                conn.execute(
-                    "INSERT OR REPLACE INTO research_catalogue_edges VALUES (?,?,?,?,?,?,?,?)",
-                    (
-                        edge["id"],
-                        card["version"],
-                        edge["source_id"],
-                        relation["target_card_id"],
-                        card["id"],
-                        relation["kind"],
-                        1,
-                        encode(edge),
-                    ),
-                )
+
+    def _record_cross_relations(self, conn, card, evidence):
+        for relation in card.get("cross_relations", []):
+            edge = {
+                **relation,
+                "id": digest([card["id"], relation["id"]])[:32],
+                "source_id": card.get("linked_card_id") or card["id"],
+                "target_id": relation["target_card_id"],
+                "card_id": card["id"],
+                "card_version": card["version"],
+                "book_id": card["book_id"],
+                "run_id": card["run_id"],
+                "approval_type": card["approval_type"],
+                "usage": "research_lead",
+                "evidence": [
+                    evidence[eid]
+                    for eid in [
+                        *relation["source_evidence_ids"],
+                        *relation["target_evidence_ids"],
+                    ]
+                ],
+            }
+            conn.execute(
+                "INSERT OR REPLACE INTO research_catalogue_edges VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    edge["id"],
+                    card["version"],
+                    edge["source_id"],
+                    relation["target_card_id"],
+                    card["id"],
+                    relation["kind"],
+                    1,
+                    encode(edge),
+                ),
+            )
+
+    @staticmethod
+    def _evidence_refs(card, evidence_ids):
+        return [
+            {"card_id": card["id"], "card_version": card["version"], "evidence_id": eid}
+            for eid in evidence_ids
+        ]
 
     @staticmethod
     def _record_document(connection, card, source_key):
@@ -529,10 +553,7 @@ class ResearchCatalogue:
             "approval_type": card["approval_type"],
             "usage": "research_lead",
             "evidence": [evidence[eid] for eid in relation["evidence_ids"]],
-            "evidence_refs": [
-                {"card_id": card["id"], "card_version": card["version"], "evidence_id": eid}
-                for eid in relation["evidence_ids"]
-            ],
+            "evidence_refs": ResearchCatalogue._evidence_refs(card, relation["evidence_ids"]),
         }
         if relation.get("subject_id"):
             edge["source_member_id"] = digest([card["id"], relation["subject_id"]])[:32]

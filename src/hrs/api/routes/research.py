@@ -69,9 +69,7 @@ def cards(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
 ):
-    from hrs.storage.models import research_cards
-
-    return service.records(research_cards, book_id, offset=offset, limit=limit)
+    return service.list_cards(book_id, offset=offset, limit=limit)
 
 
 @router.get("/books/{book_id}/entities", response_model=ResearchEntityPage)
@@ -81,9 +79,7 @@ def entities(
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
 ):
-    from hrs.storage.models import research_entities
-
-    return service.records(research_entities, book_id, offset=offset, limit=limit)
+    return service.list_entities(book_id, offset=offset, limit=limit)
 
 
 @router.get("/runs/{run_id}", response_model=ResearchRunResponse)
