@@ -1161,7 +1161,7 @@ def test_structured_card_revision_replaces_only_its_article_after_independent_re
     revised_run = service.workspace.card_revision(
         first["id"], CardRevision(expected_version=first["version"], card=draft)
     )
-    assert {row["id"] for row in service.records(db.research_cards, book_id)["items"]} == {
+    assert {row["id"] for row in service.list_cards(book_id)["items"]} == {
         first["id"],
         second["id"],
     }
@@ -1194,7 +1194,7 @@ def test_structured_card_revision_replaces_only_its_article_after_independent_re
     bridge.projection.sync(final)
     replacement = bridge.workflow.list_cards(run_id=final["run_id"])[0]
     assert replacement["replaces_card_id"] == first["id"]
-    assert {row["id"] for row in service.records(db.research_cards, book_id)["items"]} == {
+    assert {row["id"] for row in service.list_cards(book_id)["items"]} == {
         replacement["id"],
         second["id"],
     }
@@ -1846,16 +1846,16 @@ def test_research_revision_keeps_complete_cards_until_replacement_is_ready(resea
     replacement = bridge.start(
         book_id, revision_of=original["run_id"], reason="Synthetic revision contract"
     )
-    assert service.records(db.research_cards, book_id)["items"][0]["id"] == card["id"]
+    assert service.list_cards(book_id)["items"][0]["id"] == card["id"]
     replacement, revised = finish_contract_run(
         bridge, replacement, "Replacement pending card", pending=True
     )
-    assert service.records(db.research_cards, book_id)["items"][0]["id"] == card["id"]
+    assert service.list_cards(book_id)["items"][0]["id"] == card["id"]
     assert service.card(revised["id"])["superseded"] is False
     accepted = service.decide(
         revised["id"], ResearchDecision(action="accept", expected_version=revised["version"])
     )
-    visible = service.records(db.research_cards, book_id)
+    visible = service.list_cards(book_id)
     assert visible["total"] == 1 and visible["items"][0]["id"] == accepted["id"]
     assert service.card(card["id"])["superseded"] is True
     assert service.card(card["id"])["source_current"] is True
@@ -1932,7 +1932,7 @@ def test_external_book_revision_hides_dependent_cards_and_preserves_original_tar
             .where(db.runs.c.id == external_run)
             .values(result={**result, "codex_publication_sha256": "a" * 64})
         )
-    assert service.records(db.research_cards, book_id)["total"] == 0
+    assert service.list_cards(book_id)["total"] == 0
     historical = service.card(card["id"])
     assert historical["source_current"] is False and historical["needs_update"] is True
     assert historical["evidence"][1]["reading_target"] == target

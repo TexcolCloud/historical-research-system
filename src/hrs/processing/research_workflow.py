@@ -18,7 +18,11 @@ from hrs.processing.hashing import digest
 from hrs.processing.ledger import encode
 from hrs.processing.runtime_control import FAILURE_CODES
 from hrs.research import policy as research_policy
-from hrs.research.card_validation import validate_card_evidence, validate_identity_sources
+from hrs.research.card_validation import (
+    require_checked_ids,
+    validate_card_evidence,
+    validate_identity_sources,
+)
 from hrs.research.catalogue import ResearchCatalogue
 from hrs.research.complete_contracts import (
     AssessmentMismatch,
@@ -1934,17 +1938,9 @@ class ResearchWorkflow:
     def submit(self, task_token, worker_id, result):
         result_hash = digest(result)
         with self.ledger.connect(write=True) as connection:
-            duplicate = connection.execute(
-                "SELECT worker,result_hash,task_id FROM research_submissions WHERE token=?",
-                (task_token,),
-            ).fetchone()
-            if duplicate:
-                if duplicate[0] != worker_id or duplicate[1] != result_hash:
-                    raise LeaseConflict("A committed submission cannot be replaced")
-                run_id = connection.execute(
-                    "SELECT run_id FROM research_tasks WHERE id=?", (duplicate[2],)
-                ).fetchone()[0]
-                return self._status(connection, run_id)
+            prior_run = self._submitted_run_id(connection, task_token, worker_id, result_hash)
+            if prior_run is not None:
+                return self._status(connection, prior_run)
             task, run = self._lease(connection, task_token, worker_id)
             self._require_native_worker(connection, task, run)
             if result.get("input_hash") != task["input_hash"]:
@@ -1954,232 +1950,258 @@ class ResearchWorkflow:
             reads = self._require_read(connection, task, run)
             validated, delta = self._materialize_submission(task, run, result)
             if task["stage"] in VERIFY_STAGES:
-                if not reads["candidate_opened"]:
-                    raise EvidenceMismatch(
-                        "Read source and record independent observations before inspecting candidates"
-                    )
-                if reads.get("candidate_paged"):
-                    if not self._ranges_complete(
-                        reads.get("candidate_ranges", []), len(self._candidate_body(task))
-                    ):
-                        raise EvidenceMismatch(
-                            "Read every complete candidate JSON window before submitting verification"
-                        )
-                for field, expected in self._verification_checks(
-                    self._task_cards(task),
-                    complete=task.get("complete_research", False),
-                    card_only=is_card_only(run["policy"]),
-                    dossier=is_dossier(run["policy"]),
-                ).items():
-                    if set(validated[field]) != set(expected) or len(validated[field]) != len(
-                        set(validated[field])
-                    ):
-                        raise EvidenceMismatch(
-                            "Independent verification must cover every candidate card, item, citation and relationship: "
-                            + field
-                        )
-                if run["policy"].get("complete_research"):
-                    document = self._candidate_document(task)
-                    inventory = document["independent_inventory"]
-                    expected = [item["id"] for item in inventory["findings"]]
-                    if set(validated["checked_inventory_ids"]) != set(expected) or len(
-                        validated["checked_inventory_ids"]
-                    ) != len(expected):
-                        raise EvidenceMismatch(
-                            "Independent verification must check every source inventory finding"
-                        )
-                    validate_assessments(
-                        validated["coverage_assessments"],
-                        inventory,
-                        self._task_cards(task),
-                        decision=validated["decision"],
-                        card_only=is_card_only(run["policy"]),
-                    )
-                    self._require_targets_read(connection, task, self._task_cards(task), reads)
-                if (
-                    task.get("research_disposition")
-                    and not validated["checked_research_disposition"]
-                ):
-                    raise EvidenceMismatch(
-                        "Independent verification must check the source-supported no-search disposition"
-                    )
-                if task.get("research_audit_ref"):
-                    expected = self._candidate_document(task)["required_checks"][
-                        "checked_search_receipt_ids"
-                    ]
-                    if set(validated["checked_search_receipt_ids"]) != set(expected) or len(
-                        validated["checked_search_receipt_ids"]
-                    ) != len(expected):
-                        raise EvidenceMismatch(
-                            "Independent verification must check every server search receipt ID"
-                        )
-                if task.get("mechanical_evidence_ref"):
-                    document = self._candidate_document(task)
-                    expected = document["required_checks"]["checked_mechanical_evidence_ids"]
-                    if set(validated["checked_mechanical_evidence_ids"]) != set(expected) or len(
-                        validated["checked_mechanical_evidence_ids"]
-                    ) != len(expected):
-                        raise EvidenceMismatch(
-                            "Independent verification must check every decoded mechanical evidence receipt"
-                        )
-                    if any(
-                        not receipt["quote_exact"] or not receipt["source_hash_verified"]
-                        for receipt in document["mechanical_evidence"]["receipts"]
-                    ):
-                        raise EvidenceMismatch(
-                            "Decoded evidence does not exactly match its frozen source"
-                        )
-                repair = (
-                    validated["decision"] == "pending"
-                    and task["stage"] == "verify"
-                    and run["policy"].get("complete_research")
-                    and run["policy"].get("max_content_repairs", 0) > 0
-                )
-                task["state"] = (
-                    "completed"
-                    if repair
-                    else ("pending" if validated["decision"] == "pending" else "completed")
-                )
-                if repair:
-                    next_task = self._new_task(
-                        connection,
-                        run,
-                        task["article_id"],
-                        "repair",
-                        digest(
-                            {"prior_verification": validated, "candidate": task.get("cards_ref")}
-                        ),
-                        self._task_cards(task),
-                        task.get("external_sources", []),
-                        research_disposition=task.get("research_disposition")
-                        if run["policy"].get("incremental_updates")
-                        else None,
-                    )
-                    next_task.update(
-                        prior_verification=deepcopy(validated),
-                        target_cards=deepcopy(task.get("target_cards", {})),
-                        inherited_audit_ref=task.get("research_audit_ref"),
-                    )
-                    self._save_task(connection, next_task)
-                    self._event(
-                        connection,
-                        run["run_id"],
-                        "directed_repair",
-                        {"task_id": task["task_id"], "repair_task_id": next_task["task_id"]},
-                    )
-                else:
-                    self._publish_cards(connection, run, task, validated)
+                self._validate_verification(connection, task, run, reads, validated)
+                self._complete_verification(connection, task, run, validated)
             else:
-                if (
-                    task["stage"] in ENRICH_STAGES
-                    and run["policy"].get("enrichment_search_required")
-                    and not task.get("search_successes")
-                    and not (task["stage"] == "repair" and self._plan_receipt_ids(task))
-                ):
-                    disposition = validated.get("research_disposition")
-                    cards = validated["cards"]
-                    basis = {
-                        f"{card['id']}/{item['id']}"
-                        for card in cards
-                        for item in card["evidence"]
-                        if item["article_id"] == task["article_id"]
-                    }
-                    if (
-                        not disposition
-                        or not set(disposition["evidence_ids"]) <= basis
-                        or any(
-                            card["mentions"] or card["events"] or card["identity_links"]
-                            for card in cards
-                        )
-                    ):
-                        raise EvidenceMismatch(
-                            "Enrichment requires actual hybrid retrieval or a source-supported no-external-claims disposition"
-                        )
-                self._validate_cards(validated["cards"], task, run)
-                self._require_read(connection, task, run, validated["cards"])
-                self._require_targets_read(connection, task, validated["cards"], reads)
-                if delta is not None:
-                    self._record_materialization(
-                        connection, task, run, result, delta, validated["cards"]
-                    )
-                task["state"] = "completed"
-                next_stage = (
-                    "verify"
-                    if is_card_only(run["policy"]) and task["stage"] == "author"
-                    else STAGES[STAGES.index(task["stage"]) + 1]
-                )
-                manifest = task.get("external_sources", [])
-                audit_ref = (
-                    self._freeze_research_audit(connection, task)
-                    if next_stage in VERIFY_STAGES
-                    and run["policy"].get("verify_search_audit")
-                    and (
-                        not is_card_only(run["policy"])
-                        or task.get("search_receipt_ids")
-                        or task.get("inherited_audit_ref")
-                    )
-                    else None
-                )
-                next_input = {"submission": validated, "external_sources": manifest}
-                if audit_ref:
-                    next_input["research_audit_ref"] = audit_ref
-                mechanical_ref = None
-                if (
-                    next_stage in VERIFY_STAGES
-                    and run["policy"].get("version", 1) >= 4
-                    and run["policy"].get("verify_decoded_evidence")
-                ):
-                    sources = {
-                        source["id"]: source
-                        for source in self._required_sources(task, run, validated["cards"])
-                    }
-                    mechanical_ref = self._freeze_source(
-                        connection,
-                        decoded_evidence_receipts(
-                            validated["cards"], sources, run["publication_sha256"]
-                        ),
-                        "decoded_evidence",
-                    )
-                    next_input["mechanical_evidence_ref"] = mechanical_ref
-                next_task = self._new_task(
-                    connection,
-                    run,
-                    task["article_id"],
-                    next_stage,
-                    digest(next_input),
-                    validated["cards"],
-                    manifest,
-                    research_disposition=validated.get("research_disposition"),
-                    research_audit_ref=audit_ref,
-                    mechanical_evidence_ref=mechanical_ref,
-                )
-                next_task["target_cards"] = deepcopy(task.get("target_cards", {}))
-                next_task["research_plan"] = deepcopy(task.get("research_plan", []))
-                self._save_task(connection, next_task)
-            task.update(result_hash=result_hash, completed_at=time.time(), expires_at=0)
-            self._save_task(connection, task)
-            connection.execute(
-                "INSERT INTO research_submissions VALUES (?,?,?,?,?,?)",
-                (
-                    task_token,
-                    task["task_id"],
-                    worker_id,
-                    result_hash,
-                    encode(validated),
-                    time.time(),
-                ),
+                self._complete_authoring(connection, task, run, reads, validated, delta, result)
+            return self._commit_submission(connection, task, run, validated, result_hash)
+
+    def _submitted_run_id(self, connection, task_token, worker_id, result_hash):
+        duplicate = connection.execute(
+            "SELECT worker,result_hash,task_id FROM research_submissions WHERE token=?",
+            (task_token,),
+        ).fetchone()
+        if duplicate is None:
+            return None
+        if duplicate[0] != worker_id or duplicate[1] != result_hash:
+            raise LeaseConflict("A committed submission cannot be replaced")
+        return connection.execute(
+            "SELECT run_id FROM research_tasks WHERE id=?", (duplicate[2],)
+        ).fetchone()[0]
+
+    def _validate_verification(self, connection, task, run, reads, validated):
+        if not reads["candidate_opened"]:
+            raise EvidenceMismatch(
+                "Read source and record independent observations before inspecting candidates"
             )
-            self.store.runtime_control.success(
-                task["model"], "research:" + task_token, "research:" + task_token
+        if reads.get("candidate_paged"):
+            if not self._ranges_complete(
+                reads.get("candidate_ranges", []), len(self._candidate_body(task))
+            ):
+                raise EvidenceMismatch(
+                    "Read every complete candidate JSON window before submitting verification"
+                )
+        for field, expected in self._verification_checks(
+            self._task_cards(task),
+            complete=task.get("complete_research", False),
+            card_only=is_card_only(run["policy"]),
+            dossier=is_dossier(run["policy"]),
+        ).items():
+            require_checked_ids(
+                validated[field],
+                set(expected),
+                "Independent verification must cover every candidate card, item, citation and relationship: "
+                + field,
             )
-            self._event(
+        if run["policy"].get("complete_research"):
+            document = self._candidate_document(task)
+            inventory = document["independent_inventory"]
+            expected = [item["id"] for item in inventory["findings"]]
+            require_checked_ids(
+                validated["checked_inventory_ids"],
+                expected,
+                "Independent verification must check every source inventory finding",
+            )
+            validate_assessments(
+                validated["coverage_assessments"],
+                inventory,
+                self._task_cards(task),
+                decision=validated["decision"],
+                card_only=is_card_only(run["policy"]),
+            )
+            self._require_targets_read(connection, task, self._task_cards(task), reads)
+        self._require_verification_receipts(task, validated)
+
+    def _require_verification_receipts(self, task, validated):
+        if task.get("research_disposition") and not validated["checked_research_disposition"]:
+            raise EvidenceMismatch(
+                "Independent verification must check the source-supported no-search disposition"
+            )
+        if task.get("research_audit_ref"):
+            expected = self._candidate_document(task)["required_checks"][
+                "checked_search_receipt_ids"
+            ]
+            require_checked_ids(
+                validated["checked_search_receipt_ids"],
+                expected,
+                "Independent verification must check every server search receipt ID",
+            )
+        if task.get("mechanical_evidence_ref"):
+            document = self._candidate_document(task)
+            expected = document["required_checks"]["checked_mechanical_evidence_ids"]
+            require_checked_ids(
+                validated["checked_mechanical_evidence_ids"],
+                expected,
+                "Independent verification must check every decoded mechanical evidence receipt",
+            )
+            if any(
+                not receipt["quote_exact"] or not receipt["source_hash_verified"]
+                for receipt in document["mechanical_evidence"]["receipts"]
+            ):
+                raise EvidenceMismatch("Decoded evidence does not exactly match its frozen source")
+
+    def _complete_verification(self, connection, task, run, validated):
+        repair = (
+            validated["decision"] == "pending"
+            and task["stage"] == "verify"
+            and run["policy"].get("complete_research")
+            and run["policy"].get("max_content_repairs", 0) > 0
+        )
+        task["state"] = (
+            "completed"
+            if repair
+            else ("pending" if validated["decision"] == "pending" else "completed")
+        )
+        if repair:
+            self._queue_repair(connection, task, run, validated)
+        else:
+            self._publish_cards(connection, run, task, validated)
+
+    def _queue_repair(self, connection, task, run, validated):
+        next_task = self._new_task(
+            connection,
+            run,
+            task["article_id"],
+            "repair",
+            digest({"prior_verification": validated, "candidate": task.get("cards_ref")}),
+            self._task_cards(task),
+            task.get("external_sources", []),
+            research_disposition=task.get("research_disposition")
+            if run["policy"].get("incremental_updates")
+            else None,
+        )
+        next_task.update(
+            prior_verification=deepcopy(validated),
+            target_cards=deepcopy(task.get("target_cards", {})),
+            inherited_audit_ref=task.get("research_audit_ref"),
+        )
+        self._save_task(connection, next_task)
+        self._event(
+            connection,
+            run["run_id"],
+            "directed_repair",
+            {"task_id": task["task_id"], "repair_task_id": next_task["task_id"]},
+        )
+
+    def _require_enrichment_evidence(self, task, run, validated):
+        if (
+            task["stage"] in ENRICH_STAGES
+            and run["policy"].get("enrichment_search_required")
+            and not task.get("search_successes")
+            and not (task["stage"] == "repair" and self._plan_receipt_ids(task))
+        ):
+            disposition = validated.get("research_disposition")
+            cards = validated["cards"]
+            basis = {
+                f"{card['id']}/{item['id']}"
+                for card in cards
+                for item in card["evidence"]
+                if item["article_id"] == task["article_id"]
+            }
+            if (
+                not disposition
+                or not set(disposition["evidence_ids"]) <= basis
+                or any(
+                    card["mentions"] or card["events"] or card["identity_links"] for card in cards
+                )
+            ):
+                raise EvidenceMismatch(
+                    "Enrichment requires actual hybrid retrieval or a source-supported no-external-claims disposition"
+                )
+
+    def _complete_authoring(self, connection, task, run, reads, validated, delta, result):
+        self._require_enrichment_evidence(task, run, validated)
+        self._validate_cards(validated["cards"], task, run)
+        self._require_read(connection, task, run, validated["cards"])
+        self._require_targets_read(connection, task, validated["cards"], reads)
+        if delta is not None:
+            self._record_materialization(connection, task, run, result, delta, validated["cards"])
+        task["state"] = "completed"
+        self._queue_next_stage(connection, task, run, validated)
+
+    def _queue_next_stage(self, connection, task, run, validated):
+        next_stage = (
+            "verify"
+            if is_card_only(run["policy"]) and task["stage"] == "author"
+            else STAGES[STAGES.index(task["stage"]) + 1]
+        )
+        manifest = task.get("external_sources", [])
+        refs = self._freeze_verification_receipts(connection, task, run, validated, next_stage)
+        next_task = self._new_task(
+            connection,
+            run,
+            task["article_id"],
+            next_stage,
+            digest({"submission": validated, "external_sources": manifest, **refs}),
+            validated["cards"],
+            manifest,
+            research_disposition=validated.get("research_disposition"),
+            research_audit_ref=refs.get("research_audit_ref"),
+            mechanical_evidence_ref=refs.get("mechanical_evidence_ref"),
+        )
+        next_task["target_cards"] = deepcopy(task.get("target_cards", {}))
+        next_task["research_plan"] = deepcopy(task.get("research_plan", []))
+        self._save_task(connection, next_task)
+
+    def _freeze_verification_receipts(self, connection, task, run, validated, next_stage):
+        audit_ref = (
+            self._freeze_research_audit(connection, task)
+            if next_stage in VERIFY_STAGES
+            and run["policy"].get("verify_search_audit")
+            and (
+                not is_card_only(run["policy"])
+                or task.get("search_receipt_ids")
+                or task.get("inherited_audit_ref")
+            )
+            else None
+        )
+        refs = {}
+        if audit_ref:
+            refs["research_audit_ref"] = audit_ref
+        mechanical_ref = None
+        if (
+            next_stage in VERIFY_STAGES
+            and run["policy"].get("version", 1) >= 4
+            and run["policy"].get("verify_decoded_evidence")
+        ):
+            sources = {
+                source["id"]: source
+                for source in self._required_sources(task, run, validated["cards"])
+            }
+            mechanical_ref = self._freeze_source(
                 connection,
-                run["run_id"],
-                "submitted",
-                {"task_id": task["task_id"], "result_hash": result_hash},
+                decoded_evidence_receipts(validated["cards"], sources, run["publication_sha256"]),
+                "decoded_evidence",
             )
-            self._refresh(connection, run)
-            return self._status(connection, run["run_id"])
+            refs["mechanical_evidence_ref"] = mechanical_ref
+        return refs
+
+    def _commit_submission(self, connection, task, run, validated, result_hash):
+        task_token, worker_id = task["task_token"], task["worker_id"]
+        task.update(result_hash=result_hash, completed_at=time.time(), expires_at=0)
+        self._save_task(connection, task)
+        connection.execute(
+            "INSERT INTO research_submissions VALUES (?,?,?,?,?,?)",
+            (
+                task_token,
+                task["task_id"],
+                worker_id,
+                result_hash,
+                encode(validated),
+                time.time(),
+            ),
+        )
+        self.store.runtime_control.success(
+            task["model"], "research:" + task_token, "research:" + task_token
+        )
+        self._event(
+            connection,
+            run["run_id"],
+            "submitted",
+            {"task_id": task["task_id"], "result_hash": result_hash},
+        )
+        self._refresh(connection, run)
+        return self._status(connection, run["run_id"])
 
     def _publish_cards(self, connection, run, task, checks):
         if run.get("purpose") == "card_revision":

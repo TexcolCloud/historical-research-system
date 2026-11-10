@@ -1,6 +1,8 @@
 """Research application operations over native state and library projections."""
 
-from sqlalchemy import and_, func, not_, or_, select
+from dataclasses import replace
+
+from sqlalchemy import func, select
 
 from hrs.library.books import get_run
 from hrs.library.deletion import require_active
@@ -9,6 +11,7 @@ from hrs.library.native_workspace import require_workspace
 from hrs.processing.workspace import identity
 from hrs.research.bridge import ResearchBridge
 from hrs.research.card_notes import CardNotes
+from hrs.research.catalogue_query import CatalogueQuery, CatalogueScope
 from hrs.research.exporting import export_card
 from hrs.research.projection import catalogue_card, located_card
 from hrs.research.sources import (
@@ -27,6 +30,7 @@ class Research:
         self.settings, self.engine = settings, engine
         self.bridge = ResearchBridge(settings, engine)
         self.workflow = self.bridge.workflow
+        self.catalogue_query = CatalogueQuery(engine, identity(self.bridge.store)["workspace_id"])
         self.evidence = ResearchEvidence(settings, engine)
         from hrs.research.workspace import ResearchWorkspace
 
@@ -76,13 +80,18 @@ class Research:
                 .all()
             )
         version = next((v for run in source_runs if (v := indexed_version(run))), None)
-        cards = self.records(
-            db.research_cards, book_id, offset=offset, limit=limit, include=include_cards
+        scope = CatalogueScope(book_id=book_id)
+        cards = (
+            self.catalogue_query.list_cards(scope, offset=offset, limit=limit)
+            if include_cards
+            else {"items": [], "total": self.catalogue_query.count_cards(scope)}
         )
-        entities = self.records(
-            db.research_entities, book_id, offset=offset, limit=limit, include=include_entities
+        entities = (
+            self.catalogue_query.list_entities(scope, offset=offset, limit=limit)
+            if include_entities
+            else {"items": [], "total": self.catalogue_query.count_entities(scope)}
         )
-        stale = self.records(db.research_cards, book_id, include=False, stale_only=True)["total"]
+        stale = self.catalogue_query.count_stale_cards(scope)
         revision_pending = any(
             (run["result"] or {}).get("codex_revision_pending") for run in source_runs
         )
@@ -121,95 +130,15 @@ class Research:
             "required_research_policy_version": POLICY["version"],
         }
 
-    def records(
-        self,
-        table,
-        book_id=None,
-        *,
-        offset=0,
-        limit=100,
-        include=True,
-        query=None,
-        stale_only=False,
-        book_ids=None,
-        record_ids=None,
-    ):
-        workspace_id = identity(self.bridge.store)["workspace_id"]
-        conditions = [
-            db.research_runs.c.workspace_id == workspace_id,
-            db.books.c.state.not_in(["deleted", "deleting", "delete_failed"]),
-        ]
-        if stale_only:
-            conditions.append(
-                not_(
-                    func.coalesce(
-                        and_(*current_source_conditions(db.research_runs, db.runs)), False
-                    )
-                )
-            )
-        else:
-            conditions.extend(current_source_conditions(db.research_runs, db.runs))
-            conditions.append(
-                table.c.id.in_(current_card_ids(workspace_id))
-                if table is db.research_cards
-                else table.c.summary["card_id"].astext.in_(current_card_ids(workspace_id))
-            )
-        if table is db.research_cards:
-            conditions.append(table.c.state != "excluded")
-        if book_id:
-            conditions.append(table.c.book_id == str(book_id))
-        if book_ids is not None:
-            conditions.append(table.c.book_id.in_(book_ids))
-        if record_ids is not None:
-            conditions.append(
-                or_(
-                    table.c.id.in_(record_ids),
-                    table.c.summary["canonical_id"].astext.in_(record_ids),
-                )
-                if table is db.research_entities
-                else table.c.id.in_(record_ids)
-            )
-        if query:
-            # The cards/entities lane is explicitly SQL literal search; source hits use hybrid search.
-            conditions.append(
-                table.c.search_text.ilike(
-                    "%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",
-                    escape="\\",
-                )
-            )
-        relation = (
-            table.join(db.research_runs)
-            .join(db.runs, db.runs.c.id == db.research_runs.c.source_run_id)
-            .join(db.books, db.books.c.id == table.c.book_id)
+    def list_cards(self, book_id, *, offset=0, limit=100):
+        return self.catalogue_query.list_cards(
+            CatalogueScope(book_id=book_id), offset=offset, limit=limit
         )
-        with self.engine.connect() as connection:
-            total = connection.scalar(select(func.count()).select_from(relation).where(*conditions))
-            rows = (
-                connection.execute(
-                    select(table.c.summary, db.runs.c.result["codex_revision_pending"].as_boolean())
-                    .select_from(relation)
-                    .where(*conditions)
-                    .order_by(table.c.id)
-                    .offset(offset)
-                    .limit(limit)
-                ).all()
-                if include
-                else []
-            )
-        items = [
-            {
-                **summary,
-                "source_current": not stale_only,
-                "needs_update": stale_only or bool(revision),
-                "source_status": "stale"
-                if stale_only
-                else "revision_pending"
-                if revision
-                else "current",
-            }
-            for summary, revision in rows
-        ]
-        return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+    def list_entities(self, book_id, *, offset=0, limit=100):
+        return self.catalogue_query.list_entities(
+            CatalogueScope(book_id=book_id), offset=offset, limit=limit
+        )
 
     def card(self, card_id, *, include_relations=True):
         card = self.invoke(self.workflow.card, card_id)
@@ -580,24 +509,26 @@ class Research:
                 "records": [],
             }
         available = found["backend"] != "unavailable"
-        cards = self.records(
-            db.research_cards,
-            book_ids=selected,
+        scope = CatalogueScope(
+            book_ids=tuple(selected) if selected is not None else None,
             query=None if available else query,
-            record_ids=[r["record_id"] for r in found["records"] if r["record_kind"] == "card"]
+        )
+        card_scope = replace(
+            scope,
+            record_ids=tuple(r["record_id"] for r in found["records"] if r["record_kind"] == "card")
             if available
             else None,
-            limit=limit,
-        )["items"]
-        entities = self.records(
-            db.research_entities,
-            book_ids=selected,
-            query=None if available else query,
-            record_ids=[r["record_id"] for r in found["records"] if r["record_kind"] == "entity"]
+        )
+        entity_scope = replace(
+            scope,
+            record_ids=tuple(
+                r["record_id"] for r in found["records"] if r["record_kind"] == "entity"
+            )
             if available
             else None,
-            limit=limit,
-        )["items"]
+        )
+        cards = self.catalogue_query.list_cards(card_scope, limit=limit)["items"]
+        entities = self.catalogue_query.list_entities(entity_scope, limit=limit)["items"]
         indexed_entities = {}
         for entity in entities:
             canonical = entity.get("canonical_id") or entity["id"]

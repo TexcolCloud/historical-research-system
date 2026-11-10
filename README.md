@@ -6,7 +6,7 @@
 
 仓库只有一个 Python 工程和一个 React 前端。Python 3.11、uv、Node.js 24+、Docker Desktop Linux 引擎，以及已登录且可使用 Terra/Sol 的 Codex CLI 为运行前提。完整平台检索将原文按保留来源位置的片段建立 BGE-M3 向量，结合关键词召回和 BGE reranker 重排；默认使用 CUDA，CPU 模式须显式配置。
 
-后端按业务模块组织，HTTP 路由与 MCP 调用同一应用服务。`processing` 持有 SQLite 任务、租约和证据事务；`research/service.py` 协调制卡应用操作，`schemas.py` 定义接口数据，`policy.py` 定义新任务默认策略，`packets.py` 与 `card_validation.py` 分别组装冻结任务包和校验来源证据。Markdown 导出由独立模块生成，并共用引文、脚注及原文定位规则；既有任务继续读取各自冻结策略。PostgreSQL、S3 和 OpenSearch 分别承载业务投影、对象和检索，不替代原生任务账本。前端按功能目录组织；阅读组件分别由数据查询、来源定位和目录导航模块承担对应职责，引用编辑与阅读复用章节请求。
+后端按业务模块组织，HTTP 路由与 MCP 调用同一应用服务。`processing` 持有 SQLite 任务、租约和证据事务；审核提交按读取校验、阶段推进和提交记录划分职责，重复提交保持幂等。`research/service.py` 协调制卡应用操作，`schemas.py` 定义接口数据，`policy.py` 定义新任务默认策略，`packets.py` 与 `card_validation.py` 分别组装冻结任务包和校验来源证据；`catalogue_query.py` 承担工作区及来源版本约束下的卡片、实体分页与计数，HTTP 路由不接触数据库表。实体目录分别投影来源提及、别名、关系及事件参与者，所有写入共用调用者事务，失败不保留部分结果。Markdown 导出由独立模块生成，并共用引文、脚注及原文定位规则；既有任务继续读取各自冻结策略。PostgreSQL、S3 和 OpenSearch 分别承载业务投影、对象和检索，不替代原生任务账本。前端按功能目录组织；阅读组件分别由数据查询、来源定位和目录导航模块承担对应职责，引用编辑与阅读复用章节请求。原书目录区分正式阅读与人工核对入口，共用目录显示、筛选和覆盖提示，目录决定的请求去重、冲突提示及缓存同步由专用 Hook 管理。
 
 以下命令均在仓库根目录的 PowerShell 中执行。更新依赖前正常停止所属应用进程。
 
