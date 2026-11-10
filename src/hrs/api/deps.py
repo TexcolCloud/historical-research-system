@@ -11,7 +11,7 @@ from hrs.library.catalog import Library
 from hrs.library.exports import Exports
 from hrs.library.review import Review
 from hrs.library.runs.outputs import Outputs
-from hrs.research.api import Research
+from hrs.research.service import Research
 from hrs.search.search import Search
 
 

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from hrs.library.errors import ServiceError
-from hrs.research.api import Research
+from hrs.research.service import Research
 from hrs.research.workspace import ResearchWorkspace
 
 

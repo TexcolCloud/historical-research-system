@@ -5,8 +5,9 @@ from copy import deepcopy
 import pytest
 
 from hrs.processing.errors import EvidenceMismatch
-from hrs.processing.research_workflow import POLICY, ResearchWorkflow
+from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
+from hrs.research.policy import POLICY
 from tests.unit.research.test_complete_workflow import (
     TEXT,
     draft,
@@ -20,7 +21,7 @@ V6_POLICY = {**deepcopy(POLICY), "version": 6, "dossier_cards": False}
 
 @pytest.fixture(autouse=True)
 def retain_v6_policy(monkeypatch):
-    monkeypatch.setattr("hrs.processing.research_workflow.POLICY", V6_POLICY)
+    monkeypatch.setattr("hrs.research.policy.POLICY", V6_POLICY)
 
 
 def card_draft(book="book-a"):

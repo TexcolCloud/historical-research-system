@@ -18,10 +18,11 @@ from hrs.library.native_workspace import WrongWorkspace
 from hrs.library.projection.facts import PROJECTION_POLICY
 from hrs.library.projection.publication import NativePublication
 from hrs.library.records import text_digest
-from hrs.processing.research_workflow import POLICY as CURRENT_CARD_POLICY
 from hrs.processing.workspace import identity
-from hrs.research.api import Research, ResearchDecision
 from hrs.research.bridge import ResearchBridge
+from hrs.research.policy import POLICY as CURRENT_CARD_POLICY
+from hrs.research.schemas import ResearchDecision
+from hrs.research.service import Research
 from hrs.research.workspace import QuestionCreate, QuestionEvidence, QuestionUpdate
 from hrs.storage import models as db
 
@@ -30,21 +31,21 @@ from hrs.storage import models as db
 def research_book(platform, monkeypatch):
     from copy import deepcopy
 
-    from hrs.processing import research_workflow
+    from hrs.research import policy as research_policy
 
     # These synthetic fixtures exercise retained v4 HTTP/projection contracts,
     # never native v5 coverage or content-accuracy acceptance.
-    retained_policy = deepcopy(research_workflow.POLICY)
+    retained_policy = deepcopy(research_policy.POLICY)
     retained_policy["version"] = 4
     retained_policy["card_only"] = False
     retained_policy["enrichment_search_required"] = True
-    retained_policy["models"] = dict.fromkeys(research_workflow.STAGES, research_workflow.SOL)
+    retained_policy["models"] = dict.fromkeys(research_policy.STAGES, research_policy.SOL)
     retained_policy["stages"] = {
-        stage: {"model": research_workflow.SOL, "reasoning_effort": "high"}
-        for stage in research_workflow.STAGES
+        stage: {"model": research_policy.SOL, "reasoning_effort": "high"}
+        for stage in research_policy.STAGES
     }
     retained_policy.pop("complete_research", None)
-    monkeypatch.setattr(research_workflow, "POLICY", retained_policy)
+    monkeypatch.setattr(research_policy, "POLICY", retained_policy)
     settings, engine = platform
     values = {}
 
@@ -1245,12 +1246,12 @@ def test_retained_policy_is_visible_as_upgrade_without_automatic_rewriting(
 ):
     from copy import deepcopy
 
-    from hrs.processing import research_workflow
+    from hrs.research import policy as research_policy
 
     settings, engine, bridge, book_id, _, _, _ = research_book
     status, _ = finish_contract_run(bridge, bridge.start(book_id), "Retained v4 source")
     current = deepcopy(CURRENT_CARD_POLICY)
-    monkeypatch.setattr(research_workflow, "POLICY", current)
+    monkeypatch.setattr(research_policy, "POLICY", current)
     bridge.tick()
     assert (
         len(

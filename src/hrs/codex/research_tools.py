@@ -82,7 +82,13 @@ def status_summary(status):
     last = max(failures, key=lambda item: item.get("at", 0), default={})
     detail = last.get("details") or status.get("last_runtime_failure") or {}
     if status["state"] in {
-        "completed", "pending", "paused", "cancelled", "superseded", "failed", "technical_blocked"
+        "completed",
+        "pending",
+        "paused",
+        "cancelled",
+        "superseded",
+        "failed",
+        "technical_blocked",
     }:
         dispatch_action = "stop"
     elif any(task["state"] == "ready" for task in tasks):
@@ -146,7 +152,7 @@ def register_research_tools(server, store, checked):
 
     @lru_cache(maxsize=1)
     def research_workspace():
-        from hrs.research.api import Research
+        from hrs.research.service import Research
 
         source = evidence()
         return Research(source.settings, source.engine).workspace

@@ -7,10 +7,11 @@ from pydantic import ValidationError
 
 from hrs.codex.research_tools import rejection_diagnostics
 from hrs.processing.errors import EvidenceMismatch
-from hrs.processing.research_workflow import POLICY, ResearchWorkflow
+from hrs.processing.research_workflow import ResearchWorkflow
 from hrs.processing.store import Store
 from hrs.research.execution import role_configs
 from hrs.research.models import CrossCardRelation
+from hrs.research.policy import POLICY
 from tests.unit.research.test_source_variants import (
     TEXT,
     complete_target,

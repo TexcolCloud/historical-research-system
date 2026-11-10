@@ -12,8 +12,9 @@ from hrs.library.errors import Problem, ServiceError
 from hrs.library.footnotes import resolve_footnotes
 from hrs.library.records import text_digest
 from hrs.research import sources
-from hrs.research.api import Research, evidence_markdown
+from hrs.research.evidence_export import evidence_markdown
 from hrs.research.projection import located_card
+from hrs.research.service import Research
 from hrs.research.sources import retrieval_preview
 
 

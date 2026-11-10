@@ -20,7 +20,7 @@ from hrs.research.models import CardDraft, ResearchDate
 
 def legacy_policy(version=5):
     """Explicit retained policy; a new product default must not rewrite old-contract tests."""
-    from hrs.processing.research_workflow import POLICY, STAGES
+    from hrs.research.policy import POLICY, STAGES
 
     return {
         **deepcopy(POLICY),
@@ -106,9 +106,9 @@ def draft(article_id="article-1", text="第一頁記張三。第二頁記張三�
 def workflow(tmp_path, monkeypatch):
     # This suite retains the v4 wire/lease contracts; complete v5 extraction has
     # its own inventory, metadata, repair and catalogue acceptance fixtures.
-    from hrs.processing import research_workflow as module
+    from hrs.research import policy
 
-    monkeypatch.setattr(module, "POLICY", legacy_policy(4))
+    monkeypatch.setattr(policy, "POLICY", legacy_policy(4))
     return ResearchWorkflow(Store(tmp_path / "workspace"))
 
 
@@ -785,16 +785,16 @@ def test_source_supported_no_external_claims_disposition_is_independently_checke
 
 
 def test_new_policy_creates_a_new_run_and_preserves_older_claim_contract(workflow, monkeypatch):
-    from hrs.processing import research_workflow as module
+    from hrs.research import policy
 
-    current = deepcopy(module.POLICY)
+    current = deepcopy(policy.POLICY)
     legacy = {**current, "version": 1, "enrichment_search_required": False}
-    monkeypatch.setattr(module, "POLICY", legacy)
+    monkeypatch.setattr(policy, "POLICY", legacy)
     older = workflow.enqueue(snapshot())
     submit_draft(workflow, older["run_id"], "author", "old-author")
     packet = workflow.claim(older["run_id"], "old-enricher", stage="enrich")
     read_all(workflow, packet)
-    monkeypatch.setattr(module, "POLICY", current)
+    monkeypatch.setattr(policy, "POLICY", current)
     newer = workflow.enqueue(snapshot())
     assert newer["run_id"] != older["run_id"]
     workflow.submit(
@@ -1052,10 +1052,10 @@ def test_v3_verifier_gets_frozen_search_audit_after_source_gate_and_checks_each_
 
 
 def test_v3_business_prompt_and_old_v2_receipt_contract_remain_frozen(workflow, monkeypatch):
-    from hrs.processing import research_workflow as module
+    from hrs.research import policy
     from hrs.research.execution import role_configs
 
-    current = deepcopy(module.POLICY)
+    current = deepcopy(policy.POLICY)
     legacy = {**current, "version": 2, "verify_search_audit": False}
     assert (
         "never put runtime tool names"
@@ -1065,11 +1065,11 @@ def test_v3_business_prompt_and_old_v2_receipt_contract_remain_frozen(workflow, 
         "never put runtime tool names"
         not in role_configs(legacy)["research_card_author"]["instructions"]
     )
-    monkeypatch.setattr(module, "POLICY", legacy)
+    monkeypatch.setattr(policy, "POLICY", legacy)
     previous = completed(workflow)
     card = workflow.list_cards(run_id=previous["run_id"])[0]
     assert card["checks"]["checked_search_receipt_ids"] == []
-    monkeypatch.setattr(module, "POLICY", current)
+    monkeypatch.setattr(policy, "POLICY", current)
     revision = workflow.enqueue(
         snapshot(),
         revision_of=previous["run_id"],
@@ -1149,15 +1149,15 @@ def test_literal_backslash_n_cannot_replace_an_actual_source_line_feed(workflow)
 
 @pytest.mark.parametrize("version", [1, 2, 3])
 def test_v4_does_not_add_mechanical_contract_to_older_policies(workflow, monkeypatch, version):
-    from hrs.processing import research_workflow as module
+    from hrs.research import policy
     from hrs.research.execution import role_configs
 
-    current = deepcopy(module.POLICY)
+    current = deepcopy(policy.POLICY)
     older = {**current, "version": version}
     assert (
         "Policy v4 decoded evidence" not in role_configs(older)["research_verifier"]["instructions"]
     )
-    monkeypatch.setattr(module, "POLICY", older)
+    monkeypatch.setattr(policy, "POLICY", older)
     run = workflow.enqueue(snapshot())
     submit_draft(workflow, run["run_id"], "author", "author")
     submit_draft(workflow, run["run_id"], "enrich", "enricher")

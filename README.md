@@ -6,6 +6,8 @@
 
 仓库只有一个 Python 工程和一个 React 前端。Python 3.11、uv、Node.js 24+、Docker Desktop Linux 引擎，以及已登录且可使用 Terra/Sol 的 Codex CLI 为运行前提。完整平台检索将原文按保留来源位置的片段建立 BGE-M3 向量，结合关键词召回和 BGE reranker 重排；默认使用 CUDA，CPU 模式须显式配置。
 
+后端按业务模块组织，HTTP 路由与 MCP 调用同一应用服务。`processing` 持有 SQLite 任务、租约和证据事务；`research/service.py` 协调制卡应用操作，`schemas.py` 定义接口数据，`policy.py` 定义新任务默认策略，`packets.py` 与 `card_validation.py` 分别组装冻结任务包和校验来源证据。Markdown 导出由独立模块生成，并共用引文、脚注及原文定位规则；既有任务继续读取各自冻结策略。PostgreSQL、S3 和 OpenSearch 分别承载业务投影、对象和检索，不替代原生任务账本。前端按功能目录组织；阅读组件分别由数据查询、来源定位和目录导航模块承担对应职责，引用编辑与阅读复用章节请求。
+
 以下命令均在仓库根目录的 PowerShell 中执行。更新依赖前正常停止所属应用进程。
 
 ```powershell
@@ -198,5 +200,9 @@ npm --prefix web run build
 ```
 
 集成测试使用 [隔离设施](deploy/compose.test.yml) 及 [CI](.github/workflows/engineering.yml) 中的专用数据库、S3 和 OpenSearch；不能把业务数据卷接入测试。安装包 MCP 检查需先构建 wheel，并将 `HRS_TEST_WHEEL` 指向该文件；备份恢复和搜索回归分别显式设置 `PLATFORM_TEST_BACKUP=1`、`PLATFORM_TEST_SEARCH=1`，备份测试还需指定专用 `PLATFORM_POSTGRES_CONTAINER`。契约生成使用 `npm --prefix web run contracts`，同时提交 `web/openapi.json` 与客户端类型。真实史料验收使用原生视觉子代理并检查完整证据链；节选外的目录目标保持未定位，样本未包含的脚注、表格等不计作真实内容覆盖，机器通过不作为人工史料准确率证明。
+
+重构须保持 HTTP/MCP 契约、历史冻结策略、事务边界和导出兼容性；测试覆盖 v1–v7 任务包、审核候选隔离、来源哈希、脚注归属和模块依赖边界。代码规范参考[阿里巴巴开发手册](https://alibaba.github.io/Alibaba-Java-Coding-Guidelines/)中的命名、分层、复用和异常处理原则，并遵循 Python、TypeScript 的语言习惯；以 Ruff、类型检查、依赖检查及功能回归共同验收。
+
+安装包验证使用 `uv build`，先生成源码分发包，再从该包构建 wheel，避免本机旧 `build/lib` 将已删除模块混入发行包。MCP 集成检查会逐一比较包内模块、工作流资源与当前源码，并从仓库外启动已安装的 MCP 核验工作区选择。
 
 Git 只保留现役源码、锁文件、必要测试/契约、部署和 README，以及实际执行需要的 Skill/工作流资源。模型权重、原件、账本、运行日志、私有配置和本地归档保持忽略；功能或命令变更在同一 PR 同步对应 README。

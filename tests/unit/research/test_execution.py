@@ -44,9 +44,9 @@ def test_runtime_diagnostics_keep_retry_metadata_but_exclude_credentials_and_rea
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
-    from hrs.processing import research_workflow as module
+    from hrs.research import policy
 
-    monkeypatch.setattr(module, "POLICY", legacy_policy(4))
+    monkeypatch.setattr(policy, "POLICY", legacy_policy(4))
     store = Store(tmp_path / "native")
     workflow = ResearchWorkflow(store)
     run_id = workflow.enqueue(snapshot())["run_id"]
