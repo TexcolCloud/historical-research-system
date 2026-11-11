@@ -1,6 +1,20 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { CloudCheck, Upload } from "lucide-react";
+import {
+  CloudCheck,
+  Upload,
+  PanelLeft,
+  LayoutDashboard,
+  Search,
+  Library,
+  NotebookPen,
+  FolderOpen,
+  Network,
+  History,
+  Sparkles,
+  Settings,
+  ScrollText,
+} from "lucide-react";
 import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents.ts";
 import { useQuery } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
@@ -8,6 +22,37 @@ import { RuntimeScopeContext, type RuntimeScope } from "./runtime-scope.ts";
 const UploadPanel = lazy(() => import("@/features/uploads/UploadPanel.tsx"));
 import type { UploadActivity } from "@/features/uploads/UploadPanel.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { studyRequest } from "@/features/studies/api";
+import "@/styles/study-shell.css";
+import type { LucideIcon } from "lucide-react";
+
+const sections: { group: string; links: [string, string, LucideIcon][] }[] = [
+  {
+    group: "研究资料",
+    links: [
+      ["仪表盘", "/dashboard", LayoutDashboard],
+      ["全文检索", "/search", Search],
+      ["史料集", "/library", Library],
+      ["论据丛", "/arguments", NotebookPen],
+      ["研究专题", "/studies", FolderOpen],
+    ],
+  },
+  {
+    group: "专题研究",
+    links: [
+      ["专题工作台", "/workspace", Network],
+      ["时间线索", "/timeline", History],
+      ["AI 分析", "/analysis", Sparkles],
+    ],
+  },
+  {
+    group: "工作空间",
+    links: [
+      ["设置", "/settings", Settings],
+      ["更新日志", "/updates", ScrollText],
+    ],
+  },
+];
 
 export type WorkspaceContext = {
   upload: () => void;
@@ -19,11 +64,21 @@ export type WorkspaceContext = {
 
 export default function AppShell() {
   const location = useLocation();
-  const researching = location.pathname === "/research";
-  const reviewing =
-    location.pathname === "/reviews" ||
-    (location.pathname.startsWith("/books/") &&
-      new URLSearchParams(location.search).get("tab") === "review");
+  const canvas = /^\/studies\/[^/]+\/canvas$/.test(location.pathname);
+  const [sidebarOpen, setSidebarOpen] = useState(!canvas);
+  useEffect(() => setSidebarOpen(!canvas), [canvas]);
+  const preferences = useQuery({
+    queryKey: ["studies", "preferences"],
+    staleTime: 300000,
+    retry: false,
+    queryFn: ({ signal }) =>
+      studyRequest<{ compact: boolean }>(
+        "/preferences",
+        "GET",
+        undefined,
+        signal,
+      ),
+  });
   const connected = useWorkspaceEvents();
   const runtime = useQuery({
     queryKey: ["platform", "runtime"],
@@ -58,28 +113,83 @@ export default function AppShell() {
     setOpen(true);
   }
   return (
-    <div className="platform-workspace">
+    <div
+      className="platform-workspace study-shell"
+      data-sidebar={sidebarOpen ? "open" : "closed"}
+      data-density={preferences.data?.compact ? "compact" : "normal"}
+      data-canvas={canvas}
+    >
+      <aside
+        className="study-sidebar"
+        aria-label="研究功能导航"
+        hidden={!sidebarOpen}
+      >
+        <Link className="study-sidebar-brand" to="/dashboard">
+          <span className="platform-seal">史</span>
+          <span>
+            史料研究<small>个人研究工作台</small>
+          </span>
+        </Link>
+        <nav aria-label="主要导航">
+          {sections.map((section) => (
+            <div key={section.group}>
+              <p>{section.group}</p>
+              {section.links.map(([label, path, Glyph]) => {
+                const active =
+                  location.pathname === path ||
+                  (path === "/library" &&
+                    location.pathname.startsWith("/books/")) ||
+                  (path === "/workspace" && canvas);
+                return (
+                  <Link
+                    key={path}
+                    to={path}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <Glyph size={18} aria-hidden="true" />
+                    {label}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+        <div className="study-sidebar-footer">
+          <Link
+            to="/reviews"
+            aria-current={location.pathname === "/reviews" ? "page" : undefined}
+          >
+            待办
+          </Link>
+          <Link
+            to="/research"
+            aria-current={
+              location.pathname === "/research" ? "page" : undefined
+            }
+          >
+            实体库
+          </Link>
+        </div>
+      </aside>
       <header className="platform-header">
-        <Link to="/" className="platform-brand" aria-label="史料研究 · 书籍">
+        <Button
+          variant="ghost"
+          aria-label={sidebarOpen ? "收起功能导航" : "展开功能导航"}
+          aria-expanded={sidebarOpen}
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+        >
+          <PanelLeft size={20} />
+        </Button>
+        <Link
+          to="/dashboard"
+          className="platform-brand"
+          aria-label="史料研究 · 仪表盘"
+        >
           <span className="platform-seal" aria-hidden="true">
             史
           </span>
           <span>史料研究</span>
         </Link>
-        <nav aria-label="主要导航">
-          <Link
-            to="/"
-            aria-current={!reviewing && !researching ? "page" : undefined}
-          >
-            书籍
-          </Link>
-          <Link to="/reviews" aria-current={reviewing ? "page" : undefined}>
-            待办
-          </Link>
-          <Link to="/research" aria-current={researching ? "page" : undefined}>
-            实体库
-          </Link>
-        </nav>
         <div className="platform-header-actions">
           <span className="platform-sync" data-connected={connected}>
             <CloudCheck size={16} />

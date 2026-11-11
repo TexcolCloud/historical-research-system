@@ -134,7 +134,9 @@ def status_summary(status):
 
 
 def register_research_tools(server, store, checked):
-    workflow = ResearchWorkflow(store)
+    @lru_cache(maxsize=1)
+    def workflow():
+        return ResearchWorkflow(store)
 
     @lru_cache(maxsize=1)
     def evidence():
@@ -161,18 +163,18 @@ def register_research_tools(server, store, checked):
     @checked
     def research_status(run_id: str) -> dict:
         """Read bounded research progress and ready stages; no task or content approval."""
-        return status_summary(workflow.status(run_id))
+        return status_summary(workflow().status(run_id))
 
     @server.tool()
     @checked
     def research_claim(run_id: str, worker_id: str, stage: str) -> dict | None:
         """A native child claims one article task with frozen model, source and submission schema."""
-        status = workflow.status(run_id)
+        status = workflow().status(run_id)
         if status["policy"].get("version", 1) >= 2 and not status.get("native_execution_id"):
             raise ToolError(
                 "Research v2 awaits its supervised native execution before claiming tasks"
             )
-        return workflow.claim(run_id, worker_id, stage=stage, paged=None)
+        return workflow().claim(run_id, worker_id, stage=stage, paged=None)
 
     @server.tool()
     @checked
@@ -180,7 +182,7 @@ def register_research_tools(server, store, checked):
         task_token: str, worker_id: str, offset: int = 0, limit: int = 1600
     ) -> dict:
         """Read the frozen complete task packet JSON in bounded windows before other research tools."""
-        return workflow.packet_text(task_token, worker_id, offset, limit)
+        return workflow().packet_text(task_token, worker_id, offset, limit)
 
     @server.tool()
     @checked
@@ -188,7 +190,7 @@ def register_research_tools(server, store, checked):
         task_token: str, offset: int = 0, limit: int = 1600, article_id: str | None = None
     ) -> dict:
         """Read a bounded frozen source range; advance end until complete before submitting."""
-        return workflow.read_source(task_token, offset, min(limit, 2000), article_id=article_id)
+        return workflow().read_source(task_token, offset, min(limit, 2000), article_id=article_id)
 
     @server.tool()
     @checked
@@ -208,7 +210,7 @@ def register_research_tools(server, store, checked):
         limit: Annotated[int, Field(ge=1, le=20)] = 20,
     ) -> dict:
         """Locate exact quotes in a fully read frozen source; ambiguity stays explicit, no inference."""
-        return workflow.locate_quotes(
+        return workflow().locate_quotes(
             task_token,
             worker_id,
             quotes,
@@ -221,7 +223,7 @@ def register_research_tools(server, store, checked):
     @checked
     def research_candidate(task_token: str, worker_id: str, observations: dict) -> dict:
         """After full independent source reading freeze article_id/text_sha256/summary observations."""
-        return workflow.candidate(task_token, worker_id, observations, paged=None)
+        return workflow().candidate(task_token, worker_id, observations, paged=None)
 
     @server.tool()
     @checked
@@ -229,13 +231,13 @@ def register_research_tools(server, store, checked):
         task_token: str, worker_id: str, offset: int = 0, limit: int = 1600
     ) -> dict:
         """Read bounded canonical candidate JSON after source-first observations; advance end until total."""
-        return workflow.candidate_text(task_token, worker_id, offset, limit)
+        return workflow().candidate_text(task_token, worker_id, offset, limit)
 
     @server.tool()
     @checked
     def research_plan(task_token: str, worker_id: str, questions: list[dict]) -> dict:
         """Persist a bounded research plan before retrieval; the native worker owns its judgments."""
-        return workflow.record_plan(task_token, worker_id, questions)
+        return workflow().record_plan(task_token, worker_id, questions)
 
     @server.tool()
     @checked
@@ -246,7 +248,7 @@ def register_research_tools(server, store, checked):
         version: int | None = None,
     ) -> dict:
         """Freeze an authorized counterpart and its source versions; verification reads retained targets."""
-        return workflow.target_card(
+        return workflow().target_card(
             task_token,
             worker_id,
             card_id,
@@ -264,7 +266,9 @@ def register_research_tools(server, store, checked):
         limit: int = 1600,
     ) -> dict:
         """Read the complete frozen counterpart in bounded windows; its source must be independently read."""
-        return workflow.target_card_text(task_token, worker_id, card_ref, offset, min(limit, 2000))
+        return workflow().target_card_text(
+            task_token, worker_id, card_ref, offset, min(limit, 2000)
+        )
 
     @server.tool()
     @checked
@@ -278,7 +282,7 @@ def register_research_tools(server, store, checked):
         """Search indexed primary publications using the shared hybrid/rerank pipeline."""
         if not 1 <= limit <= 20:
             raise ValueError("Research retrieval limit must be between 1 and 20")
-        scope = workflow.prepare_search(task_token, query=query) or {}
+        scope = workflow().prepare_search(task_token, query=query) or {}
         frozen_books = scope.get("book_ids") or []
         if book_ids is not None and (
             not isinstance(book_ids, list)
@@ -297,7 +301,7 @@ def register_research_tools(server, store, checked):
         try:
             result = evidence().search(query, book_id, semantic=True, limit=limit, **options)
         except Exception as error:  # noqa: BLE001 - retain an actual failed retrieval, then propagate it
-            workflow.record_search(
+            workflow().record_search(
                 task_token,
                 {
                     "query": query,
@@ -315,7 +319,7 @@ def register_research_tools(server, store, checked):
         from hrs.research.sources import retrieval_preview
 
         preview = retrieval_preview(result)
-        receipt = workflow.record_search(
+        receipt = workflow().record_search(
             task_token,
             result,
             book_id=book_id,
@@ -336,20 +340,20 @@ def register_research_tools(server, store, checked):
         task_token: str, article_id: str, offset: int = 0, limit: int = 1600
     ) -> dict:
         """Freeze a server-loaded published article, then read/cite its immutable returned identity."""
-        workflow.read_source(task_token, 0, 1)
+        workflow().read_source(task_token, 0, 1)
         if not article_id.startswith("source-"):
             snapshot = evidence().freeze_source(article_id)
-            indexes = workflow.add_source(task_token, snapshot)
+            indexes = workflow().add_source(task_token, snapshot)
             if len(indexes) != 1:
                 raise ValueError("A research evidence request must freeze one complete article")
             article_id = indexes[0]["id"]
-        return workflow.read_source(task_token, offset, min(limit, 2000), article_id=article_id)
+        return workflow().read_source(task_token, offset, min(limit, 2000), article_id=article_id)
 
     @server.tool()
     @checked
     def research_original(task_token: str, page: int, article_id: str | None = None):
         """Inspect original pixels for a frozen research source; cannot reopen or approve OCR."""
-        reference = workflow.source_reference(task_token, article_id=article_id, page=page)
+        reference = workflow().source_reference(task_token, article_id=article_id, page=page)
         metadata, pixels = store.original_page(reference["document_id"], page)
         if reference.get("image_sha256") and metadata["image_sha256"] != reference["image_sha256"]:
             raise ValueError("Retained source image differs from the research snapshot")
@@ -369,11 +373,11 @@ def register_research_tools(server, store, checked):
     @checked
     def research_related(task_token: str, entity_id: str, hops: int = 1, limit: int = 20) -> dict:
         """Explore bounded source-backed identity/event neighbours as leads, not new historical claims."""
-        workflow.read_source(task_token, 0, 1)
+        workflow().read_source(task_token, 0, 1)
         evidence().require_entity(entity_id)
         # Preserve task/stage authorization, then validate complete edge provenance
         # through the HTTP facade before truncating discovery metadata for MCP.
-        workflow.related(task_token, entity_id, hops=hops, limit=limit)
+        workflow().related(task_token, entity_id, hops=hops, limit=limit)
         from hrs.research.graph import graph_leads
 
         graph = research_workspace().graph(entity_id, hops=hops, limit=min(limit, 8))
@@ -384,11 +388,11 @@ def register_research_tools(server, store, checked):
     def research_submit(task_token: str, worker_id: str, result: dict) -> dict:
         """Validate and commit the exact stage schema; native decisions never grant human approval."""
         try:
-            return workflow.submit(task_token, worker_id, result)
+            return workflow().submit(task_token, worker_id, result)
         except (ValidationError, EvidenceMismatch) as error:
             diagnostics, reply = rejection_diagnostics(error)
             try:
-                receipt = workflow.record_submission_rejection(
+                receipt = workflow().record_submission_rejection(
                     task_token, worker_id, result, diagnostics
                 )
                 if receipt.get("recorded"):
@@ -408,6 +412,6 @@ def register_research_tools(server, store, checked):
             raise ValueError(
                 "An actual technical failure requires a concrete details.reason or details.message"
             )
-        return workflow.fail(task_token, worker_id, code, details=diagnostics)
+        return workflow().fail(task_token, worker_id, code, details=diagnostics)
 
     return evidence

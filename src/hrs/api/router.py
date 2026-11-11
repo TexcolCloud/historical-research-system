@@ -12,6 +12,8 @@ from hrs.api.routes import (
     research,
     reviews,
     runs,
+    studies,
+    study_analysis,
     uploads,
 )
 
@@ -26,3 +28,5 @@ api_router.include_router(events.router)
 api_router.include_router(health.router)
 api_router.include_router(native_workbench.router)
 api_router.include_router(research.router)
+api_router.include_router(studies.router)
+api_router.include_router(study_analysis.router)

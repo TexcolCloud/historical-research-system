@@ -93,7 +93,7 @@ function PublishedBookResearch({ book }: { book: Book }) {
       <section className="workspace-empty">
         <h2>研究记录不可用</h2>
         <p>{detail.error.message}</p>
-        <Link className="research-source-link" to="/">
+        <Link className="research-source-link" to="/library">
           返回书籍
         </Link>
       </section>

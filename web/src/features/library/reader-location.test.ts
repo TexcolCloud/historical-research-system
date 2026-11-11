@@ -17,6 +17,17 @@ const target = {
   image_sha256: "b".repeat(64),
 };
 describe("shared source-bound reading targets", () => {
+  it("returns to a study canvas with its selected material while rejecting path lookalikes", () => {
+    const canvas =
+      "/studies/topic-a/canvas?canvas=canvas-a&selected=material-a";
+    expect(safeReaderReturn(canvas, "book")).toBe(canvas);
+    expect(safeReaderReturn("/search?q=运输&topic=topic-a", "book")).toBe(
+      "/search?q=运输&topic=topic-a",
+    );
+    expect(safeReaderReturn("/studies/../outside", "book")).toBe(
+      "/books/book?tab=reader&section=directory",
+    );
+  });
   it("restores cross-book research results while rejecting external return routes", () => {
     expect(
       safeReaderReturn("/research?q=运输&book_id=book-b&card=card-a", "book-a"),

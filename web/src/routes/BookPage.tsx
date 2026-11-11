@@ -68,7 +68,8 @@ export default function BookPage() {
   if (!book)
     return (
       <p role="alert">
-        {detail.error?.message ?? "书籍不存在。"} <Link to="/">返回书籍</Link>
+        {detail.error?.message ?? "书籍不存在。"}{" "}
+        <Link to="/library">返回书籍</Link>
       </p>
     );
   if (["deleting", "delete_failed", "deleted"].includes(book.state))
@@ -89,7 +90,7 @@ export default function BookPage() {
               : "正在停止执行并清理文件，完成后会自动从列表移除。"}
         </p>
         {book.state === "delete_failed" && <DeleteBookButton book={book} />}
-        <Link to="/">返回全部书籍</Link>
+        <Link to="/library">返回全部书籍</Link>
       </section>
     );
   return (
@@ -101,7 +102,7 @@ export default function BookPage() {
       }
     >
       <div className="book-context-bar">
-        <Link to="/" className="platform-back">
+        <Link to="/library" className="platform-back">
           ← 书籍
         </Link>
         <span title={book.title}>{book.title}</span>

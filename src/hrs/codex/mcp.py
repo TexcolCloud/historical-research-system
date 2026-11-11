@@ -586,4 +586,8 @@ def create_server(root: Path) -> MCPServer:
 
     research_evidence = register_research_tools(server, store, contract_errors)
 
+    from hrs.studies.mcp import register_study_tools
+
+    register_study_tools(server, store)
+
     return server

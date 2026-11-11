@@ -1,0 +1,527 @@
+.study-canvas-workspace {
+  --study-line: color-mix(in srgb, var(--foreground) 15%, var(--background));
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.study-canvas-context {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 0 16px;
+  flex-wrap: wrap;
+}
+.study-canvas-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.study-canvas-context label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.study-canvas-workspace input:not([type="checkbox"]),
+.study-canvas-workspace select,
+.study-canvas-workspace textarea {
+  border: 1px solid var(--study-line);
+  background: var(--card);
+  color: var(--foreground);
+  border-radius: 6px;
+  padding: 9px 11px;
+  min-width: 0;
+  max-width: 100%;
+  font: inherit;
+}
+.study-canvas-workspace input:focus-visible,
+.study-canvas-workspace select:focus-visible,
+.study-canvas-workspace textarea:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.study-canvas-create {
+  position: relative;
+  margin-left: auto;
+}
+.study-canvas-create summary,
+.study-canvas-tools summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--study-line);
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: var(--card);
+}
+.study-canvas-create[open] form,
+.study-canvas-tools[open] > div {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  min-width: 270px;
+  max-width: 360px;
+  background: var(--card);
+  padding: 18px;
+  border: 1px solid var(--study-line);
+  border-radius: 8px;
+  box-shadow: 0 8px 22px #00000012;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.study-canvas-create form label,
+.study-canvas-tools form label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.study-canvas-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--study-line);
+  flex-wrap: wrap;
+}
+.study-canvas-toolbar button {
+  font-size: 13px;
+  min-height: 38px;
+  padding: 7px 11px;
+}
+.study-canvas-save {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.study-canvas-save[data-dirty="true"] {
+  color: var(--foreground);
+}
+.study-canvas-tools {
+  position: relative;
+  font-size: 13px;
+}
+.study-canvas-tools > div p {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  line-height: 1.6;
+}
+.study-canvas-tools form {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.study-canvas-tools a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.study-canvas-stage {
+  height: max(580px, calc(100dvh - 210px));
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--study-line);
+  border-radius: 8px;
+  background: var(--background);
+}
+.study-canvas-stage:fullscreen {
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+.study-canvas-session:fullscreen {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: 12px;
+  background: var(--background);
+}
+.study-canvas-session:fullscreen .study-canvas-stage {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+.study-canvas-stage[data-drawer="true"] .react-flow__controls {
+  left: 302px;
+}
+.study-canvas-stage[data-inspecting="true"] .react-flow__minimap {
+  right: 372px;
+}
+.study-canvas-surface {
+  width: 100%;
+  height: 100%;
+  outline-offset: -3px;
+}
+.study-canvas-surface .react-flow {
+  background: var(--background);
+}
+.study-canvas-surface .react-flow__node-study-card {
+  border: 0;
+  padding: 0;
+  border-radius: 7px;
+  background: transparent;
+}
+.study-canvas-surface .react-flow__node-study-card:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}
+.study-canvas-card {
+  height: 100%;
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--study-line);
+  border-radius: 7px;
+  box-shadow: 0 2px 6px #00000008;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+.study-canvas-card[data-selected="true"] {
+  border-color: var(--foreground);
+  box-shadow: 0 0 0 1px var(--foreground);
+}
+.study-canvas-card[data-kind="thought"] {
+  background: color-mix(in srgb, var(--card) 88%, #e9d88b);
+}
+.study-canvas-card[data-kind="question"] {
+  background: color-mix(in srgb, var(--card) 90%, #eabcc1);
+}
+.study-canvas-card[data-kind="note"] {
+  background: color-mix(in srgb, var(--card) 90%, #bcd7e9);
+}
+.study-canvas-card[data-kind="argument"] {
+  background: color-mix(in srgb, var(--card) 90%, #b7d3b7);
+}
+.study-canvas-card[data-kind="clue"] {
+  background: color-mix(in srgb, var(--card) 90%, #d4c6e4);
+}
+.study-canvas-card[data-group="true"] {
+  background: color-mix(in srgb, var(--background) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 40%, transparent);
+  border-radius: 4px;
+  box-shadow: none;
+}
+.study-canvas-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 7px 12px 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  cursor: grab;
+}
+.study-canvas-card header > span {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.study-canvas-card header button {
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  padding: 3px 5px;
+  cursor: pointer;
+}
+.study-canvas-card header button:hover {
+  color: var(--foreground);
+}
+.study-canvas-card h3 {
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 500;
+  padding: 6px 15px 10px;
+  margin: 0;
+  max-height: 66px;
+  overflow: hidden;
+}
+.study-canvas-card[data-group="true"] header {
+  flex: 0 0 24px;
+  height: 24px;
+  min-height: 24px;
+  gap: 6px;
+  padding: 0 7px;
+}
+.study-canvas-card[data-group="true"] header > span {
+  flex-shrink: 0;
+  gap: 4px;
+  font-size: 10px;
+}
+.study-canvas-card[data-group="true"] header h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 24px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.study-canvas-card[data-group="true"] header button {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 1px;
+}
+.study-card-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 15px 10px;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  scrollbar-width: thin;
+  cursor: text;
+}
+.study-canvas-card footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  border-top: 1px solid var(--study-line);
+  padding: 7px 15px;
+}
+.study-canvas-card footer strong {
+  font-weight: 500;
+  color: var(--foreground);
+}
+.study-canvas-card .react-flow__handle {
+  opacity: 0;
+  border: 1px solid var(--card);
+  background: var(--foreground);
+  transition: opacity 120ms;
+}
+.study-canvas-card:hover .react-flow__handle,
+.study-canvas-card[data-selected="true"] .react-flow__handle,
+.react-flow__connection .react-flow__handle {
+  opacity: 1;
+}
+.study-material-drawer,
+.study-canvas-inspector {
+  position: absolute;
+  z-index: 20;
+  top: 16px;
+  bottom: 16px;
+  width: 270px;
+  border: 1px solid var(--study-line);
+  background: var(--card);
+  border-radius: 8px;
+  box-shadow: 0 5px 20px #0000000a;
+  padding: 16px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.study-material-drawer {
+  left: 16px;
+}
+.study-canvas-inspector {
+  right: 16px;
+  width: 340px;
+}
+.study-material-drawer > header,
+.study-canvas-inspector > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+.study-material-drawer header h2,
+.study-canvas-inspector header h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.study-material-drawer header button,
+.study-canvas-inspector header button {
+  border: 0;
+  background: transparent;
+  padding: 5px;
+  cursor: pointer;
+}
+.study-material-drawer > input,
+.study-material-drawer > select {
+  width: 100%;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.study-material-drawer article {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--study-line);
+}
+.study-material-drawer article > span {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.study-material-drawer article h3 {
+  font-size: 14px;
+  line-height: 1.55;
+  font-weight: 500;
+  margin: 5px 0;
+}
+.study-material-drawer article p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  max-height: 58px;
+  overflow: hidden;
+  margin: 0 0 9px;
+}
+.study-material-drawer article button {
+  width: 100%;
+  font-size: 12px;
+}
+.study-canvas-inspector > h3 {
+  font-size: 19px;
+  line-height: 1.6;
+  margin: 12px 0;
+}
+.study-canvas-inspector > p,
+.study-canvas-inspector > a {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.study-canvas-inspector > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0;
+  font-size: 13px;
+}
+.study-canvas-inspector textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+.study-canvas-inspector fieldset {
+  border: 0;
+  padding: 0;
+  margin: 18px 0;
+}
+.study-canvas-inspector fieldset legend {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.study-canvas-inspector fieldset label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.study-canvas-inspector > button {
+  margin-top: 14px;
+}
+.study-canvas-origin {
+  color: var(--muted-foreground);
+}
+.study-record-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.study-canvas-notice,
+.study-canvas-error {
+  padding: 10px 13px;
+  border: 1px solid var(--study-line);
+  background: var(--accent);
+  border-radius: 6px;
+  font-size: 13px;
+  margin: 5px 0;
+}
+.study-canvas-error {
+  background: var(--card);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.study-canvas-error p {
+  flex: 1;
+  min-width: 240px;
+  margin: 0;
+}
+.study-canvas-welcome {
+  position: absolute;
+  top: 38%;
+  left: max(310px, 32%);
+  color: var(--muted-foreground);
+  max-width: 390px;
+  pointer-events: none;
+}
+.study-canvas-welcome h2 {
+  font-size: 23px;
+  color: var(--foreground);
+  margin-bottom: 12px;
+}
+.study-canvas-welcome p {
+  font-size: 14px;
+  line-height: 1.8;
+}
+.study-canvas-count {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  background: var(--background);
+  padding: 4px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+.study-canvas-count small {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  text-align: center;
+}
+.study-canvas-empty {
+  min-height: 60dvh;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 20px;
+  padding-left: 10%;
+}
+.study-canvas-loading {
+  padding: 35px;
+}
+.study-canvas-inspector .study-record-editor {
+  min-width: 0;
+}
+.study-canvas-surface .react-flow__minimap {
+  border: 1px solid var(--study-line);
+  box-shadow: 0 2px 6px #00000008;
+  right: 12px;
+  bottom: 12px;
+}
+.study-canvas-surface .study-canvas-minimap .react-flow__minimap-mask {
+  fill-opacity: 0.68;
+  stroke-opacity: 0.7;
+}
+.study-canvas-surface .study-canvas-grid {
+  opacity: 0.3;
+}
+.study-canvas-surface .react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--study-line);
+}
+.study-canvas-surface .react-flow__controls-button {
+  background: var(--card);
+  color: var(--foreground);
+  border-color: var(--study-line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .study-canvas-card .react-flow__handle {
+    transition: none;
+  }
+}

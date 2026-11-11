@@ -389,13 +389,14 @@ class Ledger:
                 if "runtime_control" in tables
                 else {}
             )
-            coordinators = connection.execute(
-                "SELECT payload FROM runtime_admissions WHERE owner GLOB 'research-coordinator:*' "
+            admissions = connection.execute(
+                "SELECT payload FROM runtime_admissions WHERE "
+                "(owner GLOB 'research-coordinator:*' OR owner GLOB 'study-worker:*') "
                 "AND json_extract(payload,'$.expires_at')>?"
                 + (" AND json_extract(payload,'$.model')=?" if model else ""),
                 (now, model) if model else (now,),
             )
-            for admission in (json.loads(row[0]) for row in coordinators):
+            for admission in (json.loads(row[0]) for row in admissions):
                 scope = "model:" + admission["model"] if model else "account"
                 free = (
                     admission.get("control_only") is True
