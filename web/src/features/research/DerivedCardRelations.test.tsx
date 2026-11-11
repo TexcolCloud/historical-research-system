@@ -29,6 +29,8 @@ test("incoming relationships expose actual endpoints, a separate evidence packet
               needs_update: true,
               target_card_id: "second-card",
               evidence: [],
+              event_status: "unknown",
+              status_note: "",
             },
           ],
         }}

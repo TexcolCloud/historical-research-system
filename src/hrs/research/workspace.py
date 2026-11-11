@@ -356,22 +356,139 @@ class ResearchWorkspace:
                     raise
         return {**result, "nodes": nodes, "edges": edges}
 
-    def timeline(self, *, entity_id=None, book_id=None, limit=100):
-        if entity_id:
-            self.research.entity(entity_id)
-        result = self.research.invoke(
-            self.research.workflow.timeline, entity_id=entity_id, book_id=book_id, limit=limit
+    def _network_query(self):
+        """Batch the library's source gate; native SQLite supplies the actual evidence records."""
+        from hrs.processing.workspace import identity
+        from hrs.research.network import NetworkQuery
+        from hrs.research.sources import current_card_ids
+
+        workspace_id = identity(self.research.bridge.store)["workspace_id"]
+        with self.research.engine.connect() as connection:
+            rows = connection.execute(
+                select(
+                    db.research_cards.c.id,
+                    db.research_cards.c.version,
+                    db.research_cards.c.book_id,
+                    db.research_runs.c.summary["publication_sha256"].astext,
+                    db.runs.c.result["codex_revision_pending"].as_boolean(),
+                )
+                .select_from(
+                    db.research_cards.join(db.research_runs).join(
+                        db.runs, db.runs.c.id == db.research_runs.c.source_run_id
+                    )
+                )
+                .where(
+                    db.research_cards.c.id.in_(current_card_ids(workspace_id)),
+                    db.research_cards.c.state.in_(["verified", "human_accepted"]),
+                    db.research_runs.c.workspace_id == workspace_id,
+                    db.runs.c.result["codex_workspace_id"].astext == workspace_id,
+                )
+            ).all()
+        return NetworkQuery(
+            self.research.workflow.ledger,
+            current_cards=[
+                {
+                    "id": key,
+                    "version": version,
+                    "book_id": str(book),
+                    "publication_sha256": publication,
+                    "needs_update": bool(revision),
+                }
+                for key, version, book, publication, revision in rows
+            ],
         )
-        items = []
+
+    def network(self, entity_id, **options):
+        return self.research.invoke(self._network_query().graph, entity_id, **options)
+
+    def network_entities(self, **options):
+        return self.research.invoke(self._network_query().entity_index, **options)
+
+    def network_relation(self, relation_id):
+        relation = self.research.invoke(self.research.workflow.relation, relation_id)
+        context = self.research.invoke(self._network_query().relation_context, relation_id)
+        cards = {}
+        detail = self.current_relation(relation, cards=cards)
+        owner = self.current_card(relation["card_id"], relation.get("card_version"), cards=cards)
+        date_ids = set((context.get("date") or {}).get("evidence_ids", []))
+        date_proof = [span for span in owner["evidence"] if span["id"] in date_ids]
+        if len(date_proof) != len(date_ids):
+            raise ServiceError(409, "日期依据不属于当前卡片版本，请重新读取。")
+        evidence = detail["evidence"] + [
+            span for span in date_proof if span not in detail["evidence"]
+        ]
+        refs = detail["evidence_refs"] + [
+            {
+                "card_id": owner["id"],
+                "card_version": owner["version"],
+                "evidence_id": span["id"],
+                "evidence": span,
+            }
+            for span in date_proof
+            if not any(
+                ref["card_id"] == owner["id"] and ref["evidence_id"] == span["id"]
+                for ref in detail["evidence_refs"]
+            )
+        ]
+        return {**detail, **context, "evidence": evidence, "evidence_refs": refs}
+
+    def timeline(
+        self,
+        *,
+        entity_id=None,
+        book_id=None,
+        book_ids=None,
+        date_basis="event",
+        date_from=None,
+        date_to=None,
+        include_undated=True,
+        offset=0,
+        limit=100,
+        summary=False,
+    ):
+        selected = list(map(str, book_ids)) if book_ids is not None else None
+        if book_id:
+            selected = list(dict.fromkeys([str(book_id), *(selected or [])]))
+        result = self.research.invoke(
+            self._network_query().timeline,
+            entity_id=entity_id,
+            book_ids=selected,
+            date_basis=date_basis,
+            date_from=date_from,
+            date_to=date_to,
+            include_undated=include_undated,
+            offset=offset,
+            limit=limit,
+        )
+        if summary:
+            return result
+        cards, entities, items = {}, {}, []
         for item in result["items"]:
-            try:
-                card = self.current_card(item["card_id"], item.get("card_version"))
-            except ServiceError as error:
-                if error.status_code in {404, 409}:
-                    continue
-                raise
-            evidence = [e for e in card["evidence"] if e["id"] in item.get("evidence_ids", [])]
-            items.append({**item, "evidence": evidence})
+            card = self.current_card(item["card_id"], item["card_version"], cards=cards)
+            if item["item_kind"] == "event":
+                identity = item["entity_id"]
+                if identity not in entities:
+                    entities[identity] = self.research.entity(identity)
+                base = entities[identity]
+            else:
+                base = card
+            evidence = [span for span in card["evidence"] if span["id"] in item["evidence_ids"]]
+            items.append(
+                {
+                    **base,
+                    **item,
+                    "id": base["id"],
+                    "evidence": evidence,
+                    "evidence_refs": [
+                        {
+                            "card_id": card["id"],
+                            "card_version": card["version"],
+                            "evidence_id": identity,
+                        }
+                        for identity in item["evidence_ids"]
+                    ],
+                }
+            )
         return {**result, "items": items}
 
     def questions(self, **options):

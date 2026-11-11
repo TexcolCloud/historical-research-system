@@ -6,6 +6,46 @@ export const eventNatureLabels = {
   unknown: "发生性质尚未核对",
 };
 
+export function EventParticipants({
+  value,
+}: {
+  value: Pick<ResearchTimelineItem, "participants" | "participant_count">;
+}) {
+  const participants = value.participants ?? [];
+  if (!participants.length) return null;
+  const label = (participant: (typeof participants)[number]) =>
+    `${participant.name}（${relationLabel(participant.role)}）`;
+  return (
+    <div className="research-event-participants">
+      <p>
+        相关对象：
+        {participants.slice(0, 3).map((participant, index) => (
+          <span key={`${participant.entity_id}:${index}`}>
+            {label(participant)}{" "}
+          </span>
+        ))}
+      </p>
+      {participants.length > 3 && (
+        <details>
+          <summary>展开其余相关对象</summary>
+          <ul>
+            {participants.slice(3).map((participant, index) => (
+              <li key={`${participant.entity_id}:${index}`}>
+                {label(participant)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {(value.participant_count ?? 0) > participants.length && (
+        <p>
+          共 {value.participant_count} 个相关对象，完整记载请查阅出处史料卡。
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function EventNature({
   value,
 }: {
@@ -27,3 +67,5 @@ export default function EventNature({
     </div>
   );
 }
+import { relationLabel } from "./relation-labels";
+import type { ResearchTimelineItem } from "./api";

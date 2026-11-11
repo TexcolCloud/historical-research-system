@@ -132,8 +132,27 @@ export type ResearchGraphData = {
   edges: Schemas["ResearchRelationshipResponse"][];
 };
 
+export type ResearchNetworkNode = Schemas["ResearchNetworkNode"];
+export type ResearchNetworkEdge = Schemas["ResearchNetworkEdge"] & {
+  directed?: boolean;
+};
+export type ResearchNetworkData = Schemas["ResearchNetworkResponse"];
+export type ResearchTimelineItem = Schemas["ResearchTimelineItem"];
+export type ResearchTimelineData = Schemas["ResearchTimelineResponse"];
+export type ResearchNetworkScope = {
+  bookId: string;
+  dateFrom: string;
+  dateTo: string;
+  includeUndated: boolean;
+  nodeKind: string;
+  predicate: string;
+  includeSources: boolean;
+};
+
 // Pydantic emits these default arrays; keep old cached responses readable too.
-function normalizeEvidence(evidence: Schemas["ResearchEvidenceResponse"]) {
+export function normalizeEvidence(
+  evidence: Schemas["ResearchEvidenceResponse"],
+) {
   return {
     ...evidence,
     pages: evidence.pages ?? [],
@@ -236,6 +255,15 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 const id = encodeURIComponent;
+function networkScopeParams(scope: ResearchNetworkScope) {
+  const params = new URLSearchParams({
+    include_undated: String(scope.includeUndated),
+  });
+  if (scope.bookId) params.append("book_ids", scope.bookId);
+  if (scope.dateFrom) params.set("date_from", scope.dateFrom);
+  if (scope.dateTo) params.set("date_to", scope.dateTo);
+  return params;
+}
 export const research = {
   book: (book: string, signal?: AbortSignal) =>
     request<ResearchBook>(
@@ -282,6 +310,61 @@ export const research = {
       `/graph?${new URLSearchParams({ entity_id: entity, hops: String(hops), limit: "50" })}`,
       signal,
     ),
+  network: (
+    entity: string,
+    hops: number,
+    limit: number,
+    scope: ResearchNetworkScope,
+    signal?: AbortSignal,
+  ) => {
+    const params = networkScopeParams(scope);
+    params.set("entity_id", entity);
+    params.set("hops", String(hops));
+    params.set("limit", String(limit));
+    params.set("include_source_cards", String(scope.includeSources));
+    if (scope.nodeKind) params.append("node_kinds", scope.nodeKind);
+    if (scope.predicate) params.set("predicate", scope.predicate);
+    return request<ResearchNetworkData>(`/network?${params}`, signal);
+  },
+  networkRelation: (edge: string, signal?: AbortSignal) =>
+    request<Schemas["ResearchRelationshipResponse"]>(
+      `/network/relations/${id(edge)}`,
+      signal,
+    ),
+  networkEntities: (
+    q: string,
+    kind: string,
+    bookId: string,
+    offset: number,
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({
+      q,
+      offset: String(offset),
+      limit: "30",
+    });
+    if (kind) params.set("kind", kind);
+    if (bookId) params.append("book_ids", bookId);
+    return request<ResearchPage<ResearchNetworkNode>>(
+      `/network/entities?${params}`,
+      signal,
+    );
+  },
+  timelinePage: (
+    entity: string,
+    basis: "event" | "formation",
+    offset: number,
+    scope: ResearchNetworkScope,
+    signal?: AbortSignal,
+  ) => {
+    const params = networkScopeParams(scope);
+    params.set("entity_id", entity);
+    params.set("summary", "true");
+    params.set("date_basis", basis);
+    params.set("offset", String(offset));
+    params.set("limit", "20");
+    return request<ResearchTimelineData>(`/timeline?${params}`, signal);
+  },
   run: (run: string, signal?: AbortSignal) =>
     request<ResearchRun>(`/runs/${id(run)}`, signal),
   control: (run: string, action: "pause" | "resume") =>
