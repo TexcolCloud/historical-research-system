@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
@@ -6,12 +6,11 @@ import { Button } from "@/components/ui/button";
 import Evidence from "./ResearchEvidence";
 import IdentityEditor from "./IdentityEditor";
 import EventNature from "./EventNature";
-import EntityTimeline from "./EntityTimeline";
 import { relationLabel } from "./relation-labels";
 import { entityLabels } from "./labels";
 import SourceCardReader from "./SourceCardReader";
 import { cardStateLabel } from "./card-reading";
-const ResearchGraph = lazy(() => import("./ResearchGraph"));
+import { entityWorkspaceHref } from "./network-query";
 import {
   research,
   researchKeys,
@@ -120,9 +119,8 @@ function ResearchCardDetail({ cardId }: { cardId: string }) {
 
 function ResearchEntityDetail({ entityId }: { entityId: string }) {
   const [params, setParams] = useSearchParams();
-  const [editingIdentity, setEditingIdentity] = useState(false),
-    [graphOpen, setGraphOpen] = useState(false),
-    [timelineOpen, setTimelineOpen] = useState(false);
+  const location = useLocation();
+  const [editingIdentity, setEditingIdentity] = useState(false);
   const detail = useQuery({
     queryKey: researchKeys.entity(entityId),
     queryFn: ({ signal }) => research.entity(entityId, signal),
@@ -226,42 +224,23 @@ function ResearchEntityDetail({ entityId }: { entityId: string }) {
       )}
       {entity.canonical_id && !historical && (
         <div className="research-decision-actions">
+          <Link
+            className="research-source-link"
+            to={entityWorkspaceHref(
+              entity.canonical_id || entity.id,
+              location.pathname.startsWith("/books/")
+                ? location.pathname.split("/")[2]
+                : params.get("book_id") || "",
+            )}
+          >
+            打开关系与时间线
+          </Link>
           <Button variant="outline" onClick={() => setEditingIdentity(true)}>
             核对身份与别名
           </Button>
-          <Button
-            variant="outline"
-            aria-expanded={graphOpen}
-            onClick={() => setGraphOpen(!graphOpen)}
-          >
-            {graphOpen ? "收起关系视图" : "查看关系视图"}
-          </Button>
-          <Button
-            variant="outline"
-            aria-expanded={timelineOpen}
-            onClick={() => setTimelineOpen(!timelineOpen)}
-          >
-            {timelineOpen ? "收起事项时间线" : "查看事项时间线"}
-          </Button>
         </div>
       )}
-      {graphOpen && (
-        <Suspense fallback={<p role="status">正在打开关系视图…</p>}>
-          <ResearchGraph
-            entityId={entity.canonical_id || entity.id}
-            onEntity={openEntity}
-            onCard={openCard}
-          />
-        </Suspense>
-      )}
       {entity.identity_basis && <p>身份依据：{entity.identity_basis}</p>}
-      {timelineOpen && (
-        <EntityTimeline
-          entityId={entity.canonical_id || entity.id}
-          onEntity={openEntity}
-          onCard={openCard}
-        />
-      )}
       {entity.description && <p>{entity.description}</p>}
       {dateLabel(entity.date) && <p>{dateLabel(entity.date)}</p>}
       {!!entity.source_mentions.length && (
@@ -484,6 +463,14 @@ export default function ResearchDetail() {
     ) === "reader"
       ? returnTo
       : null;
+  const workspaceReturn =
+    returnTo?.startsWith("/research?") &&
+    !returnTo.includes("#") &&
+    new URLSearchParams(returnTo.slice(returnTo.indexOf("?") + 1)).get(
+      "view",
+    ) === "network"
+      ? returnTo
+      : null;
   return (
     <aside className="research-detail-pane" data-document={Boolean(cardId)}>
       <div
@@ -491,6 +478,7 @@ export default function ResearchDetail() {
       >
         {!cardId && <span>实体详情</span>}
         {readerReturn && <Link to={readerReturn}>返回阅读位置</Link>}
+        {workspaceReturn && <Link to={workspaceReturn}>返回关系与时间线</Link>}
         <Button
           size="icon"
           variant="ghost"

@@ -1,5 +1,6 @@
 """Research routes are separate from retired legacy card-generation interfaces."""
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
@@ -16,8 +17,12 @@ from hrs.research.schemas import (
     ResearchDecision,
     ResearchEntityPage,
     ResearchEntityResponse,
+    ResearchNetworkEntityPage,
+    ResearchNetworkResponse,
+    ResearchRelationshipResponse,
     ResearchRunResponse,
     ResearchSearchResponse,
+    ResearchTimelineResponse,
     StartResearch,
 )
 from hrs.research.workspace import (
@@ -181,14 +186,85 @@ def graph(
     return service.workspace.graph(entity_id, hops=hops, limit=limit)
 
 
-@router.get("/timeline")
+@router.get("/network", response_model=ResearchNetworkResponse)
+def network(
+    service: ResearchDep,
+    entity_id: str,
+    hops: int = Query(1, ge=1, le=2),
+    limit: int = Query(100, ge=1, le=200),
+    book_ids: list[UUID] | None = Query(default=None, max_length=100),
+    node_kinds: list[Literal["person", "organization", "place", "document", "event", "card"]]
+    | None = Query(default=None),
+    predicate: str | None = Query(default=None, max_length=200),
+    date_from: str | None = None,
+    date_to: str | None = None,
+    include_undated: bool = True,
+    include_source_cards: bool = False,
+):
+    return service.workspace.network(
+        entity_id,
+        hops=hops,
+        limit=limit,
+        book_ids=list(map(str, book_ids)) if book_ids is not None else None,
+        node_kinds=node_kinds,
+        predicate=predicate,
+        date_from=date_from,
+        date_to=date_to,
+        include_undated=include_undated,
+        include_source_cards=include_source_cards,
+    )
+
+
+@router.get("/network/entities", response_model=ResearchNetworkEntityPage)
+def network_entities(
+    service: ResearchDep,
+    q: str | None = Query(default=None, max_length=1000),
+    kind: Literal["person", "organization", "place", "event", "document"] | None = None,
+    book_ids: list[UUID] | None = Query(default=None, max_length=100),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+):
+    return service.workspace.network_entities(
+        q=q,
+        kind=kind,
+        book_ids=list(map(str, book_ids)) if book_ids is not None else None,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.get("/network/relations/{relation_id}", response_model=ResearchRelationshipResponse)
+def network_relation(service: ResearchDep, relation_id: str):
+    return service.workspace.network_relation(relation_id)
+
+
+@router.get("/timeline", responses={200: {"model": ResearchTimelineResponse}})
 def timeline(
     service: ResearchDep,
     entity_id: str | None = None,
     book_id: UUID | None = None,
+    book_ids: list[UUID] | None = Query(default=None, max_length=100),
+    date_basis: Literal["event", "formation"] = "event",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    include_undated: bool = True,
+    offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
+    summary: bool = False,
 ):
-    return service.workspace.timeline(entity_id=entity_id, book_id=book_id, limit=limit)
+    """Use summary=true for bounded navigation metadata; the default retains legacy evidence detail."""
+    return service.workspace.timeline(
+        entity_id=entity_id,
+        book_id=book_id,
+        book_ids=list(map(str, book_ids)) if book_ids is not None else None,
+        date_basis=date_basis,
+        date_from=date_from,
+        date_to=date_to,
+        include_undated=include_undated,
+        offset=offset,
+        limit=limit,
+        summary=summary,
+    )
 
 
 @router.get("/questions")

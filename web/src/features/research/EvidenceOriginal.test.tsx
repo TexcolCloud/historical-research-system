@@ -11,6 +11,54 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+
+test("card-local proof IDs cannot select another source or carry its page into that source", async () => {
+  const seen: string[] = [];
+  vi.spyOn(libraryApi, "readOriginalPage").mockImplementation(
+    async (run, page) => {
+      seen.push(`${run}/${page}`);
+      return `/source-${run}-${page}.png`;
+    },
+  );
+  render(
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <EvidenceOriginal
+          selected="e1"
+          evidence={[
+            {
+              id: "e1",
+              pages: [9, 10],
+              reading_target: { run_id: "first", physical_page: 9 },
+            },
+            {
+              id: "e1",
+              pages: [2, 3],
+              reading_target: { run_id: "second", physical_page: 2 },
+            },
+          ]}
+        />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByRole("img", { name: "PDF 第 9 页" });
+  await userEvent.selectOptions(
+    screen.getByRole("combobox", { name: "原件页码" }),
+    "10",
+  );
+  await screen.findByRole("img", { name: "PDF 第 10 页" });
+  const choices = screen.getByRole("combobox", { name: "原件证据" });
+  await userEvent.selectOptions(
+    choices,
+    screen.getByRole("option", { name: "证据 2" }),
+  );
+  await screen.findByRole("img", { name: "PDF 第 2 页" });
+  expect(seen.at(-1)).toBe("second/2");
+  expect(seen).not.toContain("second/10");
+  expect(
+    screen.getByRole("link", { name: "打开原 PDF" }).getAttribute("href"),
+  ).toContain("/runs/second/");
+});
 test("evidence opens its retained source run and lets the reader change page and zoom without leaving the card", async () => {
   const seen: string[] = [];
   vi.spyOn(libraryApi, "readOriginalPage").mockImplementation(

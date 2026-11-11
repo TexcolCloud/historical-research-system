@@ -290,6 +290,10 @@ class ResearchRelationshipResponse(BaseModel):
     source_current: bool = True
     target_current: bool = True
     needs_update: bool = False
+    date: ResearchDate | None = None
+    date_basis: Literal["event", "formation"] | None = None
+    event_status: str = "unknown"
+    status_note: str = ""
 
 
 class ResearchDerivedRelationsResponse(BaseModel):
@@ -372,6 +376,99 @@ class ResearchEntityResponse(BaseModel):
     events: list[ResearchEventDetailResponse] = Field(default_factory=list)
     relationships: list[ResearchRelationshipResponse] = Field(default_factory=list)
     identity_decisions: list[ResearchIdentityDecisionResponse] = Field(default_factory=list)
+
+
+class ResearchNetworkNode(BaseModel):
+    id: str
+    canonical_id: str | None = None
+    card_id: str | None = None
+    kind: str
+    name: str
+    source_title: str | None = None
+    version: int
+    book_ids: list[str]
+    card_ids: list[str]
+    book_count: int = 0
+    card_count: int = 0
+    metadata_truncated: bool = False
+    source_current: bool = True
+    needs_update: bool = False
+
+
+class ResearchNetworkEdge(BaseModel):
+    id: str
+    source_id: str
+    target_id: str
+    kind: str
+    predicate: str
+    card_id: str
+    card_version: int
+    book_id: str
+    evidence_count: int
+    certainty: str | None = None
+    date: ResearchDate | None = None
+    date_basis: Literal["event", "formation"]
+    event_status: str = "unknown"
+    status_note: str = ""
+    source_current: bool = True
+    needs_update: bool = False
+
+
+class ResearchNetworkResponse(BaseModel):
+    entity_id: str
+    hops: int
+    limit: int
+    truncated: bool
+    nodes: list[ResearchNetworkNode]
+    edges: list[ResearchNetworkEdge]
+    usage: str
+
+
+class ResearchNetworkEntityPage(BaseModel):
+    items: list[ResearchNetworkNode]
+    total: int
+    offset: int
+    limit: int
+
+
+class ResearchTimelineItem(BaseModel):
+    id: str
+    item_kind: Literal["event", "document"]
+    entity_id: str | None = None
+    canonical_id: str | None = None
+    card_id: str
+    card_version: int
+    book_id: str
+    run_id: str
+    name: str
+    description: str = ""
+    date: ResearchDate
+    date_basis: Literal["event", "formation"]
+    date_precision: Literal["year", "month", "day", "range", "unknown"]
+    date_start: str | None = None
+    date_end: str | None = None
+    undated: bool
+    event_status: str = "unknown"
+    status_note: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    evidence_count: int
+    participants: list[ResearchParticipantResponse] = Field(default_factory=list)
+    participant_count: int | None = None
+    source_current: bool = True
+    needs_update: bool = False
+
+
+class ResearchTimelineResponse(BaseModel):
+    items: list[ResearchTimelineItem]
+    total: int
+    dated_total: int
+    undated_total: int
+    offset: int
+    limit: int
+    date_basis: Literal["event", "formation"]
+    entity_id: str | None = None
+    entity_name: str | None = None
+    truncated: bool
 
 
 class ResearchBookResponse(BaseModel):

@@ -47,6 +47,7 @@ test("the entity catalogue filters documents and opens them as entities while re
     "entity=document-entity",
   );
   expect(screen.getByTestId("route").textContent).not.toContain("card=");
+  expect(screen.getByTestId("route").textContent).toContain("view=network");
   await userEvent.click(screen.getByRole("button", { name: "下一页" }));
   await vi.waitFor(() =>
     expect(requests.some((url) => url.includes("offset=30"))).toBe(true),
@@ -54,10 +55,53 @@ test("the entity catalogue filters documents and opens them as entities while re
   expect(
     requests.every(
       (url) =>
-        url.startsWith("/api/v2/research/entities?") &&
+        url.startsWith("/api/v2/research/network/entities?") &&
         url.includes("kind=document"),
     ),
   ).toBe(true);
   expect(screen.queryByText("研究检索")).toBeNull();
   expect(screen.queryByRole("button", { name: "继续查证" })).toBeNull();
+});
+
+test("same-name identities expose their own source preview without merging their buttons", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        items: [
+          {
+            id: "first",
+            name: "中央",
+            kind: "organization",
+            source_title: "第一篇文献",
+            card_count: 1,
+          },
+          {
+            id: "second",
+            name: "中央",
+            kind: "organization",
+            source_title: "第二篇文献",
+            card_count: 1,
+          },
+        ],
+        total: 2,
+        offset: 0,
+        limit: 30,
+      }),
+    ),
+  );
+  render(
+    <MemoryRouter>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <EntityLibrary compact onSelect={vi.fn()} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText("出处：第一篇文献")).toBeTruthy();
+  expect(screen.getByText("出处：第二篇文献")).toBeTruthy();
+  expect(screen.getAllByRole("button", { name: /中央/ })).toHaveLength(2);
 });

@@ -907,6 +907,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/research/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Network */
+        get: operations["network_api_v2_research_network_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/network/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Network Entities */
+        get: operations["network_entities_api_v2_research_network_entities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/research/network/relations/{relation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Network Relation */
+        get: operations["network_relation_api_v2_research_network_relations__relation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/research/timeline": {
         parameters: {
             query?: never;
@@ -914,7 +965,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Timeline */
+        /**
+         * Timeline
+         * @description Use summary=true for bounded navigation metadata; the default retains legacy evidence detail.
+         */
         get: operations["timeline_api_v2_research_timeline_get"];
         put?: never;
         post?: never;
@@ -3595,6 +3649,129 @@ export interface components {
             /** Source Mention Id */
             source_mention_id?: string | null;
         };
+        /** ResearchNetworkEdge */
+        ResearchNetworkEdge: {
+            /** Id */
+            id: string;
+            /** Source Id */
+            source_id: string;
+            /** Target Id */
+            target_id: string;
+            /** Kind */
+            kind: string;
+            /** Predicate */
+            predicate: string;
+            /** Card Id */
+            card_id: string;
+            /** Card Version */
+            card_version: number;
+            /** Book Id */
+            book_id: string;
+            /** Evidence Count */
+            evidence_count: number;
+            /** Certainty */
+            certainty?: string | null;
+            date?: components["schemas"]["ResearchDate"] | null;
+            /**
+             * Date Basis
+             * @enum {string}
+             */
+            date_basis: "event" | "formation";
+            /**
+             * Event Status
+             * @default unknown
+             */
+            event_status: string;
+            /**
+             * Status Note
+             * @default
+             */
+            status_note: string;
+            /**
+             * Source Current
+             * @default true
+             */
+            source_current: boolean;
+            /**
+             * Needs Update
+             * @default false
+             */
+            needs_update: boolean;
+        };
+        /** ResearchNetworkEntityPage */
+        ResearchNetworkEntityPage: {
+            /** Items */
+            items: components["schemas"]["ResearchNetworkNode"][];
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+        };
+        /** ResearchNetworkNode */
+        ResearchNetworkNode: {
+            /** Id */
+            id: string;
+            /** Canonical Id */
+            canonical_id?: string | null;
+            /** Card Id */
+            card_id?: string | null;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Source Title */
+            source_title?: string | null;
+            /** Version */
+            version: number;
+            /** Book Ids */
+            book_ids: string[];
+            /** Card Ids */
+            card_ids: string[];
+            /**
+             * Book Count
+             * @default 0
+             */
+            book_count: number;
+            /**
+             * Card Count
+             * @default 0
+             */
+            card_count: number;
+            /**
+             * Metadata Truncated
+             * @default false
+             */
+            metadata_truncated: boolean;
+            /**
+             * Source Current
+             * @default true
+             */
+            source_current: boolean;
+            /**
+             * Needs Update
+             * @default false
+             */
+            needs_update: boolean;
+        };
+        /** ResearchNetworkResponse */
+        ResearchNetworkResponse: {
+            /** Entity Id */
+            entity_id: string;
+            /** Hops */
+            hops: number;
+            /** Limit */
+            limit: number;
+            /** Truncated */
+            truncated: boolean;
+            /** Nodes */
+            nodes: components["schemas"]["ResearchNetworkNode"][];
+            /** Edges */
+            edges: components["schemas"]["ResearchNetworkEdge"][];
+            /** Usage */
+            usage: string;
+        };
         /** ResearchParticipantResponse */
         ResearchParticipantResponse: {
             /** Entity Id */
@@ -3688,6 +3865,19 @@ export interface components {
              * @default false
              */
             needs_update: boolean;
+            date?: components["schemas"]["ResearchDate"] | null;
+            /** Date Basis */
+            date_basis?: ("event" | "formation") | null;
+            /**
+             * Event Status
+             * @default unknown
+             */
+            event_status: string;
+            /**
+             * Status Note
+             * @default
+             */
+            status_note: string;
             /** Event Id */
             event_id: string;
             /**
@@ -3700,23 +3890,12 @@ export interface components {
              * @default
              */
             participant_name: string;
-            date?: components["schemas"]["ResearchDate"] | null;
             /**
              * Action
              * @default
              */
             action: string;
             place?: components["schemas"]["SourceValue"] | null;
-            /**
-             * Event Status
-             * @default unknown
-             */
-            event_status: string;
-            /**
-             * Status Note
-             * @default
-             */
-            status_note: string;
         } & {
             [key: string]: unknown;
         };
@@ -3829,6 +4008,19 @@ export interface components {
              * @default false
              */
             needs_update: boolean;
+            date?: components["schemas"]["ResearchDate"] | null;
+            /** Date Basis */
+            date_basis?: ("event" | "formation") | null;
+            /**
+             * Event Status
+             * @default unknown
+             */
+            event_status: string;
+            /**
+             * Status Note
+             * @default
+             */
+            status_note: string;
         } & {
             [key: string]: unknown;
         };
@@ -4086,6 +4278,106 @@ export interface components {
             message?: string | null;
         } & {
             [key: string]: unknown;
+        };
+        /** ResearchTimelineItem */
+        ResearchTimelineItem: {
+            /** Id */
+            id: string;
+            /**
+             * Item Kind
+             * @enum {string}
+             */
+            item_kind: "event" | "document";
+            /** Entity Id */
+            entity_id?: string | null;
+            /** Canonical Id */
+            canonical_id?: string | null;
+            /** Card Id */
+            card_id: string;
+            /** Card Version */
+            card_version: number;
+            /** Book Id */
+            book_id: string;
+            /** Run Id */
+            run_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            date: components["schemas"]["ResearchDate"];
+            /**
+             * Date Basis
+             * @enum {string}
+             */
+            date_basis: "event" | "formation";
+            /**
+             * Date Precision
+             * @enum {string}
+             */
+            date_precision: "year" | "month" | "day" | "range" | "unknown";
+            /** Date Start */
+            date_start?: string | null;
+            /** Date End */
+            date_end?: string | null;
+            /** Undated */
+            undated: boolean;
+            /**
+             * Event Status
+             * @default unknown
+             */
+            event_status: string;
+            /**
+             * Status Note
+             * @default
+             */
+            status_note: string;
+            /** Evidence Ids */
+            evidence_ids?: string[];
+            /** Evidence Count */
+            evidence_count: number;
+            /** Participants */
+            participants?: components["schemas"]["ResearchParticipantResponse"][];
+            /** Participant Count */
+            participant_count?: number | null;
+            /**
+             * Source Current
+             * @default true
+             */
+            source_current: boolean;
+            /**
+             * Needs Update
+             * @default false
+             */
+            needs_update: boolean;
+        };
+        /** ResearchTimelineResponse */
+        ResearchTimelineResponse: {
+            /** Items */
+            items: components["schemas"]["ResearchTimelineItem"][];
+            /** Total */
+            total: number;
+            /** Dated Total */
+            dated_total: number;
+            /** Undated Total */
+            undated_total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+            /**
+             * Date Basis
+             * @enum {string}
+             */
+            date_basis: "event" | "formation";
+            /** Entity Id */
+            entity_id?: string | null;
+            /** Entity Name */
+            entity_name?: string | null;
+            /** Truncated */
+            truncated: boolean;
         };
         /** ReviewAnchor */
         ReviewAnchor: {
@@ -6723,11 +7015,53 @@ export interface operations {
             };
         };
     };
-    timeline_api_v2_research_timeline_get: {
+    network_api_v2_research_network_get: {
+        parameters: {
+            query: {
+                entity_id: string;
+                hops?: number;
+                limit?: number;
+                book_ids?: string[] | null;
+                node_kinds?: ("person" | "organization" | "place" | "document" | "event" | "card")[] | null;
+                predicate?: string | null;
+                date_from?: string | null;
+                date_to?: string | null;
+                include_undated?: boolean;
+                include_source_cards?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchNetworkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    network_entities_api_v2_research_network_entities_get: {
         parameters: {
             query?: {
-                entity_id?: string | null;
-                book_id?: string | null;
+                q?: string | null;
+                kind?: ("person" | "organization" | "place" | "event" | "document") | null;
+                book_ids?: string[] | null;
+                offset?: number;
                 limit?: number;
             };
             header?: never;
@@ -6742,7 +7076,78 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ResearchNetworkEntityPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    network_relation_api_v2_research_network_relations__relation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                relation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRelationshipResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    timeline_api_v2_research_timeline_get: {
+        parameters: {
+            query?: {
+                entity_id?: string | null;
+                book_id?: string | null;
+                book_ids?: string[] | null;
+                date_basis?: "event" | "formation";
+                date_from?: string | null;
+                date_to?: string | null;
+                include_undated?: boolean;
+                offset?: number;
+                limit?: number;
+                summary?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchTimelineResponse"];
                 };
             };
             /** @description Validation Error */

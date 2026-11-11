@@ -34,7 +34,9 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
   const returnLabel = returnTo.startsWith("/research")
     ? returnParams.get("view") === "questions"
       ? "返回历史记录"
-      : "返回卡片与实体"
+      : returnParams.get("view") === "network"
+        ? "返回关系与时间线"
+        : "返回卡片与实体"
     : returnParams.get("tab") === "research"
       ? "返回史料卡"
       : returnParams.get("section") === "search" ||

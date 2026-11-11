@@ -14,20 +14,31 @@ export default function EvidenceOriginal({
   evidence: SourceEvidence[];
   selected?: string;
 }) {
-  const located = evidence.filter(
-    (item) => item.reading_target && item.pages.length,
-  );
+  // Proof IDs are card-local; the choice also binds the exact retained source.
+  const located = evidence
+    .filter((item) => item.reading_target && item.pages.length)
+    .map((item, index) => ({
+      ...item,
+      sourceKey: JSON.stringify([index, item.id, item.reading_target]),
+    }));
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState("");
   useEffect(() => {
     if (selected) {
-      setChoice(selected);
+      setChoice(located.find((item) => item.id === selected)?.sourceKey || "");
       setOpen(true);
     }
-  }, [selected]);
-  const current = located.find((item) => item.id === choice) || located[0];
-  const [page, setPage] = useState<number>();
-  useEffect(() => setPage(undefined), [current?.id]);
+  }, [selected, evidence]);
+  const current =
+    located.find((item) => item.sourceKey === choice) || located[0];
+  const [pageChoice, setPageChoice] = useState<{
+    source: string;
+    page: number;
+  }>();
+  const page =
+    pageChoice?.source === current?.sourceKey
+      ? pageChoice?.page
+      : current?.reading_target?.physical_page;
   return (
     <section className="research-original-comparison" aria-label="卡片原件对照">
       <div className="research-evidence-heading">
@@ -51,11 +62,11 @@ export default function EvidenceOriginal({
                 证据{" "}
                 <select
                   aria-label="原件证据"
-                  value={current.id}
+                  value={current.sourceKey}
                   onChange={(event) => setChoice(event.target.value)}
                 >
                   {located.map((item, index) => (
-                    <option value={item.id} key={item.id}>
+                    <option value={item.sourceKey} key={item.sourceKey}>
                       证据 {index + 1}
                     </option>
                   ))}
@@ -65,8 +76,13 @@ export default function EvidenceOriginal({
                 PDF 页{" "}
                 <select
                   aria-label="原件页码"
-                  value={page ?? current.reading_target!.physical_page}
-                  onChange={(event) => setPage(Number(event.target.value))}
+                  value={page}
+                  onChange={(event) =>
+                    setPageChoice({
+                      source: current.sourceKey,
+                      page: Number(event.target.value),
+                    })
+                  }
                 >
                   {current.pages.map((value) => (
                     <option value={value} key={value}>

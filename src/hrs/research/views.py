@@ -105,29 +105,54 @@ class ResearchViews:
             }
 
     def timeline(self, *, entity_id=None, book_id=None, limit=100):
+        from hrs.research.network import NetworkQuery
+
         if type(limit) is not int or not 1 <= limit <= 200:
             raise ValueError("Timeline limit must be 1–200")
-        catalogue = ResearchCatalogue(self.ledger)
-        if entity_id:
-            entity = catalogue.entity(entity_id)
-            ids = {edge["event_id"] for edge in entity["participations"]}
-            if entity["kind"] == "event":
-                ids.add(entity["id"])
-            events = [catalogue.entity(identity) for identity in sorted(ids)]
-        else:
-            events = catalogue.entities(book_id=book_id, kind="event", limit=min(limit, 100))[
-                "items"
-            ]
-        if book_id:
-            events = [
-                event
-                for event in events
-                if any(mention["book_id"] == str(book_id) for mention in event["source_mentions"])
-            ]
-        events.sort(
-            key=lambda event: ((event.get("date") or {}).get("normalized") or "9999", event["id"])
+        result = NetworkQuery(self.ledger).timeline(
+            entity_id=entity_id, book_ids=[str(book_id)] if book_id else None, limit=limit
         )
-        return {"items": events[:limit], "truncated": len(events) > limit}
+        catalogue = ResearchCatalogue(self.ledger)
+        with self.ledger.connect() as connection:
+            sources = (
+                {
+                    identity: (json.loads(payload), json.loads(card))
+                    for identity, payload, card in connection.execute(
+                        "SELECT m.id,m.payload,c.payload FROM research_catalogue_members m "
+                        "JOIN research_cards c ON c.id=m.card_id AND c.version=m.card_version "
+                        "WHERE m.id IN (SELECT value FROM json_each(?))",
+                        (json.dumps([item["id"] for item in result["items"]]),),
+                    )
+                }
+                if result["items"]
+                else {}
+            )
+        entities, events = {}, []
+        for item in result["items"]:
+            identity = item["entity_id"]
+            if identity not in entities:
+                entities[identity] = catalogue.entity(identity)
+            source, card = sources[item["id"]]
+            events.append(
+                {
+                    **entities[identity],
+                    **source,
+                    **item,
+                    "id": identity,
+                    "evidence": [
+                        span for span in card["evidence"] if span["id"] in item["evidence_ids"]
+                    ],
+                    "evidence_refs": [
+                        {
+                            "card_id": card["id"],
+                            "card_version": card["version"],
+                            "evidence_id": identity,
+                        }
+                        for identity in item["evidence_ids"]
+                    ],
+                }
+            )
+        return {**result, "items": events}
 
     def link_candidates(self, book_id, *, limit=20):
         """Names identify candidates only; native workers must read both documents and adjudicate."""

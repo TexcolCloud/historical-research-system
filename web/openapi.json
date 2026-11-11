@@ -2958,12 +2958,355 @@
         }
       }
     },
+    "/api/v2/research/network": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Network",
+        "operationId": "network_api_v2_research_network_get",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "hops",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2,
+              "minimum": 1,
+              "default": 1,
+              "title": "Hops"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "book_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "maxItems": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Book Ids"
+            }
+          },
+          {
+            "name": "node_kinds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "person",
+                      "organization",
+                      "place",
+                      "document",
+                      "event",
+                      "card"
+                    ],
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Node Kinds"
+            }
+          },
+          {
+            "name": "predicate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Predicate"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "include_undated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Undated"
+            }
+          },
+          {
+            "name": "include_source_cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Source Cards"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchNetworkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/research/network/entities": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Network Entities",
+        "operationId": "network_entities_api_v2_research_network_entities_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 1000
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "person",
+                    "organization",
+                    "place",
+                    "event",
+                    "document"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "book_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "maxItems": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Book Ids"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchNetworkEntityPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/research/network/relations/{relation_id}": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Network Relation",
+        "operationId": "network_relation_api_v2_research_network_relations__relation_id__get",
+        "parameters": [
+          {
+            "name": "relation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Relation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchRelationshipResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/research/timeline": {
       "get": {
         "tags": [
           "research"
         ],
         "summary": "Timeline",
+        "description": "Use summary=true for bounded navigation metadata; the default retains legacy evidence detail.",
         "operationId": "timeline_api_v2_research_timeline_get",
         "parameters": [
           {
@@ -3000,6 +3343,94 @@
             }
           },
           {
+            "name": "book_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "maxItems": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Book Ids"
+            }
+          },
+          {
+            "name": "date_basis",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "event",
+                "formation"
+              ],
+              "type": "string",
+              "default": "event",
+              "title": "Date Basis"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "include_undated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Undated"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -3010,6 +3441,16 @@
               "default": 100,
               "title": "Limit"
             }
+          },
+          {
+            "name": "summary",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Summary"
+            }
           }
         ],
         "responses": {
@@ -3017,7 +3458,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchTimelineResponse"
+                }
               }
             }
           },
@@ -10119,6 +10562,291 @@
         ],
         "title": "ResearchMentionResponse"
       },
+      "ResearchNetworkEdge": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "predicate": {
+            "type": "string",
+            "title": "Predicate"
+          },
+          "card_id": {
+            "type": "string",
+            "title": "Card Id"
+          },
+          "card_version": {
+            "type": "integer",
+            "title": "Card Version"
+          },
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "evidence_count": {
+            "type": "integer",
+            "title": "Evidence Count"
+          },
+          "certainty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certainty"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchDate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "date_basis": {
+            "type": "string",
+            "enum": [
+              "event",
+              "formation"
+            ],
+            "title": "Date Basis"
+          },
+          "event_status": {
+            "type": "string",
+            "title": "Event Status",
+            "default": "unknown"
+          },
+          "status_note": {
+            "type": "string",
+            "title": "Status Note",
+            "default": ""
+          },
+          "source_current": {
+            "type": "boolean",
+            "title": "Source Current",
+            "default": true
+          },
+          "needs_update": {
+            "type": "boolean",
+            "title": "Needs Update",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_id",
+          "target_id",
+          "kind",
+          "predicate",
+          "card_id",
+          "card_version",
+          "book_id",
+          "evidence_count",
+          "date_basis"
+        ],
+        "title": "ResearchNetworkEdge"
+      },
+      "ResearchNetworkEntityPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchNetworkNode"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "ResearchNetworkEntityPage"
+      },
+      "ResearchNetworkNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "canonical_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Id"
+          },
+          "card_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Title"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "book_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Book Ids"
+          },
+          "card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Card Ids"
+          },
+          "book_count": {
+            "type": "integer",
+            "title": "Book Count",
+            "default": 0
+          },
+          "card_count": {
+            "type": "integer",
+            "title": "Card Count",
+            "default": 0
+          },
+          "metadata_truncated": {
+            "type": "boolean",
+            "title": "Metadata Truncated",
+            "default": false
+          },
+          "source_current": {
+            "type": "boolean",
+            "title": "Source Current",
+            "default": true
+          },
+          "needs_update": {
+            "type": "boolean",
+            "title": "Needs Update",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "version",
+          "book_ids",
+          "card_ids"
+        ],
+        "title": "ResearchNetworkNode"
+      },
+      "ResearchNetworkResponse": {
+        "properties": {
+          "entity_id": {
+            "type": "string",
+            "title": "Entity Id"
+          },
+          "hops": {
+            "type": "integer",
+            "title": "Hops"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchNetworkNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchNetworkEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          },
+          "usage": {
+            "type": "string",
+            "title": "Usage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entity_id",
+          "hops",
+          "limit",
+          "truncated",
+          "nodes",
+          "edges",
+          "usage"
+        ],
+        "title": "ResearchNetworkResponse"
+      },
       "ResearchParticipantResponse": {
         "properties": {
           "entity_id": {
@@ -10289,6 +11017,41 @@
             "title": "Needs Update",
             "default": false
           },
+          "date": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchDate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "date_basis": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "event",
+                  "formation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Basis"
+          },
+          "event_status": {
+            "type": "string",
+            "title": "Event Status",
+            "default": "unknown"
+          },
+          "status_note": {
+            "type": "string",
+            "title": "Status Note",
+            "default": ""
+          },
           "event_id": {
             "type": "string",
             "title": "Event Id"
@@ -10302,16 +11065,6 @@
             "type": "string",
             "title": "Participant Name",
             "default": ""
-          },
-          "date": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ResearchDate"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "action": {
             "type": "string",
@@ -10327,16 +11080,6 @@
                 "type": "null"
               }
             ]
-          },
-          "event_status": {
-            "type": "string",
-            "title": "Event Status",
-            "default": "unknown"
-          },
-          "status_note": {
-            "type": "string",
-            "title": "Status Note",
-            "default": ""
           }
         },
         "additionalProperties": true,
@@ -10567,6 +11310,41 @@
             "type": "boolean",
             "title": "Needs Update",
             "default": false
+          },
+          "date": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchDate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "date_basis": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "event",
+                  "formation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Basis"
+          },
+          "event_status": {
+            "type": "string",
+            "title": "Event Status",
+            "default": "unknown"
+          },
+          "status_note": {
+            "type": "string",
+            "title": "Status Note",
+            "default": ""
           }
         },
         "additionalProperties": true,
@@ -11111,6 +11889,259 @@
           "state"
         ],
         "title": "ResearchTaskResponse"
+      },
+      "ResearchTimelineItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "item_kind": {
+            "type": "string",
+            "enum": [
+              "event",
+              "document"
+            ],
+            "title": "Item Kind"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "canonical_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Id"
+          },
+          "card_id": {
+            "type": "string",
+            "title": "Card Id"
+          },
+          "card_version": {
+            "type": "integer",
+            "title": "Card Version"
+          },
+          "book_id": {
+            "type": "string",
+            "title": "Book Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "date": {
+            "$ref": "#/components/schemas/ResearchDate"
+          },
+          "date_basis": {
+            "type": "string",
+            "enum": [
+              "event",
+              "formation"
+            ],
+            "title": "Date Basis"
+          },
+          "date_precision": {
+            "type": "string",
+            "enum": [
+              "year",
+              "month",
+              "day",
+              "range",
+              "unknown"
+            ],
+            "title": "Date Precision"
+          },
+          "date_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Start"
+          },
+          "date_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date End"
+          },
+          "undated": {
+            "type": "boolean",
+            "title": "Undated"
+          },
+          "event_status": {
+            "type": "string",
+            "title": "Event Status",
+            "default": "unknown"
+          },
+          "status_note": {
+            "type": "string",
+            "title": "Status Note",
+            "default": ""
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Ids"
+          },
+          "evidence_count": {
+            "type": "integer",
+            "title": "Evidence Count"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchParticipantResponse"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "participant_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participant Count"
+          },
+          "source_current": {
+            "type": "boolean",
+            "title": "Source Current",
+            "default": true
+          },
+          "needs_update": {
+            "type": "boolean",
+            "title": "Needs Update",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "item_kind",
+          "card_id",
+          "card_version",
+          "book_id",
+          "run_id",
+          "name",
+          "date",
+          "date_basis",
+          "date_precision",
+          "undated",
+          "evidence_count"
+        ],
+        "title": "ResearchTimelineItem"
+      },
+      "ResearchTimelineResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchTimelineItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "dated_total": {
+            "type": "integer",
+            "title": "Dated Total"
+          },
+          "undated_total": {
+            "type": "integer",
+            "title": "Undated Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "date_basis": {
+            "type": "string",
+            "enum": [
+              "event",
+              "formation"
+            ],
+            "title": "Date Basis"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "entity_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Name"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "dated_total",
+          "undated_total",
+          "offset",
+          "limit",
+          "date_basis",
+          "truncated"
+        ],
+        "title": "ResearchTimelineResponse"
       },
       "ReviewAnchor": {
         "properties": {
