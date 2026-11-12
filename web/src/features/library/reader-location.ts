@@ -125,6 +125,13 @@ export function safeReaderReturn(value: string | null, bookId: string) {
   const sourceResearch =
     researchParams?.get("tab") === "research" &&
     Boolean(researchParams.get("card") || researchParams.get("entity"));
+  const libraryPath = /^\/library\?([^#\\]*)$/.exec(value ?? "");
+  const libraryParams = libraryPath
+    ? new URLSearchParams(libraryPath[1])
+    : null;
+  const libraryCard =
+    libraryParams?.get("view") === "cards" &&
+    Boolean(libraryParams.get("card"));
   const studyPath =
     /^\/(?:studies(?:\/[A-Za-z0-9_-]+\/canvas)?|arguments|timeline|analysis|search)(?:\?[^#\\]*)?$/.test(
       value ?? "",
@@ -134,6 +141,7 @@ export function safeReaderReturn(value: string | null, bookId: string) {
       value === "/research" ||
       value.startsWith("/research?") ||
       sourceResearch ||
+      libraryCard ||
       studyPath)
     ? value
     : `/books/${bookId}?tab=reader&section=directory`;

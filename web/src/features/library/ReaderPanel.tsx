@@ -38,26 +38,31 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
         : returnTo.startsWith("/search")
           ? "返回全文检索"
           : "返回专题研究"
-      : returnTo.startsWith("/research")
-        ? returnParams.get("view") === "questions"
-          ? "返回历史记录"
-          : returnParams.get("view") === "network"
-            ? "返回关系与时间线"
-            : "返回卡片与实体"
-        : returnParams.get("tab") === "research"
-          ? "返回史料卡"
-          : returnParams.get("section") === "search" ||
-              returnParams.get("tab") === "search"
-            ? "返回检索结果"
-            : "返回目录";
+      : returnTo.startsWith("/library?")
+        ? "返回史料卡"
+        : returnTo.startsWith("/research")
+          ? returnParams.get("view") === "questions"
+            ? "返回历史记录"
+            : returnParams.get("view") === "network"
+              ? "返回关系与时间线"
+              : "返回卡片与实体"
+          : returnParams.get("tab") === "research"
+            ? "返回史料卡"
+            : returnParams.get("section") === "search" ||
+                returnParams.get("tab") === "search"
+              ? "返回检索结果"
+              : "返回目录";
   const location = useLocation(),
     navigate = useNavigate();
-  const [original, setOriginal] = useState(false),
+  const [original, setOriginal] = useState(
+      params.get("readerMode") === "compare",
+    ),
     [page, setPage] = useState<number | null>(null);
   const [navigationOpen, setNavigationOpen] = useState(true);
-  const [researchOpen, setResearchOpen] = useState(false);
   const searchOpen =
     params.get("section") === "search" || params.get("tab") === "search";
+  const researchOpen =
+    !searchOpen && params.get("readerInspector") === "related";
   const [navigationView, setNavigationView] = useState<
     "original" | "chapters" | null
   >(null);
@@ -171,7 +176,8 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
       headings[0].scrollIntoView?.({ block: "center" });
     if (requestedPage > 0 && Number.isSafeInteger(requestedPage)) {
       setPage(requestedPage);
-      if (!target || failedTarget) setOriginal(true);
+      if (params.get("readerMode") !== "read" && (!target || failedTarget))
+        setOriginal(true);
     }
   }, [chapter.data, params, requestedPage, target, failedTarget]);
   function go(id: string) {
@@ -193,12 +199,32 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
     setPage(null);
   }
   function toggleSearch(open: boolean) {
-    if (open) setResearchOpen(false);
+    if (open) setNavigationOpen(false);
     const next = new URLSearchParams(params);
     next.set("tab", "reader");
     next.set("section", open ? "search" : "text");
     if (id) next.set("chapter", id);
+    if (open) next.delete("readerInspector");
     setParams(next, { state: { preserveReadingPosition: true } });
+  }
+  function toggleRelated(open: boolean) {
+    const next = new URLSearchParams(params);
+    next.set("tab", "reader");
+    next.set("section", "text");
+    if (open) {
+      next.set("readerInspector", "related");
+      setNavigationOpen(false);
+    } else next.delete("readerInspector");
+    setParams(next, { state: { preserveReadingPosition: true } });
+  }
+  function readingMode(compare: boolean) {
+    setOriginal(compare);
+    const next = new URLSearchParams(params);
+    next.set("readerMode", compare ? "compare" : "read");
+    setParams(next, {
+      replace: true,
+      state: { preserveReadingPosition: true },
+    });
   }
   if (chapters.isError || chapter.isError)
     return (
@@ -274,9 +300,26 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
           >
             下一章
           </Button>
-          <Button variant="outline" onClick={() => setOriginal(!original)}>
-            {original ? "收起原书" : "对照原书"}
-          </Button>
+          <div
+            className="reader-mode-switch"
+            role="group"
+            aria-label="阅读模式"
+          >
+            <Button
+              variant={original ? "ghost" : "outline"}
+              aria-pressed={!original}
+              onClick={() => readingMode(false)}
+            >
+              阅读文本
+            </Button>
+            <Button
+              variant={original ? "outline" : "ghost"}
+              aria-pressed={original}
+              onClick={() => readingMode(true)}
+            >
+              对照原书
+            </Button>
+          </div>
           <Button
             variant={searchOpen ? "default" : "outline"}
             aria-expanded={searchOpen}
@@ -289,35 +332,42 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
           <Button
             variant={researchOpen ? "default" : "outline"}
             aria-expanded={researchOpen}
-            onClick={() => {
-              if (!researchOpen && searchOpen) toggleSearch(false);
-              setResearchOpen(!researchOpen);
-            }}
+            onClick={() => toggleRelated(!researchOpen)}
           >
             相关史料
           </Button>
-          {chapter.data && (
-            <div className="reader-structure-control" ref={structureControl}>
-              <StructurePanel
-                key={id}
-                runId={chapter.data.run_id}
-                items={chapter.data.structure ?? []}
-                onLocate={(value) => {
-                  setPage(value);
-                  setOriginal(true);
-                  const details =
-                    structureControl.current?.querySelector("details");
-                  if (details) details.open = false;
-                }}
-              />
+          <details className="reader-more">
+            <summary>更多</summary>
+            <div className="reader-more-panel">
+              {chapter.data && (
+                <div
+                  className="reader-structure-control"
+                  ref={structureControl}
+                >
+                  <StructurePanel
+                    key={id}
+                    runId={chapter.data.run_id}
+                    items={chapter.data.structure ?? []}
+                    onLocate={(value) => {
+                      setPage(value);
+                      setOriginal(true);
+                      const details =
+                        structureControl.current?.querySelector("details");
+                      if (details) details.open = false;
+                      const menu = structureControl.current?.closest("details");
+                      if (menu) menu.open = false;
+                    }}
+                  />
+                </div>
+              )}
+              <a
+                className="platform-export"
+                href={`/api/v2/books/${bookId}/export?download=latest`}
+              >
+                导出全书 Markdown
+              </a>
             </div>
-          )}
-          <a
-            className="platform-export"
-            href={`/api/v2/books/${bookId}/export?download=latest`}
-          >
-            导出全书 Markdown
-          </a>
+          </details>
         </div>
         {failedTarget && (
           <p role="status" className="workspace-status-note">
@@ -334,6 +384,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
         <div
           className="reader-body"
           data-search-open={searchOpen || researchOpen}
+          data-reading-mode={original ? "compare" : "read"}
         >
           <div
             className={
@@ -397,6 +448,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
                   </select>
                 </label>
                 <OriginalPage
+                  viewId={`${bookId}:${id}:${readingFocus?.id ?? "page"}`}
                   runId={
                     failedTarget && target ? target.run_id : chapter.data.run_id
                   }
@@ -421,7 +473,7 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
             <ReadingResearchSidebar
               data={researchReading.data}
               returnTo={`${location.pathname}${location.search}`}
-              onClose={() => setResearchOpen(false)}
+              onClose={() => toggleRelated(false)}
               error={researchReading.error}
               onRetry={() => void researchReading.refetch()}
             />

@@ -12,6 +12,30 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("a single-quote drawer preserves its original card evidence number", async () => {
+  vi.spyOn(libraryApi, "readOriginalPage").mockResolvedValue("/source.png");
+  render(
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <EvidenceOriginal
+          selected="e05"
+          offset={4}
+          evidence={[
+            {
+              id: "e05",
+              pages: [1],
+              reading_target: { run_id: "run", physical_page: 1 },
+            },
+          ]}
+        />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByRole("img", { name: "PDF 第 1 页" });
+  expect(screen.getByRole("option", { name: "证据 5" })).toBeTruthy();
+  expect(screen.queryByRole("option", { name: "证据 1" })).toBeNull();
+});
+
 test("card-local proof IDs cannot select another source or carry its page into that source", async () => {
   const seen: string[] = [];
   vi.spyOn(libraryApi, "readOriginalPage").mockImplementation(

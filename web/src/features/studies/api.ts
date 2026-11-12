@@ -265,6 +265,18 @@ export const studies = {
       suggestion_id: string;
       kind: "note" | "argument" | "thought";
       title?: string;
+      text?: string;
+      limitations?: string;
     },
   ) => request<StudyRecord>(`/analyses/${id(analysis)}/adopt`, "POST", body),
+  setSuggestionDisposition: (
+    analysis: string,
+    suggestion: string,
+    body: { expected_version: number; ignored: boolean },
+  ) =>
+    request<StudyAnalysis>(
+      `/analyses/${id(analysis)}/suggestions/${id(suggestion)}/disposition`,
+      "POST",
+      body,
+    ),
 };

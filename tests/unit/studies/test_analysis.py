@@ -243,6 +243,93 @@ def test_successful_adoption_retry_survives_later_source_revision(native_job):
     assert case.store.list("record", topic_id=case.topic["id"])["total"] == 1
 
 
+@pytest.fixture
+def personal_analysis(native_job):
+    case = native_job
+    job = case.store.read("analysis", case.job_id)
+    job = case.store.save(
+        "analysis",
+        case.job_id,
+        {
+            "state": "ready",
+            "suggestions": [{**case.candidate["suggestions"][0], "verified": True, "issues": []}],
+        },
+        expected_version=job["version"],
+    )
+
+    def create_record(topic, value, **context):
+        return case.store.create(
+            "record",
+            {**value, "origin": context["origin"], "analysis_id": context["analysis_id"]},
+            topic_id=topic,
+            item_id=context["item_id"],
+        )
+
+    service = AnalysisService(
+        SimpleNamespace(
+            store=case.store,
+            material=lambda *args: {"source_current": True, "card_version": 1},
+            create_record=create_record,
+        )
+    )
+    return case, service, job
+
+
+def test_ignored_suggestion_is_durable_reversible_and_not_adoptable(personal_analysis):
+    case, service, job = personal_analysis
+    ignored = service.disposition(case.job_id, "s", job["version"], ignored=True)
+    assert ignored["suggestions"][0]["ignored"] is True
+    assert service.read(case.job_id)["suggestions"][0]["ignored"] is True
+    assert case.store.read("analysis", case.job_id)["suggestions"] == job["suggestions"]
+    with pytest.raises(ServiceError, match="忽略"):
+        service.adopt(
+            case.job_id, AnalysisAdoption(expected_version=ignored["version"], suggestion_id="s")
+        )
+    restored = service.disposition(case.job_id, "s", ignored["version"], ignored=False)
+    assert restored["suggestions"][0]["ignored"] is False
+    adopted = service.adopt(
+        case.job_id, AnalysisAdoption(expected_version=restored["version"], suggestion_id="s")
+    )
+    assert adopted["origin"] == "ai_adopted"
+
+
+def test_edited_adoption_preserves_verified_suggestion_and_source_references(personal_analysis):
+    case, service, job = personal_analysis
+    request = AnalysisAdoption(
+        expected_version=job["version"],
+        suggestion_id="s",
+        title="我的限定解读",
+        text="个人补充：这一计划的实施仍需其他资料。",
+        limitations="仅作研究札记，尚不能证明实施。",
+    )
+    record = service.adopt(case.job_id, request)
+    assert record["text"] == request.text and record["limitations"] == request.limitations
+    assert record["source_refs"] == ["m"] and record["analysis_id"] == case.job_id
+    assert case.store.read("analysis", case.job_id)["suggestions"] == job["suggestions"]
+    assert service.adopt(case.job_id, request)["id"] == record["id"]
+
+
+def test_suggestion_disposition_retries_do_not_rewrite_history_or_override_newer_choices(
+    personal_analysis,
+):
+    case, service, job = personal_analysis
+    ignored = service.disposition(case.job_id, "s", job["version"], ignored=True)
+    retry = service.disposition(case.job_id, "s", job["version"], ignored=True)
+    assert retry["version"] == ignored["version"]
+    with pytest.raises(ServiceError, match="状态已变化"):
+        service.disposition(case.job_id, "s", job["version"], ignored=False)
+    with pytest.raises(ServiceError, match="版本无效"):
+        service.disposition(case.job_id, "s", ignored["version"] + 1, ignored=True)
+    with pytest.raises(ServiceError, match="没有这条"):
+        service.disposition(case.job_id, "missing", ignored["version"], ignored=True)
+    restored = service.disposition(case.job_id, "s", ignored["version"], ignored=False)
+    service.adopt(
+        case.job_id, AnalysisAdoption(expected_version=restored["version"], suggestion_id="s")
+    )
+    with pytest.raises(ServiceError, match="已采纳"):
+        service.disposition(case.job_id, "s", service.read(case.job_id)["version"], ignored=True)
+
+
 @pytest.mark.parametrize("field", ["title", "text", "limitations"])
 def test_candidate_rejects_blank_analysis_claims_and_limits(native_job, field):
     candidate = native_job.candidate

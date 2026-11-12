@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearchParams } from "react-router-dom";
 import type { Edge, ReactFlowInstance } from "@xyflow/react";
@@ -38,6 +38,7 @@ export default function CanvasSession({
   workspace,
   createCanvas,
   onArchived,
+  management,
 }: {
   canvas: StudyCanvasRecord;
   topic: StudyTopic;
@@ -49,6 +50,7 @@ export default function CanvasSession({
     document?: StudyCanvasDocument,
   ) => Promise<StudyCanvasRecord | undefined>;
   onArchived: (canvas: StudyCanvasRecord) => void;
+  management?: ReactNode;
 }) {
   const state = useCanvasDocument(canvas, workspace);
   const cache = useQueryClient();
@@ -440,6 +442,7 @@ export default function CanvasSession({
       }}
     >
       <CanvasToolbar
+        management={management}
         canvas={canvas}
         topicArchived={topic.archived}
         readonly={readonly}

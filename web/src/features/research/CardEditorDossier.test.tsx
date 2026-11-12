@@ -88,8 +88,9 @@ async function replace(
   container: Pick<typeof screen, "getByRole"> = screen,
 ) {
   const input = container.getByRole("textbox", { name: label });
-  await userEvent.clear(input);
-  await userEvent.type(input, value);
+  const user = userEvent.setup();
+  await user.clear(input);
+  await user.paste(value);
 }
 
 test("v7 dossier edits submit the complete source-bound dossier and citation without changing other card fields", async () => {

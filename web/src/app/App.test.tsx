@@ -101,27 +101,16 @@ test("the header distinguishes a selected file from a running transfer and a com
     </MemoryRouter>,
   );
   const user = userEvent.setup();
-  await screen.findByRole("heading", { name: "仪表盘" });
+  await screen.findByRole("heading", { name: "继续工作" });
   const navigation = within(
     screen.getByRole("navigation", { name: "主要导航" }),
   );
-  expect(navigation.getAllByRole("link")).toHaveLength(10);
-  for (const name of [
-    "仪表盘",
-    "全文检索",
-    "史料集",
-    "论据丛",
-    "研究专题",
-    "专题工作台",
-    "时间线索",
-    "AI 分析",
-    "设置",
-    "更新日志",
-  ])
+  expect(navigation.getAllByRole("link")).toHaveLength(5);
+  for (const name of ["继续工作", "全文检索", "史料集", "研究专题", "待办"])
     expect(navigation.getByRole("link", { name })).toBeTruthy();
   expect(
     navigation
-      .getByRole("link", { name: "仪表盘" })
+      .getByRole("link", { name: "继续工作" })
       .getAttribute("aria-current"),
   ).toBe("page");
   await user.click(await screen.findByRole("button", { name: "上传史料" }));
@@ -183,7 +172,7 @@ test("retired introduction redirects to books while navigation retains one strea
   );
   expect(screen.queryByRole("link", { name: "史料卡" })).toBeNull();
   expect(screen.queryByRole("link", { name: "研究检索" })).toBeNull();
-  expect(screen.getByRole("link", { name: "实体库" })).toBeTruthy();
+  expect(await screen.findByRole("link", { name: "实体索引" })).toBeTruthy();
   const user = userEvent.setup();
   await user.click(
     await screen.findByRole("button", { name: "上传史料" }, { timeout: 5000 }),
@@ -250,6 +239,7 @@ test("returning from book details retains the shelf search and status filter", a
   await user.click(screen.getByRole("tab", { name: "需要核对" }));
   await user.click(await screen.findByRole("button", { name: /^待审史料/ }));
   await screen.findByRole("heading", { name: "书籍详情" });
+  await user.click(screen.getByRole("button", { name: "展开功能导航" }));
   expect(
     screen.getByRole("link", { name: "史料集" }).getAttribute("aria-current"),
   ).toBe("page");

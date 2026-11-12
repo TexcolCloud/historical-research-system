@@ -1,0 +1,59 @@
+.study-workspace-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--background);
+  margin: 0 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+.study-topic-context {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 0;
+}
+.study-topic-context > span {
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.study-topic-context strong {
+  color: var(--foreground);
+  font: 600 19px var(--font-reading);
+  overflow-wrap: anywhere;
+}
+.study-topic-context a {
+  margin-left: auto;
+  color: var(--primary);
+  font-size: 13px;
+  text-underline-offset: 4px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 0;
+}
+.study-topic-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+}
+.study-topic-navigation a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 2px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted-foreground);
+  text-decoration: none;
+  font-size: 14px;
+}
+.study-topic-navigation a[aria-current="page"] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+.study-topic-navigation a:focus-visible,
+.study-topic-context a:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}

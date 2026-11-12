@@ -17,6 +17,7 @@ import {
 } from "@/features/review/review-cache.ts";
 import type { components } from "@/client/schema.d.ts";
 import ConversionReader from "@/features/review/ConversionReader.tsx";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 const issueOptions = (id: string) =>
   queryOptions({
@@ -56,6 +57,7 @@ export default function ReviewPanel({
   const [selected, setSelected] = useState<string | null>(null),
     [message, setMessage] = useState("");
   const [showDraft, setShowDraft] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(true);
   const preparing = ["upload", "conversion", "ocr", "vision"].includes(
     stage ?? "",
   );
@@ -91,13 +93,8 @@ export default function ReviewPanel({
       void query.invalidateQueries({ queryKey: issuesKey(runId) });
   }, [current.data?.state, query, runId]);
   return (
-    <section className="evidence-review">
-      {bookId ? (
-        <div className="review-workspace-intro">
-          <p>逐处完成保留或修改，全部处理后提交本页。草稿会自动保存。</p>
-          <a href={`#/books/${bookId}?tab=reader`}>阅读已有底稿</a>
-        </div>
-      ) : (
+    <section className="evidence-review" aria-label="正文核对工作区">
+      {!bookId && (
         <Button
           variant="outline"
           disabled={busy || draftPreparing}
@@ -151,37 +148,55 @@ export default function ReviewPanel({
           )}
         </div>
       ) : (
-        <div className="evidence-review-queue-layout">
-          <nav
-            id="review-page-queue"
-            aria-label="问题清单"
-            className="evidence-review-queue"
-          >
-            <h3>
-              待核对页 <span>{issues.data.length}</span>
-            </h3>
-            {issues.data.map((issue) => (
-              <button
-                key={issue.id}
-                aria-label={`原件第 ${issue.page} 页`}
-                disabled={busy}
-                aria-current={issue.id === currentId ? "true" : undefined}
-                onPointerEnter={() =>
-                  void query.prefetchQuery(issueOptions(issue.id))
-                }
-                onClick={() => setSelected(issue.id)}
-              >
-                <strong>原件第 {issue.page} 页</strong>
-                <small aria-hidden="true">
-                  {issue.id === currentId
-                    ? current.data?.draft_text
-                      ? "当前页 · 已有草稿"
-                      : "当前页 · 待核对"
-                    : "待核对"}
-                </small>
-              </button>
-            ))}
-          </nav>
+        <div
+          className="evidence-review-queue-layout"
+          data-queue={queueOpen ? "open" : "closed"}
+        >
+          <aside className="review-queue-panel" aria-label="待核页导航">
+            <Button
+              variant="ghost"
+              aria-controls="review-page-queue"
+              aria-label={queueOpen ? "收起页清单" : "展开页清单"}
+              title={queueOpen ? "收起页清单" : "展开页清单"}
+              aria-expanded={queueOpen}
+              onClick={() => setQueueOpen(!queueOpen)}
+            >
+              {queueOpen ? (
+                <PanelLeftClose size={16} />
+              ) : (
+                <PanelLeftOpen size={16} />
+              )}
+              {queueOpen && <span>待核对页 · {issues.data.length}</span>}
+            </Button>
+            <nav
+              id="review-page-queue"
+              aria-label="问题清单"
+              className="evidence-review-queue"
+              hidden={!queueOpen}
+            >
+              {issues.data.map((issue) => (
+                <button
+                  key={issue.id}
+                  aria-label={`原件第 ${issue.page} 页`}
+                  disabled={busy}
+                  aria-current={issue.id === currentId ? "true" : undefined}
+                  onPointerEnter={() =>
+                    void query.prefetchQuery(issueOptions(issue.id))
+                  }
+                  onClick={() => setSelected(issue.id)}
+                >
+                  <strong>原件第 {issue.page} 页</strong>
+                  <small aria-hidden="true">
+                    {issue.id === currentId
+                      ? current.data?.draft_text
+                        ? "当前页 · 已有草稿"
+                        : "当前页 · 待核对"
+                      : "待核对"}
+                  </small>
+                </button>
+              ))}
+            </nav>
+          </aside>
           {current.isError ? (
             <p role="alert">
               {current.error.message}

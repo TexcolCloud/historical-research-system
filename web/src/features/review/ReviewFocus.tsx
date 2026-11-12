@@ -16,8 +16,6 @@ export default function ReviewFocus({
   onSelect,
   text,
   resolutions,
-  onResolve,
-  onEdit,
   disabled,
   editing = false,
   machineReasons = [],
@@ -27,8 +25,6 @@ export default function ReviewFocus({
   onSelect: (id: string) => void;
   text: string;
   resolutions: Resolution[];
-  onResolve: (action: Resolution["action"]) => void;
-  onEdit: () => void;
   disabled: boolean;
   editing?: boolean;
   machineReasons?: string[];
@@ -79,23 +75,13 @@ export default function ReviewFocus({
         </div>
       )}
       {!editing && (
-        <div className="review-judgment-actions">
-          <Button
-            variant="outline"
-            disabled={disabled}
-            onClick={() => onResolve("keep")}
-          >
-            识别正确，保留
-          </Button>
-          <Button variant="outline" disabled={disabled} onClick={onEdit}>
-            需要修改
-          </Button>
-        </div>
+        <p className="review-doubt-reason">
+          {issue.message || "请核对这处文字与原图是否一致。"}
+        </p>
       )}
-      {!editing && (
+      {!editing && (issue.source_reading || machineReasons.length > 0) && (
         <details className="review-observation">
-          <summary>为什么需要核对</summary>
-          <p>{issue.message || "请核对这处文字与原图是否一致。"}</p>
+          <summary>机器参考读法与依据</summary>
           {issue.source_reading && (
             <p>机器参考读法 · 由你裁决：{issue.source_reading}</p>
           )}

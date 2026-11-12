@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Copy,
   Download,
@@ -43,6 +43,7 @@ export function CanvasToolbar({
   createCanvas,
   onArchived,
   onFullscreen,
+  management,
 }: {
   canvas: StudyCanvasRecord;
   topicArchived: boolean;
@@ -62,6 +63,7 @@ export function CanvasToolbar({
   ) => Promise<StudyCanvasRecord | undefined>;
   onArchived: (canvas: StudyCanvasRecord) => void;
   onFullscreen: () => void;
+  management?: ReactNode;
 }) {
   const document = state.document;
   const [rename, setRename] = useState(canvas.title);
@@ -195,6 +197,7 @@ export function CanvasToolbar({
             >
               {canvas.archived ? "恢复画布" : "归档画布"}
             </Button>
+            {management}
           </div>
         </details>
         <details className="study-canvas-tools">

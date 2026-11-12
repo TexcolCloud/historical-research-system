@@ -5597,6 +5597,67 @@
         }
       }
     },
+    "/api/v2/studies/analyses/{analysis_id}/suggestions/{suggestion_id}/disposition": {
+      "post": {
+        "tags": [
+          "studies"
+        ],
+        "summary": "Disposition",
+        "operationId": "disposition_api_v2_studies_analyses__analysis_id__suggestions__suggestion_id__disposition_post",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Analysis Id"
+            }
+          },
+          {
+            "name": "suggestion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Suggestion Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisDisposition"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/studies/preferences": {
       "get": {
         "tags": [
@@ -5752,6 +5813,32 @@
               }
             ],
             "title": "Title"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "limitations": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limitations"
           }
         },
         "additionalProperties": false,
@@ -5761,6 +5848,26 @@
           "suggestion_id"
         ],
         "title": "AnalysisAdoption"
+      },
+      "AnalysisDisposition": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "ignored": {
+            "type": "boolean",
+            "title": "Ignored"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version",
+          "ignored"
+        ],
+        "title": "AnalysisDisposition"
       },
       "AnalysisPage": {
         "properties": {
@@ -17595,6 +17702,11 @@
               }
             ],
             "title": "Adopted Record Id"
+          },
+          "ignored": {
+            "type": "boolean",
+            "title": "Ignored",
+            "default": false
           }
         },
         "additionalProperties": false,

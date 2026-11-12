@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 class AnalysisRequest(BaseModel):
@@ -52,6 +52,15 @@ class AnalysisAdoption(BaseModel):
     suggestion_id: str
     kind: Literal["note", "argument", "thought"] = "note"
     title: str | None = Field(default=None, min_length=1, max_length=300)
+    text: str | None = Field(default=None, min_length=1, max_length=60000)
+    limitations: str | None = Field(default=None, min_length=1, max_length=10000)
+
+    @field_validator("title", "text", "limitations")
+    @classmethod
+    def nonblank_personal_edit(cls, value):
+        if value is not None and not value.strip():
+            raise ValueError("个人记录的标题、正文和使用限制不能只含空白。")
+        return value
 
 
 class AnalysisVersion(BaseModel):
@@ -59,10 +68,15 @@ class AnalysisVersion(BaseModel):
     expected_version: int = Field(ge=1)
 
 
+class AnalysisDisposition(AnalysisVersion):
+    ignored: bool
+
+
 class VerifiedSuggestion(Suggestion):
     verified: bool
     issues: list[str] = Field(default_factory=list)
     adopted_record_id: str | None = None
+    ignored: bool = False
 
 
 class AnalysisResponse(BaseModel):

@@ -334,7 +334,7 @@ test("a failed argument save preserves the draft and selected source material", 
     }),
   );
   render(
-    <MemoryRouter initialEntries={["/arguments?topic=topic"]}>
+    <MemoryRouter initialEntries={["/arguments?topic=topic&kind=argument"]}>
       <QueryClientProvider
         client={
           new QueryClient({ defaultOptions: { queries: { retry: false } } })

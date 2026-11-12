@@ -77,7 +77,8 @@ test("adopted records retain an exact analysis return link in their list, editor
   assertLink(await screen.findByRole("link", { name: "查看原分析与采纳依据" }));
   await userEvent.click(screen.getByRole("button", { name: "编辑记录" }));
   const links = screen.getAllByRole("link", { name: "查看原分析与采纳依据" });
-  expect(links).toHaveLength(2);
+  // Editing replaces the selected document; the list no longer duplicates full content.
+  expect(links).toHaveLength(1);
   links.forEach(assertLink);
   expect(screen.getByText("个人整理，不改变原文核验状态")).toBeTruthy();
   view.unmount();

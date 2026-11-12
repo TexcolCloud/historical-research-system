@@ -103,7 +103,7 @@ export default function App() {
         <Route
           path="/arguments"
           element={
-            <Suspense fallback={<p role="status">正在读取论据丛…</p>}>
+            <Suspense fallback={<p role="status">正在读取研究记录…</p>}>
               <ArgumentsPage />
             </Suspense>
           }
