@@ -472,6 +472,7 @@ class NetworkQuery:
         *,
         entity_id=None,
         book_ids=None,
+        evidence_scope=None,
         date_basis="event",
         date_from=None,
         date_to=None,
@@ -530,6 +531,13 @@ class NetworkQuery:
                     continue
                 ids = json.loads(row[11]) if row[11] else []
                 ids = list(dict.fromkeys([*ids, *((value or {}).get("evidence_ids") or [])]))
+                allowed = (evidence_scope or {}).get((row[2], row[3]))
+                if (
+                    date_basis == "event"
+                    and allowed is not None
+                    and not set(ids).intersection(allowed)
+                ):
+                    continue
                 items.append(
                     {
                         "id": row[0],

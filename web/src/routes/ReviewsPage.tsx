@@ -50,7 +50,7 @@ export default function ReviewsPage() {
           <ClipboardCheck size={36} />
           <h2>正文与目录暂无待办</h2>
           <p>书籍核验发现问题后，会在这里列出；研究待办单独列在下方。</p>
-          <Link to="/">查看书籍进展</Link>
+          <Link to="/library">查看书籍进展</Link>
         </section>
       ) : (
         <section className="platform-collection" aria-label="按书籍整理的待办">

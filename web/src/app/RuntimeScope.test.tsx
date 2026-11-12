@@ -78,6 +78,11 @@ test("an unknown runtime keeps draft decisions but blocks final approval until s
   const query = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  query.setQueryData(["studies", "preferences"], {
+    version: 0,
+    compact: false,
+    restore_last_canvas: true,
+  });
   try {
     render(
       <QueryClientProvider client={query}>

@@ -1,6 +1,6 @@
 ---
 name: historical-research
-description: 导入 PDF 或图片史料、继续处理任务、打开人工待审页面、检索已入库资料，或处理自动史料卡与实体事件证据时使用。
+description: 导入 PDF 或图片史料、继续处理任务、打开人工待审页面、检索已入库资料，或处理史料卡、实体事件证据与专题选材分析时使用。
 ---
 
 # Historical research
@@ -64,6 +64,15 @@ actions. Personal notes are separately versioned and remain distinct from source
 claims. Existing v1–v6 runs keep their frozen contracts; index rebuilding never
 upgrades them. New research-question and automatic link-refresh execution is
 retired; prior history remains readable/exportable. Old `kind=cards` stays retired.
+
+For personal studies, use the workbench's topics, arguments, timeline and canvas.
+Materials pin source card versions and evidence IDs; personal edits, manual links
+and timeline clues remain separate from verified source assertions. Analysis is
+explicitly requested for selected material: native Sol author and fresh verifier
+use the `study_analysis_*` tools against the same workspace. Follow the personal
+studies contract in `workflow_instructions`; only supported suggestions can be
+explicitly adopted by the user. A personal question or adopted note does not
+reactivate the retired research-question executor or approve source content.
 
 If independent original-image audits still disagree after detail inspection,
 use `request_human_review` with current evidence hashes and the exact unresolved

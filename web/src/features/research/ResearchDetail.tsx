@@ -11,6 +11,7 @@ import { entityLabels } from "./labels";
 import SourceCardReader from "./SourceCardReader";
 import { cardStateLabel } from "./card-reading";
 import { entityWorkspaceHref } from "./network-query";
+import { safeReaderReturn } from "@/features/library/reader-location";
 import {
   research,
   researchKeys,
@@ -90,7 +91,7 @@ function ResearchCardDetail({ cardId }: { cardId: string }) {
         {detail.error.message}
         {detail.error instanceof ResearchError &&
         detail.error.status === 404 ? (
-          <Link className="research-source-link" to="/">
+          <Link className="research-source-link" to="/library">
             返回书籍
           </Link>
         ) : (
@@ -134,7 +135,7 @@ function ResearchEntityDetail({ entityId }: { entityId: string }) {
         {detail.error.message}
         {detail.error instanceof ResearchError &&
         detail.error.status === 404 ? (
-          <Link className="research-source-link" to="/">
+          <Link className="research-source-link" to="/library">
             返回书籍
           </Link>
         ) : (
@@ -471,6 +472,12 @@ export default function ResearchDetail() {
     ) === "network"
       ? returnTo
       : null;
+  const studyReturn =
+    returnTo &&
+    /^\/(studies|arguments|timeline|analysis|search)(\/|\?|$)/.test(returnTo) &&
+    safeReaderReturn(returnTo, "") === returnTo
+      ? returnTo
+      : null;
   return (
     <aside className="research-detail-pane" data-document={Boolean(cardId)}>
       <div
@@ -479,6 +486,15 @@ export default function ResearchDetail() {
         {!cardId && <span>实体详情</span>}
         {readerReturn && <Link to={readerReturn}>返回阅读位置</Link>}
         {workspaceReturn && <Link to={workspaceReturn}>返回关系与时间线</Link>}
+        {studyReturn && (
+          <Link to={studyReturn}>
+            {studyReturn.includes("/canvas")
+              ? "返回专题画布"
+              : studyReturn.startsWith("/search")
+                ? "返回全文检索"
+                : "返回专题研究"}
+          </Link>
+        )}
         <Button
           size="icon"
           variant="ghost"

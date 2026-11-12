@@ -268,6 +268,32 @@ function CurrentLocation() {
   );
 }
 
+test("source inspection preserves the selected study canvas on return", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json(card)),
+  );
+  const returnTo = "/studies/topic/canvas?canvas=desk&node=source-node";
+  render(
+    <MemoryRouter
+      initialEntries={[
+        `/research?card=last-card&returnTo=${encodeURIComponent(returnTo)}`,
+      ]}
+    >
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ResearchDetail />
+        <CurrentLocation />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await userEvent.click(screen.getByRole("link", { name: "返回专题画布" }));
+  expect(screen.getByLabelText("当前页面").textContent).toBe(returnTo);
+});
+
 test("saving a pending card opens the next identity task rather than returning to the already resolved card", async () => {
   vi.stubGlobal(
     "fetch",
@@ -548,7 +574,7 @@ test("a deleted book's research deep link gives a clear return path without offe
   await screen.findByText("研究记录不存在，所属书籍可能已删除。");
   expect(
     screen.getByRole("link", { name: "返回书籍" }).getAttribute("href"),
-  ).toBe("/");
+  ).toBe("/library");
   expect(screen.queryByRole("button", { name: "确认采用此卡" })).toBeNull();
   expect(screen.queryByRole("button", { name: "重新读取史料卡" })).toBeNull();
 });

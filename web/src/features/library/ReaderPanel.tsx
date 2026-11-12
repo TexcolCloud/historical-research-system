@@ -31,18 +31,25 @@ export default function ReaderPanel({ bookId }: { bookId: string }) {
   const returnParams = new URLSearchParams(
     returnTo.slice(returnTo.indexOf("?") + 1),
   );
-  const returnLabel = returnTo.startsWith("/research")
-    ? returnParams.get("view") === "questions"
-      ? "返回历史记录"
-      : returnParams.get("view") === "network"
-        ? "返回关系与时间线"
-        : "返回卡片与实体"
-    : returnParams.get("tab") === "research"
-      ? "返回史料卡"
-      : returnParams.get("section") === "search" ||
-          returnParams.get("tab") === "search"
-        ? "返回检索结果"
-        : "返回目录";
+  const returnLabel =
+    /^\/(studies|arguments|timeline|analysis|search)(\/|\?|$)/.test(returnTo)
+      ? returnTo.includes("/canvas")
+        ? "返回专题画布"
+        : returnTo.startsWith("/search")
+          ? "返回全文检索"
+          : "返回专题研究"
+      : returnTo.startsWith("/research")
+        ? returnParams.get("view") === "questions"
+          ? "返回历史记录"
+          : returnParams.get("view") === "network"
+            ? "返回关系与时间线"
+            : "返回卡片与实体"
+        : returnParams.get("tab") === "research"
+          ? "返回史料卡"
+          : returnParams.get("section") === "search" ||
+              returnParams.get("tab") === "search"
+            ? "返回检索结果"
+            : "返回目录";
   const location = useLocation(),
     navigate = useNavigate();
   const [original, setOriginal] = useState(false),

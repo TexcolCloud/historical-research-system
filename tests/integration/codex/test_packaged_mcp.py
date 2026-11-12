@@ -73,11 +73,16 @@ def test_wheel_mcp_preserves_resources_and_workspace_selection_outside_checkout(
                 "research_locate_quotes",
                 "research_search", "research_read_evidence", "research_original",
                 "research_entities", "research_related", "research_submit", "research_fail",
+                "study_analysis_status", "study_analysis_claim", "study_analysis_source",
+                "study_analysis_original", "study_analysis_candidate", "study_analysis_submit",
             }.issubset(names)
             assert not any("human" in name and name.startswith("research_") for name in names)
             result = await client.call_tool("workflow_instructions")
             assert not result.is_error
             assert result.content[0].text == instructions
+            assert "## Personal studies and selected-material analysis" in instructions
+            missing = await client.call_tool("study_analysis_status", {"analysis_id": "missing"})
+            assert missing.is_error
             status = await client.call_tool("workspace_status")
             assert not status.is_error
             value = status.structured_content or json.loads(status.content[0].text)

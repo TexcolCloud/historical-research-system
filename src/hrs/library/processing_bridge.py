@@ -68,6 +68,10 @@ class CodexBridge:
         self.executor.start()
         self.research_executor = ResearchRunner(self.store)
         self.research_executor.start()
+        from hrs.studies.execution import StudyAnalysisRunner
+
+        self.study_executor = StudyAnalysisRunner(self.store)
+        self.study_executor.start()
         self.research.start_indexing()
         self.thread = threading.Thread(target=self.loop, name="codex-platform-bridge", daemon=True)
         self.thread.start()
@@ -78,6 +82,8 @@ class CodexBridge:
         self.executor.stop()
         if getattr(self, "research_executor", None):
             self.research_executor.stop()
+        if getattr(self, "study_executor", None):
+            self.study_executor.stop()
         if self.thread:
             self.thread.join(timeout=10)
 

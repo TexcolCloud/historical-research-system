@@ -198,7 +198,7 @@ export default function QuestionWorkspace() {
             旧问题、选材、笔记和结论保留为只读记录，可核对原文及导出；新流程专注自动史料卡制作。
           </p>
         </div>
-        <Link to="/">返回书籍</Link>
+        <Link to="/library">返回书籍</Link>
       </header>
       <div className="research-question-layout">
         <nav aria-label="历史问题清单">
