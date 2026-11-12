@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { readBooks } from "@/client/api";
 import { research } from "@/features/research/api";
@@ -9,6 +8,7 @@ import EvidenceOriginal from "@/features/research/EvidenceOriginal";
 import { studies, studyKeys } from "./api";
 import { StudyErrorState, useStudyTopic } from "./StudyTopicScope";
 import type { StudyTopic } from "./types";
+import { TopicNavigation } from "./TopicNavigation";
 
 export function TopicsPage() {
   const scope = useStudyTopic();
@@ -40,14 +40,16 @@ export function TopicsPage() {
   });
   return (
     <section className="study-page">
-      <header className="study-page-heading">
-        <div>
-          <p className="study-eyebrow">研究资料</p>
-          <h1>研究专题</h1>
-          <p>围绕一个问题整理材料、论据和个人思考。</p>
-        </div>
-        <Button onClick={() => setCreating(true)}>新建专题</Button>
-      </header>
+      {!scope.topicId && (
+        <header className="study-page-heading">
+          <div>
+            <p className="study-eyebrow">研究资料</p>
+            <h1>研究专题</h1>
+            <p>围绕一个问题整理材料、论据和个人思考。</p>
+          </div>
+          <Button onClick={() => setCreating(true)}>新建专题</Button>
+        </header>
+      )}
       {creating && (
         <form
           className="study-editor"
@@ -90,69 +92,73 @@ export function TopicsPage() {
           </div>
         </form>
       )}
-      <div className="study-topic-layout">
-        <aside className="study-topic-list" aria-label="专题清单">
-          <label className="study-check">
-            <input
-              type="checkbox"
-              checked={archived}
-              onChange={(event) => {
-                setArchived(event.target.checked);
-                setOffset(0);
-              }}
-            />
-            查看已归档专题
-          </label>
-          {items.isError ? (
-            <StudyErrorState
-              error={items.error}
-              retry={() => void items.refetch()}
-            />
-          ) : items.isPending ? (
-            <p role="status">正在读取专题…</p>
-          ) : items.data?.items.length ? (
-            items.data.items.map((topic) => (
-              <button
-                className="study-topic-item"
-                key={topic.id}
-                aria-pressed={scope.topicId === topic.id}
-                onClick={() => scope.select(topic.id)}
-              >
-                <strong>{topic.title}</strong>
-                <span>{topic.description || "尚未填写研究说明"}</span>
-                <small>
-                  资料 {topic.material_count ?? topic.materials.length} 项
-                </small>
-              </button>
-            ))
-          ) : (
-            <p className="study-empty">
-              {archived ? "尚无归档专题。" : "创建第一个专题，开始整理材料。"}
-            </p>
-          )}
-          {items.data && (
-            <nav className="study-actions" aria-label="专题分页">
-              <Button
-                variant="ghost"
-                disabled={!offset || items.isFetching}
-                onClick={() => setOffset(Math.max(0, offset - 30))}
-              >
-                上一页专题
-              </Button>
-              <span>
-                {items.data.total ? offset + 1 : 0}–
-                {Math.min(offset + 30, items.data.total)} / {items.data.total}
-              </span>
-              <Button
-                variant="ghost"
-                disabled={offset + 30 >= items.data.total || items.isFetching}
-                onClick={() => setOffset(offset + 30)}
-              >
-                下一页专题
-              </Button>
-            </nav>
-          )}
-        </aside>
+      <div
+        className={scope.topicId ? "study-open-topic" : "study-topic-layout"}
+      >
+        {!scope.topicId && (
+          <aside className="study-topic-list" aria-label="专题清单">
+            <label className="study-check">
+              <input
+                type="checkbox"
+                checked={archived}
+                onChange={(event) => {
+                  setArchived(event.target.checked);
+                  setOffset(0);
+                }}
+              />
+              查看已归档专题
+            </label>
+            {items.isError ? (
+              <StudyErrorState
+                error={items.error}
+                retry={() => void items.refetch()}
+              />
+            ) : items.isPending ? (
+              <p role="status">正在读取专题…</p>
+            ) : items.data?.items.length ? (
+              items.data.items.map((topic) => (
+                <button
+                  className="study-topic-item"
+                  key={topic.id}
+                  aria-pressed={scope.topicId === topic.id}
+                  onClick={() => scope.select(topic.id)}
+                >
+                  <strong>{topic.title}</strong>
+                  <span>{topic.description || "尚未填写研究说明"}</span>
+                  <small>
+                    资料 {topic.material_count ?? topic.materials.length} 项
+                  </small>
+                </button>
+              ))
+            ) : (
+              <p className="study-empty">
+                {archived ? "尚无归档专题。" : "创建第一个专题，开始整理材料。"}
+              </p>
+            )}
+            {items.data && (
+              <nav className="study-actions" aria-label="专题分页">
+                <Button
+                  variant="ghost"
+                  disabled={!offset || items.isFetching}
+                  onClick={() => setOffset(Math.max(0, offset - 30))}
+                >
+                  上一页专题
+                </Button>
+                <span>
+                  {items.data.total ? offset + 1 : 0}–
+                  {Math.min(offset + 30, items.data.total)} / {items.data.total}
+                </span>
+                <Button
+                  variant="ghost"
+                  disabled={offset + 30 >= items.data.total || items.isFetching}
+                  onClick={() => setOffset(offset + 30)}
+                >
+                  下一页专题
+                </Button>
+              </nav>
+            )}
+          </aside>
+        )}
         <div className="study-topic-detail">
           {!scope.topicId ? (
             <div className="study-empty">
@@ -218,6 +224,11 @@ function TopicDetail({
   });
   return (
     <>
+      <TopicNavigation
+        topicId={topic.id}
+        topicTitle={topic.title}
+        active="materials"
+      />
       <div className="study-detail-heading">
         <div>
           <p className="study-eyebrow">
@@ -279,20 +290,6 @@ function TopicDetail({
         </form>
       )}
       {save.isError && <p role="alert">{save.error.message}</p>}
-      <nav className="study-section-links" aria-label="专题研究入口">
-        <Link to={`/studies/${encodeURIComponent(topic.id)}/canvas`}>
-          打开专题工作台
-        </Link>
-        <Link to={`/arguments?topic=${encodeURIComponent(topic.id)}`}>
-          整理论据丛
-        </Link>
-        <Link to={`/timeline?topic=${encodeURIComponent(topic.id)}`}>
-          查看时间线索
-        </Link>
-        <Link to={`/analysis?topic=${encodeURIComponent(topic.id)}`}>
-          对照所选材料
-        </Link>
-      </nav>
       <div className="study-detail-heading">
         <h3>专题材料 · {topic.materials.length}</h3>
         <Button

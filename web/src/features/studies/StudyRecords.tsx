@@ -50,11 +50,9 @@ export function ArgumentsPage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get("kind");
   const kind: StudyRecordKind | "all" =
-    requested === "all"
-      ? "all"
-      : requested && Object.hasOwn(recordLabels, requested)
-        ? (requested as StudyRecordKind)
-        : "argument";
+    requested && Object.hasOwn(recordLabels, requested)
+      ? (requested as StudyRecordKind)
+      : "all";
   const [editing, setEditing] = useState<StudyRecord | "new" | null>(null);
   const showArchived = params.get("archived") === "true";
   const offset = Math.max(
@@ -63,16 +61,17 @@ export function ArgumentsPage() {
   );
   function changeList(changes: Record<string, string>) {
     const next = new URLSearchParams(params);
+    next.delete("source");
     for (const [key, value] of Object.entries(changes))
       value ? next.set(key, value) : next.delete(key);
     setParams(next);
   }
   const setKind = (value: StudyRecordKind | "all") =>
-    changeList({ kind: value, offset: "" });
+    changeList({ kind: value, offset: "", record: "" });
   const setArchived = (value: boolean) =>
-    changeList({ archived: String(value), offset: "" });
+    changeList({ archived: String(value), offset: "", record: "" });
   const setOffset = (value: number) =>
-    changeList({ offset: value ? String(value) : "" });
+    changeList({ offset: value ? String(value) : "", record: "" });
   const records = useQuery({
     queryKey: [...studyKeys.records(scope.topicId), showArchived, kind, offset],
     queryFn: ({ signal }) =>
@@ -86,29 +85,60 @@ export function ArgumentsPage() {
     staleTime: 30_000,
   });
   const cache = useQueryClient();
-  const [source, setSource] = useState("");
+
   const archive = useMutation({
     mutationFn: (record: StudyRecord) =>
       studies.updateRecord(record.id, {
         expected_version: record.version,
         archived: !record.archived,
       }),
-    onSuccess: () =>
+    onSuccess: (record) => {
+      cache.setQueryData(["studies", "record", record.id], record);
       void cache.invalidateQueries({
         queryKey: studyKeys.records(scope.topicId),
-      }),
+      });
+    },
   });
   const items = records.data?.items ?? [];
+  const requestedRecord = params.get("record");
+  const listedRecord = items.find((record) => record.id === requestedRecord);
+  const retainedRecord = useQuery({
+    queryKey: ["studies", "record", requestedRecord],
+    queryFn: ({ signal }) => studies.record(requestedRecord!, signal),
+    enabled:
+      !!requestedRecord &&
+      !listedRecord &&
+      !records.isPending &&
+      !!scope.topic.data,
+    retry: false,
+  });
+  const selected = requestedRecord
+    ? listedRecord ||
+      (retainedRecord.data?.topic_id === scope.topicId
+        ? retainedRecord.data
+        : undefined)
+    : items[0];
+  const source =
+    !editing && selected?.source_refs.includes(params.get("source") || "")
+      ? params.get("source") || ""
+      : "";
+  function setSource(value: string) {
+    const next = new URLSearchParams(params);
+    if (selected) next.set("record", selected.id);
+    if (value) next.set("source", value);
+    else next.delete("source");
+    setParams(next);
+  }
+
   useEffect(() => {
     setEditing(null);
-    setSource("");
   }, [scope.topicId]);
   return (
     <section className="study-page">
       <header className="study-page-heading">
         <div>
           <p className="study-eyebrow">研究资料</p>
-          <h1>论据丛</h1>
+          <h1>研究记录</h1>
           <p>将选材与使用判断整理在一起，个人解释与原文依据分别保留。</p>
         </div>
         <TopicChooser scope={scope} />
@@ -160,53 +190,98 @@ export function ArgumentsPage() {
               新建{kind === "all" ? "记录" : recordLabels[kind]}
             </Button>
           </div>
-          {editing && (
-            <RecordEditor
-              key={`${scope.topicId}:${editing === "new" ? "new" : editing.id}`}
-              topic={scope.topic.data}
-              record={editing === "new" ? undefined : editing}
-              kind={kind === "all" ? "note" : kind}
-              onSaved={() => {
-                setEditing(null);
-                setOffset(0);
-                void cache.invalidateQueries({
-                  queryKey: studyKeys.records(scope.topicId),
-                });
-              }}
-              onCancel={() => setEditing(null)}
-            />
-          )}
-          {records.isError ? (
-            <StudyErrorState
-              error={records.error}
-              retry={() => void records.refetch()}
-            />
-          ) : records.isPending ? (
-            <p role="status">正在读取个人记录…</p>
-          ) : items.length ? (
-            <div className="study-record-grid">
-              {items.map((record) => (
-                <article key={record.id} className="study-record">
+          <div className="study-record-workspace" data-source={!!source}>
+            <div className="study-record-index">
+              {records.isError ? (
+                <StudyErrorState
+                  error={records.error}
+                  retry={() => void records.refetch()}
+                />
+              ) : records.isPending ? (
+                <p role="status">正在读取个人记录…</p>
+              ) : items.length ? (
+                <nav className="study-record-list" aria-label="研究记录清单">
+                  {items.map((record) => (
+                    <button
+                      key={record.id}
+                      className="study-record-list-item"
+                      aria-pressed={
+                        selected?.id === record.id && editing !== "new"
+                      }
+                      onClick={() => {
+                        changeList({ record: record.id });
+                        setEditing(null);
+                      }}
+                    >
+                      <span className="study-badge">
+                        {recordLabels[record.kind]}
+                      </span>
+                      <strong>{record.title}</strong>
+                      <span className="study-record-excerpt">
+                        {record.text.slice(0, 100)}
+                      </span>
+                      <small>
+                        {record.source_refs.length} 份依据 · v{record.version}
+                      </small>
+                    </button>
+                  ))}
+                </nav>
+              ) : (
+                <div className="study-empty">
+                  <h2>此范围还没有记录</h2>
+                  <p>可以先记下问题、札记或一条论据，再补充来源与使用限制。</p>
+                </div>
+              )}
+            </div>
+            <section className="study-record-detail" aria-label="当前研究记录">
+              {editing ? (
+                <RecordEditor
+                  key={`${scope.topicId}:${editing === "new" ? "new" : editing.id}`}
+                  topic={scope.topic.data}
+                  record={editing === "new" ? undefined : editing}
+                  kind={kind === "all" ? "note" : kind}
+                  onSaved={(saved) => {
+                    setEditing(null);
+                    cache.setQueryData(["studies", "record", saved.id], saved);
+                    changeList({
+                      record: saved.id,
+                      ...(editing === "new" ? { offset: "" } : {}),
+                    });
+                    void cache.invalidateQueries({
+                      queryKey: studyKeys.records(scope.topicId),
+                    });
+                  }}
+                  onCancel={() => setEditing(null)}
+                />
+              ) : requestedRecord && retainedRecord.isError && !listedRecord ? (
+                <StudyErrorState
+                  error={retainedRecord.error}
+                  retry={() => void retainedRecord.refetch()}
+                />
+              ) : requestedRecord &&
+                retainedRecord.isPending &&
+                !listedRecord ? (
+                <p role="status">正在读取所选记录…</p>
+              ) : selected ? (
+                <article className="study-record" key={selected.id}>
                   <div className="study-detail-heading">
                     <span className="study-badge">
-                      {recordLabels[record.kind]} ·{" "}
-                      {record.origin === "ai_adopted"
+                      {recordLabels[selected.kind]} ·{" "}
+                      {selected.origin === "ai_adopted"
                         ? "采纳的 AI 建议"
                         : "个人记录"}
                     </span>
-                    <span>v{record.version}</span>
+                    <span>v{selected.version}</span>
                   </div>
-                  <h2>{record.title}</h2>
-                  <RenderedMarkdown markdown={record.text} />
-                  {record.limitations && (
-                    <div className="study-limitations">
-                      <strong>使用限制</strong>
-                      <p className="study-preserve">{record.limitations}</p>
-                    </div>
+                  <h2>{selected.title}</h2>
+                  {requestedRecord && !listedRecord && (
+                    <p className="study-muted">
+                      此记录通过返回链接打开，当前清单筛选和分页保留。
+                    </p>
                   )}
                   <div className="study-source-links">
-                    <AdoptedAnalysisLink record={record} />
-                    {record.source_refs.map((ref) => {
+                    <AdoptedAnalysisLink record={selected} />
+                    {selected.source_refs.map((ref) => {
                       const material = scope.topic.data!.materials.find(
                         (material) => material.id === ref,
                       );
@@ -218,10 +293,17 @@ export function ArgumentsPage() {
                       );
                     })}
                   </div>
-                  <div className="study-actions">
+                  <RenderedMarkdown markdown={selected.text} />
+                  {selected.limitations && (
+                    <div className="study-limitations">
+                      <strong>使用限制</strong>
+                      <p className="study-preserve">{selected.limitations}</p>
+                    </div>
+                  )}
+                  <div className="study-record-detail-actions">
                     <Button
                       variant="outline"
-                      onClick={() => setEditing(record)}
+                      onClick={() => setEditing(selected)}
                     >
                       编辑记录
                     </Button>
@@ -230,23 +312,41 @@ export function ArgumentsPage() {
                     >
                       去画布摆放
                     </Link>
-                    <Button
-                      variant="ghost"
-                      disabled={archive.isPending}
-                      onClick={() => archive.mutate(record)}
-                    >
-                      {record.archived ? "恢复记录" : "归档记录"}
-                    </Button>
+                    <details className="study-more-actions">
+                      <summary>更多操作</summary>
+                      <Button
+                        variant="ghost"
+                        disabled={archive.isPending}
+                        onClick={() => archive.mutate(selected)}
+                      >
+                        {selected.archived ? "恢复记录" : "归档记录"}
+                      </Button>
+                    </details>
                   </div>
                 </article>
-              ))}
-            </div>
-          ) : (
-            <div className="study-empty">
-              <h2>此范围还没有记录</h2>
-              <p>可以从一条论据开始，引用专题材料并记下其适用范围。</p>
-            </div>
-          )}
+              ) : (
+                <div className="study-empty">
+                  <p>
+                    {requestedRecord
+                      ? "此记录不属于当前专题，请从清单重新选择。"
+                      : "在左侧选择记录，或开始一条新的个人记录。"}
+                  </p>
+                </div>
+              )}
+            </section>
+            {source && (
+              <aside
+                className="study-record-proof"
+                aria-label="当前记录的原文依据"
+              >
+                <MaterialPreview
+                  topicId={scope.topicId}
+                  materialId={source}
+                  onClose={() => setSource("")}
+                />
+              </aside>
+            )}
+          </div>
           {archive.isError && <p role="alert">{archive.error.message}</p>}
           {records.data && (
             <nav className="study-actions" aria-label="个人记录分页">
@@ -272,13 +372,6 @@ export function ArgumentsPage() {
                 下一页记录
               </Button>
             </nav>
-          )}
-          {source && (
-            <MaterialPreview
-              topicId={scope.topicId}
-              materialId={source}
-              onClose={() => setSource("")}
-            />
           )}
         </>
       )}

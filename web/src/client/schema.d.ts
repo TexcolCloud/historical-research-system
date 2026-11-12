@@ -1430,6 +1430,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/studies/analyses/{analysis_id}/suggestions/{suggestion_id}/disposition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disposition */
+        post: operations["disposition_api_v2_studies_analyses__analysis_id__suggestions__suggestion_id__disposition_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/studies/preferences": {
         parameters: {
             query?: never;
@@ -1482,6 +1499,17 @@ export interface components {
             kind: "note" | "argument" | "thought";
             /** Title */
             title?: string | null;
+            /** Text */
+            text?: string | null;
+            /** Limitations */
+            limitations?: string | null;
+        };
+        /** AnalysisDisposition */
+        AnalysisDisposition: {
+            /** Expected Version */
+            expected_version: number;
+            /** Ignored */
+            ignored: boolean;
         };
         /** AnalysisPage */
         AnalysisPage: {
@@ -6287,6 +6315,11 @@ export interface components {
             issues?: string[];
             /** Adopted Record Id */
             adopted_record_id?: string | null;
+            /**
+             * Ignored
+             * @default false
+             */
+            ignored: boolean;
         };
         /** Version */
         Version: {
@@ -9488,6 +9521,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecordResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disposition_api_v2_studies_analyses__analysis_id__suggestions__suggestion_id__disposition_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: string;
+                suggestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalysisDisposition"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisResponse"];
                 };
             };
             /** @description Validation Error */

@@ -10,12 +10,15 @@ type SourceEvidence = {
 export default function EvidenceOriginal({
   evidence,
   selected,
+  offset = 0,
 }: {
   evidence: SourceEvidence[];
   selected?: string;
+  offset?: number;
 }) {
   // Proof IDs are card-local; the choice also binds the exact retained source.
   const located = evidence
+    .map((item, index) => ({ ...item, ordinal: index + offset + 1 }))
     .filter((item) => item.reading_target && item.pages.length)
     .map((item, index) => ({
       ...item,
@@ -65,9 +68,9 @@ export default function EvidenceOriginal({
                   value={current.sourceKey}
                   onChange={(event) => setChoice(event.target.value)}
                 >
-                  {located.map((item, index) => (
+                  {located.map((item) => (
                     <option value={item.sourceKey} key={item.sourceKey}>
-                      证据 {index + 1}
+                      证据 {item.ordinal}
                     </option>
                   ))}
                 </select>
@@ -93,6 +96,7 @@ export default function EvidenceOriginal({
               </label>
             </div>
             <OriginalPage
+              viewId={current.sourceKey}
               runId={current.reading_target!.run_id}
               page={page ?? current.reading_target!.physical_page}
             />

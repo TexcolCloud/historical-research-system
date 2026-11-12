@@ -79,7 +79,10 @@ export type StudyTimelineItem = ResearchTimelineItem | PersonalTimelineItem;
 export type StudyTimeline = Omit<Schemas["StudyTimelineResponse"], "items"> & {
   items: StudyTimelineItem[];
 };
-export type StudyAnalysisSuggestion = Schemas["VerifiedSuggestion"];
+export type StudyAnalysisSuggestion = Omit<
+  Schemas["VerifiedSuggestion"],
+  "ignored"
+> & { ignored?: boolean };
 export type StudyAnalysis = Omit<Schemas["AnalysisResponse"], "suggestions"> & {
   suggestions: StudyAnalysisSuggestion[];
   source_current?: boolean;

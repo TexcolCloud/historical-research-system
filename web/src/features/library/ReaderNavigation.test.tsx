@@ -191,13 +191,17 @@ test("drawer and query changes preserve source focus while following the same so
     .spyOn(Element.prototype, "scrollIntoView")
     .mockImplementation(() => {});
   setup(readingHref("book", target));
-  await screen.findByLabelText("正文定位位置");
+  const focus = await screen.findByLabelText("正文定位位置");
   scroll.mockClear();
   await userEvent.click(screen.getByRole("button", { name: "检索本书" }));
+  expect(screen.queryByRole("navigation", { name: "章节目录" })).toBeNull();
   await userEvent.type(screen.getByLabelText("检索本书正文"), "人物");
   await userEvent.click(screen.getByRole("button", { name: "查找" }));
   await screen.findByText(/未找到相关内容/);
   await userEvent.click(screen.getByRole("button", { name: "关闭检索" }));
+  expect(screen.getByLabelText("正文定位位置")).toBe(focus);
+  expect(screen.queryByRole("navigation", { name: "章节目录" })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "目录" }));
   expect(scroll).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("link", { name: /第二篇.*书内页/ }));
   await vi.waitFor(() => expect(scroll).toHaveBeenCalled());
@@ -234,6 +238,16 @@ test("an external-book citation returns to its originating book's research card"
   expect(link.getAttribute("href")).toBe(returnTo);
   await screen.findByLabelText("正文定位位置");
   expect(document.querySelectorAll("mark[data-reading-focus]")).toHaveLength(1);
+});
+
+test("a library card citation returns to its exact version-bound reading scene", async () => {
+  const returnTo =
+    "/library?view=cards&card=source-card&cardReadId=source-card&cardReadVersion=1&cardChapter=boundaries&cardEvidence=e05";
+  setup(readingHref("book", target, { returnTo }));
+  const link = await screen.findByRole("link", { name: "返回史料卡" });
+  expect(link.getAttribute("href")).toBe(returnTo);
+  expect(screen.queryByRole("link", { name: "返回目录" })).toBeNull();
+  await screen.findByLabelText("正文定位位置");
 });
 
 test.each([

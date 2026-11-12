@@ -114,11 +114,7 @@ test("located doubts highlight text, show source region, and require an explicit
       .querySelector("rect")
       ?.getAttribute("x"),
   ).toBe("0.2");
-  expect(
-    screen
-      .getByRole("button", { name: "提交本页并继续" })
-      .hasAttribute("disabled"),
-  ).toBe(true);
+  expect(screen.queryByRole("button", { name: "提交本页并继续" })).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "识别正确，保留" }));
   await waitFor(() => expect(put).toHaveBeenCalled());
   await waitFor(() =>

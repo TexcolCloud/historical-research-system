@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCanvasResources } from "./canvas-resources";
 import CanvasSession from "./canvas-session";
+import { TopicNavigation } from "./TopicNavigation";
 import "@xyflow/react/dist/style.css";
 import "./canvas.css";
 
@@ -29,16 +29,61 @@ export default function StudyCanvas({
   if (!resources.data) return <p role="status">正在打开专题画布…</p>;
   const { topic, canvas, canvases, records, recordPage, workspace, activeId } =
     resources.data;
+  const management = (
+    <div className="study-canvas-library-controls">
+      <label className="study-canvas-archive-filter">
+        <input
+          type="checkbox"
+          checked={resources.archived}
+          onChange={(event) => resources.setArchived(event.target.checked)}
+        />
+        查看已归档
+      </label>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void resources.createCanvas(newTitle);
+        }}
+      >
+        <label>
+          新画布名称
+          <input
+            aria-label="新画布名称"
+            value={newTitle}
+            maxLength={200}
+            onChange={(event) => setNewTitle(event.target.value)}
+          />
+        </label>
+        <Button disabled={resources.creating || topic.archived}>
+          创建画布
+        </Button>
+      </form>
+      <Button
+        variant="outline"
+        disabled={resources.creating || topic.archived}
+        onClick={() => importInput.current?.click()}
+      >
+        恢复备份
+      </Button>
+      <input
+        hidden
+        ref={importInput}
+        type="file"
+        accept=".json,application/json"
+        aria-label="恢复画布备份"
+        onChange={(event) => void resources.importBackup(event.currentTarget)}
+      />
+    </div>
+  );
   return (
     <section className="study-canvas-workspace" aria-label="专题研究画布">
+      <TopicNavigation
+        topicId={topicId}
+        topicTitle={topic.title}
+        active="canvas"
+      />
       <header className="study-canvas-context">
-        <Link
-          to={`/studies?topic=${encodeURIComponent(topicId)}`}
-          className="study-canvas-back"
-        >
-          <ArrowLeft size={16} />
-          {topic.title}
-        </Link>
+        <h1>关系画布</h1>
         <label>
           画布
           <select
@@ -59,51 +104,12 @@ export default function StudyCanvas({
             )}
           </select>
         </label>
-        <label className="study-canvas-archive-filter">
-          <input
-            type="checkbox"
-            checked={resources.archived}
-            onChange={(event) => resources.setArchived(event.target.checked)}
-          />
-          查看已归档
-        </label>
-        <details className="study-canvas-create">
-          <summary>新建画布</summary>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void resources.createCanvas(newTitle);
-            }}
-          >
-            <label>
-              画布名称
-              <input
-                aria-label="新画布名称"
-                value={newTitle}
-                maxLength={200}
-                onChange={(event) => setNewTitle(event.target.value)}
-              />
-            </label>
-            <Button disabled={resources.creating || topic.archived}>
-              创建画布
-            </Button>
-          </form>
-        </details>
-        <Button
-          variant="outline"
-          disabled={resources.creating || topic.archived}
-          onClick={() => importInput.current?.click()}
-        >
-          恢复备份
-        </Button>
-        <input
-          hidden
-          ref={importInput}
-          type="file"
-          accept=".json,application/json"
-          aria-label="恢复画布备份"
-          onChange={(event) => void resources.importBackup(event.currentTarget)}
-        />
+        {!canvas && (
+          <details className="study-canvas-tools">
+            <summary>画布管理</summary>
+            <div>{management}</div>
+          </details>
+        )}
       </header>
       {resources.createError && <p role="alert">{resources.createError}</p>}
       {resources.importNotice && (
@@ -133,6 +139,7 @@ export default function StudyCanvas({
           workspace={workspace}
           createCanvas={resources.createCanvas}
           onArchived={resources.onArchived}
+          management={management}
         />
       )}
     </section>

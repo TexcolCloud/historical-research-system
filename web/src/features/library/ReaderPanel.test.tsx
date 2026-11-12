@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -53,6 +53,7 @@ test("reads a complete logical chapter first and opens only its associated origi
   expect(
     screen.getByText("结构整理结果").closest(".reader-toolbar"),
   ).not.toBeNull();
+  await userEvent.click(screen.getByText("更多"));
   await userEvent.click(screen.getByText("结构整理结果"));
   expect(
     await screen.findByText("暂无可展示的结构关系，仍按原文阅读。"),
@@ -70,6 +71,56 @@ test("reads a complete logical chapter first and opens only its associated origi
     screen.getByRole("link", { name: "打开原 PDF" }).getAttribute("href"),
   ).toContain("original.pdf#page=7");
   vi.restoreAllMocks();
+});
+
+test("reading and comparison are stable modes while search uses a separate inspector", async () => {
+  const chapter = {
+    id: "chapter",
+    book_id: "book",
+    run_id: "run",
+    position: 0,
+    title: "第一章",
+    kind: "article",
+    pages: [7],
+    codepoints: 8,
+  };
+  respondWith((request) =>
+    request.url.includes("/reading-navigation")
+      ? { entries: [], state: "not_detected", version: 0, sha256: "" }
+      : request.url.includes("/review-pages/")
+        ? { page: 7, image: "/original-7.png" }
+        : new URL(request.url).pathname.includes("/books/")
+          ? [chapter]
+          : { ...chapter, text: "连续的章节正文", parts: [] },
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <ReaderPanel bookId="book" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await screen.findByText("连续的章节正文");
+  const modes = screen.getByRole("group", { name: "阅读模式" });
+  await userEvent.click(
+    within(modes).getByRole("button", { name: "对照原书" }),
+  );
+  await screen.findByAltText("PDF 第 7 页");
+  await userEvent.click(screen.getByRole("button", { name: "检索本书" }));
+  expect(
+    within(modes)
+      .getByRole("button", { name: "对照原书" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("complementary", { name: "本书检索侧栏" }),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByAltText("PDF 第 7 页")
+      .closest(".platform-reading-columns")
+      ?.classList.contains("single"),
+  ).toBe(false);
 });
 
 test("a search link opens its chapter instead of the first chapter", async () => {

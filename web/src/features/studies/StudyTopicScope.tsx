@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { studies, studyKeys } from "./api";
+import { TopicNavigation } from "./TopicNavigation";
 
 export function StudyErrorState({
   error,
@@ -41,10 +42,19 @@ export function useStudyTopic() {
     const next = new URLSearchParams(params);
     if (id) next.set("topic", id);
     else next.delete("topic");
-    next.delete("offset");
-    next.delete("analysis");
-    next.delete("selected");
-    next.delete("material_id");
+    for (const key of [
+      "offset",
+      "analysis",
+      "selected",
+      "material_id",
+      "record",
+      "source",
+      "suggestion",
+      "proof_material",
+      "evidence",
+      "proof",
+    ])
+      next.delete(key);
     setParams(next);
   }
   return { topicId, topics, topic, select };
@@ -63,36 +73,44 @@ export function TopicChooser({
       />
     );
   return (
-    <div className="study-topic-chooser">
-      <label>
-        研究专题
-        <select
-          aria-label="研究专题"
-          value={scope.topicId}
-          onChange={(event) => scope.select(event.target.value)}
-          disabled={scope.topics.isPending}
-        >
-          <option value="">
-            {scope.topics.isPending ? "正在读取专题…" : "选择研究专题"}
-          </option>
-          {scope.topics.data?.items.map((topic) => (
-            <option key={topic.id} value={topic.id}>
-              {topic.title}
+    <>
+      <div className="study-topic-chooser">
+        <label>
+          研究专题
+          <select
+            aria-label="研究专题"
+            value={scope.topicId}
+            onChange={(event) => scope.select(event.target.value)}
+            disabled={scope.topics.isPending}
+          >
+            <option value="">
+              {scope.topics.isPending ? "正在读取专题…" : "选择研究专题"}
             </option>
-          ))}
-          {scope.topic.data &&
-            !scope.topics.data?.items.some(
-              (topic) => topic.id === scope.topicId,
-            ) && (
-              <option value={scope.topicId}>{scope.topic.data.title}</option>
-            )}
-        </select>
-      </label>
-      {scope.topics.data &&
-        scope.topics.data.total > scope.topics.data.items.length && (
-          <Link to="/studies">查看全部 {scope.topics.data.total} 个专题</Link>
-        )}
-    </div>
+            {scope.topics.data?.items.map((topic) => (
+              <option key={topic.id} value={topic.id}>
+                {topic.title}
+              </option>
+            ))}
+            {scope.topic.data &&
+              !scope.topics.data?.items.some(
+                (topic) => topic.id === scope.topicId,
+              ) && (
+                <option value={scope.topicId}>{scope.topic.data.title}</option>
+              )}
+          </select>
+        </label>
+        {scope.topics.data &&
+          scope.topics.data.total > scope.topics.data.items.length && (
+            <Link to="/studies">查看全部 {scope.topics.data.total} 个专题</Link>
+          )}
+      </div>
+      {scope.topic.data && (
+        <TopicNavigation
+          topicId={scope.topicId}
+          topicTitle={scope.topic.data.title}
+        />
+      )}
+    </>
   );
 }
 

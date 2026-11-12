@@ -28,6 +28,8 @@ import {
 } from "./card-reading";
 import { isCardOnly, research, researchKeys } from "./api";
 import { useResearchPendingNavigation } from "./pending-navigation";
+import { useCardReadingPosition } from "./useCardReadingPosition";
+import "./research-reading.css";
 
 export default function SourceCardReader({
   card,
@@ -40,10 +42,10 @@ export default function SourceCardReader({
   const query = useQueryClient();
   const pendingNavigation = useResearchPendingNavigation();
   const [params, setParams] = useSearchParams();
-  const [selected, setSelected] = useState<string>();
-  const [activeChapter, setActiveChapter] = useState<string>("basic");
   const [editing, setEditing] = useState(false),
     [fullEditing, setFullEditing] = useState(false);
+  const { selected, activeChapter, selectChapter, selectEvidence } =
+    useCardReadingPosition(card.id, card.version, scope, !fullEditing);
   const [text, setText] = useState(card.summary);
   const returnFocus = useRef<HTMLButtonElement | null>(null);
   const returnChapter = useRef<string | undefined>(undefined);
@@ -91,8 +93,9 @@ export default function SourceCardReader({
   });
   function openEvidence(id: string, button: HTMLButtonElement) {
     returnFocus.current = button;
-    returnChapter.current = button.closest(".dossier-chapter")?.id;
-    setSelected(id);
+    const chapter = button.closest<HTMLElement>(".dossier-chapter");
+    returnChapter.current = chapter?.id;
+    selectEvidence(id, chapter?.dataset.cardChapter);
   }
   function refs(ids: string[]) {
     return (
@@ -132,6 +135,13 @@ export default function SourceCardReader({
           const next = new URLSearchParams(params);
           next.delete("card");
           next.delete("cardMode");
+          for (const key of [
+            "cardReadId",
+            "cardReadVersion",
+            "cardChapter",
+            "cardEvidence",
+          ])
+            next.delete(key);
           next.set("entity", item.entity_id || id);
           setParams(next);
         }}
@@ -146,10 +156,7 @@ export default function SourceCardReader({
     setParams(next, { replace: true });
   }
   function chapter(id: string) {
-    setActiveChapter(id);
-    document
-      .getElementById(`${scope}-${id}`)
-      ?.scrollIntoView?.({ block: "start" });
+    selectChapter(id);
   }
   function section(id: string, title: string, children: ReactNode) {
     return (
@@ -157,6 +164,7 @@ export default function SourceCardReader({
         id={`${scope}-${id}`}
         aria-label={title}
         className="dossier-chapter"
+        data-card-chapter={id}
       >
         <h2>{title}</h2>
         {children}
@@ -231,115 +239,11 @@ export default function SourceCardReader({
             : "阅读模式 · 一份完整文献，一张卡片"}
         </span>
       </div>
-      {checking && (
-        <section
-          className="research-human-decision dossier-review"
-          aria-label="人工决策"
-        >
-          <h2>核对与决定</h2>
-          {historical ? (
-            <p>历史记录保留原有判断，不能向旧来源提交当前决定。</p>
-          ) : (
-            <>
-              <CardReviewIssues card={card} renderEvidence={refs} />
-              {card.state === "human_accepted" ? (
-                <p>你的决定已保存，原有证据与版本继续保留。</p>
-              ) : card.state === "excluded" ? (
-                <p>此卡已排除，原有证据和版本继续保留。</p>
-              ) : card.state !== "pending" ? (
-                <p>已完成原文核验，引用前可继续核对原文与使用边界。</p>
-              ) : (
-                <>
-                  <p>
-                    请点引文对照原文或原图，再决定是否采用。模型核验结果不代表你的确认。
-                  </p>
-                  <p>
-                    人物、机构、地点、事件或引注需要改动时，请选择“修订完整卡片”；“修订提要”只修改提要。
-                  </p>
-                  {editing ? (
-                    <>
-                      <label htmlFor={`${scope}-summary`}>修订提要</label>
-                      <textarea
-                        id={`${scope}-summary`}
-                        value={text}
-                        onChange={(event) => setText(event.target.value)}
-                        rows={5}
-                        maxLength={60000}
-                      />
-                      <Button
-                        disabled={decision.isPending || !text.trim()}
-                        onClick={() =>
-                          decision.mutate({ action: "edit", text: text.trim() })
-                        }
-                      >
-                        保存修订并确认
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={decision.isPending}
-                        onClick={() => setEditing(false)}
-                      >
-                        取消修订
-                      </Button>
-                    </>
-                  ) : (
-                    <div className="research-decision-actions">
-                      <Button
-                        disabled={decision.isPending}
-                        onClick={() => decision.mutate({ action: "accept" })}
-                      >
-                        确认采用此卡
-                      </Button>
-                      <Button
-                        variant="outline"
-                        disabled={decision.isPending}
-                        onClick={() => {
-                          setText(card.summary);
-                          setEditing(true);
-                        }}
-                      >
-                        修订提要
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={decision.isPending}
-                        onClick={() => decision.mutate({ action: "reject" })}
-                      >
-                        排除此卡
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
-              <Button
-                variant="outline"
-                className="research-card-edit-control"
-                onClick={() => setFullEditing(true)}
-              >
-                修订完整卡片
-              </Button>
-            </>
-          )}
-          {decision.isPending && <p role="status">正在保存人工决定…</p>}
-          {pendingNavigation.notice && (
-            <p role="status">{pendingNavigation.notice}</p>
-          )}
-          {decision.isError && (
-            <p role="alert">
-              {decision.error.message}
-              <Button
-                variant="outline"
-                onClick={() =>
-                  void query.invalidateQueries({
-                    queryKey: researchKeys.card(card.id),
-                  })
-                }
-              >
-                重新读取当前卡片
-              </Button>
-              {editing && " 当前修订草稿仍保留，请对照新版本后再提交。"}
-            </p>
-          )}
+      {checking && !historical && (
+        <section className="dossier-review-context" aria-label="当前卡片核对">
+          <h2>本卡待核问题</h2>
+          <CardReviewIssues card={card} renderEvidence={refs} />
+          <p>从问题中的引文查看原文与原图，核对后在底部提交最终决定。</p>
         </section>
       )}
       <nav className="dossier-chapter-nav" aria-label="本卡章节">
@@ -483,7 +387,7 @@ export default function SourceCardReader({
               <Button
                 variant="ghost"
                 onClick={() => {
-                  setSelected(undefined);
+                  selectEvidence(undefined);
                   if (returnFocus.current?.isConnected) {
                     returnFocus.current.focus({ preventScroll: true });
                     returnFocus.current.scrollIntoView?.({ block: "nearest" });
@@ -510,10 +414,122 @@ export default function SourceCardReader({
             <EvidenceOriginal
               evidence={[selectedEvidence]}
               selected={selectedEvidence.id}
+              offset={selectedIndex}
             />
           </aside>
         )}
       </div>
+      {checking && (
+        <footer
+          role="region"
+          className="research-human-decision dossier-review"
+          aria-label="人工决策"
+        >
+          <h2>核对与决定</h2>
+          {historical ? (
+            <p>历史记录保留原有判断，不能向旧来源提交当前决定。</p>
+          ) : (
+            <>
+              {card.state === "human_accepted" ? (
+                <p>你的决定已保存，原有证据与版本继续保留。</p>
+              ) : card.state === "excluded" ? (
+                <p>此卡已排除，原有证据和版本继续保留。</p>
+              ) : card.state !== "pending" ? (
+                <p>已完成原文核验，引用前可继续核对原文与使用边界。</p>
+              ) : (
+                <>
+                  <p>
+                    请点引文对照原文或原图，再决定是否采用。模型核验结果不代表你的确认。
+                  </p>
+                  <p>
+                    人物、机构、地点、事件或引注需要改动时，请选择“修订完整卡片”；“修订提要”只修改提要。
+                  </p>
+                  {editing ? (
+                    <>
+                      <label htmlFor={`${scope}-summary`}>修订提要</label>
+                      <textarea
+                        id={`${scope}-summary`}
+                        value={text}
+                        onChange={(event) => setText(event.target.value)}
+                        rows={5}
+                        maxLength={60000}
+                      />
+                      <Button
+                        disabled={decision.isPending || !text.trim()}
+                        onClick={() =>
+                          decision.mutate({ action: "edit", text: text.trim() })
+                        }
+                      >
+                        保存修订并确认
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={decision.isPending}
+                        onClick={() => setEditing(false)}
+                      >
+                        取消修订
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="research-decision-actions">
+                      <Button
+                        disabled={decision.isPending}
+                        onClick={() => decision.mutate({ action: "accept" })}
+                      >
+                        确认采用此卡
+                      </Button>
+                      <Button
+                        variant="outline"
+                        disabled={decision.isPending}
+                        onClick={() => {
+                          setText(card.summary);
+                          setEditing(true);
+                        }}
+                      >
+                        修订提要
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={decision.isPending}
+                        onClick={() => decision.mutate({ action: "reject" })}
+                      >
+                        排除此卡
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+              <Button
+                variant="outline"
+                className="research-card-edit-control"
+                onClick={() => setFullEditing(true)}
+              >
+                修订完整卡片
+              </Button>
+            </>
+          )}
+          {decision.isPending && <p role="status">正在保存人工决定…</p>}
+          {pendingNavigation.notice && (
+            <p role="status">{pendingNavigation.notice}</p>
+          )}
+          {decision.isError && (
+            <p role="alert">
+              {decision.error.message}
+              <Button
+                variant="outline"
+                onClick={() =>
+                  void query.invalidateQueries({
+                    queryKey: researchKeys.card(card.id),
+                  })
+                }
+              >
+                重新读取当前卡片
+              </Button>
+              {editing && " 当前修订草稿仍保留，请对照新版本后再提交。"}
+            </p>
+          )}
+        </footer>
+      )}
     </article>
   );
 }

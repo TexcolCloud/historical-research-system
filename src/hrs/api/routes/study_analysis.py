@@ -11,6 +11,7 @@ from hrs.research.schemas import ResearchSourceHit
 from hrs.studies.analysis import AnalysisService
 from hrs.studies.analysis_schemas import (
     AnalysisAdoption,
+    AnalysisDisposition,
     AnalysisPage,
     AnalysisRequest,
     AnalysisResponse,
@@ -75,6 +76,18 @@ def cancel(service: ResearchDep, analysis_id: str, body: AnalysisVersion):
 @router.post("/analyses/{analysis_id}/adopt", response_model=RecordResponse)
 def adopt(service: ResearchDep, analysis_id: str, body: AnalysisAdoption):
     return AnalysisService(StudyService(service)).adopt(analysis_id, body)
+
+
+@router.post(
+    "/analyses/{analysis_id}/suggestions/{suggestion_id}/disposition",
+    response_model=AnalysisResponse,
+)
+def disposition(
+    service: ResearchDep, analysis_id: str, suggestion_id: str, body: AnalysisDisposition
+):
+    return AnalysisService(StudyService(service)).disposition(
+        analysis_id, suggestion_id, body.expected_version, ignored=body.ignored
+    )
 
 
 class Preferences(BaseModel):

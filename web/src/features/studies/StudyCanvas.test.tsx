@@ -173,6 +173,28 @@ function openCanvas(
   return fetch;
 }
 
+test("canvas navigation retains the same topic when opening timeline and records", async () => {
+  openCanvas(() => Response.json(canvas));
+  const navigation = await screen.findByRole("navigation", {
+    name: "专题内导航",
+  });
+  const timeline = Array.from(navigation.querySelectorAll("a")).find(
+    (link) => link.textContent === "时间线索",
+  );
+  expect(timeline?.getAttribute("href")).toBe("/timeline?topic=t");
+  expect(navigation.querySelector('[aria-current="page"]')?.textContent).toBe(
+    "关系画布",
+  );
+});
+
+test("infrequent backup controls belong to canvas management instead of the primary toolbar", async () => {
+  openCanvas(() => Response.json(canvas));
+  const backup = await screen.findByLabelText("恢复画布备份");
+  expect(backup.closest("details")?.querySelector("summary")?.textContent).toBe(
+    "画布管理",
+  );
+});
+
 test("placing a source saves a membership reference with the canvas version, without copying source text", async () => {
   const patches: Record<string, unknown>[] = [];
   openCanvas((body) => {
@@ -420,6 +442,7 @@ test("restored backups get a recognizable copy title and explain that personal r
       });
     },
   );
+  await userEvent.click(await screen.findByText("画布管理"));
   await screen.findByRole("button", { name: "恢复备份" });
   const file = new File(
     [JSON.stringify({ canvas: { title: "原有画布" } })],

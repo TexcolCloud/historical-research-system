@@ -17,6 +17,22 @@ const target = {
   image_sha256: "b".repeat(64),
 };
 describe("shared source-bound reading targets", () => {
+  it("accepts only the exact local library card view as a card return destination", () => {
+    const scene =
+      "/library?view=cards&card=owner&cardReadId=owner&cardReadVersion=1&cardChapter=boundaries&cardEvidence=e05";
+    expect(safeReaderReturn(scene, "book")).toBe(scene);
+    for (const invalid of [
+      "//library?view=cards&card=owner",
+      "/library/../outside?view=cards&card=owner",
+      "/library?view=books&card=owner",
+      "/library?view=cards",
+      "/library?view=cards&card=owner#outside",
+      "/library\\outside?view=cards&card=owner",
+    ])
+      expect(safeReaderReturn(invalid, "book")).toBe(
+        "/books/book?tab=reader&section=directory",
+      );
+  });
   it("returns to a study canvas with its selected material while rejecting path lookalikes", () => {
     const canvas =
       "/studies/topic-a/canvas?canvas=canvas-a&selected=material-a";

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useNavigate } from "react-router-dom";
@@ -139,6 +139,212 @@ function mount(
     </MemoryRouter>,
   );
 }
+
+test("returning from the original restores the selected quote and chapter only for its bound card version", async () => {
+  vi.spyOn(libraryApi, "readOriginalPage").mockResolvedValue(
+    "data:image/png;base64,AA==",
+  );
+  mount(
+    sourceCard(),
+    "/books/book?tab=research&card=whole-document&cardReadId=whole-document&cardReadVersion=2&cardChapter=core&cardEvidence=e75",
+  );
+  const drawer = await screen.findByRole("complementary", { name: "引文核对" });
+  expect(within(drawer).getByText("独立原文引句75")).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: /核心内容/ })
+      .getAttribute("aria-current"),
+  ).toBe("location");
+  const href = within(drawer)
+    .getByRole("link", { name: /阅读原文/ })
+    .getAttribute("href")!;
+  expect(new URLSearchParams(href.split("?")[1]).get("returnTo")).toContain(
+    "cardEvidence=e75",
+  );
+});
+
+test("a reading scene carried from a different card never selects its coincident local evidence ID", async () => {
+  mount(
+    sourceCard(),
+    "/books/book?tab=research&card=whole-document&cardReadId=other-card&cardReadVersion=2&cardChapter=core&cardEvidence=e75",
+  );
+  await screen.findByRole("heading", { name: "一份完整文献的题名" });
+  expect(screen.queryByRole("complementary", { name: "引文核对" })).toBeNull();
+  expect(
+    screen
+      .getByRole("button", { name: /基本资料/ })
+      .getAttribute("aria-current"),
+  ).toBe("location");
+});
+
+test("a scene from an older card version does not reopen a same-ID quote in the replacement", async () => {
+  mount(
+    sourceCard(),
+    "/books/book?tab=research&card=whole-document&cardReadId=whole-document&cardReadVersion=1&cardChapter=core&cardEvidence=e75",
+  );
+  await screen.findByRole("heading", { name: "一份完整文献的题名" });
+  expect(screen.queryByRole("complementary", { name: "引文核对" })).toBeNull();
+  expect(
+    screen
+      .getByRole("button", { name: /基本资料/ })
+      .getAttribute("aria-current"),
+  ).toBe("location");
+});
+
+test("the chapter indicator follows visible reading content after manual scrolling", async () => {
+  let notify:
+    | ((
+        entries: {
+          target: Element;
+          isIntersecting: boolean;
+          boundingClientRect: { top: number };
+        }[],
+      ) => void)
+    | undefined;
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(callback: NonNullable<typeof notify>) {
+        notify = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  mount();
+  const content = await screen.findByRole("region", { name: "核心内容" });
+  await act(async () =>
+    notify?.([
+      {
+        target: content,
+        isIntersecting: true,
+        boundingClientRect: { top: 130 },
+      },
+    ]),
+  );
+  expect(
+    screen
+      .getByRole("button", { name: /核心内容/ })
+      .getAttribute("aria-current"),
+  ).toBe("location");
+});
+
+test("opening evidence preserves its reading chapter through drawer scrolling and the library return route", async () => {
+  let notify:
+    | ((
+        entries: {
+          target: Element;
+          isIntersecting: boolean;
+          boundingClientRect: { top: number };
+        }[],
+      ) => void)
+    | undefined;
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(callback: NonNullable<typeof notify>) {
+        notify = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.spyOn(libraryApi, "readOriginalPage").mockResolvedValue(
+    "/source-page.png",
+  );
+  const card = sourceCard();
+  mount(
+    {
+      ...card,
+      dossier: {
+        ...card.dossier,
+        research_value: { ...sourceValue("研究价值"), evidence_ids: ["e75"] },
+      },
+    },
+    "/library?view=cards&card=whole-document",
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: /性质、价值与边界/ }),
+  );
+  await userEvent.click(
+    within(screen.getByRole("region", { name: "性质、价值与边界" })).getByRole(
+      "button",
+      { name: "证据 76" },
+    ),
+  );
+  const drawer = await screen.findByRole("complementary", { name: "引文核对" });
+  const core = screen.getByRole("region", { name: "核心内容" });
+  await act(async () =>
+    notify?.([
+      { target: core, isIntersecting: true, boundingClientRect: { top: 110 } },
+    ]),
+  );
+  const href = within(drawer)
+    .getByRole("link", { name: /阅读原文/ })
+    .getAttribute("href")!;
+  const returnTo = new URL(href, "http://local").searchParams.get("returnTo")!;
+  const scene = new URL(returnTo, "http://local");
+  expect(scene.pathname).toBe("/library");
+  expect(scene.searchParams.get("view")).toBe("cards");
+  expect(scene.searchParams.get("cardReadId")).toBe(card.id);
+  expect(scene.searchParams.get("cardReadVersion")).toBe(String(card.version));
+  expect(scene.searchParams.get("cardEvidence")).toBe("e75");
+  expect(scene.searchParams.get("cardChapter")).toBe("boundaries");
+  expect(
+    screen
+      .getByRole("button", { name: /性质、价值与边界/ })
+      .getAttribute("aria-current"),
+  ).toBe("location");
+  await userEvent.click(
+    screen.getByRole("button", { name: "关闭引文，返回阅读位置" }),
+  );
+  await act(async () =>
+    notify?.([
+      { target: core, isIntersecting: true, boundingClientRect: { top: 110 } },
+    ]),
+  );
+  expect(
+    screen
+      .getByRole("button", { name: /核心内容/ })
+      .getAttribute("aria-current"),
+  ).toBe("location");
+});
+
+test("a quote opened directly from a scrolled chapter records that chapter rather than the last observed one", async () => {
+  vi.spyOn(libraryApi, "readOriginalPage").mockResolvedValue(
+    "/source-page.png",
+  );
+  mount(sourceCard(), "/library?view=cards&card=whole-document");
+  const boundaries = await screen.findByRole("region", {
+    name: "性质、价值与边界",
+  });
+  await userEvent.click(
+    within(boundaries).getAllByRole("button", { name: "证据 1" })[0],
+  );
+  const drawer = await screen.findByRole("complementary", { name: "引文核对" });
+  const href = within(drawer)
+    .getByRole("link", { name: /阅读原文/ })
+    .getAttribute("href")!;
+  const returnTo = new URL(href, "http://local").searchParams.get("returnTo")!;
+  expect(
+    new URL(returnTo, "http://local").searchParams.get("cardChapter"),
+  ).toBe("boundaries");
+});
+
+test("the final human decision follows the source reading workspace rather than preceding its evidence", async () => {
+  mount();
+  await userEvent.click(
+    await screen.findByRole("button", { name: "核对本卡" }),
+  );
+  const reading = screen.getByRole("region", { name: "核心内容" });
+  const decision = screen.getByRole("region", { name: "人工决策" });
+  expect(
+    Boolean(
+      reading.compareDocumentPosition(decision) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    ),
+  ).toBe(true);
+});
 
 test("one complete document has chapter navigation and ordered H3 themes, with evidence and human actions outside default reading", async () => {
   mount();

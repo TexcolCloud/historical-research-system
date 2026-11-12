@@ -22,6 +22,7 @@ export function TopicTimelinePage() {
   const navigate = useNavigate();
   const basis =
     params.get("date_basis") === "formation" ? "formation" : "event";
+  const [draftBasis, setBasis] = useState(basis);
   const offset = Math.max(
     0,
     Math.min(2_000_000_000, Number(params.get("offset")) || 0),
@@ -35,7 +36,6 @@ export function TopicTimelinePage() {
   const [editing, setEditing] = useState<StudyRecord | "new" | null>(null);
   useEffect(() => {
     setEditing(null);
-    setMaterial("");
   }, [scope.topicId]);
   const selectedId = params.get("selected") || "";
   const filters = {
@@ -47,6 +47,26 @@ export function TopicTimelinePage() {
     offset,
     limit: 20,
   } as const;
+  useEffect(() => {
+    setBasis(basis);
+    setStart(filters.date_from);
+    setEnd(filters.date_to);
+    setUndated(filters.include_undated);
+    setMaterial(filters.material_id);
+  }, [
+    scope.topicId,
+    basis,
+    filters.date_from,
+    filters.date_to,
+    filters.include_undated,
+    filters.material_id,
+  ]);
+  const filtersChanged =
+    draftBasis !== basis ||
+    start !== filters.date_from ||
+    end !== filters.date_to ||
+    includeUndated !== filters.include_undated ||
+    material !== filters.material_id;
   const cache = useQueryClient();
   const timeline = useQuery({
     queryKey: ["studies", "timeline", scope.topicId, filters],
@@ -111,6 +131,7 @@ export function TopicTimelinePage() {
             onSubmit={(event) => {
               event.preventDefault();
               change({
+                date_basis: draftBasis,
                 date_from: start,
                 date_to: end,
                 undated: String(includeUndated),
@@ -124,13 +145,11 @@ export function TopicTimelinePage() {
               日期依据
               <select
                 aria-label="日期依据"
-                value={basis}
+                value={draftBasis}
                 onChange={(event) =>
-                  change({
-                    date_basis: event.target.value,
-                    offset: "",
-                    selected: "",
-                  })
+                  setBasis(
+                    event.target.value === "formation" ? "formation" : "event",
+                  )
                 }
               >
                 <option value="event">材料叙述的事项日期</option>
@@ -181,7 +200,18 @@ export function TopicTimelinePage() {
             <Button type="submit" variant="outline">
               应用时间筛选
             </Button>
+            {filtersChanged && <span role="status">筛选条件尚未应用</span>}
           </form>
+          <p className="study-filter-status">
+            当前生效：
+            {basis === "formation" ? "文献形成日期" : "材料叙述的事项日期"}
+            {filters.date_from && ` · 从 ${filters.date_from}`}
+            {filters.date_to && ` · 至 ${filters.date_to}`}
+            {filters.material_id
+              ? ` · ${scope.topic.data.materials.find((material) => material.id === filters.material_id)?.title || "选定材料"}`
+              : " · 全部专题材料"}
+            {filters.include_undated ? " · 包含未定年" : " · 仅已定年"}
+          </p>
           {basis === "formation" && (
             <p className="study-chronology-notice">
               文献形成日期不代表材料叙述的事项发生日期。
@@ -273,7 +303,12 @@ export function TopicTimelinePage() {
                                   " · 日期有争议"}
                               </p>
                             )}
-                            <EventNature value={entry} />
+                            {(entry.item_kind === "event" ||
+                              (entry.item_kind === "personal" &&
+                                entry.event_status &&
+                                entry.event_status !== "unknown")) && (
+                              <EventNature value={entry} />
+                            )}
                             <p>
                               {entry.description.length > 300
                                 ? `${entry.description.slice(0, 300)}…`
@@ -328,7 +363,6 @@ export function TopicTimelinePage() {
               )}
             </div>
             <aside className="study-timeline-side">
-              <EraHelper />
               {item && (
                 <div className="study-timeline-proof" key={item.id}>
                   {item.item_kind === "personal" ? (
@@ -360,6 +394,16 @@ export function TopicTimelinePage() {
                   )}
                 </div>
               )}
+              {!item && (
+                <div className="study-timeline-proof study-empty">
+                  <h2>查看当前线索依据</h2>
+                  <p>选择左侧线索，在此对照来源与日期表述。</p>
+                </div>
+              )}
+              <details className="study-era-disclosure">
+                <summary>纪年查阅工具</summary>
+                <EraHelper />
+              </details>
             </aside>
           </div>
         </>

@@ -39,7 +39,11 @@ def public_analysis(job):
     )
     value = {key: deepcopy(job[key]) for key in fields if key in job}
     value["suggestions"] = [
-        {**suggestion, "adopted_record_id": job.get("adoptions", {}).get(suggestion["id"])}
+        {
+            **suggestion,
+            "adopted_record_id": job.get("adoptions", {}).get(suggestion["id"]),
+            "ignored": job.get("ignored", {}).get(suggestion["id"], False),
+        }
         for suggestion in job.get("suggestions", [])
     ]
     return value
@@ -145,6 +149,31 @@ class AnalysisService:
             release_workers(self.store, saved)
             return public_analysis(saved)
 
+    def disposition(self, job_id, suggestion_id, expected_version, *, ignored):
+        """A personal viewing decision never rewrites a machine suggestion or its checks."""
+        with self.store.transaction():
+            job = self.store.read("analysis", job_id)
+            if job["state"] != "ready":
+                raise ServiceError(409, "分析尚未完成，请等待结果后再整理建议。")
+            if not any(item["id"] == suggestion_id for item in job["suggestions"]):
+                raise ServiceError(404, "当前分析中没有这条建议。")
+            if expected_version > job["version"]:
+                raise ServiceError(409, "分析版本无效，请重新读取。")
+            if ignored and suggestion_id in job.get("adoptions", {}):
+                raise ServiceError(409, "已采纳的建议保留采纳记录；可在研究记录中归档。")
+            decisions = job.get("ignored", {})
+            if decisions.get(suggestion_id, False) == ignored:
+                return public_analysis(job)
+            if expected_version != job["version"]:
+                raise ServiceError(409, "建议状态已变化，请重新读取后再操作。")
+            saved = self.store.save(
+                "analysis",
+                job_id,
+                {"ignored": {**decisions, suggestion_id: ignored}},
+                expected_version=job["version"],
+            )
+            return public_analysis(saved)
+
     def adopt(self, job_id, request):
         job = self.store.read("analysis", job_id)
         if job["state"] != "ready":
@@ -156,6 +185,8 @@ class AnalysisService:
         if adopted_id:
             # A lost HTTP response can be retried after the source receives a later revision.
             return self.store.read("record", adopted_id)
+        if job.get("ignored", {}).get(request.suggestion_id, False):
+            raise ServiceError(409, "这条建议已忽略，请先恢复后再采纳。")
         refs = list(dict.fromkeys(r["material_id"] for r in suggestion["evidence_refs"]))
         frozen = {
             source["id"]: source
@@ -181,8 +212,12 @@ class AnalysisService:
                 {
                     "kind": request.kind,
                     "title": request.title or suggestion["title"],
-                    "text": suggestion["text"],
-                    "limitations": suggestion["limitations"],
+                    "text": request.text if request.text is not None else suggestion["text"],
+                    "limitations": (
+                        request.limitations
+                        if request.limitations is not None
+                        else suggestion["limitations"]
+                    ),
                     "source_refs": refs,
                 },
                 origin="ai_adopted",

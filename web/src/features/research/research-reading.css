@@ -1,0 +1,101 @@
+.research-editor-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 20px -20px -20px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+.research-editor-actions > p {
+  flex: 1 0 100%;
+  margin: 0;
+  font: 14px/1.5 var(--font-ui);
+  color: var(--muted-foreground);
+}
+.research-editor-actions button {
+  min-height: 38px;
+  font-size: 14px;
+}
+.research-editor-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 12px;
+}
+.research-editor-groups button {
+  min-height: 36px;
+  padding-inline: 10px;
+  font-size: 14px;
+}
+.research-editor-section {
+  display: grid;
+  gap: 16px;
+  scroll-margin-top: 100px;
+  padding-block: 10px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.research-editor-section > h4 {
+  margin: 0;
+  font: 600 18px/1.5 var(--font-title);
+}
+.dossier-review-context {
+  padding: 16px 24px;
+  background: var(--warning-surface);
+  border-bottom: 1px solid var(--border);
+}
+.dossier-review-context > h2 {
+  margin: 0 0 10px;
+  font: 600 18px/1.5 var(--font-title);
+}
+.dossier-review-context > p {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+.dossier-document > footer.dossier-review {
+  position: sticky;
+  bottom: 0;
+  z-index: 8;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 12px 24px;
+  box-shadow: 0 -4px 18px #00000008;
+}
+.dossier-document > footer.dossier-review > h2 {
+  font: 600 16px/1.5 var(--font-ui);
+  margin: 0 0 6px;
+}
+.dossier-document > footer.dossier-review p {
+  margin-block: 4px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.dossier-document > footer.dossier-review button,
+.dossier-mode-bar button {
+  min-height: 36px;
+  font-size: 14px;
+}
+.dossier-mode-bar > span {
+  font-size: 13px;
+}
+.dossier-chapter-nav button {
+  min-height: 34px;
+  font-size: 14px;
+}
+.dossier-chapter-nav button span {
+  font-size: 12px;
+  opacity: 1;
+}
+.dossier-evidence-toolbar button {
+  min-height: 36px;
+  font-size: 13px;
+}
+.dossier-chapter p {
+  font-size: 17px;
+  line-height: 1.85;
+}

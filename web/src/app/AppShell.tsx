@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation, useMatch } from "react-router-dom";
 import {
   CloudCheck,
   Upload,
@@ -7,16 +7,13 @@ import {
   LayoutDashboard,
   Search,
   Library,
-  NotebookPen,
   FolderOpen,
-  Network,
-  History,
-  Sparkles,
+  ClipboardCheck,
   Settings,
   ScrollText,
 } from "lucide-react";
 import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents.ts";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "@/client/api.ts";
 import { RuntimeScopeContext, type RuntimeScope } from "./runtime-scope.ts";
 const UploadPanel = lazy(() => import("@/features/uploads/UploadPanel.tsx"));
@@ -25,31 +22,18 @@ import { Button } from "@/components/ui/button.tsx";
 import { studyRequest } from "@/features/studies/api";
 import "@/styles/study-shell.css";
 import type { LucideIcon } from "lucide-react";
+import { useWorkOverview } from "@/features/studies/work-overview";
+import { rememberResumeWork } from "./workspace-resume";
 
 const sections: { group: string; links: [string, string, LucideIcon][] }[] = [
   {
-    group: "研究资料",
-    links: [
-      ["仪表盘", "/dashboard", LayoutDashboard],
-      ["全文检索", "/search", Search],
-      ["史料集", "/library", Library],
-      ["论据丛", "/arguments", NotebookPen],
-      ["研究专题", "/studies", FolderOpen],
-    ],
-  },
-  {
-    group: "专题研究",
-    links: [
-      ["专题工作台", "/workspace", Network],
-      ["时间线索", "/timeline", History],
-      ["AI 分析", "/analysis", Sparkles],
-    ],
-  },
-  {
     group: "工作空间",
     links: [
-      ["设置", "/settings", Settings],
-      ["更新日志", "/updates", ScrollText],
+      ["继续工作", "/dashboard", LayoutDashboard],
+      ["史料集", "/library", Library],
+      ["全文检索", "/search", Search],
+      ["研究专题", "/studies", FolderOpen],
+      ["待办", "/reviews", ClipboardCheck],
     ],
   },
 ];
@@ -64,9 +48,20 @@ export type WorkspaceContext = {
 
 export default function AppShell() {
   const location = useLocation();
-  const canvas = /^\/studies\/[^/]+\/canvas$/.test(location.pathname);
-  const [sidebarOpen, setSidebarOpen] = useState(!canvas);
-  useEffect(() => setSidebarOpen(!canvas), [canvas]);
+  const query = useQueryClient();
+  const canvasMatch = useMatch("/studies/:topicId/canvas");
+  const bookMatch = useMatch("/books/:bookId");
+  const canvas = !!canvasMatch;
+  const bookMode = new URLSearchParams(location.search).get("tab") ?? "";
+  const focused =
+    canvas ||
+    (location.pathname.startsWith("/books/") &&
+      ["review", "reader"].includes(bookMode));
+  const focusEntry = focused
+    ? `${location.pathname}:${canvas ? "canvas" : bookMode}`
+    : "normal";
+  const [sidebarOpen, setSidebarOpen] = useState(!focused);
+  useEffect(() => setSidebarOpen(!focused), [focused, focusEntry]);
   const preferences = useQuery({
     queryKey: ["studies", "preferences"],
     staleTime: 300000,
@@ -99,6 +94,52 @@ export default function AppShell() {
       : runtime.data.validation_scope === "workflow_only"
         ? "workflow_only"
         : "content";
+  const overview = useWorkOverview({
+    enabled: !!runtime.data?.workspace_id,
+    loadResearch: false,
+  });
+  const bookCountLabel =
+    overview.pendingBookCount === undefined
+      ? "资料待读取"
+      : `${overview.pendingBookCount}本资料`;
+  const researchCountLabel =
+    overview.pendingResearchCount === undefined
+      ? "研究待读取"
+      : `${overview.truncated ? "至少" : ""}${overview.pendingResearchCount}项研究`;
+  const topicId =
+    canvasMatch?.params.topicId ||
+    new URLSearchParams(location.search).get("topic");
+  const currentBook = overview.books.data?.find(
+    (book) => book.id === bookMatch?.params.bookId,
+  );
+  const resumeHref = location.pathname + location.search + location.hash;
+  useEffect(() => {
+    const workspace = runtime.data?.workspace_id;
+    if (!workspace) return;
+    const searchTerm = new URLSearchParams(location.search).get("q");
+    const labels: Record<string, string> = {
+      reader: "阅读",
+      review: "内容核对",
+      research: "史料卡",
+      progress: "处理进展",
+    };
+    const title = currentBook
+      ? `${labels[bookMode] || "书籍"}：${currentBook.title}`
+      : location.pathname === "/search" && searchTerm
+        ? `检索：${searchTerm.slice(0, 60)}`
+        : "";
+    if (!title) return;
+    const resume = rememberResumeWork(workspace, resumeHref, title);
+    if (resume) query.setQueryData(["platform", "resume", workspace], resume);
+  }, [
+    runtime.data?.workspace_id,
+    resumeHref,
+    currentBook?.title,
+    bookMode,
+    location.pathname,
+    location.search,
+    query,
+  ]);
   const [open, setOpen] = useState(false);
   const [started, setStarted] = useState(false);
   const [activity, setActivity] = useState<UploadActivity>({
@@ -138,38 +179,74 @@ export default function AppShell() {
                 const active =
                   location.pathname === path ||
                   (path === "/library" &&
-                    location.pathname.startsWith("/books/")) ||
-                  (path === "/workspace" && canvas);
+                    (location.pathname.startsWith("/books/") ||
+                      location.pathname === "/research")) ||
+                  (path === "/studies" &&
+                    (canvas ||
+                      [
+                        "/arguments",
+                        "/timeline",
+                        "/analysis",
+                        "/workspace",
+                      ].includes(location.pathname)));
                 return (
                   <Link
                     key={path}
-                    to={path}
+                    to={
+                      path === "/studies" && topicId
+                        ? `/studies?topic=${encodeURIComponent(topicId)}`
+                        : path
+                    }
+                    aria-label={label === "待办" ? "待办" : undefined}
+                    aria-describedby={
+                      label === "待办" ? "workspace-queue-count" : undefined
+                    }
+                    title={
+                      label === "待办"
+                        ? `${bookCountLabel} · ${researchCountLabel}`
+                        : undefined
+                    }
                     aria-current={active ? "page" : undefined}
                   >
                     <Glyph size={18} aria-hidden="true" />
                     {label}
+                    {label === "待办" && (
+                      <>
+                        {" "}
+                        <span
+                          className="study-navigation-count"
+                          id="workspace-queue-count"
+                          aria-hidden="true"
+                        >
+                          <span>{bookCountLabel}</span>
+                          <span>{researchCountLabel}</span>
+                        </span>
+                      </>
+                    )}
                   </Link>
                 );
               })}
             </div>
           ))}
         </nav>
-        <div className="study-sidebar-footer">
+        <nav className="study-sidebar-footer" aria-label="工作空间设置">
           <Link
-            to="/reviews"
-            aria-current={location.pathname === "/reviews" ? "page" : undefined}
-          >
-            待办
-          </Link>
-          <Link
-            to="/research"
+            to="/settings"
             aria-current={
-              location.pathname === "/research" ? "page" : undefined
+              location.pathname === "/settings" ? "page" : undefined
             }
           >
-            实体库
+            <Settings size={16} aria-hidden="true" />
+            设置
           </Link>
-        </div>
+          <Link
+            to="/updates"
+            aria-current={location.pathname === "/updates" ? "page" : undefined}
+          >
+            <ScrollText size={16} aria-hidden="true" />
+            更新日志
+          </Link>
+        </nav>
       </aside>
       <header className="platform-header">
         <Button
@@ -183,7 +260,7 @@ export default function AppShell() {
         <Link
           to="/dashboard"
           className="platform-brand"
-          aria-label="史料研究 · 仪表盘"
+          aria-label="史料研究 · 继续工作"
         >
           <span className="platform-seal" aria-hidden="true">
             史
