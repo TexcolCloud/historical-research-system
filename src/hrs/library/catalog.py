@@ -300,15 +300,14 @@ class Library:
             raise ServiceError(404, "章节尚未发布。")
         loader = chapter_content if reader else source_content
         chapter = {**row, **loader(self.settings, row["content"])}
-        from hrs.library.navigation_projection import book_navigation, book_source_structure
-        from hrs.library.structure import project_source_structure
+        from hrs.library.navigation_projection import book_navigation, chapter_source_structure
 
         rows = self.chapters(row["book_id"])
         run = get_run(self.engine, str(row["run_id"]))
         navigation = book_navigation(self.settings, run, rows)
         chapter["navigation"] = navigation
-        chapter["source_structure"] = project_source_structure(
-            book_source_structure(self.settings, run, rows), chapter["parts"]
+        chapter["source_structure"] = chapter_source_structure(
+            self.settings, run, rows, chapter["parts"]
         )
         if not reader:
             return chapter

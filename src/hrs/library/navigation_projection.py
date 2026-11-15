@@ -90,14 +90,26 @@ def book_navigation(settings, run, rows):
 
 def book_source_structure(settings, run, rows):
     """Read source facts separately from canonical chapter/card objects."""
+    return deepcopy(_source_structure_snapshot(settings, run, rows))
+
+
+def chapter_source_structure(settings, run, rows, parts):
+    """Project fresh chapter facts without copying the complete book snapshot."""
+    from hrs.library.structure import project_source_structure
+
+    return project_source_structure(_source_structure_snapshot(settings, run, rows), parts)
+
+
+def _source_structure_snapshot(settings, run, rows):
+    """Validate the complete cached snapshot; callers must only read its nested values."""
     result = run.get("result") or {}
     projection = result.get("codex_reading_projection") or {}
     reference = projection.get("source_structure")
     if not reference:
         return {"schema_version": 1, "structure_version": 0, "pages": []}
     body = projection_json(settings, reference)
-    snapshot = deepcopy(body["snapshot"])
-    snapshot["stale"] = not (
+    snapshot = body["snapshot"]
+    stale = not (
         body.get("publication_sha256") == result.get("codex_publication_sha256")
         and body.get("chapters_sha256") == chapter_signature(rows)
         and snapshot.get("source_sha256") == (run.get("source") or {}).get("sha256")
@@ -105,7 +117,7 @@ def book_source_structure(settings, run, rows):
         and snapshot.get("snapshot_sha256")
         == digest({k: v for k, v in snapshot.items() if k != "snapshot_sha256"})
     )
-    return snapshot
+    return {**snapshot, "stale": stale}
 
 
 def prepare_projection(objects, run, doc, rows, *, groups=None, previous=None):

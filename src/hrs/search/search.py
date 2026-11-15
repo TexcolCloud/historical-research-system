@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from hrs.library.catalog import Library
 from hrs.library.runs.outputs import Outputs, fingerprint
-from hrs.search.chunks import expand_hits, source_excerpt
+from hrs.search.chunks import expand_hits
 from hrs.search.compute import (
     EMBEDDING_IDENTITY,
     RetrievalCompute,
@@ -20,7 +20,13 @@ from hrs.search.compute import (
 )
 from hrs.search.directory_scope import DirectoryScope
 from hrs.search.inputs import ranking_windows
-from hrs.search.projection import SOURCE_SCOPES, prepare_projection, project_hit, source_ranges
+from hrs.search.projection import (
+    SOURCE_SCOPES,
+    prepare_projection,
+    project_hit,
+    source_excerpts,
+    source_ranges,
+)
 from hrs.search.ranking import (
     candidates_for_rerank,
     fuse,
@@ -191,6 +197,7 @@ class Search:
         try:
             with measured(metrics, "total_ms"):
                 chapter_cache = {}
+                excerpt = source_excerpts()
                 parts = multipart_queries(query) if semantic and decompose else []
                 if parts:
                     result = self.search_parts(
@@ -213,6 +220,7 @@ class Search:
                         source_scope=source_scope,
                         toc_entry_id=toc_entry_id,
                         directory_scope=directory_scope,
+                        excerpt=excerpt,
                     )
                 else:
                     result = self._search(
@@ -235,8 +243,11 @@ class Search:
                         chapter_ids,
                         directory_scope,
                         chapter_cache,
+                        excerpt=excerpt,
                     )
-                return self.reading_results(group_exact_results(result), chapters=chapter_cache)
+                return self.reading_results(
+                    group_exact_results(result), chapters=chapter_cache, excerpt=excerpt
+                )
         finally:
             logger.info("retrieval.search %s", json.dumps(metrics))
 
@@ -251,6 +262,7 @@ class Search:
         trace,
         *,
         directory_scope=None,
+        excerpt=None,
         **options,
     ):
         """Reserve evidence from each explicit clause using the existing search path."""
@@ -284,6 +296,7 @@ class Search:
             total_chars,
             metrics=metrics,
             source_scope=getattr(self, "_source_scope", "content"),
+            excerpt=excerpt,
         )
         if directory_scope:
             result = directory_scope.clip_results(result, self.library.source_chapter)
@@ -322,6 +335,7 @@ class Search:
         chapter_ids=None,
         directory_scope=None,
         chapter_cache=None,
+        excerpt=None,
     ):
         name = self.settings.opensearch_index
         if not self.client.indices.exists(index=name):
@@ -522,6 +536,7 @@ class Search:
                 diverse=diverse,
                 metrics=metrics,
                 source_scope=source_scope,
+                excerpt=excerpt,
             )
         metrics["context_assembly_ms"] = round(
             max(0, metrics["context_ms"] - metrics.get("chapter_load_ms", 0)), 3
@@ -531,11 +546,12 @@ class Search:
             result = directory_scope.clip_results(result, self.library.source_chapter)
         return result
 
-    def reading_results(self, hits, *, chapters=None):
+    def reading_results(self, hits, *, chapters=None, excerpt=None):
         """Resolve immutable result ranges through the reader's shared source contract."""
         from hrs.library.reading_locations import reading_target
 
         chapters = chapters if chapters is not None else {}
+        excerpt = source_excerpts() if excerpt is None else excerpt
         targets, navigation_links = {}, {}
 
         def target(chapter, start, end):
@@ -553,7 +569,7 @@ class Search:
             chapter = chapters[chapter_id]
             same_text = chapter["text"][hit["start"] : hit["end"]] == hit["text"]
             if same_text and 0 <= hit["start"] < hit["end"] <= len(chapter["text"]):
-                current = source_excerpt(chapter, hit["start"], hit["end"])
+                current = excerpt(chapter, hit["start"], hit["end"])
                 for field in (
                     "doc_kind",
                     "toc_path",

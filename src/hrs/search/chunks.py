@@ -17,8 +17,10 @@ from hrs.library.parsing import blocks as blocks
 from hrs.search.projection import (
     PROJECTION_RULE,
     prepare_projection,
+    primary_ranges,
     project_hit,
     source_blocks,
+    source_excerpts,
     source_relations,
     visible_text,
 )
@@ -339,6 +341,23 @@ def shared_table_scopes(text, structure, start, end):
     return scopes
 
 
+class _PendingCandidate:
+    """Keep source geometry cheap until merging or result budgets require context."""
+
+    def __init__(self, raw, materialize):
+        self.raw, self.materialize, self.value = raw, materialize, None
+
+    def ensure_context(self):
+        if self.value is None:
+            self.value = self.materialize()
+        return self.value
+
+    def merge(self, merged):
+        self.value = self.ensure_context()
+        self.value.update(merged)
+        self.raw = self.value
+
+
 def expand_hits(
     hits,
     load_chapter,
@@ -349,11 +368,13 @@ def expand_hits(
     diverse=False,
     metrics=None,
     source_scope="all",
+    excerpt=None,
 ):
     """Merge intersecting evidence and spend a separate, bounded context budget."""
     from hrs.search.ranking import diverse_order, group_exact_results
 
     metrics = metrics if metrics is not None else {}
+    excerpt = source_excerpts() if excerpt is None else excerpt
     purpose = "lexical" if source_scope == "all" else "vector"
     metrics.update(budget_rejected=0, duplicate_rejected=0)
     selected, chapters, structures, introductions, plans = [], {}, {}, {}, {}
@@ -405,40 +426,67 @@ def expand_hits(
                 )
                 if index is not None:
                     additions.extend(table_support(text, structure, index))
-        hit["context"].extend(
-            dict(source_excerpt(chapter, a, b), role=role)
-            for a, b, role in dict.fromkeys(additions)
+        primary, _ = primary_ranges(
+            chapter, hit["start"], hit["end"], purpose=purpose, source_scope=source_scope, plan=plan
         )
-        hit = project_hit(
-            chapter, hit, source_scope=source_scope, purpose=purpose, plan=plan, include_view=False
-        )
-        if not any(r["usage"] == "primary" for r in hit["ranges"]):
+        supplement_ranges = tuple(dict.fromkeys(additions))
+
+        def materialize(hit=hit, chapter=chapter, plan=plan, additions=supplement_ranges):
+            hit["context"].extend(
+                dict(excerpt(chapter, a, b), role=role) for a, b, role in dict.fromkeys(additions)
+            )
+            return project_hit(
+                chapter,
+                hit,
+                source_scope=source_scope,
+                purpose=purpose,
+                plan=plan,
+                include_view=False,
+                excerpt=excerpt,
+            )
+
+        candidate = _PendingCandidate(hit, materialize)
+        # Preserve errors/ignores for malformed external contexts even beyond the
+        # result limit; valid source ranges need no semantic context yet.
+        ranges = [(c.get("start"), c.get("end")) for c in hit.get("context", [])]
+        ranges.extend(additions_pair[:2] for additions_pair in additions)
+        if any(
+            type(a) is not int or type(b) is not int or not 0 <= a < b <= len(text)
+            for a, b in ranges
+        ):
+            candidate.ensure_context()
+        if not primary:
             continue
         overlaps = [
             h
             for h in selected
-            if h["chapter_id"] == chapter_id and hit["start"] < h["end"] and h["start"] < hit["end"]
+            if h.raw["chapter_id"] == chapter_id
+            and hit["start"] < h.raw["end"]
+            and h.raw["start"] < hit["end"]
         ]
         if overlaps:
-            start = min(hit["start"], *(h["start"] for h in overlaps))
-            end = max(hit["end"], *(h["end"] for h in overlaps))
+            hit = candidate.ensure_context()
+            overlap_hits = [h.ensure_context() for h in overlaps]
+            start = min(hit["start"], *(h["start"] for h in overlap_hits))
+            end = max(hit["end"], *(h["end"] for h in overlap_hits))
             supplements = {
                 (c["start"], c["end"]): c
-                for h in [hit, *overlaps]
+                for h in [hit, *overlap_hits]
                 for c in h.get("context", [])
-                if c["role"] != "neighbor" and not start <= c["start"] < c["end"] <= end
+                if c["role"] != "neighbor"
             }
             merged = project_hit(
                 chapter,
                 {
                     **hit,
-                    **source_excerpt(chapter, start, end),
+                    **excerpt(chapter, start, end),
                     "context": list(supplements.values()),
                 },
                 source_scope=source_scope,
                 purpose=purpose,
                 plan=plan,
                 include_view=False,
+                excerpt=excerpt,
             )
             merged_size = sum(
                 r["end"] - r["start"]
@@ -447,26 +495,24 @@ def expand_hits(
             )
             if merged_size <= min(context_chars, total_chars):
                 overlap = overlaps[0]
-                merged["score"] = max(hit["score"], *(h["score"] for h in overlaps))
-                overlap.update(merged)
+                merged["score"] = max(hit["score"], *(h["score"] for h in overlap_hits))
+                overlap.merge(merged)
                 for other in overlaps[1:]:
-                    overlap["context"].extend(other.get("context", []))
                     selected.remove(other)
                 continue
-            if any(h["start"] <= hit["start"] < hit["end"] <= h["end"] for h in overlaps):
+            if any(h["start"] <= hit["start"] < hit["end"] <= h["end"] for h in overlap_hits):
                 continue
-        selected.append({**hit, "context": list(hit.get("context", []))})
+        selected.append(candidate)
     retained, remaining, primary_texts = [], total_chars, set()
-    for hit in selected:
+    for candidate in selected:
+        hit = candidate.raw
         if len(primary_texts) >= limit and hit["text"] not in primary_texts:
             continue
+        hit = candidate.ensure_context()
         # Reserve source-linked constraints before spending on another primary hit.
         mandatory = {}
         for extra in hit["context"]:
-            if (
-                extra["role"] not in {"neighbor", "unassigned_context"}
-                and not hit["start"] <= extra["start"] < extra["end"] <= hit["end"]
-            ):
+            if extra["role"] not in {"neighbor", "unassigned_context"}:
                 mandatory[(extra["start"], extra["end"])] = extra
         primary_size = sum(r["end"] - r["start"] for r in hit["ranges"] if r["usage"] == "primary")
         duplicate_primary = hit["text"] in primary_texts
@@ -515,7 +561,7 @@ def expand_hits(
                     (max(b["start"], hit["end"]), b["end"]),
                 ]:
                     if start < end:
-                        additions.append(dict(source_excerpt(chapter, start, end), role="neighbor"))
+                        additions.append(dict(excerpt(chapter, start, end), role="neighbor"))
         additions = project_hit(
             chapter,
             {**hit, "context": additions},
@@ -523,13 +569,14 @@ def expand_hits(
             purpose=purpose,
             plan=plan,
             include_view=False,
+            excerpt=excerpt,
         )["context"]
         context, seen = [], set()
         occupied = [(r["start"], r["end"]) for r in hit["ranges"] if r["usage"] == "primary"]
         truncated = False
         for extra in additions:
             key = (extra["start"], extra["end"])
-            if key in seen or hit["start"] <= key[0] < key[1] <= hit["end"]:
+            if key in seen:
                 continue
             seen.add(key)
             ranges = [key]
@@ -549,7 +596,7 @@ def expand_hits(
                 truncated = True
                 continue
             for a, b in ranges:
-                context.append({**extra, **source_excerpt(chapter, a, b), "role": extra["role"]})
+                context.append({**extra, **excerpt(chapter, a, b), "role": extra["role"]})
                 occupied.append((a, b))
             available -= needed
             remaining -= needed
@@ -567,6 +614,8 @@ def expand_hits(
                 source_scope=source_scope,
                 purpose=purpose,
                 plan=plan,
+                excerpt=excerpt,
+                include_relations=False,
             )
         )
     return group_exact_results(output)

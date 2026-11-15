@@ -62,8 +62,8 @@ def test_source_view_keeps_canonical_fields_fresh_and_does_not_share_reader_cont
     monkeypatch.setattr(navigation_projection, "book_navigation", lambda *_: {"entries": []})
     monkeypatch.setattr(
         navigation_projection,
-        "book_source_structure",
-        lambda *_: {"schema_version": 1, "pages": []},
+        "chapter_source_structure",
+        lambda *_: {"schema_version": 1, "blocks": [], "relations": []},
     )
     chapter_content.cached_content.cache_clear()
     try:

@@ -131,6 +131,54 @@ def source_excerpt(chapter, start, end):
     }
 
 
+def source_excerpts():
+    """Reuse source envelopes only within one request over immutable chapter snapshots.
+
+    Each result has independent envelope containers. Source records and each
+    source's page list retain the established references to the supplied chapter.
+    No hit role, projection view, reading target, or storage validation is cached.
+    """
+    values, chars = {}, 0
+
+    def excerpt(chapter, start, end):
+        nonlocal chars
+        if not 0 <= start < end <= len(chapter["text"]):
+            raise ValueError("Invalid immutable chapter range")
+        # Python numeric keys compare equal across types; retain slicing behavior.
+        if type(start) is not int or type(end) is not int:
+            return source_excerpt(chapter, start, end)
+        key = (id(chapter), start, end)
+        cached = values.get(key)
+        if cached is None:
+            value = source_excerpt(chapter, start, end)
+            if len(values) >= 512 or end - start > 16384 or chars + end - start > 131072:
+                return value
+            template = MappingProxyType(
+                {
+                    **value,
+                    "sources": tuple(MappingProxyType(dict(s)) for s in value["sources"]),
+                    "pages": tuple(value["pages"]),
+                    "toc_path": tuple(value["toc_path"]),
+                    "printed_pages": tuple(
+                        MappingProxyType(dict(p)) for p in value["printed_pages"]
+                    ),
+                }
+            )
+            # Retain the snapshot so its Python identity cannot be recycled.
+            cached = values[key] = (chapter, template)
+            chars += end - start
+        value = cached[1]
+        return {
+            **value,
+            "sources": [dict(s) for s in value["sources"]],
+            "pages": list(value["pages"]),
+            "toc_path": list(value["toc_path"]),
+            "printed_pages": [dict(p) for p in value["printed_pages"]],
+        }
+
+    return excerpt
+
+
 def _classification(fact):
     role, layer = fact.get("role", "unknown"), fact.get("layer", "unknown")
     ready = fact.get("status") == "ready"
@@ -610,9 +658,9 @@ def _related_spans(edges, primary, context_key):
     return tuple(additions)
 
 
-def _context_excerpt(chapter, start, end, physical):
+def _context_excerpt(chapter, start, end, physical, excerpt):
     if physical:
-        return source_excerpt(chapter, start, end)
+        return excerpt(chapter, start, end)
     return {
         "chapter_id": str(chapter["id"]),
         "start": start,
@@ -690,14 +738,18 @@ def _qualified_context(primary, extras, plan):
     return result
 
 
-def _related_context(chapter, hit, plan, physical, primary):
+def _related_context(chapter, hit, plan, physical, primary, excerpt):
     primary_key = tuple((r["start"], r["end"]) for r in primary)
     extras = _qualified_context(primary_key, hit.get("context", []), plan)
     context_key = tuple((e["start"], e["end"], e.get("role", "context")) for e in extras)
     neighbors = [e for e in extras if e.get("role") in {"neighbor", "unassigned_context"}]
     extras = [e for e in extras if e.get("role") not in {"neighbor", "unassigned_context"}]
     extras.extend(
-        dict(_context_excerpt(chapter, start, end, physical), role=role, ownership_status="ready")
+        dict(
+            _context_excerpt(chapter, start, end, physical, excerpt),
+            role=role,
+            ownership_status="ready",
+        )
         for start, end, role in _related_spans(plan["edge_values"], primary_key, context_key)
     )
     return extras + neighbors
@@ -869,6 +921,19 @@ def projection_reserve(chapter, hit, count, limit, *, plan=None):
     return prefix
 
 
+def primary_ranges(chapter, start, end, *, purpose="vector", source_scope="all", plan=None):
+    """Share source eligibility between deferred planning and complete views."""
+    model = source_ranges(chapter, start, end, source_scope=source_scope, plan=plan)
+    primary = (
+        source_ranges(
+            chapter, start, end, source_scope=source_scope, include_furniture=True, plan=plan
+        )
+        if purpose in {"lexical", "display"} and source_scope == "all"
+        else model
+    )
+    return primary, bool(model)
+
+
 def project_hit(
     chapter,
     hit,
@@ -881,30 +946,20 @@ def project_hit(
     include_relations=True,
     plan=None,
     include_view=True,
+    excerpt=None,
 ):
     """Build a visible view, canonical fragments, and bounded nonduplicate context."""
     plan = prepare_projection(chapter) if plan is None else plan
+    excerpt = source_excerpt if excerpt is None else excerpt
     include_furniture = purpose in {"lexical", "display"} and source_scope == "all"
-    model_primary = source_ranges(
-        chapter, hit["start"], hit["end"], source_scope=source_scope, plan=plan
-    )
-    primary = (
-        source_ranges(
-            chapter,
-            hit["start"],
-            hit["end"],
-            source_scope=source_scope,
-            include_furniture=True,
-            plan=plan,
-        )
-        if include_furniture
-        else model_primary
+    primary, model_eligible = primary_ranges(
+        chapter, hit["start"], hit["end"], purpose=purpose, source_scope=source_scope, plan=plan
     )
     ranges = [dict(r, usage="primary") for r in primary]
     occupied = [(r["start"], r["end"]) for r in primary]
     context = []
     extras = (
-        _related_context(chapter, hit, plan, include_view, primary)
+        _related_context(chapter, hit, plan, include_view, primary, excerpt)
         if include_relations
         else hit.get("context", [])
     )
@@ -924,7 +979,7 @@ def project_hit(
                 context.append(
                     {
                         **extra,
-                        **_context_excerpt(chapter, a, b, include_view),
+                        **_context_excerpt(chapter, a, b, include_view, excerpt),
                         "role": extra.get("role", "context"),
                         "source_role": fact["role"],
                         "layer": fact["layer"],
@@ -954,7 +1009,7 @@ def project_hit(
         if len(scopes) == 1
         else ("mixed" if scopes else "furniture"),
         "projection_rule": PROJECTION_RULE,
-        "model_eligible": bool(model_primary),
+        "model_eligible": model_eligible,
         "doc_kind": "navigation"
         if scopes == {"navigation"}
         else ("metadata" if scopes == {"metadata"} else hit.get("doc_kind", "body")),

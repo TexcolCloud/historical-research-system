@@ -4,6 +4,8 @@ import json
 from copy import deepcopy
 from types import SimpleNamespace
 
+import pytest
+
 from hrs.library import navigation_projection as module
 from hrs.library.structure import project_source_structure
 from hrs.processing.hashing import digest
@@ -178,3 +180,126 @@ def test_sidecar_revisions_reuse_canonical_locators_and_bind_source_hashes(monke
     assert module.book_source_structure(SimpleNamespace(), run, [row])["stale"] is False
     run["source"] = {"sha256": "other-source"}
     assert module.book_source_structure(SimpleNamespace(), run, [row])["stale"] is True
+
+
+@pytest.fixture
+def retained_sidecar(monkeypatch):
+    document = source_document()
+    snapshot = structure_snapshot(document)
+    remote = snapshot["pages"][1]
+    text = document["pages"][1]["approved"]["markdown"]
+    remote["fragments"] = [
+        {
+            "fragment_id": "p2:body",
+            "role": "body",
+            "layer": "source",
+            "start": 0,
+            "end": len(text),
+            "text_sha256": digest(text),
+        }
+    ]
+    remote["relations"] = [
+        {
+            "kind": "reading_next",
+            "from_fragment_id": "p2:body",
+            "to_fragment_id": "p1:body",
+            "status": "unknown",
+            "evidence": "Retained incoming relation from another chapter",
+        }
+    ]
+    snapshot["snapshot_sha256"] = digest(
+        {key: value for key, value in snapshot.items() if key != "snapshot_sha256"}
+    )
+    rows = [{"id": "chapter", "pages": [1], "content": {"sha256": "canonical"}}]
+    body = {
+        "publication_sha256": "publication",
+        "chapters_sha256": module.chapter_signature(rows),
+        "snapshot": snapshot,
+    }
+    run = {
+        "source": document["source"],
+        "result": {
+            "codex_publication_sha256": "publication",
+            "codex_reading_projection": {
+                "source_structure": {"sha256": "sidecar"},
+                "structure_sha256": snapshot["snapshot_sha256"],
+            },
+        },
+    }
+    # Return the same retained frame, as the immutable S3 cache does on each read.
+    monkeypatch.setattr(module, "projection_json", lambda *_: body)
+    return run, rows, body, parts(document, 3)
+
+
+@pytest.mark.parametrize(
+    "change", [None, "publication", "chapters", "source", "snapshot", "facts", "missing"]
+)
+def test_chapter_structure_keeps_complete_json_parity_and_does_not_pollute_the_frame(
+    retained_sidecar, change
+):
+    run, rows, body, source_parts = retained_sidecar
+    if change == "publication":
+        run["result"]["codex_publication_sha256"] = "next-publication"
+    elif change == "chapters":
+        rows[0]["content"] = {"sha256": "next-chapters"}
+    elif change == "source":
+        run["source"] = {"sha256": "next-source"}
+    elif change == "snapshot":
+        run["result"]["codex_reading_projection"]["structure_sha256"] = "next-snapshot"
+    elif change == "facts":
+        body["snapshot"]["pages"][1]["coverage"][0]["reason"] = "Changed retained fact"
+    elif change == "missing":
+        run["result"]["codex_reading_projection"].pop("source_structure")
+    frame, canonical = deepcopy(body), deepcopy(source_parts)
+    full = module.book_source_structure(None, run, rows)
+    expected = project_source_structure(full, source_parts)
+    actual = module.chapter_source_structure(None, run, rows, source_parts)
+    assert json.dumps(actual, sort_keys=True) == json.dumps(expected, sort_keys=True)
+    assert body == frame and source_parts == canonical
+    assert "stale" not in body["snapshot"]
+    if change != "missing":
+        assert actual["relations"][-1] == {
+            "kind": "reading_next",
+            "status": "unknown",
+            "members": [{"start": 0, "end": 3, "fragment_id": "p1:body", "endpoint": "to"}],
+        }
+        assert {block["status"] for block in actual["blocks"]} == {
+            "ready" if change is None else "unknown"
+        }
+        actual["blocks"][0]["role"] = "caller edit"
+        actual["relations"][0]["members"][0]["start"] = 999
+        full["pages"][0]["fragments"][0]["role"] = "caller full-snapshot edit"
+        full["pages"][1]["relations"].clear()
+    assert module.chapter_source_structure(None, run, rows, source_parts) == expected
+    assert body == frame and source_parts == canonical
+    assert (
+        project_source_structure(module.book_source_structure(None, run, rows), source_parts)
+        == expected
+    )
+
+
+def test_chapter_structure_does_not_deepcopy_unselected_pages(retained_sidecar):
+    run, rows, body, source_parts = retained_sidecar
+
+    class UnselectedPage(dict):
+        def __deepcopy__(self, memo):
+            raise AssertionError("Chapter reads must not clone unselected book pages")
+
+    expected = project_source_structure(module.book_source_structure(None, run, rows), source_parts)
+    body["snapshot"]["pages"][1] = UnselectedPage(body["snapshot"]["pages"][1])
+    assert module.chapter_source_structure(None, run, rows, source_parts) == expected
+    assert "stale" not in body["snapshot"]
+
+
+def test_stale_chapter_read_cannot_poison_the_next_current_read(retained_sidecar):
+    run, rows, body, source_parts = retained_sidecar
+    original = deepcopy(body)
+    current = module.chapter_source_structure(None, run, rows, source_parts)
+    run["result"]["codex_publication_sha256"] = "different-publication"
+    assert {
+        block["status"]
+        for block in module.chapter_source_structure(None, run, rows, source_parts)["blocks"]
+    } == {"unknown"}
+    run["result"]["codex_publication_sha256"] = "publication"
+    assert module.chapter_source_structure(None, run, rows, source_parts) == current
+    assert body == original

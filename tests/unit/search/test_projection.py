@@ -1,5 +1,6 @@
 """Source facts govern every retrieval view; synthetic examples certify no source."""
 
+from copy import deepcopy
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from hrs.search.projection import (
     project_hit,
     slice_segments,
     source_excerpt,
+    source_excerpts,
     source_ranges,
     visible_segments,
 )
@@ -51,6 +53,257 @@ def hit(source, start=0, end=None, context=()):
         "book_title": "原书",
         "section_path": ["史料"],
     }
+
+
+def test_source_excerpt_reuse_keeps_fresh_containers_and_snapshot_identity(monkeypatch):
+    from hrs.search import projection
+
+    source = chapter("原始证据。")
+    source["navigation"] = {
+        "entries": [
+            {
+                "id": "first",
+                "level": 1,
+                "path": ["原始章"],
+                "target": {"physical_page": 9, "start": 0},
+            }
+        ],
+        "page_labels": [{"physical_page": 9, "printed_label": "一"}],
+    }
+    original, calls = projection.source_excerpt, []
+    monkeypatch.setattr(
+        projection, "source_excerpt", lambda *args: calls.append(args[1:]) or original(*args)
+    )
+    excerpt = source_excerpts()
+    expected = original(source, 0, 2)
+    first = excerpt(source, 0, 2)
+    first["sources"][0]["start"] = -1
+    first["printed_pages"][0]["label"] = "changed"
+    first["toc_path"].append("changed")
+    first["pages"].append(99)
+    first["role"] = "caller context"
+    assert excerpt(source, 0, 2) == expected and len(calls) == 1
+    assert excerpt(source, 0, 2)["sources"][0]["source_record"] is source["parts"][0]["source"]
+    other = deepcopy(source)
+    other["title"] = "另一个来源快照"
+    assert excerpt(other, 0, 2)["title"] == other["title"]
+    assert len(calls) == 2
+    with pytest.raises(ValueError, match="Invalid immutable chapter range"):
+        excerpt(source, -1, 2)
+    with pytest.raises(TypeError):
+        excerpt(source, 0.0, 2.0)
+    assert excerpt(source, False, 2)["start"] is False
+    excerpt(source, 1, 2)
+    assert excerpt(source, True, 2)["start"] is True
+    with pytest.raises(TypeError):
+        excerpt(source, 1.0, 2.0)
+    assert excerpt(source, 0, 2) == expected
+    source["navigation"]["page_labels"][0]["printed_label"] = "修订"
+    assert source_excerpts()(source, 0, 2)["printed_pages"][0]["label"] == "修订"
+
+
+@pytest.mark.parametrize("bound", ["entries", "range", "total"])
+def test_source_excerpt_reuse_bounds_only_control_reuse(monkeypatch, bound):
+    from hrs.search import projection
+
+    source = chapter("史" * 131074)
+    original, calls = projection.source_excerpt, []
+    monkeypatch.setattr(
+        projection, "source_excerpt", lambda *args: calls.append(args[1:]) or original(*args)
+    )
+    excerpt = source_excerpts()
+    if bound == "entries":
+        stored = [(i, i + 1) for i in range(512)]
+        uncached = (512, 513)
+    elif bound == "range":
+        stored, uncached = [(0, 1)], (1, 16386)
+    else:
+        stored = [(i * 16384, (i + 1) * 16384) for i in range(8)]
+        uncached = (131072, 131073)
+    for start, end in stored:
+        assert excerpt(source, start, end) == original(source, start, end)
+    assert excerpt(source, *stored[0]) == original(source, *stored[0])
+    assert len(calls) == len(stored)
+    for _ in range(2):
+        assert excerpt(source, *uncached) == original(source, *uncached)
+    assert len(calls) == len(stored) + 2
+
+
+def test_deferred_context_still_merges_a_later_overlap_beyond_the_group_limit():
+    source = chapter("甲乙丙丁戊己庚。\n\n独立段落。")
+    other = source["text"].index("独立")
+    rows = [hit(source, 0, 4), hit(source, other), hit(source, 2, 6)]
+    for row, score in zip(rows, (3, 2, 1), strict=True):
+        row["score"] = score
+    result = expand_hits(rows, lambda _: source, limit=1)
+    assert len(result) == 1 and (result[0]["start"], result[0]["end"]) == (0, 6)
+    assert result[0]["text"] == "甲乙丙丁戊己"
+
+
+def test_deferred_context_budget_rejection_leaves_room_for_a_later_fallback():
+    source = chapter("甲" * 20 + "\n\n短证据。")
+    first, later = hit(source, 0, 20), hit(source, 22)
+    first["score"], later["score"] = 2, 1
+    metrics = {}
+    result = expand_hits(
+        [first, later], lambda _: source, limit=1, context_chars=10, total_chars=10, metrics=metrics
+    )
+    assert len(result) == 1 and result[0]["text"] == "短证据。"
+    assert metrics["budget_rejected"] == 1
+
+
+def test_deferred_context_keeps_later_identical_text_at_each_source_position():
+    source = chapter("证据。\n\n另段。\n\n证据。")
+    second, last = source["text"].index("另段"), source["text"].rindex("证据")
+    rows = [hit(source, 0, 3), hit(source, second, second + 3), hit(source, last, last + 3)]
+    for row, score in zip(rows, (3, 2, 1), strict=True):
+        row["score"] = score
+    result = expand_hits(rows, lambda _: source, limit=1)
+    assert len(result) == 1
+    assert [(r["start"], r["end"]) for r in result[0]["occurrences"]] == [(0, 3), (last, last + 3)]
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_deferred_context_preserves_out_of_limit_malformed_range_errors_and_foreign_ignores(
+    foreign,
+):
+    source = chapter("首证。\n\n后证。")
+    first, later = hit(source, 0, 3), hit(source, 5)
+    first["score"], later["score"] = 2, 1
+    later["context"] = [
+        {
+            "chapter_id": str(uuid4()) if foreign else source["id"],
+            "start": len(source["text"]) + 1,
+            "end": len(source["text"]) + 2,
+            "role": "footnote",
+        }
+    ]
+    if foreign:
+        result = expand_hits([first, later], lambda _: source, limit=1)
+        control = expand_hits([first, {**later, "context": []}], lambda _: source, limit=1)
+        assert len(result) == 1 and result == control
+    else:
+        with pytest.raises(ValueError, match="Invalid immutable chapter range"):
+            expand_hits([first, later], lambda _: source, limit=1)
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_deferred_empty_primary_still_resolves_malformed_external_context(foreign):
+    text = "确认页眉"
+    source = chapter(text, [fact(text, text, "header")])
+    row = hit(
+        source,
+        context=[
+            {
+                "chapter_id": str(uuid4()) if foreign else source["id"],
+                "start": len(text) + 1,
+                "end": len(text) + 2,
+                "role": "footnote",
+            }
+        ],
+    )
+    if foreign:
+        assert expand_hits([row], lambda _: source, source_scope="content") == []
+    else:
+        with pytest.raises(ValueError, match="Invalid immutable chapter range"):
+            expand_hits([row], lambda _: source, source_scope="content")
+
+
+@pytest.mark.parametrize("noncontiguous", [False, True])
+@pytest.mark.parametrize("short", [False, True])
+def test_mandatory_metadata_holes_are_reserved_against_actual_primary_ranges(noncontiguous, short):
+    text = "ANBCM" if noncontiguous else "ABNM"
+    holes = [(1, 2), (4, 5)] if noncontiguous else [(2, 4)]
+    bodies = [(0, 1), (2, 4)] if noncontiguous else [(0, 2)]
+    source = chapter(
+        text,
+        [
+            {"start": a, "end": b, "role": role, "layer": "source", "status": "ready"}
+            for role, ranges in [("body", bodies), ("bibliography", holes)]
+            for a, b in ranges
+        ],
+    )
+    source["source_structure"]["relations"] = [
+        {
+            "kind": "note_of",
+            "status": "ready",
+            "members": [
+                {"start": a, "end": b, "endpoint": "from"},
+                {"start": bodies[i][0], "end": bodies[i][1], "endpoint": "to"},
+            ],
+        }
+        for i, (a, b) in enumerate(holes)
+    ]
+    budget = sum(b - a for a, b in bodies) if short else len(text)
+    result = expand_hits(
+        [hit(source)],
+        lambda _: source,
+        source_scope="content",
+        context_chars=budget,
+        total_chars=budget,
+    )
+    if short:
+        assert result == []
+    else:
+        assert len(result) == 1
+        assert [(c["start"], c["end"]) for c in result[0]["context"]] == holes
+        assert sum(r["end"] - r["start"] for r in result[0]["ranges"]) == budget
+
+
+def test_merge_retains_raw_qualifications_inside_a_metadata_hole():
+    source = chapter(
+        "ABXc",
+        [
+            {"start": a, "end": b, "role": role, "layer": "source", "status": "ready"}
+            for a, b, role in [(0, 2, "body"), (2, 3, "bibliography"), (3, 4, "body")]
+        ],
+    )
+    first = hit(source, 0, 3, context=[{**source_excerpt(source, 2, 3), "role": "footnote"}])
+    first["score"] = 2
+    result = expand_hits([first, hit(source, 1, 4)], lambda _: source, source_scope="content")
+    assert len(result) == 1 and (result[0]["start"], result[0]["end"]) == (0, 4)
+    assert "X" in result[0]["snippet"]
+    assert [(c["start"], c["end"]) for c in result[0]["context"]] == [(2, 3)]
+
+
+def test_final_render_keeps_a_budget_removed_unknown_note_out_of_the_result():
+    source = chapter("|地点|数量|\n|---|---|\n|甲|120|\n\n注：附近范围未知。")
+    row = next(c for c in retrieval_chunks(source, "原书") if c["kind"] == "table")
+    row["score"] = 1
+    budget = row["end"] - row["start"]
+    tight = expand_hits(
+        [row], lambda _: source, source_scope="content", context_chars=budget, total_chars=budget
+    )
+    assert tight and "附近范围未知" not in tight[0]["snippet"] and tight[0]["context_truncated"]
+    full = expand_hits([row], lambda _: source, source_scope="content")
+    assert full and "附近范围未知" in full[0]["snippet"] and "归属未定" in full[0]["snippet"]
+
+
+def test_multiple_overlap_merge_does_not_reserve_context_already_inside_merged_primary():
+    source = chapter("nABCOO")
+    source["source_structure"]["relations"] = [
+        {
+            "kind": "note_of",
+            "status": "ready",
+            "members": [
+                {"start": 0, "end": 1, "endpoint": "from"},
+                {"start": 4, "end": 6, "endpoint": "to"},
+            ],
+        }
+    ]
+    rows = [hit(source, a, b) for a, b in [(0, 2), (4, 6), (1, 5)]]
+    for row, score in zip(rows, (3, 2, 1), strict=True):
+        row["score"] = score
+    result = expand_hits(
+        rows, lambda _: source, source_scope="content", context_chars=6, total_chars=6
+    )
+    assert len(result) == 1 and result[0]["text"] == source["text"]
+    assert (
+        "".join(s["text"] for s in result[0]["snippet_segments"] if not s["synthetic"])
+        == source["text"]
+    )
+    assert result[0]["context"] == []
+    assert sum(r["end"] - r["start"] for r in result[0]["ranges"]) == 6
 
 
 def test_ready_furniture_is_model_excluded_but_raw_lexical_keeps_the_original():
@@ -583,6 +836,45 @@ def test_repeated_reading_targets_remain_independent_result_values():
     first["reading_target"]["anchor"] = "changed by caller"
     assert second["reading_target"]["anchor"] == original
     assert first["reading_targets"][0]["anchor"] == original
+
+
+def test_search_reuses_source_envelopes_within_each_current_request(monkeypatch):
+    from hrs.search import projection
+
+    source = chapter("同章重叠的正文证据。")
+    source["navigation"] = {"version": 1}
+    source["parts"][0]["source"]["image_sha256"] = "a" * 64
+    rows = [hit(source, 0, 5), hit(source, 3, len(source["text"]))]
+    search = object.__new__(Search)
+    search.settings = SimpleNamespace(opensearch_index="test")
+    search.client = SimpleNamespace(
+        indices=SimpleNamespace(exists=lambda **_: True),
+        search=lambda **_: {
+            "hits": {
+                "hits": [{"_id": row["id"], "_score": 1, "_source": deepcopy(row)} for row in rows]
+            }
+        },
+    )
+    loads, calls = [], []
+    search.library = SimpleNamespace(
+        source_chapter=lambda identity: loads.append(identity) or deepcopy(source),
+        toc_links=lambda _: [],
+    )
+    search.active_scope = lambda _: []
+    original = projection.source_excerpt
+    monkeypatch.setattr(
+        projection, "source_excerpt", lambda *args: calls.append(args) or original(*args)
+    )
+    first = search.search("正文证据", semantic=False)[0]
+    assert first["navigation_version"] == 1
+    source["navigation"]["version"] = 2
+    source["parts"][0]["source"]["image_sha256"] = "b" * 64
+    second = search.search("正文证据", semantic=False)[0]
+    assert second["navigation_version"] == 2
+    assert second["reading_target"]["image_sha256"] == "b" * 64
+    assert len(loads) == 2
+    full = [call for call in calls if call[1:] == (0, len(source["text"]))]
+    assert len(full) == 2 and full[0][0] is not full[1][0]
 
 
 def test_visible_cleaner_preserves_source_angle_brackets_and_does_not_normalize_names():
