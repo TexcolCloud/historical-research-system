@@ -102,7 +102,11 @@ export function TopicNavigation({
     <div className="study-workspace-navigation">
       <div className="study-topic-context" role="region" aria-label="当前专题">
         <span>当前专题</span>
-        <strong>{topicTitle || "研究专题"}</strong>
+        {selected === "materials" ? (
+          <h1>{topicTitle || "研究专题"}</h1>
+        ) : (
+          <strong>{topicTitle || "研究专题"}</strong>
+        )}
         <Link to="/studies">切换或管理专题</Link>
       </div>
       <nav className="study-topic-navigation" aria-label="专题内导航">

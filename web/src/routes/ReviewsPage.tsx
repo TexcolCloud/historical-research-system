@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, ClipboardCheck, CircleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { readBooks } from "@/client/api.ts";
 import { booksKey } from "@/hooks/events.ts";
@@ -26,11 +25,7 @@ export default function ReviewsPage() {
     <>
       <div className="platform-heading">
         <div>
-          <p className="platform-eyebrow">待你处理</p>
           <h1>待办</h1>
-          <p>
-            内容核对和处理异常按书籍集中显示，已通过的部分不会重复要求确认。
-          </p>
         </div>
         {books.data && (
           <span className="platform-list-count">
@@ -47,9 +42,7 @@ export default function ReviewsPage() {
         <p role="status">正在读取待办…</p>
       ) : !pending.length ? (
         <section className="platform-empty">
-          <ClipboardCheck size={36} />
           <h2>正文与目录暂无待办</h2>
-          <p>书籍核验发现问题后，会在这里列出；研究待办单独列在下方。</p>
           <Link to="/library">查看书籍进展</Link>
         </section>
       ) : (
@@ -60,11 +53,6 @@ export default function ReviewsPage() {
               key={book.id}
               data-state={book.state}
             >
-              {book.state === "failed" ? (
-                <CircleAlert size={24} />
-              ) : (
-                <ClipboardCheck size={24} />
-              )}
               <div>
                 <h2>
                   <Link to={bookWorkspaceHref(book)}>{book.title}</Link>
@@ -103,7 +91,6 @@ export default function ReviewsPage() {
                   )}
                 </div>
               </div>
-              <ArrowUpRight size={18} />
             </article>
           ))}
         </section>

@@ -61,13 +61,12 @@ export default function EntityLibrary({
           ) : (
             <>
               <h1>实体库</h1>
-              <p>按人物、机构、地点、文献和事件查看已核验卡片的来源记载。</p>
             </>
           )}
         </div>
         {!compact && (
           <Link className="research-source-link" to="/research?view=network">
-            关系与时间线 →
+            关系与时间线
           </Link>
         )}
       </div>

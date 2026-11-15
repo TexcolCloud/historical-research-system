@@ -17,7 +17,7 @@
   min-height: 0;
 }
 .book-workspace-review .book-heading h1 {
-  font-size: 22px;
+  font-size: 20px;
 }
 .review-workspace-intro {
   display: flex;
@@ -41,7 +41,7 @@
   gap: 0;
   align-items: stretch;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
   height: var(--review-available-height, 680px);
 }
@@ -53,7 +53,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--secondary);
+  background: var(--card);
   border-right: 1px solid var(--border);
 }
 .review-queue-panel > button {
@@ -63,7 +63,7 @@
   gap: 8px;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
-  font-size: 13px;
+  font-size: 12px;
 }
 .review-queue-panel > button > span {
   white-space: nowrap;
@@ -78,7 +78,7 @@
   align-content: start;
   padding: 12px 9px;
   flex: 1;
-  background: var(--secondary);
+  background: transparent;
   min-height: 0;
   overflow: auto;
 }
@@ -95,7 +95,7 @@
   width: 100%;
   min-height: 68px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 0;
   padding: 10px;
   text-align: left;
   color: inherit;
@@ -105,13 +105,13 @@
   background: var(--card);
 }
 .evidence-review-queue button[aria-current="true"] {
-  background: var(--card);
+  background: var(--secondary);
   border-color: var(--primary);
 }
 .evidence-review-queue strong,
 .evidence-review-queue small {
   display: block;
-  font-size: 13px;
+  font-size: 12px;
 }
 .evidence-review-queue strong {
   font-weight: 600;
@@ -147,7 +147,7 @@
   min-height: 0;
   overflow: hidden;
   border-left: 1px solid var(--border);
-  background: var(--secondary);
+  background: var(--background);
   padding: 0;
 }
 .evidence-review-session > aside:not(:has(.review-source-focus)) {
@@ -193,7 +193,7 @@
 }
 .review-page-preview .prose {
   font-family: var(--font-reading, serif);
-  font-size: 19px;
+  font-size: 18px;
   line-height: 1.95;
   overflow-wrap: anywhere;
 }
@@ -205,7 +205,7 @@
 .review-source-text pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 15px;
+  font-size: 14px;
 }
 .evidence-review-actions {
   grid-column: 1;
@@ -214,7 +214,7 @@
   overflow: auto;
   border-top: 1px solid var(--border);
   padding: 8px 16px;
-  background: var(--muted-surface);
+  background: transparent;
 }
 .evidence-review-actions button {
   min-height: 44px;
@@ -273,13 +273,18 @@
   color: inherit;
   background: transparent;
   font-family: var(--font-reading, serif);
-  font-size: 19px;
+  font-size: 18px;
   line-height: 1.7;
 }
 .review-observation {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--muted-foreground);
+}
+.review-doubt-reason {
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.7;
 }
 .review-observation summary,
 .review-machine-report > summary {
@@ -353,7 +358,7 @@
 }
 .review-edit-step .platform-markdown-source {
   font:
-    16px/1.8 ui-monospace,
+    14px/1.8 ui-monospace,
     monospace;
 }
 .review-text-link {
@@ -370,7 +375,7 @@
 }
 .review-page-complete h3 {
   margin: 0 0 8px;
-  font-size: 18px;
+  font-size: 14px;
   color: var(--primary);
 }
 .review-page-complete p {
@@ -443,7 +448,7 @@
 }
 .review-footer-state p {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
 }
 .review-footer-state small {
   display: block;
@@ -486,7 +491,7 @@
   justify-content: center;
   min-width: 24px;
   min-height: 32px;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 400;
   white-space: nowrap;
 }
@@ -500,7 +505,7 @@
 }
 .review-source-title small {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--muted-foreground);
 }
@@ -572,7 +577,7 @@
   flex-shrink: 0;
   padding: 0 16px 10px;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
 }
 .review-source-positions {
@@ -654,7 +659,7 @@
 .evidence-review-no-source h3 {
   margin: 0 0 8px;
   color: var(--foreground);
-  font-size: 16px;
+  font-size: 14px;
 }
 .review-source-focus .platform-inline-status,
 .review-focus .platform-inline-status {

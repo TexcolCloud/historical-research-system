@@ -396,22 +396,23 @@ export default function IssueEditor({
             <p role="alert">
               {draft.error?.message ?? submission.error?.message}
             </p>
-          ) : (
+          ) : draft.isPending ||
+            finishing ||
+            draft.isSuccess ||
+            issue.draft_text ? (
             <p role="status">
               {draft.isPending || finishing
                 ? "正在保存草稿，请等待保存完成。"
                 : draft.isSuccess
                   ? "草稿已自动保存 · 尚未提交本页"
-                  : issue.draft_text
-                    ? "已恢复草稿，尚未提交本页审核结果。"
-                    : "逐处核对后提交本页"}
+                  : "已恢复草稿，尚未提交本页审核结果。"}
             </p>
-          )}
-          <small>
-            {ready
-              ? "本页判断已完成，请检查最终文字。"
-              : "保留或修改会保存草稿；提交后本页才计入已通过。"}
-          </small>
+          ) : null}
+          {ready ? (
+            <small>本页判断已完成，请检查最终文字。</small>
+          ) : !draft.isSuccess && !issue.draft_text ? (
+            <small>保留或修改会保存草稿；提交后本页才计入已通过。</small>
+          ) : null}
           <small className="review-shortcuts">
             Alt+← / → 切换疑点 · 处理完成后 Alt+Enter 提交
           </small>

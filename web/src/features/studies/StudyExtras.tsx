@@ -22,10 +22,7 @@ function TopicLinks({
           {topic.title}
         </Link>
       </h2>
-      <p>{topic.description || "尚未填写研究说明"}</p>
-      <Link to={`/studies?topic=${encodeURIComponent(topic.id)}`}>
-        进入专题 →
-      </Link>
+      {topic.description && <p>{topic.description}</p>}
     </article>
   );
 }
@@ -50,9 +47,7 @@ export function DashboardPage() {
     <section className="study-page">
       <header className="study-page-heading">
         <div>
-          <p className="study-eyebrow">个人研究空间</p>
           <h1>继续工作</h1>
-          <p>先处理需要你判断的内容，再回到正在研究的专题。</p>
         </div>
         <Link
           to={hasPending ? "/reviews" : "/library"}
@@ -66,11 +61,8 @@ export function DashboardPage() {
           <div>
             <span>上次停留</span>
             <strong>{resume.data.title}</strong>
-            <p>恢复原来的专题、页码、选择和筛选条件。</p>
           </div>
-          <Link className="study-primary-link" to={resume.data.href}>
-            继续上次工作
-          </Link>
+          <Link to={resume.data.href}>继续上次工作</Link>
         </section>
       )}
       <div className="study-home-work">
@@ -141,9 +133,7 @@ export function DashboardPage() {
               </span>
             </Link>
           ))}
-          {books.isSuccess && !processing.length && (
-            <p>暂无正在处理正文的书籍。制卡和分析进度可在对应任务中查看。</p>
-          )}
+          {books.isSuccess && !processing.length && <p>暂无处理中的书籍。</p>}
         </section>
       </div>
       {books.isError && (
@@ -214,7 +204,7 @@ export function UpdatesPage() {
       <header className="study-page-heading">
         <div>
           <h1>更新日志</h1>
-          <p>当前版本 0.2.1 · 单人本地史料研究工作台</p>
+          <p>当前版本 0.2.1</p>
         </div>
       </header>
       <article className="study-overview-card">

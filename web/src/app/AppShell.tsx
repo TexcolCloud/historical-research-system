@@ -166,15 +166,11 @@ export default function AppShell() {
         hidden={!sidebarOpen}
       >
         <Link className="study-sidebar-brand" to="/dashboard">
-          <span className="platform-seal">史</span>
-          <span>
-            史料研究<small>个人研究工作台</small>
-          </span>
+          史料研究
         </Link>
         <nav aria-label="主要导航">
           {sections.map((section) => (
             <div key={section.group}>
-              <p>{section.group}</p>
               {section.links.map(([label, path, Glyph]) => {
                 const active =
                   location.pathname === path ||
@@ -262,9 +258,6 @@ export default function AppShell() {
           className="platform-brand"
           aria-label="史料研究 · 继续工作"
         >
-          <span className="platform-seal" aria-hidden="true">
-            史
-          </span>
           <span>史料研究</span>
         </Link>
         <div className="platform-header-actions">

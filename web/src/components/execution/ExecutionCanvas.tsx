@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ReactFlow,
-  Background,
   Controls,
   MiniMap,
   Panel,
@@ -56,11 +55,11 @@ function RuntimeNodeView({ id, data, selected }: NodeProps<RuntimeNode>) {
 }
 const nodeTypes = { runtime: RuntimeNodeView };
 const colors: Record<string, string> = {
-  delegates: "#386e9e",
-  calls: "#70849b",
-  returns: "#368872",
-  produces: "#8871a0",
-  waits_for: "#bd8033",
+  delegates: "var(--primary)",
+  calls: "var(--muted-foreground)",
+  returns: "var(--success)",
+  produces: "var(--muted-foreground)",
+  waits_for: "var(--warning)",
 };
 const relations: Record<string, string> = {
   delegates: "委派任务",
@@ -127,7 +126,7 @@ export function ExecutionCanvas({
       !selected || edge.source === selected || edge.target === selected;
     const running =
       nodes.find((n) => n.id === edge.target)?.state === "running";
-    const color = colors[edge.relation] || "#70849b";
+    const color = colors[edge.relation] || "var(--muted-foreground)";
     return {
       ...edge,
       type: edge.relation === "returns" ? "default" : "smoothstep",
@@ -143,8 +142,8 @@ export function ExecutionCanvas({
         strokeDasharray: edge.relation === "returns" ? "6 5" : undefined,
       },
       markerEnd: { type: MarkerType.ArrowClosed, color, width: 18, height: 18 },
-      labelStyle: { fill: color, fontSize: 11 },
-      labelBgStyle: { fill: "#f8fafc", fillOpacity: 0.96 },
+      labelStyle: { fill: color, fontSize: 12 },
+      labelBgStyle: { fill: "var(--card)" },
       labelBgPadding: [7, 4],
       labelBgBorderRadius: 5,
     };
@@ -201,7 +200,6 @@ export function ExecutionCanvas({
         }}
         defaultEdgeOptions={{ type: "smoothstep" }}
       >
-        <Background color="#d8e2ec" gap={22} size={1} />
         <Controls showInteractive={false} />
         <MiniMap<RuntimeNode>
           pannable
@@ -209,10 +207,10 @@ export function ExecutionCanvas({
           nodeStrokeWidth={3}
           nodeColor={(node) =>
             node.data.record.state === "running"
-              ? "#4885b0"
+              ? "var(--primary)"
               : ["failed", "interrupted"].includes(node.data.record.state)
-                ? "#cca460"
-                : "#becbd8"
+                ? "var(--warning)"
+                : "var(--border)"
           }
         />
         <Panel position="top-left" className="execution-canvas-legend">

@@ -39,7 +39,6 @@ export function SettingsPage() {
       <header className="study-page-heading">
         <div>
           <h1>设置</h1>
-          <p>当前本机工作区与研究桌面偏好。</p>
         </div>
       </header>
       <section className="study-overview-card">
@@ -67,7 +66,7 @@ export function SettingsPage() {
       <section className="study-overview-card">
         <h2>桌面偏好</h2>
         {preferences.isError && <p role="alert">{preferences.error.message}</p>}
-        <label className="study-checkbox">
+        <label className="study-check">
           <input
             type="checkbox"
             checked={preferences.data?.compact ?? false}
@@ -76,7 +75,7 @@ export function SettingsPage() {
           />
           紧凑显示研究桌面
         </label>
-        <label className="study-checkbox">
+        <label className="study-check">
           <input
             type="checkbox"
             checked={preferences.data?.restore_last_canvas ?? true}
@@ -105,7 +104,8 @@ export function SettingsPage() {
         {save.isSuccess && <p role="status">偏好已保存。</p>}
       </section>
       <p>
-        原始环境配置和模型凭据保留在本机配置中。画布备份与恢复入口位于每张画布的管理菜单。
+        原始环境配置和模型凭据保留在本机配置中。
+        画布备份与恢复位于每张画布的管理菜单。
       </p>
     </section>
   );

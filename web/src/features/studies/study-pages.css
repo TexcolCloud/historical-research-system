@@ -1,7 +1,8 @@
 .study-page {
   max-width: 1500px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 0;
+  font-size: 14px;
 }
 .study-page-heading,
 .study-detail-heading,
@@ -20,26 +21,25 @@
 .study-page h1,
 .study-page h2,
 .study-page h3 {
-  font-family: var(--font-title);
+  font-family: var(--font-ui);
 }
 .study-page h1 {
-  font-size: 28px;
+  font-size: 20px;
   margin: 4px 0 8px;
 }
 .study-page h2 {
-  font-size: 24px;
+  font-size: 16px;
   margin: 4px 0 12px;
 }
 .study-page h3 {
-  font-size: 19px;
+  font-size: 16px;
 }
 .study-page p {
   line-height: 1.8;
 }
 .study-eyebrow {
   color: var(--muted-foreground);
-  font-size: 13px;
-  letter-spacing: 0.08em;
+  font-size: 14px;
 }
 .study-page-heading p,
 .study-detail-heading p {
@@ -60,17 +60,21 @@
   width: 100%;
   gap: 8px;
   text-align: left;
-  padding: 18px;
-  margin: 12px 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
+  padding: 14px 8px;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
 }
 .study-topic-item span {
   color: var(--muted-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.study-topic-list .study-topic-item small {
+  font-size: 12px;
 }
 .study-topic-item[aria-pressed="true"] {
   background: var(--accent);
@@ -85,10 +89,10 @@
   align-items: flex-start;
 }
 .study-editor {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  padding: 24px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  padding: 20px 0;
   display: grid;
   gap: 18px;
   margin: 16px 0 24px;
@@ -164,23 +168,20 @@
 }
 .study-badge {
   display: inline-block;
-  border-radius: 4px;
-  padding: 3px 7px;
   font-size: 12px;
-  background: var(--muted-surface);
   color: var(--muted-foreground);
   white-space: nowrap;
 }
 .study-warning {
   color: var(--destructive);
-  font-size: 13px;
+  font-size: 14px;
 }
 .study-material-picker {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 20px;
+  border: 0;
+  border-block: 1px solid var(--border);
+  padding: 20px 0;
   margin-bottom: 24px;
-  background: var(--card);
+  background: transparent;
 }
 .study-picker-row {
   border-bottom: 1px solid var(--border);
@@ -189,9 +190,9 @@
 .study-source-preview {
   margin: 20px 0;
   padding: 24px;
-  background: var(--accent);
+  background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
 }
 .study-source-preview .research-evidence {
   margin-top: 24px;
@@ -232,17 +233,18 @@
 }
 .study-record-list {
   display: grid;
-  gap: 8px;
+  gap: 0;
 }
 .study-record-list-item {
   display: grid;
   justify-items: start;
-  gap: 9px;
+  gap: 8px;
   width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--card);
-  padding: 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 12px;
   text-align: left;
 }
 .study-record-list-item[aria-pressed="true"] {
@@ -250,7 +252,7 @@
   border-color: var(--ring);
 }
 .study-record-list-item strong {
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.5;
 }
 .study-record-list-item small,
@@ -292,7 +294,7 @@
   position: sticky;
   bottom: 0;
   padding: 16px 0;
-  background: var(--card);
+  background: var(--background);
   border-top: 1px solid var(--border);
 }
 .study-record-detail-actions,
@@ -318,14 +320,20 @@
 }
 .study-record .prose,
 .study-analysis-suggestion .prose {
+  font-family: var(--font-reading);
   font-size: 18px;
   line-height: 1.8;
 }
 .study-record {
-  border: 1px solid var(--border);
-  border-radius: 8px;
   background: var(--card);
-  padding: 24px;
+  padding: 20px;
+}
+.study-record > h2 {
+  font-size: 20px;
+}
+.study-record .prose :is(h1, h2, h3),
+.study-analysis-suggestion .prose :is(h1, h2, h3) {
+  font-size: 18px;
 }
 .study-record .study-actions {
   margin-top: 24px;
@@ -351,8 +359,6 @@
   text-underline-offset: 4px;
 }
 .study-limitations {
-  border-left: 3px solid var(--border);
-  padding-left: 16px;
   margin: 18px 0;
 }
 .study-clue-fields {
@@ -366,11 +372,9 @@
   flex-wrap: wrap;
   gap: 14px;
   align-items: end;
-  padding: 20px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  border-radius: 8px;
-  margin-bottom: 28px;
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
 }
 .study-timeline-filters input {
   max-width: 170px;
@@ -391,10 +395,8 @@
   align-self: start;
 }
 .study-era-disclosure {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 16px;
-  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
 }
 .study-era-disclosure .study-era-helper {
   border: 0;
@@ -432,20 +434,21 @@
   display: block;
   margin-bottom: 8px;
 }
+.study-timeline-date small {
+  font-size: 12px;
+}
 .study-timeline-entry article {
   margin-left: 25px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  border-radius: 8px;
-  padding: 24px;
+  border-bottom: 1px solid var(--border);
+  padding: 20px;
 }
 .study-timeline-entry[data-selected="true"] article {
   background: var(--accent);
   border-color: var(--ring);
 }
 .study-timeline-entry article .study-text-button {
-  font-family: var(--font-title);
-  font-size: 20px;
+  font-family: var(--font-ui);
+  font-size: 16px;
 }
 .study-date-original {
   color: var(--muted-foreground);
@@ -455,14 +458,12 @@
 }
 .study-era-helper,
 .study-timeline-proof {
-  border: 1px solid var(--border);
-  border-radius: 8px;
   background: var(--card);
-  padding: 22px;
+  padding: 20px;
   margin-bottom: 24px;
 }
 .study-era-helper h2 {
-  font-size: 22px;
+  font-size: 16px;
 }
 .study-era-helper form {
   display: grid;
@@ -470,17 +471,15 @@
   margin: 18px 0;
 }
 .study-era-note {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted-foreground);
 }
 .study-timeline-proof {
   max-height: 75vh;
   overflow: auto;
-  background: var(--accent);
 }
 .study-chronology-notice {
-  padding: 12px 16px;
-  border-left: 3px solid var(--ring);
+  padding: 0;
   margin-bottom: 24px;
 }
 .study-analysis-layout {
@@ -505,21 +504,11 @@
   gap: 8px;
 }
 .study-analysis-stages span {
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--border);
-  border-radius: 50%;
+  font-variant-numeric: tabular-nums;
 }
 .study-analysis-stages [aria-current="step"] {
   color: var(--primary);
   font-weight: 600;
-}
-.study-analysis-stages [aria-current="step"] span {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--primary-foreground);
 }
 .study-analysis-index {
   position: sticky;
@@ -530,19 +519,26 @@
 }
 .study-suggestion-list .study-topic-item {
   gap: 8px;
-  padding: 14px;
-  margin: 8px 0;
+  padding: 14px 8px;
+  margin: 0;
 }
 .study-suggestion-list strong {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.5;
 }
 .study-suggestion-list small {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted-foreground);
 }
 .study-analysis-results {
   min-width: 0;
+}
+.study-analysis-results > .study-detail-heading h2,
+.study-analysis-results .study-editor > h2,
+.study-analysis-results .study-empty h3,
+.study-analysis-proof h3 {
+  font-size: 14px;
+  font-weight: 600;
 }
 .study-analysis-results > .study-editor {
   max-width: 720px;
@@ -563,17 +559,18 @@
 .study-analysis-proof .study-source-preview {
   margin: 0;
   padding: 18px;
-  background: var(--muted-surface);
+  background: var(--card);
 }
 .study-personal-adoption {
   display: grid;
   gap: 16px;
-  border: 1px solid var(--border);
-  padding: 18px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 18px 0;
   margin-top: 20px;
 }
 .study-personal-adoption legend {
-  padding: 0 8px;
+  padding: 0;
 }
 .study-personal-adoption p {
   font-size: 14px;
@@ -583,19 +580,18 @@
   margin-top: 0;
 }
 .study-analysis-suggestion {
-  padding: 24px;
+  padding: 20px;
   background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
   margin-bottom: 24px;
   min-width: 0;
 }
 .study-analysis-suggestion h3 {
+  font-size: 20px;
   margin-bottom: 18px;
 }
 .study-muted {
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: 14px;
 }
 .study-page [data-slot="button"] {
   min-height: 40px;

@@ -43,9 +43,7 @@ export function TopicsPage() {
       {!scope.topicId && (
         <header className="study-page-heading">
           <div>
-            <p className="study-eyebrow">研究资料</p>
             <h1>研究专题</h1>
-            <p>围绕一个问题整理材料、论据和个人思考。</p>
           </div>
           <Button onClick={() => setCreating(true)}>新建专题</Button>
         </header>
@@ -163,7 +161,6 @@ export function TopicsPage() {
           {!scope.topicId ? (
             <div className="study-empty">
               <h2>选择一个专题</h2>
-              <p>每个专题可以拥有自己的选材、论据丛、时间线索和多张画布。</p>
             </div>
           ) : scope.topic.isError ? (
             <StudyErrorState
@@ -231,13 +228,10 @@ function TopicDetail({
       />
       <div className="study-detail-heading">
         <div>
-          <p className="study-eyebrow">
-            {topic.archived ? "已归档专题" : "当前专题"}
-          </p>
-          <h2>{topic.title}</h2>
-          <p className="study-preserve">
-            {topic.description || "补充研究说明，让选材围绕同一个方向。"}
-          </p>
+          {topic.archived && <p className="study-warning">已归档专题</p>}
+          {topic.description && (
+            <p className="study-preserve">{topic.description}</p>
+          )}
         </div>
         <Button
           variant="outline"

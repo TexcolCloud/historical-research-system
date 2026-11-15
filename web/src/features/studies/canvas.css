@@ -14,7 +14,7 @@
 }
 .study-canvas-context h1 {
   margin: 0;
-  font: 600 18px var(--font-reading);
+  font: 600 20px var(--font-ui);
 }
 .study-canvas-workspace > .study-workspace-navigation {
   margin: 0;
@@ -87,7 +87,6 @@
   padding: 18px;
   border: 1px solid var(--study-line);
   border-radius: 8px;
-  box-shadow: 0 8px 22px #00000012;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -108,7 +107,7 @@
   flex-wrap: wrap;
 }
 .study-canvas-toolbar button {
-  font-size: 13px;
+  font-size: 14px;
   min-height: 38px;
   padding: 7px 11px;
 }
@@ -123,7 +122,7 @@
 }
 .study-canvas-tools {
   position: relative;
-  font-size: 13px;
+  font-size: 14px;
 }
 .study-canvas-tools > div p {
   font-size: 12px;
@@ -182,10 +181,14 @@
 .study-canvas-surface .react-flow {
   background: var(--background);
 }
+.study-canvas-surface .react-flow__edge-text,
+.study-canvas-surface .react-flow__attribution {
+  font-size: 12px;
+}
 .study-canvas-surface .react-flow__node-study-card {
   border: 0;
   padding: 0;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
 }
 .study-canvas-surface .react-flow__node-study-card:focus-visible {
@@ -197,8 +200,7 @@
   width: 100%;
   background: var(--card);
   border: 1px solid var(--study-line);
-  border-radius: 7px;
-  box-shadow: 0 2px 6px #00000008;
+  border-radius: 4px;
   display: flex;
   flex-direction: column;
   overflow: visible;
@@ -206,21 +208,6 @@
 .study-canvas-card[data-selected="true"] {
   border-color: var(--foreground);
   box-shadow: 0 0 0 1px var(--foreground);
-}
-.study-canvas-card[data-kind="thought"] {
-  background: color-mix(in srgb, var(--card) 88%, #e9d88b);
-}
-.study-canvas-card[data-kind="question"] {
-  background: color-mix(in srgb, var(--card) 90%, #eabcc1);
-}
-.study-canvas-card[data-kind="note"] {
-  background: color-mix(in srgb, var(--card) 90%, #bcd7e9);
-}
-.study-canvas-card[data-kind="argument"] {
-  background: color-mix(in srgb, var(--card) 90%, #b7d3b7);
-}
-.study-canvas-card[data-kind="clue"] {
-  background: color-mix(in srgb, var(--card) 90%, #d4c6e4);
 }
 .study-canvas-card[data-group="true"] {
   background: color-mix(in srgb, var(--background) 45%, transparent);
@@ -236,7 +223,7 @@
   min-height: 32px;
   padding: 7px 12px 0;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
   cursor: grab;
 }
 .study-canvas-card header > span {
@@ -255,7 +242,7 @@
   color: var(--foreground);
 }
 .study-canvas-card h3 {
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1.5;
   font-weight: 500;
   padding: 6px 15px 10px;
@@ -273,7 +260,7 @@
 .study-canvas-card[data-group="true"] header > span {
   flex-shrink: 0;
   gap: 4px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .study-canvas-card[data-group="true"] header h3 {
   flex: 1;
@@ -295,7 +282,7 @@
   min-height: 0;
   overflow: auto;
   padding: 0 15px 10px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.8;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -307,7 +294,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted-foreground);
   border-top: 1px solid var(--study-line);
   padding: 7px 15px;
@@ -336,8 +323,6 @@
   width: 270px;
   border: 1px solid var(--study-line);
   background: var(--card);
-  border-radius: 8px;
-  box-shadow: 0 5px 20px #0000000a;
   padding: 16px;
   overflow: auto;
   scrollbar-width: thin;
@@ -373,14 +358,14 @@
 .study-material-drawer > select {
   width: 100%;
   margin-bottom: 10px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .study-material-drawer article {
   padding: 12px 0;
   border-bottom: 1px solid var(--study-line);
 }
 .study-material-drawer article > span {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .study-material-drawer article h3 {
@@ -402,13 +387,13 @@
   font-size: 12px;
 }
 .study-canvas-inspector > h3 {
-  font-size: 19px;
+  font-size: 20px;
   line-height: 1.6;
   margin: 12px 0;
 }
 .study-canvas-inspector > p,
 .study-canvas-inspector > a {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.8;
 }
 .study-canvas-inspector > label {
@@ -416,7 +401,7 @@
   flex-direction: column;
   gap: 6px;
   margin: 14px 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .study-canvas-inspector textarea {
   min-height: 100px;
@@ -428,7 +413,7 @@
   margin: 18px 0;
 }
 .study-canvas-inspector fieldset legend {
-  font-size: 13px;
+  font-size: 14px;
   margin-bottom: 8px;
 }
 .study-canvas-inspector fieldset label {
@@ -455,7 +440,7 @@
   border: 1px solid var(--study-line);
   background: var(--accent);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   margin: 5px 0;
 }
 .study-canvas-error {
@@ -479,7 +464,7 @@
   pointer-events: none;
 }
 .study-canvas-welcome h2 {
-  font-size: 23px;
+  font-size: 20px;
   color: var(--foreground);
   margin-bottom: 12px;
 }
@@ -521,7 +506,6 @@
 }
 .study-canvas-surface .react-flow__minimap {
   border: 1px solid var(--study-line);
-  box-shadow: 0 2px 6px #00000008;
   right: 12px;
   bottom: 12px;
 }

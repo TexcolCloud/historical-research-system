@@ -135,26 +135,14 @@ export default function BookPage() {
                     ? "阅读资料"
                     : "处理进展"}
             </h1>
-            {tab === "review" && (
-              <span className="book-task-count">
-                {directoryTask
-                  ? `${book.navigation_pending_count ?? 0} 项待确认${book.navigation_missing_page_count ? ` · ${book.navigation_missing_page_count} 页待补全` : ""}`
-                  : `${book.pending_count ?? 0} 页待核对`}
-              </span>
-            )}
           </div>
-          <p>
-            {book.state === "failed"
-              ? "自动处理已停止，请在处理进展中从断点恢复。"
-              : book.state === "paused"
-                ? "自动处理已暂停，请在处理进展中点击“继续处理”。"
-                : (book.pending_count ?? 0) > 0 ||
-                    (book.navigation_pending_count ?? 0) > 0
-                  ? `需要你处理：${book.pending_count ?? 0} 页正文核对 · ${book.navigation_pending_count ?? 0} 项目录确认`
-                  : book.state === "ready"
-                    ? "资料已入库，可阅读、检索和导出。"
-                    : "系统按页自动处理，已有底稿可在阅读资料中查看。"}
-          </p>
+          {["failed", "paused"].includes(book.state) && (
+            <p>
+              {book.state === "failed"
+                ? "自动处理已停止，请在处理进展中从断点恢复。"
+                : "自动处理已暂停，请在处理进展中点击“继续处理”。"}
+            </p>
+          )}
           {(book.navigation_missing_page_count ?? 0) > 0 && (
             <p role="status">
               目录仍有 {book.navigation_missing_page_count}{" "}

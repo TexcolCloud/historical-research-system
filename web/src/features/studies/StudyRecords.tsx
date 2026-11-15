@@ -137,9 +137,7 @@ export function ArgumentsPage() {
     <section className="study-page">
       <header className="study-page-heading">
         <div>
-          <p className="study-eyebrow">研究资料</p>
           <h1>研究记录</h1>
-          <p>将选材与使用判断整理在一起，个人解释与原文依据分别保留。</p>
         </div>
         <TopicChooser scope={scope} />
       </header>

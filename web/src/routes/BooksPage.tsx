@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { BookOpen, Upload, Search, ArrowRight, Ellipsis } from "lucide-react";
+import { Upload, Search, ArrowRight, Ellipsis } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
@@ -60,7 +60,7 @@ export default function BooksPage() {
       <div className="platform-heading">
         <div>
           <h1>书籍</h1>
-          <p>{books.data?.length ?? 0} 本资料 · 原件、核对结果与阅读版本</p>
+          <p>{books.data?.length ?? 0} 本资料</p>
         </div>
         <Button onClick={upload}>
           <Upload size={17} />
@@ -96,16 +96,13 @@ export default function BooksPage() {
         </div>
       ) : !visible.length ? (
         <section className="platform-empty">
-          <BookOpen size={36} />
           <h2>
-            {search || filter !== "all"
-              ? "没有符合条件的书籍"
-              : "建立你的第一本研究材料"}
+            {search || filter !== "all" ? "没有符合条件的书籍" : "还没有书籍"}
           </h2>
           <p>
             {search || filter !== "all"
               ? "可清空书名或切换到全部书籍。"
-              : "上传 PDF 后自动提取文字并核对原图，需要你确认的疑点会集中列出。"}
+              : "上传 PDF 后自动处理，疑点会列入待办。"}
           </p>
           {search || filter !== "all" ? (
             <Button

@@ -68,17 +68,7 @@ button:disabled {
   align-items: center;
   gap: 12px;
   flex: none;
-  font: 600 21px/1.5 var(--font-title);
-}
-.platform-seal {
-  width: 32px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--input);
-  border-radius: 3px;
-  font-size: 23px;
-  font-weight: 400;
+  font: 600 20px/1.5 var(--font-ui);
 }
 .platform-header nav {
   display: flex;
@@ -138,7 +128,7 @@ button:disabled {
 .platform-body main > .platform-inline-status {
   margin: 0 -32px;
   padding: 6px 32px;
-  font-size: 13px;
+  font-size: 12px;
   background: var(--warning-surface);
   border-bottom: 1px solid var(--border);
 }
@@ -154,7 +144,7 @@ button:disabled {
 }
 .platform-heading h1 {
   margin: 5px 0 10px;
-  font: 600 32px/1.4 var(--font-title, serif);
+  font: 600 20px/1.4 var(--font-ui, sans-serif);
   overflow-wrap: anywhere;
 }
 .platform-heading p {
@@ -162,11 +152,6 @@ button:disabled {
   font-size: 14px;
   color: var(--muted-foreground);
   line-height: 1.8;
-}
-.platform-heading .platform-eyebrow {
-  color: var(--primary);
-  font-size: 14px;
-  margin-bottom: 5px;
 }
 .platform-heading > button {
   min-height: 44px;
@@ -249,7 +234,7 @@ button:disabled {
 }
 .platform-book h2 {
   margin: 0 0 7px;
-  font: 600 22px/1.6 var(--font-title, serif);
+  font: 600 16px/1.6 var(--font-ui, sans-serif);
   overflow-wrap: anywhere;
 }
 .platform-book p {
@@ -301,7 +286,6 @@ button:disabled {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 12px 28px #252c2714;
 }
 .platform-book-menu button {
   min-height: 44px;
@@ -332,11 +316,11 @@ button:disabled {
   background: var(--destructive-surface, #fdebe7);
 }
 .platform-empty {
-  padding: 52px 24px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  text-align: center;
+  padding: 32px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
   color: var(--muted-foreground);
 }
 .platform-empty > svg {
@@ -344,11 +328,11 @@ button:disabled {
 }
 .platform-empty h2 {
   color: var(--foreground);
-  font: 600 25px/1.5 var(--font-title, serif);
+  font: 600 20px/1.5 var(--font-ui, sans-serif);
 }
 .platform-empty p {
   max-width: 620px;
-  margin: 12px auto 24px;
+  margin: 12px 0 24px;
   line-height: 1.8;
 }
 .platform-empty a {
@@ -373,7 +357,7 @@ button:disabled {
 }
 .platform-collection-row h2 {
   margin: 0 0 8px;
-  font: 600 21px/1.6 var(--font-title, serif);
+  font: 600 16px/1.6 var(--font-ui, sans-serif);
   overflow-wrap: anywhere;
 }
 .platform-collection-row h2 a:hover {
@@ -416,10 +400,14 @@ button:disabled {
 .platform-upload-dialog .uppy-Dashboard-inner {
   width: 100% !important;
   border-color: var(--border);
+  background: var(--card);
   font-family: var(--font-ui, sans-serif);
 }
-.platform-upload-dialog .uppy-Dashboard-AddFiles-title {
+.platform-upload-dialog .uppy-Dashboard .uppy-Dashboard-AddFiles-title {
   font-size: 20px;
+}
+.platform-upload-dialog .uppy-Dashboard .uppy-Dashboard-browse {
+  color: var(--primary);
 }
 .platform-upload-dialog button {
   box-shadow: none;
@@ -520,7 +508,7 @@ button:disabled {
 }
 .book-heading h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 20px;
   line-height: 1.5;
 }
 .book-heading p {
@@ -530,13 +518,6 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 18px;
-}
-.book-task-count {
-  font-size: 14px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  color: var(--warning);
-  background: var(--warning-surface);
 }
 .book-workspace-review:not([data-state="failed"]):not([data-state="paused"])
   .book-heading
@@ -573,7 +554,6 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--card);
-  box-shadow: 0 12px 28px #252c2714;
 }
 .workspace-main-tabs {
   display: flex;
@@ -608,10 +588,10 @@ button:disabled {
 }
 .workspace-status-note,
 .workspace-next-action {
-  padding: 16px 20px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--secondary);
+  padding: 16px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   margin: 16px 0;
 }
 .workspace-status-note p,
@@ -639,14 +619,15 @@ button:disabled {
   font-size: 14px;
 }
 .workspace-empty {
-  padding: 28px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
+  padding: 28px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .workspace-empty h2,
 .workspace-empty h3 {
   margin-top: 0;
+  font: 600 16px/1.6 var(--font-ui);
 }
 .workspace-empty a {
   display: inline-block;
@@ -704,11 +685,12 @@ button:disabled {
 .platform-workspace .prose img {
   max-width: 100%;
 }
+.platform-workspace .prose h1,
 .platform-workspace .prose h2 {
-  font-size: 22px;
+  font-size: 20px;
 }
 .platform-workspace .prose h3 {
-  font-size: 19px;
+  font-size: 1em;
 }
 .platform-workspace .prose pre {
   overflow: auto;
@@ -748,7 +730,7 @@ button:disabled {
   color: var(--foreground);
 }
 .platform-executions .execution-heading h2 {
-  font-size: 15px;
+  font-size: 14px;
   margin: 14px 0;
   font-weight: 600;
 }
@@ -785,7 +767,7 @@ button:disabled {
   align-content: start;
   gap: 18px;
   margin: 20px 0 0;
-  padding: 20px;
+  padding: 20px 0;
 }
 .platform-process:has(> .workspace-next-action)
   > :not(.platform-process-heading):not(.platform-page-progress):not(
@@ -798,10 +780,10 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 18px 22px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .platform-process-summary > div {
   min-width: 0;
@@ -811,7 +793,7 @@ button:disabled {
   flex: none;
 }
 .platform-process-heading h2 {
-  font: 600 24px/1.5 var(--font-title, serif);
+  font: 600 20px/1.5 var(--font-ui, sans-serif);
   margin: 0 0 5px;
 }
 .platform-process-heading p,
@@ -862,7 +844,7 @@ button:disabled {
   margin: 5px 0 0;
 }
 .platform-progress-count strong {
-  font: 500 28px/1.4 var(--font-title, serif);
+  font: 600 20px/1.4 var(--font-ui, sans-serif);
   font-variant-numeric: tabular-nums;
 }
 .platform-progress-count span {
@@ -941,8 +923,8 @@ button:disabled {
   height: 32px;
   flex: none;
   color: var(--muted-foreground);
-  background: var(--secondary);
-  border-radius: 50%;
+  background: transparent;
+  border-radius: 0;
 }
 .platform-stage-title {
   display: flex;
@@ -958,11 +940,11 @@ button:disabled {
 }
 .platform-process-steps [data-status="done"] .platform-process-icon {
   color: var(--success, #2f6b4f);
-  background: var(--success-surface, #e6f1e9);
+  background: transparent;
 }
 .platform-process-steps [data-status="current"] .platform-process-icon {
   color: var(--primary);
-  background: var(--secondary);
+  background: transparent;
 }
 .platform-process-steps a {
   color: var(--primary);
@@ -987,7 +969,7 @@ button:disabled {
 }
 .platform-process .workspace-next-action h3 {
   margin: 0 0 6px;
-  font-size: 18px;
+  font-size: 16px;
 }
 .platform-process .workspace-next-action button {
   min-height: 44px;
@@ -1048,15 +1030,15 @@ button:disabled {
 }
 .platform-structure {
   margin: 16px 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
 }
 .platform-structure > summary {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 16px;
+  padding: 14px 0;
   cursor: pointer;
   font-weight: 600;
 }
@@ -1066,7 +1048,7 @@ button:disabled {
   font-weight: 400;
 }
 .platform-structure-body {
-  padding: 0 16px 16px;
+  padding: 0 0 16px;
 }
 .platform-structure-body > p {
   color: var(--muted-foreground);
@@ -1122,9 +1104,9 @@ button:disabled {
   margin-bottom: 12px;
 }
 .platform-structure-diff > div {
-  background: var(--secondary);
-  border-radius: 5px;
-  padding: 10px;
+  background: transparent;
+  border-radius: 0;
+  padding: 10px 0;
 }
 .platform-structure-diff small,
 .platform-structure-diff code {

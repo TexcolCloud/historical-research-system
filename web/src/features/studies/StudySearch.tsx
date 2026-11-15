@@ -64,7 +64,6 @@ export function GlobalSearchPage() {
       <header className="study-page-heading">
         <div>
           <h1>全文检索</h1>
-          <p>在当前工作区的已发布原文中查找，或限定到专题选材。</p>
         </div>
       </header>
       <form
@@ -162,7 +161,7 @@ export function GlobalSearchPage() {
       )}
       {results.data && (
         <>
-          <p className="study-eyebrow">
+          <p className="study-muted">
             {topic
               ? topics.data?.items.find((t) => t.id === topic)?.title ||
                 "所选专题"
@@ -201,7 +200,7 @@ export function GlobalSearchPage() {
       )}
       {results.data?.hits.map((hit) => (
         <article key={hit.id} className="study-search-hit">
-          <p className="study-eyebrow">
+          <p className="study-muted">
             {hit.book_title} · PDF {hit.pages.join("、")} 页
           </p>
           <h2>{hit.title}</h2>
@@ -261,11 +260,7 @@ export function GlobalSearchPage() {
             : "当前范围未找到匹配原文。这不代表历史上不存在相关记载，可调整词语或资料范围。"}
         </p>
       )}
-      {!q && (
-        <p className="study-empty">
-          输入词语开始查找；检索结果会保留原文出处和返回位置。
-        </p>
-      )}
+      {!q && <p className="study-empty">输入关键词，检索已发布原文。</p>}
     </section>
   );
 }
