@@ -213,7 +213,7 @@ export default function ResearchGraph({
               background: "var(--card)",
               color: "var(--foreground)",
               fontFamily: "var(--font-ui)",
-              fontSize: 13,
+              fontSize: 14,
             },
           };
         }),
@@ -249,7 +249,7 @@ export default function ResearchGraph({
                 : "var(--muted-foreground)",
             strokeWidth: selected === item.id ? 2.5 : 1.5,
           },
-          labelStyle: { fill: "var(--foreground)", fontSize: 11 },
+          labelStyle: { fill: "var(--foreground)", fontSize: 12 },
           labelBgStyle: { fill: "var(--card)" },
         })) ?? [],
     [data?.edges, selected, positions],
@@ -317,9 +317,7 @@ export default function ResearchGraph({
           </Button>
         </div>
       </header>
-      <p className="research-provenance">
-        初始聚焦中心；拖动画布查看周边，或用“查看全图”显示全部节点。单击实体或关系核对来源。
-      </p>
+      <p className="research-provenance">选择实体或关系查看依据。</p>
       {(controlled ? loading : graph.isPending) && (
         <p role="status">正在读取关系与证据…</p>
       )}

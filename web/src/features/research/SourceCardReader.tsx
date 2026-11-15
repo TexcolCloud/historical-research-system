@@ -190,7 +190,7 @@ export default function SourceCardReader({
       <header className="dossier-document-header">
         <div>
           <p className="dossier-identity">
-            文献史料卡 <span>{cardNumber(card)}</span>
+            <span>{cardNumber(card)}</span>
             <a
               className="research-source-link"
               href={research.exportHref(card.id)}
@@ -233,11 +233,6 @@ export default function SourceCardReader({
             {historical ? "查看历史核验" : "核对本卡"}
           </Button>
         </div>
-        <span>
-          {checking
-            ? "核对模式 · 对照原文后作出决定"
-            : "阅读模式 · 一份完整文献，一张卡片"}
-        </span>
       </div>
       {checking && !historical && (
         <section className="dossier-review-context" aria-label="当前卡片核对">
@@ -247,13 +242,12 @@ export default function SourceCardReader({
         </section>
       )}
       <nav className="dossier-chapter-nav" aria-label="本卡章节">
-        {cardChapters.map(([id, label], index) => (
+        {cardChapters.map(([id, label]) => (
           <button
             key={id}
             aria-current={activeChapter === id ? "location" : undefined}
             onClick={() => chapter(id)}
           >
-            <span>{String(index + 1).padStart(2, "0")}</span>
             {label}
           </button>
         ))}

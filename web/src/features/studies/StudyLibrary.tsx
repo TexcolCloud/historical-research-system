@@ -40,7 +40,6 @@ export default function StudyLibrary() {
             <header className="study-page-heading">
               <div>
                 <h1>自动史料卡</h1>
-                <p>查看已完成核验的文献、使用边界及规范出处。</p>
               </div>
               <label>
                 来源书籍

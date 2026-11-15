@@ -86,9 +86,7 @@ export function TopicTimelinePage() {
     <section className="study-page">
       <header className="study-page-heading">
         <div>
-          <p className="study-eyebrow">专题研究</p>
           <h1>时间线索</h1>
-          <p>沿专题材料中的日期阅读，未定年和个人补记各自保留。</p>
         </div>
         <div className="study-actions">
           <TopicChooser scope={scope} />
@@ -288,11 +286,6 @@ export function TopicTimelinePage() {
                               >
                                 {entry.name}
                               </button>
-                              <span className="study-badge">
-                                {entry.item_kind === "personal"
-                                  ? "个人线索"
-                                  : "史料记录"}
-                              </span>
                             </div>
                             {entry.date?.text && (
                               <p className="study-date-original">
@@ -455,7 +448,6 @@ function EraHelper() {
   const [error, setError] = useState("");
   return (
     <section className="study-era-helper">
-      <p className="study-eyebrow">纪年查阅</p>
       <h2>公元年与常用纪年</h2>
       <form
         onSubmit={(event) => {

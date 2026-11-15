@@ -142,9 +142,7 @@ export function AnalysisPage() {
     <section className="study-page">
       <header className="study-page-heading">
         <div>
-          <p className="study-eyebrow">专题研究</p>
           <h1>AI 分析</h1>
-          <p>对照所选材料，沿原文判断建议是否可用。</p>
         </div>
         <TopicChooser scope={scope} />
       </header>

@@ -15,17 +15,19 @@
 }
 .study-topic-context > span {
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: 12px;
 }
-.study-topic-context strong {
+.study-topic-context strong,
+.study-topic-context h1 {
+  margin: 0;
   color: var(--foreground);
-  font: 600 19px var(--font-reading);
+  font: 600 20px var(--font-ui);
   overflow-wrap: anywhere;
 }
 .study-topic-context a {
   margin-left: auto;
   color: var(--primary);
-  font-size: 13px;
+  font-size: 12px;
   text-underline-offset: 4px;
   display: inline-flex;
   align-items: center;

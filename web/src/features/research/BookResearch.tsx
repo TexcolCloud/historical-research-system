@@ -285,10 +285,6 @@ function PublishedBookResearch({ book }: { book: Book }) {
         ) : (
           <div className="research-selection-empty">
             <h2>选择一份文献</h2>
-            <p>
-              阅读完整文献的基本资料、核心内容、使用边界与规范引注，按需对照原图，并导出
-              Markdown。
-            </p>
           </div>
         )}
       </div>

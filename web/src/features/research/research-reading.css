@@ -41,7 +41,7 @@
 }
 .research-editor-section > h4 {
   margin: 0;
-  font: 600 18px/1.5 var(--font-title);
+  font: 600 14px/1.5 var(--font-ui);
 }
 .dossier-review-context {
   padding: 16px 24px;
@@ -50,7 +50,7 @@
 }
 .dossier-review-context > h2 {
   margin: 0 0 10px;
-  font: 600 18px/1.5 var(--font-title);
+  font: 600 14px/1.5 var(--font-ui);
 }
 .dossier-review-context > p {
   margin: 8px 0 0;
@@ -64,10 +64,9 @@
   background: var(--card);
   border-top: 1px solid var(--border);
   padding: 12px 24px;
-  box-shadow: 0 -4px 18px #00000008;
 }
 .dossier-document > footer.dossier-review > h2 {
-  font: 600 16px/1.5 var(--font-ui);
+  font: 600 14px/1.5 var(--font-ui);
   margin: 0 0 6px;
 }
 .dossier-document > footer.dossier-review p {
@@ -80,22 +79,15 @@
   min-height: 36px;
   font-size: 14px;
 }
-.dossier-mode-bar > span {
-  font-size: 13px;
-}
 .dossier-chapter-nav button {
   min-height: 34px;
   font-size: 14px;
 }
-.dossier-chapter-nav button span {
-  font-size: 12px;
-  opacity: 1;
-}
 .dossier-evidence-toolbar button {
   min-height: 36px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .dossier-chapter p {
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1.85;
 }

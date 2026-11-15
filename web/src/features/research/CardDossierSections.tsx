@@ -205,9 +205,7 @@ export function CardContext({ card, refs }: { card: ReadingCard; refs: Refs }) {
   return (
     <>
       <p className="dossier-layer-label">
-        {card.human_decision?.action === "edit"
-          ? "用户修订 · 来源阅读说明"
-          : "模型整理 · 来源阅读说明"}
+        {card.human_decision?.action === "edit" ? "用户修订" : "模型整理"}
       </p>
       <p className="dossier-lead research-preserve">{card.summary}</p>
       {card.dossier ? (

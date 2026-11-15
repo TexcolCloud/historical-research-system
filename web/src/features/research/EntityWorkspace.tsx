@@ -91,7 +91,6 @@ export default function EntityWorkspace() {
             ← 实体库
           </Link>
           <h1>关系与时间线</h1>
-          <p>围绕实体查阅关联记载，沿每条依据回到原文。</p>
         </div>
         <NetworkFilters
           scope={state.scope}
@@ -154,9 +153,7 @@ export default function EntityWorkspace() {
           ) : (
             <>
               <div className="network-focus-heading">
-                <span>当前关注</span>
                 <strong>{rootName || "所选实体"}</strong>
-                <p>单击仅查看依据；选择“以此为中心”后再展开关联。</p>
               </div>
               <div
                 role="tabpanel"
