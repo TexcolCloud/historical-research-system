@@ -6,6 +6,7 @@ from functools import lru_cache
 
 from hrs.library.chapter_content import read_json, storage_identity
 from hrs.library.runs.outputs import fingerprint
+from hrs.processing.hashing import digest
 
 POLICY = "book-navigation-v1"
 MAX_CACHED_BYTES = 2 * 1024 * 1024
@@ -87,6 +88,26 @@ def book_navigation(settings, run, rows):
     return deepcopy(body.get("navigation", {}))
 
 
+def book_source_structure(settings, run, rows):
+    """Read source facts separately from canonical chapter/card objects."""
+    result = run.get("result") or {}
+    projection = result.get("codex_reading_projection") or {}
+    reference = projection.get("source_structure")
+    if not reference:
+        return {"schema_version": 1, "structure_version": 0, "pages": []}
+    body = projection_json(settings, reference)
+    snapshot = deepcopy(body["snapshot"])
+    snapshot["stale"] = not (
+        body.get("publication_sha256") == result.get("codex_publication_sha256")
+        and body.get("chapters_sha256") == chapter_signature(rows)
+        and snapshot.get("source_sha256") == (run.get("source") or {}).get("sha256")
+        and snapshot.get("snapshot_sha256") == projection.get("structure_sha256")
+        and snapshot.get("snapshot_sha256")
+        == digest({k: v for k, v in snapshot.items() if k != "snapshot_sha256"})
+    )
+    return snapshot
+
+
 def prepare_projection(objects, run, doc, rows, *, groups=None, previous=None):
     """Prepare references; the caller commits them atomically with chapter SQL visibility."""
     publication_sha = doc["publication"]["markdown_sha256"]
@@ -134,6 +155,33 @@ def prepare_projection(objects, run, doc, rows, *, groups=None, previous=None):
             ).encode(),
             run_id=run["id"],
         )
+    structure = {}
+    if doc.get("pages") and doc.get("source") and doc.get("id"):
+        from hrs.processing.source_structure import structure_snapshot
+
+        snapshot = structure_snapshot(doc)
+        reference = (
+            previous.get("source_structure")
+            if unchanged_content and previous.get("structure_sha256") == snapshot["snapshot_sha256"]
+            else None
+        )
+        if not reference:
+            reference = objects.put_bytes(
+                json.dumps(
+                    {
+                        "publication_sha256": publication_sha,
+                        "chapters_sha256": signature,
+                        "snapshot": snapshot,
+                    },
+                    ensure_ascii=False,
+                ).encode(),
+                run_id=run["id"],
+            )
+        structure = {
+            "source_structure": reference,
+            "structure_sha256": snapshot["snapshot_sha256"],
+            "structure_version": snapshot["structure_version"],
+        }
     return {
         "policy": POLICY,
         "publication_sha256": publication_sha,
@@ -142,4 +190,5 @@ def prepare_projection(objects, run, doc, rows, *, groups=None, previous=None):
         "chapters_sha256": signature,
         "locators": locators,
         "navigation": navigation_ref,
+        **structure,
     }

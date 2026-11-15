@@ -5,7 +5,11 @@ export function matchBasis(
   hit: Pick<
     components["schemas"]["SearchHit"],
     "text" | "title" | "section_path" | "toc_path"
-  > & { context?: { text: string }[] },
+  > & {
+    context?: { text: string }[];
+    snippet?: string | null;
+    snippet_segments?: { text: string; usage?: string }[];
+  },
   query: string,
 ) {
   const normalize = (value: string) =>
@@ -13,7 +17,13 @@ export function matchBasis(
   const needle = normalize(query);
   const contains = (value: string) =>
     Boolean(needle) && normalize(value).includes(needle);
-  if (contains(hit.text)) return "原文片段含查询词";
+  const segments = hit.snippet_segments?.filter(
+    (part) => part.usage !== "context",
+  );
+  const sourceText = segments?.length
+    ? segments.map((part) => part.text).join("")
+    : (hit.snippet ?? hit.text);
+  if (contains(sourceText)) return "原文片段含查询词";
   if (
     [hit.title, ...(hit.section_path ?? []), ...(hit.toc_path ?? [])].some(
       contains,

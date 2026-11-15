@@ -16,6 +16,7 @@ def main():
             "backup",
             "restore",
             "reindex",
+            "rollback-index",
             "amend-library",
             "evaluate",
             "evaluate-offline",
@@ -41,6 +42,9 @@ def main():
         help="Absent restore directory; multiple workspaces restore under workspace-ID subdirectories",
     )
     parser.add_argument("--run-id", help="Published book run to reindex without repeating OCR")
+    parser.add_argument(
+        "--expected-generation", help="Current generation required for index rollback"
+    )
     parser.add_argument(
         "--research",
         action="store_true",
@@ -101,7 +105,7 @@ def main():
         finally:
             engine.dispose()
         return
-    if args.command in {"reindex", "evaluate"}:
+    if args.command in {"reindex", "evaluate", "rollback-index"}:
         import json
         from uuid import UUID
 
@@ -111,6 +115,8 @@ def main():
             parser.error(f"{args.command} requires --run-id")
         if args.command == "evaluate" and not args.cases:
             parser.error("evaluate requires --cases")
+        if args.command == "rollback-index" and not args.expected_generation:
+            parser.error("rollback-index requires --expected-generation")
         try:
             run_id = str(UUID(args.run_id))
         except ValueError:
@@ -129,6 +135,10 @@ def main():
                     json.loads(Path(args.cases).read_text(encoding="utf-8-sig")),
                     semantic=args.semantic,
                     limit=args.limit,
+                )
+            elif args.command == "rollback-index":
+                result = BookIndexer(settings, engine).rollback_generation(
+                    run_id, args.expected_generation
                 )
             elif args.research:
                 from hrs.research.bridge import ResearchBridge

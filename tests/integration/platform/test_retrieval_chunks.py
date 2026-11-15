@@ -46,12 +46,18 @@ def test_indexable_projection_omits_furniture_but_retains_canonical_coverage_and
         }
     ]
     source["navigation"] = {"page_labels": [{"physical_page": 9, "printed_label": "7"}]}
+    source["source_structure"] = {
+        "blocks": [
+            {"start": 0, "end": 3, "role": "page_number", "layer": "source", "status": "ready"}
+        ]
+    }
     raw = list(retrieval_chunks(source, "书"))
     assert set().union(*(set(range(h["start"], h["end"])) for h in raw)) == set(
         range(len(source["text"]))
     )
     hits = list(indexable_chunks(source, "书"))
-    assert all(h["text"].strip() not in {"", "7", "## 注释"} for h in hits)
+    assert any(h["text"].strip() == "7" and not h["model_eligible"] for h in hits)
+    assert all("7" not in h["snippet"] for h in hits if h["text"].strip() == "7")
     assert any("120" in h["text"] for h in hits)
     assert any("正文禁止没收商店" in h["text"] for h in hits)
     assert any("违纪" in h["text"] for h in hits)
@@ -171,7 +177,8 @@ def test_long_markdown_table_rows_keep_header_units_and_note_as_separate_evidenc
     ]
     assert len(tables) > 1
     for hit in tables[1:]:
-        assert header in hit["retrieval_text"]
+        assert "年份" in hit["retrieval_text"] and "数量（吨）" in hit["retrieval_text"]
+        assert "---" not in hit["retrieval_text"]
         assert "注：仅计甲地" in hit["retrieval_text"]
         assert any(c["role"] == "table_header" for c in hit["context"])
         assert all(line.count("|") == 3 for line in hit["text"].splitlines() if line.strip())
@@ -187,7 +194,8 @@ def test_html_rowspan_group_is_not_split_and_header_is_repeated_separately():
     hits = list(retrieval_chunks(source, "样本", size=70, overlap=10))
     owned = [h for h in hits if 'rowspan="2"' in h["text"]]
     assert len(owned) == 1 and "130吨" in owned[0]["text"]
-    assert len(hits) > 1 and "<th>地区</th>" in hits[-1]["retrieval_text"]
+    assert len(hits) > 1 and "地区" in hits[-1]["retrieval_text"]
+    assert "<th>" not in hits[-1]["retrieval_text"]
     assert owned[0]["oversized"]
 
 
@@ -244,7 +252,9 @@ def test_continued_table_keeps_event_intro_and_shared_cell_scope():
     ]
     hit = next(h for h in retrieval_chunks(source, "样本") if "rowspan" in h["text"])
     result = expand_hits([{**hit, "score": 1}], lambda _: source)[0]
-    assert any(c["role"] == "table_intro" and "强行改编" in c["text"] for c in result["context"])
+    assert any(
+        c["role"] == "unassigned_context" and "强行改编" in c["text"] for c in result["context"]
+    )
     scope = next(c for c in result["table_scopes"] if c["value"] == "共45")
     assert scope["row_numbers"] == [1, 2] and scope["column_numbers"] == [2]
     assert scope["row_labels"] == [["乙"], ["丙"]]

@@ -290,8 +290,10 @@ def create_review_server(store: Store, port: int = 8766) -> ThreadingHTTPServer:
             <div data-live-section="revision-controls">{revision_form}</div>'''
 
         def render_library(self, query):
+            from hrs.search.local_snapshot import search_published
+
             term = query.get("q", "").strip()
-            results = store.search(term) if term else []
+            results = search_published(store, term) if term else []
             hits = "".join(
                 f'<article class="search-hit"><a href="{escape(self.link(view="document", document=row.get("document_id", row.get("id"))))}">{escape(row.get("title", row.get("document_id", "文档")))}</a>'
                 f"<small>物理第 {escape(row.get('page', ''))} 页</small>"

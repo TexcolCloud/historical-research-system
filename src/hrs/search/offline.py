@@ -11,6 +11,7 @@ from hrs.search.compute import normalizer, query_vector
 from hrs.search.evaluation import evaluate_cases
 from hrs.search.indexing import BookIndexer
 from hrs.search.inputs import bounded_chunks
+from hrs.search.projection import lexical_text
 from hrs.search.search import Search
 
 
@@ -37,6 +38,7 @@ def evaluate_offline(settings, engine, dataset):
     search = Search(settings.model_copy(update={"opensearch_index": index}), engine)
     # Only this private instance can see development samples. No runs/chapters are written.
     search.active_scope = lambda _: [{"term": {"book_id": book_id}}]
+    search.library.source_chapter = chapters.__getitem__
     search.library.chapter = chapters.__getitem__
     try:
         BookIndexer(search.settings, engine).ensure_index(index)
@@ -51,9 +53,13 @@ def evaluate_offline(settings, engine, dataset):
             )
         for offset in range(0, len(chunks), 8):
             batch = chunks[offset : offset + 8]
-            vectors = search.runtime.compute("embed", [c["retrieval_text"] for c in batch])[
-                "vectors"
-            ]
+            eligible = [c for c in batch if c.get("model_eligible", True)]
+            vectors = (
+                search.runtime.compute("embed", [c["retrieval_text"] for c in eligible])["vectors"]
+                if eligible
+                else []
+            )
+            by_id = {c["id"]: v for c, v in zip(eligible, vectors, strict=True)}
             helpers.bulk(
                 search.client,
                 [
@@ -62,13 +68,17 @@ def evaluate_offline(settings, engine, dataset):
                         "_id": c["id"],
                         "_source": {
                             **c,
-                            "vector": v,
+                            **({"vector": by_id[c["id"]]} if c["id"] in by_id else {}),
                             "title": chapters[c["chapter_id"]]["title"],
-                            "title_search": normalizer().convert(c["title"]),
-                            "text_search": normalizer().convert(c["retrieval_text"]),
+                            "title_search": c["title"],
+                            "text_search": lexical_text(c),
+                            "title_aliases": normalizer().convert(c["title"]),
+                            "text_aliases": normalizer().convert(lexical_text(c)),
+                            "raw_text_search": c["raw_text"],
+                            "raw_text_aliases": normalizer().convert(c["raw_text"]),
                         },
                     }
-                    for c, v in zip(batch, vectors, strict=True)
+                    for c in batch
                 ],
                 refresh=True,
             )

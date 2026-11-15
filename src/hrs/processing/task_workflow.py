@@ -13,6 +13,7 @@ from hrs.processing.task_results import (
     apply_ocr,
     apply_organization,
     apply_review,
+    apply_structure,
 )
 from hrs.processing.workflow_rules import (
     STAGES,
@@ -57,7 +58,7 @@ class TaskWorkflow:
         control = RuntimeControl(repository.root, repository.ledger)
         plan["runtime_control"] = control.snapshot()
         remaining = {}
-        for stage in ("verify", "review", "ocr", "navigation", "organization"):
+        for stage in ("verify", "review", "ocr", "structure", "navigation", "organization"):
             model = model_for_stage(stage)
             gate = control.gate(model)
             allowance = remaining.setdefault(model, gate["limit"] if gate["allowed"] else 0)
@@ -220,6 +221,7 @@ class TaskWorkflow:
         def select_candidate(doc, *, candidate_id=None):
             nonlocal selected_task_id
             from hrs.processing.scheduling import task_priority
+            from hrs.processing.source_structure import prior_structure_workers
 
             reservations = {}
             if scheduled and stage == "review" and self.context.repository.ledger:
@@ -235,6 +237,10 @@ class TaskWorkflow:
                 task
                 for task in doc["tasks"]
                 if task["stage"] == stage
+                and (
+                    stage != "structure"
+                    or worker_id not in prior_structure_workers(doc, task["page"])
+                )
                 and (candidate_id is None or task["task_id"] == candidate_id)
                 and task["state"] in {"ready", "leased"}
                 and not task.get("technical_blocked")
@@ -269,6 +275,11 @@ class TaskWorkflow:
             self.context.repository.ledger.connect(write=True),
         ):
             require_active(doc)
+            if stage == "structure" or (
+                stage in {"review", "verify"}
+                and doc.get("processing_policy", {}).get("structure_contract_version") == 1
+            ):
+                source_first = True
             if scheduled:
                 from hrs.processing.runtime_control import effective_policy
                 from hrs.processing.scheduling import scheduling_plan
@@ -363,10 +374,10 @@ class TaskWorkflow:
             task["bounded_candidate_required"] = (
                 scheduled
                 and source_first
-                and stage in {"review", "verify"}
+                and stage in {"review", "verify", "structure"}
                 and len(inputs.get("markdown", "")) > 2000
             )
-            if source_first and stage in {"review", "verify"}:
+            if source_first and stage in {"review", "verify", "structure"}:
                 task["source_first_required"] = True
             task.update(state="leased", claim=claim, inputs=inputs)
             if session is not None:
@@ -393,6 +404,13 @@ class TaskWorkflow:
                 raise ValueError("Task input hash mismatch")
             self.context.evidence.verify_details(doc, task, result)
             stage = task["stage"]
+            if stage == "structure":
+                from hrs.processing.source_structure import prior_structure_workers
+
+                if claim["worker_id"] in prior_structure_workers(doc, task["page"]):
+                    raise ValueError(
+                        "Structure inspection requires an independent native worker identity"
+                    )
             if stage in {"review", "verify"} and task.get("source_first_required"):
                 from hrs.processing.review_contract import validate_issues
 
@@ -475,6 +493,8 @@ class TaskWorkflow:
                 apply_ocr(doc, task, result, receipt)
             elif stage in {"review", "verify"}:
                 result, automatic_verification = apply_review(doc, task, result, receipt)
+            elif stage == "structure":
+                apply_structure(doc, task, result, receipt)
             elif stage == "navigation":
                 if task.get("navigation_original_reading"):
                     receipt["navigation_original_reading_sha256"] = task[
@@ -490,8 +510,17 @@ class TaskWorkflow:
                 result=result,
                 receipt={**receipt, "result_sha256": digest(result)},
             )
-            self.navigation.refresh_document(doc)
-            if all(p["state"] == "approved" for p in doc["pages"]):
+            if stage != "structure":
+                self.navigation.refresh_document(doc)
+            if stage == "structure":
+                doc["state"] = (
+                    "published"
+                    if doc.get("publication")
+                    and doc.get("organization")
+                    and all(p["state"] == "approved" for p in doc["pages"])
+                    else doc["state"]
+                )
+            elif all(p["state"] == "approved" for p in doc["pages"]):
                 navigation_pending = any(
                     t["stage"] == "navigation" and t["state"] in {"ready", "leased"}
                     for t in doc["tasks"]

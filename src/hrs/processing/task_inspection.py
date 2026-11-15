@@ -60,7 +60,9 @@ class TaskInspection:
         if task["inputs"].get("navigation_mode") == "verify_links" and not task.get(
             "navigation_original_reading"
         ):
-            raise ValueError("Freeze navigation original observations before reading candidate text")
+            raise ValueError(
+                "Freeze navigation original observations before reading candidate text"
+            )
         frozen = [p for p in task["inputs"]["pages"] if p["page"] > after_page]
         pages, size = [], 0
         for reference in frozen[:limit]:
@@ -134,7 +136,10 @@ class TaskInspection:
                         t
                         for t in doc["tasks"]
                         if t["task_id"] == task_id
-                        and t["stage"] in {"navigation", "organization", "ocr"}
+                        and (
+                            t["stage"] in {"navigation", "organization", "ocr"}
+                            or (t["stage"] == "structure" and t["page"] != page)
+                        )
                     ),
                     None,
                 )
@@ -148,7 +153,15 @@ class TaskInspection:
                     allowed = (
                         [source_task["page"]]
                         if source_task["stage"] == "ocr"
-                        else [p["page"] for p in source_task["inputs"]["pages"]]
+                        else [
+                            p["page"]
+                            for p in source_task["inputs"].get(
+                                "relation_context"
+                                if source_task["stage"] == "structure"
+                                else "pages",
+                                [],
+                            )
+                        ]
                     )
                     if page not in allowed:
                         raise ValueError("Source image outside its claimed snapshot")

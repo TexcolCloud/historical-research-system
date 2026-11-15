@@ -18,13 +18,9 @@ def fixture(tmp_path):
 
 
 def submit(store, doc_id, stage, result):
-    task = store.claim_task(doc_id, stage, "synthetic-" + stage)
-    store.submit_task(
-        doc_id,
-        task["task_id"],
-        task["lease_token"],
-        {"input_sha256": task["input_sha256"], **result},
-    )
+    from tests.unit.processing.test_store import complete as complete_source
+
+    return complete_source(store, doc_id, stage, "synthetic-" + stage, result)
 
 
 def test_background_dispatch_resumes_after_explicit_synthetic_human_decision(tmp_path):

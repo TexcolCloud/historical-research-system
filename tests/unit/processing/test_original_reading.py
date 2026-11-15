@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.unit.processing.test_store import complete, document
+from tests.unit.processing.test_store import complete, document, result_with_structure
 
 
 def test_compact_detail_receipts_and_bounded_candidate_access(tmp_path):
@@ -51,6 +51,7 @@ def reading(store, doc_id, task, *, unresolved=None):
 
 
 def submit(store, doc_id, task, result):
+    result = result_with_structure(store, doc_id, task, result)
     return store.submit_task(
         doc_id,
         task["task_id"],

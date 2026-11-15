@@ -58,6 +58,8 @@ def fixture():
     library = SimpleNamespace(
         chapters=lambda _: [dict(id=chapter)],
         chapter=lambda _: deepcopy(body),
+        source_chapter=lambda _: deepcopy(body),
+        toc_links=lambda chapter: deepcopy(chapter.get("toc_links", [])),
         reading_navigation=lambda _: dict(entries=deepcopy(entries)),
     )
     return book, body, entries, library
@@ -182,6 +184,8 @@ def test_scope_uses_canonical_heading_boundary_not_reader_visible_start(followin
     library = SimpleNamespace(
         chapters=lambda _: chapters,
         chapter=by_id.__getitem__,
+        source_chapter=by_id.__getitem__,
+        toc_links=lambda chapter: deepcopy(chapter.get("toc_links", [])),
         reading_navigation=lambda _: dict(entries=entries),
     )
     scope = DirectoryScope.resolve(library, book, "0")
@@ -224,9 +228,17 @@ def test_legacy_directory_hit_keeps_each_explicit_link_without_picking_first():
     body["toc_links"] = links
     search = object.__new__(Search)
     search.library = library
+    reads, link_reads = [], []
+    library.chapter = lambda _: pytest.fail("navigation search must not reload the reader chapter")
+    library.source_chapter = lambda identity: reads.append(identity) or deepcopy(body)
+    library.toc_links = lambda source: (
+        link_reads.append(source["id"]) or deepcopy(source["toc_links"])
+    )
     hit = {**source_excerpt(body, 0, len(text)), "score": 1, "context": []}
     hit.pop("doc_kind")  # The stored legacy index has no new directory metadata.
-    result = search.reading_results([hit])[0]
+    result, repeated = search.reading_results([hit, deepcopy(hit)])
+    assert reads == link_reads == [body["id"]]
+    assert repeated == result
     assert result["doc_kind"] == "navigation"
     assert result["reading_target"] is None
     assert [entry["id"] for entry in result["directory_links"]] == [e["id"] for e in entries]

@@ -1,6 +1,7 @@
 """Refresh directory metadata over retained source ranges without regenerating vectors."""
 
 from hrs.search.chunks import source_excerpt
+from hrs.search.projection import lexical_text as lexical_text
 
 FIELDS = ("doc_kind", "toc_entry_id", "toc_path", "printed_pages", "navigation_version")
 
@@ -19,7 +20,3 @@ def navigation_fields(chapters, row):
             for extra in row["context"]
         ]
     return fields
-
-
-def lexical_text(row):
-    return "\n".join([*row.get("toc_path", []), row.get("retrieval_text", row["text"])])

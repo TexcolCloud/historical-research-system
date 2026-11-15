@@ -49,6 +49,30 @@ def test_oversized_content_is_not_retained(monkeypatch):
     assert len(calls) == 2 and module.cached_content.cache_info().currsize == 0
 
 
+def test_source_view_selects_before_copying_reader_only_values(monkeypatch):
+    class ReaderOnly:
+        def __deepcopy__(self, _):
+            raise AssertionError("Source reads must not copy rendered-reader values")
+
+    monkeypatch.setattr(
+        module,
+        "read_content",
+        lambda *_: {
+            "text": "原文",
+            "parts": [{"text": "原文"}],
+            "footnotes": [],
+            "reading_parts": ReaderOnly(),
+            "reading_segments": ReaderOnly(),
+        },
+    )
+    module.cached_content.cache_clear()
+    try:
+        source = module.source_content(settings(), {"sha256": "source-only", "byte_length": 3})
+        assert source == {"text": "原文", "parts": [{"text": "原文"}], "footnotes": []}
+    finally:
+        module.cached_content.cache_clear()
+
+
 def test_cached_chapter_still_checks_current_sql_reference_and_deletion(platform):
     from uuid import uuid4
 
@@ -90,6 +114,17 @@ def test_cached_chapter_still_checks_current_sql_reference_and_deletion(platform
             )
         )
     assert library.chapter(chapter)["footnotes"]
+    source_view = library.source_chapter(chapter)
+    reader_view = library.chapter(chapter)
+    assert all(
+        source_view[key] == reader_view[key]
+        for key in ("text", "parts", "structure", "navigation", "footnotes", "source_structure")
+    )
+    assert "reading_text" in reader_view and "toc_links" in reader_view
+    assert (
+        not any(key.startswith("reading_") for key in source_view)
+        and "toc_links" not in source_view
+    )
     assert Library(settings, engine).chapter(chapter)["text"].startswith("原文")
     with engine.begin() as conn:
         conn.execute(
@@ -99,8 +134,13 @@ def test_cached_chapter_still_checks_current_sql_reference_and_deletion(platform
         )
     assert library.chapter(chapter)["text"] == "修改后的正文。"
     assert library.chapter(chapter)["title"] == "新标题"
+    assert library.source_chapter(chapter)["text"] == "修改后的正文。"
+    assert library.source_chapter(chapter)["title"] == "新标题"
     with engine.begin() as conn:
         conn.execute(delete(db.chapters).where(db.chapters.c.id == chapter))
     with pytest.raises(ServiceError) as error:
         library.chapter(chapter)
     assert error.value.status_code == 404
+    with pytest.raises(ServiceError) as source_error:
+        library.source_chapter(chapter)
+    assert source_error.value.status_code == 404

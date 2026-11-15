@@ -61,7 +61,9 @@ test("reads a complete logical chapter first and opens only its associated origi
   expect(
     screen.getByText("0 项可用于连续阅读 · 0 项暂按原页显示"),
   ).toBeTruthy();
-  await userEvent.click(screen.getByText("结构整理结果"));
+  await userEvent.click(
+    screen.getByRole("button", { name: "关闭" }),
+  );
   expect(screen.queryByTitle("原书 PDF")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "对照原书" }));
   expect((await screen.findByAltText("PDF 第 7 页")).getAttribute("src")).toBe(

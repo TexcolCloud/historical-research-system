@@ -7,13 +7,13 @@ from hrs.processing.contracts import TaskRecord, TaskStage
 from hrs.processing.errors import LeaseConflict, WorkflowStopped
 from hrs.processing.review_contract import validate_issues
 
-STAGES = {"ocr", "review", "verify", "navigation", "organization"}
+STAGES = {"ocr", "review", "verify", "navigation", "organization", "structure"}
 
 
 def metadata_work_remaining(doc: dict) -> bool:
     """Publication stays readable while source-bound link verification continues."""
     return any(
-        task["stage"] == "navigation" and task["state"] in {"ready", "leased"}
+        task["stage"] in {"navigation", "structure"} and task["state"] in {"ready", "leased"}
         for task in doc["tasks"]
     )
 
@@ -38,7 +38,7 @@ def new_task(stage: TaskStage, page: int | None = None) -> TaskRecord:
 def active_review(doc: dict, task_id: str, lease_token: str) -> dict:
     task = next(t for t in doc["tasks"] if t["task_id"] == task_id)
     if (
-        task["stage"] not in {"review", "verify"}
+        task["stage"] not in {"review", "verify", "structure"}
         or task["state"] != "leased"
         or task["claim"]["lease_token"] != lease_token
     ):
@@ -88,7 +88,11 @@ def request_continuation(doc: dict, *, resume: bool = False, followup: bool = Fa
         request.pop("pause_requested", None)
         if doc["state"] == "paused":
             doc["state"] = (
-                "pending" if any(p["state"] == "pending" for p in doc["pages"]) else "processing"
+                "published"
+                if doc.get("publication") and all(p["state"] == "approved" for p in doc["pages"])
+                else "pending"
+                if any(p["state"] == "pending" for p in doc["pages"])
+                else "processing"
             )
     if doc["state"] == "published" and not metadata_work_remaining(doc):
         request["state"] = "succeeded"

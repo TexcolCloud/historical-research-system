@@ -5,6 +5,21 @@ type Chapter = components["schemas"]["Chapter"];
 type ReadingChapter = Pick<Chapter, "id" | "run_id" | "text"> &
   Partial<Pick<Chapter, "text_sha256" | "reading_text" | "reading_segments">>;
 
+export function chapterHref(
+  bookId: string,
+  chapterId: string,
+  options?: { page?: number; returnTo?: string },
+) {
+  const params = new URLSearchParams({
+    tab: "reader",
+    section: "text",
+    chapter: chapterId,
+  });
+  if (options?.page != null) params.set("physicalPage", String(options.page));
+  if (options?.returnTo) params.set("returnTo", options.returnTo);
+  return `/books/${bookId}?${params}`;
+}
+
 /** Directory, inline TOC and search links all enter the same source-bound reader route. */
 export function readingHref(
   bookId: string,

@@ -35,6 +35,18 @@ def _main() -> None:
     execution.add_argument("--capacity", type=int, required=True)
     execution.add_argument("--batch-pages", type=int, default=8)
     execution.add_argument("--overlap-reading", action=argparse.BooleanOptionalAction, default=True)
+    structure = commands.add_parser(
+        "backfill-structure", help="Queue explicit native source-structure inspection"
+    )
+    structure.add_argument("document_id")
+    structure.add_argument("--pages", type=int, nargs="+")
+    structure.add_argument(
+        "--force", action="store_true", help="Directed recheck of the selected physical pages"
+    )
+    structure_read = commands.add_parser(
+        "source-structure", help="Read the current source-structure snapshot"
+    )
+    structure_read.add_argument("document_id")
     repair = commands.add_parser(
         "repair-structure", help="Audit or restore page structure from retained review evidence"
     )
@@ -72,6 +84,7 @@ def _main() -> None:
             command.add_argument("task_id")
     search = commands.add_parser("search")
     search.add_argument("query")
+    search.add_argument("--source-scope", choices=("content", "metadata", "all"), default="content")
     args = parser.parse_args()
     root = resolve_workspace(args.root)
     if args.command == "mcp":
@@ -92,6 +105,12 @@ def _main() -> None:
             batch_pages=args.batch_pages,
             overlap_reading=args.overlap_reading,
         )
+    elif args.command == "source-structure":
+        result = store.structure_snapshot(args.document_id)
+    elif args.command == "backfill-structure":
+        result = store.backfill_structure(args.document_id, pages=args.pages, force=args.force)
+        if result["queued_pages"]:
+            result["run_request"] = store.request_run(args.document_id)
     elif args.command == "repair-structure":
         result = store.repair_structure(
             args.document_id, apply=args.apply, replan_navigation=args.replan_navigation
@@ -109,7 +128,9 @@ def _main() -> None:
     elif args.command == "retry":
         result = store.retry_task(args.document_id, args.task_id)
     elif args.command == "search":
-        result = store.search(args.query)
+        from hrs.search.local_snapshot import search_published
+
+        result = search_published(store, args.query, source_scope=args.source_scope)
     elif args.command == "list":
         result = store.list_documents()
     elif args.command == "workspace":

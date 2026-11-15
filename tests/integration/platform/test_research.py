@@ -15,6 +15,7 @@ from hrs.library.books import get_run
 from hrs.library.errors import ServiceError
 from hrs.library.events import read_events
 from hrs.library.native_workspace import WrongWorkspace
+from hrs.library.navigation_projection import chapter_signature
 from hrs.library.projection.facts import PROJECTION_POLICY
 from hrs.library.projection.publication import NativePublication
 from hrs.library.records import text_digest
@@ -25,6 +26,7 @@ from hrs.research.schemas import ResearchDecision
 from hrs.research.service import Research
 from hrs.research.workspace import QuestionCreate, QuestionEvidence, QuestionUpdate
 from hrs.storage import models as db
+from tests.integration.platform.index_stub import completed_index, seed_current_index
 
 
 @pytest.fixture
@@ -100,6 +102,7 @@ def research_book(platform, monkeypatch):
             ensure_ascii=False,
         ).encode()
     )
+    chapters_sha = chapter_signature([{"id": chapter_id, "content": content, "pages": [4]}])
     with engine.begin() as connection:
         connection.execute(
             insert(db.books).values(id=book_id, title="Synthetic contract book", state="ready")
@@ -117,9 +120,9 @@ def research_book(platform, monkeypatch):
                     "published": True,
                     "content_acceptance": "machine_or_human",
                     "codex_publication_sha256": publication,
-                    "codex_reading_projection": {"chapters_sha256": "d" * 64},
+                    "codex_reading_projection": {"chapters_sha256": chapters_sha},
                     "codex_indexed_publication_sha256": publication,
-                    "codex_indexed_chapters_sha256": "d" * 64,
+                    "codex_indexed_chapters_sha256": chapters_sha,
                 },
             )
         )
@@ -136,6 +139,7 @@ def research_book(platform, monkeypatch):
                 codepoints=len(text),
             )
         )
+    seed_current_index(settings, engine, run_id)
     return settings, engine, bridge, book_id, run_id, chapter_id, text
 
 
@@ -153,6 +157,28 @@ def retained_research_run(bridge, book_id, *, purpose, scope, questions=(), targ
         link_target_cards=list(targets),
     )
     return bridge.workflow.enqueue(snapshot, purpose=purpose)
+
+
+def project_fixture_chapters(engine, run_id):
+    """Model the publication commit before a synthetic source index is activated."""
+    with engine.begin() as connection:
+        result = connection.scalar(select(db.runs.c.result).where(db.runs.c.id == run_id))
+        rows = list(
+            connection.execute(select(db.chapters).where(db.chapters.c.run_id == run_id)).mappings()
+        )
+        connection.execute(
+            update(db.runs)
+            .where(db.runs.c.id == run_id)
+            .values(
+                result={
+                    **result,
+                    "codex_reading_projection": {
+                        **result["codex_reading_projection"],
+                        "chapters_sha256": chapter_signature(rows),
+                    },
+                }
+            )
+        )
 
 
 def test_indexed_reconciliation_is_durable_idempotent_and_freezes_full_article(research_book):
@@ -425,11 +451,11 @@ def test_graph_drops_stale_owner_edges_after_entities_merge_into_current_books(r
     _, old_card = finish_contract_run(
         bridge, bridge.start(book_id), "Old owner A", draft_patch=patch
     )
-    book_b, article_b = later_source(engine, source_run, chapter_id)
+    book_b, article_b = later_source(bridge, source_run, chapter_id)
     _, card_b = finish_contract_run(
         bridge, bridge.start(book_b), "Current person B", draft_patch=named_patch(article_b, text)
     )
-    book_c, article_c = later_source(engine, source_run, chapter_id)
+    book_c, article_c = later_source(bridge, source_run, chapter_id)
     _, card_c = finish_contract_run(
         bridge,
         bridge.start(book_c),
@@ -628,7 +654,8 @@ def named_patch(chapter_id, text):
     }
 
 
-def later_source(engine, source_run, chapter_id):
+def later_source(bridge, source_run, chapter_id):
+    engine = bridge.engine
     book_id, run_id, article_id = (str(uuid4()) for _ in range(3))
     with engine.begin() as connection:
         source = (
@@ -642,12 +669,28 @@ def later_source(engine, source_run, chapter_id):
         connection.execute(
             insert(db.books).values(id=book_id, title="Later question source", state="ready")
         )
-        connection.execute(insert(db.runs).values(**{**source, "id": run_id, "book_id": book_id}))
+        result = {
+            key: value
+            for key, value in source["result"].items()
+            if not key.startswith(("retrieval_", "codex_indexed_"))
+        }
+        connection.execute(
+            insert(db.runs).values(
+                **{
+                    **source,
+                    "id": run_id,
+                    "book_id": book_id,
+                    "result": result,
+                }
+            )
+        )
         connection.execute(
             insert(db.chapters).values(
                 **{**article, "id": article_id, "run_id": run_id, "book_id": book_id}
             )
         )
+    project_fixture_chapters(engine, run_id)
+    completed_index(bridge.settings, engine)(None, run_id)
     return book_id, article_id
 
 
@@ -685,7 +728,7 @@ def test_retained_link_refresh_keeps_frozen_questions_and_notebook_findings(rese
             bridge.workflow.card(original["id"]), bridge.workflow.snapshot(initial["run_id"])
         )
     )
-    other_book, other_article = later_source(engine, source_run, chapter_id)
+    other_book, other_article = later_source(bridge, source_run, chapter_id)
     _, counterpart = finish_contract_run(
         bridge,
         bridge.start(other_book),
@@ -1017,14 +1060,28 @@ def test_new_book_completion_retires_auto_links_and_preserves_legacy_two_sided_e
         connection.execute(
             insert(db.books).values(id=other_book, title="Later arrival", state="ready")
         )
+        result = {
+            key: value
+            for key, value in source["result"].items()
+            if not key.startswith(("retrieval_", "codex_indexed_"))
+        }
         connection.execute(
-            insert(db.runs).values(**{**source, "id": other_run, "book_id": other_book})
+            insert(db.runs).values(
+                **{
+                    **source,
+                    "id": other_run,
+                    "book_id": other_book,
+                    "result": result,
+                }
+            )
         )
         connection.execute(
             insert(db.chapters).values(
                 **{**chapter, "id": other_chapter, "run_id": other_run, "book_id": other_book}
             )
         )
+    project_fixture_chapters(engine, other_run)
+    completed_index(settings, engine)(None, other_run)
     _, second = finish_contract_run(
         bridge,
         bridge.start(other_book),
@@ -1136,7 +1193,7 @@ def test_structured_card_revision_replaces_only_its_article_after_independent_re
     from hrs.research.workspace import CardRevision
     from hrs.search.indexing import BookIndexer
 
-    settings, engine, bridge, book_id, _, chapter_id, _ = research_book
+    settings, engine, bridge, book_id, source_run, chapter_id, _ = research_book
     second_id = str(uuid4())
     with engine.begin() as connection:
         article = (
@@ -1149,6 +1206,8 @@ def test_structured_card_revision_replaces_only_its_article_after_independent_re
                 **{**article, "id": second_id, "position": 1, "title": "Second article"}
             )
         )
+    project_fixture_chapters(engine, source_run)
+    completed_index(settings, engine)(None, source_run)
     initial = bridge.start(book_id)
     initial, first = finish_contract_run(bridge, initial, "LegacyOnlyMarker")
     initial, second = finish_contract_run(bridge, initial, "Second article")
@@ -1339,7 +1398,7 @@ def test_index_commit_emits_one_durable_research_event(research_book, monkeypatc
             "Indexer",
             (),
             {
-                "index": lambda self, run_id: None,
+                "index": completed_index(settings, engine),
                 "refresh_navigation": lambda self, run_id: None,
             },
         )(),
@@ -1381,8 +1440,51 @@ def test_index_commit_emits_one_durable_research_event(research_book, monkeypatc
         "publication_sha256": result["codex_publication_sha256"],
         "chapters_sha256": result["codex_reading_projection"]["chapters_sha256"],
         "navigation_sha256": "e" * 64,
-        "retrieval_generation": None,
+        "retrieval_generation": get_run(engine, source_run)["result"]["retrieval_generation"],
     }
+
+
+def test_new_cards_wait_for_current_structure_index_and_existing_runs_remain_readable(
+    research_book,
+):
+    settings, engine, bridge, book_id, source_run, _, _ = research_book
+    from hrs.research.sources import indexed_version
+
+    def revise_structure(value):
+        run = get_run(engine, source_run)
+        with engine.begin() as connection:
+            connection.execute(
+                update(db.runs)
+                .where(db.runs.c.id == source_run)
+                .values(
+                    result={
+                        **run["result"],
+                        "codex_reading_projection": {
+                            **run["result"]["codex_reading_projection"],
+                            "structure_sha256": value,
+                        },
+                    }
+                )
+            )
+
+    revise_structure("new-structure")
+    assert indexed_version(get_run(engine, source_run)), "Historical source reads remain available"
+    assert bridge.index_is_current(get_run(engine, source_run)) is False
+    bridge.tick()
+    assert bridge.workflow.list_runs(book_id) == []
+    with pytest.raises(ServiceError, match="仍在同步"):
+        bridge.start(book_id)
+    completed_index(settings, engine)(None, source_run)
+    bridge.reconcile_at = 0
+    bridge.tick()
+    retained = bridge.workflow.list_runs(book_id)[0]
+    frozen = bridge.workflow.snapshot(retained["run_id"])
+    revise_structure("later-structure")
+    assert bridge.start(book_id)["run_id"] == retained["run_id"]
+    bridge.reconcile_at = 0
+    bridge.tick()
+    assert len(bridge.workflow.list_runs(book_id)) == 1
+    assert bridge.workflow.snapshot(retained["run_id"]) == frozen
 
 
 def test_foreign_workspace_never_enters_research_or_its_search_scope(research_book):

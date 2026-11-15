@@ -21,6 +21,7 @@ from hrs.storage import models as db
 def retrieval_preview(result):
     """Project research-only selection leads; complete source evidence is fetched separately."""
     from hrs.processing.hashing import digest
+    from hrs.search.projection import slice_segments
 
     query = result.get("query", "")
     original = result.get("hits", [])
@@ -35,12 +36,36 @@ def retrieval_preview(result):
         "read_evidence": "Use research_read_evidence(article_id=chapter_id); read the complete frozen article before citing. Previews are selection leads only.",
     }
     for rank, hit in enumerate(original[:8], 1):
-        text = hit.get("text", "")
+        text = hit.get("snippet") if hit.get("snippet") is not None else hit.get("text", "")
         position = text.find(query) if query else -1
         left = max(0, position - max(0, 320 - len(query)) // 2) if position >= 0 else 0
         right = min(len(text), left + 320)
         preview = text[left:right]
         target = hit.get("reading_target") or {}
+        segments = hit.get("snippet_segments") or []
+        selected = slice_segments(segments, left, right) if segments else []
+        locations = [
+            {key: segment.get(key) for key in ("start", "end", "role", "layer")}
+            for segment in selected
+            if not segment["synthetic"]
+        ]
+        contiguous = not selected or (
+            all(
+                not segment["synthetic"] and not segment.get("transformation")
+                for segment in selected
+            )
+            and all(a["end"] == b["start"] for a, b in zip(selected, selected[1:]))
+        )
+        preview_start = (
+            (selected[0]["start"] if selected else hit.get("start", 0) + left)
+            if contiguous
+            else None
+        )
+        preview_end = (
+            (selected[-1]["end"] if selected else hit.get("start", 0) + right)
+            if contiguous
+            else None
+        )
         output["hits"].append(
             {
                 "rank": rank,
@@ -57,8 +82,13 @@ def retrieval_preview(result):
                 "text_sha256": target.get("text_sha256"),
                 "snippet_sha256": digest(text),
                 "preview": preview,
-                "preview_start": hit.get("start", 0) + left,
-                "preview_end": hit.get("start", 0) + right,
+                "preview_start": preview_start,
+                "preview_end": preview_end,
+                "preview_ranges": locations[:12],
+                "preview_ranges_truncated": len(locations) > 12,
+                "role": hit.get("role", "unknown"),
+                "layer": hit.get("layer", "unknown"),
+                "occurrence_count": len(hit.get("occurrences", [])) or 1,
                 "preview_length": len(preview),
                 "preview_sha256": digest(preview),
                 "preview_truncated": left > 0 or right < len(text),

@@ -3,7 +3,16 @@
 from hrs.library.errors import ServiceError
 
 
-def search_materials(research, query, *, topic=None, book_ids=None, semantic=True, limit=12):
+def search_materials(
+    research,
+    query,
+    *,
+    topic=None,
+    book_ids=None,
+    semantic=True,
+    limit=12,
+    source_scope="content",
+):
     available = set(research.workspace.available_books())
     materials = (topic or {}).get("materials", [])
     whole_books = set((topic or {}).get("book_ids", []))
@@ -25,7 +34,7 @@ def search_materials(research, query, *, topic=None, book_ids=None, semantic=Tru
             "evidence_status": "no_published_sources",
             "metrics": {},
         }
-    options = {}
+    options = {} if source_scope == "content" else {"source_scope": source_scope}
     if topic is not None and not whole_books:
         options["chapter_ids"] = sorted({item["article_id"] for item in materials})
     elif topic is not None and materials and selected - whole_books:

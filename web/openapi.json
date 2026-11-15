@@ -478,6 +478,113 @@
         }
       }
     },
+    "/api/v2/runs/{run_id}/source-structure": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Source Structure",
+        "operationId": "source_structure_api_v2_runs__run_id__source_structure_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceStructurePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/runs/{run_id}/source-structure/recheck": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Recheck Structure",
+        "operationId": "recheck_structure_api_v2_runs__run_id__source_structure_recheck_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StructureRecheck"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StructureRecheckReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/runs/{run_id}/navigation": {
       "get": {
         "tags": [
@@ -1514,6 +1621,21 @@
               "type": "boolean",
               "default": false,
               "title": "Include Navigation"
+            }
+          },
+          {
+            "name": "source_scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "content",
+                "metadata",
+                "all"
+              ],
+              "type": "string",
+              "default": "content",
+              "title": "Source Scope"
             }
           },
           {
@@ -5300,6 +5422,21 @@
             }
           },
           {
+            "name": "source_scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "content",
+                "metadata",
+                "all"
+              ],
+              "type": "string",
+              "default": "content",
+              "title": "Source Scope"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -7831,6 +7968,11 @@
             },
             "type": "array",
             "title": "Structure"
+          },
+          "source_structure": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Source Structure"
           }
         },
         "type": "object",
@@ -14769,6 +14911,87 @@
             "title": "Oversized",
             "default": false
           },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "snippet_segments": {
+            "items": {
+              "$ref": "#/components/schemas/SnippetSegment"
+            },
+            "type": "array",
+            "title": "Snippet Segments"
+          },
+          "ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SearchRange"
+            },
+            "type": "array",
+            "title": "Ranges"
+          },
+          "reading_targets": {
+            "items": {
+              "$ref": "#/components/schemas/SearchReadingTarget"
+            },
+            "type": "array",
+            "title": "Reading Targets"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "unknown"
+          },
+          "layer": {
+            "type": "string",
+            "title": "Layer",
+            "default": "unknown"
+          },
+          "source_scope": {
+            "type": "string",
+            "title": "Source Scope",
+            "default": "content"
+          },
+          "projection_rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Rule"
+          },
+          "source_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Group Id"
+          },
+          "model_eligible": {
+            "type": "boolean",
+            "title": "Model Eligible",
+            "default": true
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/components/schemas/SearchOccurrence"
+            },
+            "type": "array",
+            "title": "Occurrences"
+          },
           "research_cards": {
             "items": {
               "$ref": "#/components/schemas/ResearchTargetCardResponse"
@@ -16497,6 +16720,47 @@
             "type": "boolean",
             "title": "Outside Scope",
             "default": false
+          },
+          "source_role": {
+            "type": "string",
+            "title": "Source Role",
+            "default": "unknown"
+          },
+          "layer": {
+            "type": "string",
+            "title": "Layer",
+            "default": "unknown"
+          },
+          "source_scope": {
+            "type": "string",
+            "title": "Source Scope",
+            "default": "content"
+          },
+          "ownership_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ownership Status"
+          },
+          "context_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Hint"
           }
         },
         "type": "object",
@@ -16655,6 +16919,87 @@
             "type": "boolean",
             "title": "Oversized",
             "default": false
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "snippet_segments": {
+            "items": {
+              "$ref": "#/components/schemas/SnippetSegment"
+            },
+            "type": "array",
+            "title": "Snippet Segments"
+          },
+          "ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SearchRange"
+            },
+            "type": "array",
+            "title": "Ranges"
+          },
+          "reading_targets": {
+            "items": {
+              "$ref": "#/components/schemas/SearchReadingTarget"
+            },
+            "type": "array",
+            "title": "Reading Targets"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "unknown"
+          },
+          "layer": {
+            "type": "string",
+            "title": "Layer",
+            "default": "unknown"
+          },
+          "source_scope": {
+            "type": "string",
+            "title": "Source Scope",
+            "default": "content"
+          },
+          "projection_rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Rule"
+          },
+          "source_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Group Id"
+          },
+          "model_eligible": {
+            "type": "boolean",
+            "title": "Model Eligible",
+            "default": true
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/components/schemas/SearchOccurrence"
+            },
+            "type": "array",
+            "title": "Occurrences"
           }
         },
         "type": "object",
@@ -16671,6 +17016,397 @@
           "score"
         ],
         "title": "SearchHit"
+      },
+      "SearchOccurrence": {
+        "properties": {
+          "reading_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "directory_links": {
+            "items": {
+              "$ref": "#/components/schemas/ReadingTocLink"
+            },
+            "type": "array",
+            "title": "Directory Links"
+          },
+          "toc_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Toc Path"
+          },
+          "toc_entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toc Entry Id"
+          },
+          "navigation_version": {
+            "type": "integer",
+            "title": "Navigation Version",
+            "default": 0
+          },
+          "printed_pages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Printed Pages"
+          },
+          "doc_kind": {
+            "type": "string",
+            "title": "Doc Kind",
+            "default": "content"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "book_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Book Id"
+          },
+          "chapter_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chapter Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Pages"
+          },
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "book_title": {
+            "type": "string",
+            "title": "Book Title",
+            "default": ""
+          },
+          "section_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Section Path"
+          },
+          "table_scopes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Table Scopes"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "context": {
+            "items": {
+              "$ref": "#/components/schemas/SearchContext"
+            },
+            "type": "array",
+            "title": "Context"
+          },
+          "context_truncated": {
+            "type": "boolean",
+            "title": "Context Truncated",
+            "default": false
+          },
+          "oversized": {
+            "type": "boolean",
+            "title": "Oversized",
+            "default": false
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "snippet_segments": {
+            "items": {
+              "$ref": "#/components/schemas/SnippetSegment"
+            },
+            "type": "array",
+            "title": "Snippet Segments"
+          },
+          "ranges": {
+            "items": {
+              "$ref": "#/components/schemas/SearchRange"
+            },
+            "type": "array",
+            "title": "Ranges"
+          },
+          "reading_targets": {
+            "items": {
+              "$ref": "#/components/schemas/SearchReadingTarget"
+            },
+            "type": "array",
+            "title": "Reading Targets"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "unknown"
+          },
+          "layer": {
+            "type": "string",
+            "title": "Layer",
+            "default": "unknown"
+          },
+          "source_scope": {
+            "type": "string",
+            "title": "Source Scope",
+            "default": "content"
+          },
+          "projection_rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projection Rule"
+          },
+          "source_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Group Id"
+          },
+          "model_eligible": {
+            "type": "boolean",
+            "title": "Model Eligible",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "book_id",
+          "chapter_id",
+          "run_id",
+          "title",
+          "text",
+          "pages",
+          "start",
+          "end",
+          "score"
+        ],
+        "title": "SearchOccurrence"
+      },
+      "SearchRange": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "unknown"
+          },
+          "layer": {
+            "type": "string",
+            "title": "Layer",
+            "default": "unknown"
+          },
+          "source_scope": {
+            "type": "string",
+            "title": "Source Scope",
+            "default": "content"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "unknown"
+          },
+          "usage": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "context"
+            ],
+            "title": "Usage",
+            "default": "primary"
+          },
+          "subkind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subkind"
+          },
+          "context_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Role"
+          },
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SearchRange"
+      },
+      "SearchReadingTarget": {
+        "properties": {
+          "chapter_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chapter Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "physical_page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Physical Page"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Start",
+            "description": "Canonical chapter Markdown offset in Unicode codepoints."
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "End",
+            "description": "Exclusive canonical chapter Markdown offset in Unicode codepoints."
+          },
+          "text_sha256": {
+            "type": "string",
+            "title": "Text Sha256"
+          },
+          "anchor": {
+            "type": "string",
+            "title": "Anchor"
+          },
+          "image_sha256": {
+            "type": "string",
+            "title": "Image Sha256",
+            "default": ""
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "unknown"
+          },
+          "layer": {
+            "type": "string",
+            "title": "Layer",
+            "default": "unknown"
+          },
+          "usage": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "context"
+            ],
+            "title": "Usage",
+            "default": "primary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chapter_id",
+          "run_id",
+          "physical_page",
+          "start",
+          "end",
+          "text_sha256",
+          "anchor"
+        ],
+        "title": "SearchReadingTarget"
       },
       "SelectionUpdate": {
         "properties": {
@@ -16714,6 +17450,98 @@
           "expected_version"
         ],
         "title": "SelectionUpdate"
+      },
+      "SnippetSegment": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "title": "Synthetic",
+            "default": false
+          },
+          "transformation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transformation"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "unknown"
+          },
+          "layer": {
+            "type": "string",
+            "title": "Layer",
+            "default": "unknown"
+          },
+          "usage": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "context"
+            ],
+            "title": "Usage",
+            "default": "primary"
+          },
+          "snippet_start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet Start"
+          },
+          "snippet_end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "SnippetSegment"
       },
       "SourceReference": {
         "properties": {
@@ -16826,6 +17654,338 @@
           "article_sha256"
         ],
         "title": "SourceReference"
+      },
+      "SourceStructureCoverage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "body",
+              "heading",
+              "toc",
+              "index",
+              "bibliography",
+              "frontmatter",
+              "header",
+              "footer",
+              "page_number",
+              "note",
+              "table",
+              "figure",
+              "caption",
+              "watermark",
+              "stamp",
+              "marginalia",
+              "unknown"
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "present",
+              "absent",
+              "unknown"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "status"
+        ],
+        "title": "SourceStructureCoverage"
+      },
+      "SourceStructureFragment": {
+        "properties": {
+          "fragment_id": {
+            "type": "string",
+            "title": "Fragment Id"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "body",
+              "heading",
+              "toc",
+              "index",
+              "bibliography",
+              "frontmatter",
+              "header",
+              "footer",
+              "page_number",
+              "note",
+              "table",
+              "figure",
+              "caption",
+              "watermark",
+              "stamp",
+              "marginalia",
+              "unknown"
+            ],
+            "title": "Role"
+          },
+          "layer": {
+            "type": "string",
+            "enum": [
+              "source",
+              "author_note",
+              "editor_note",
+              "translator_note",
+              "annotation",
+              "capture",
+              "unknown"
+            ],
+            "title": "Layer"
+          },
+          "subkind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "title_page",
+                  "copyright",
+                  "imprint",
+                  "preface",
+                  "foreword",
+                  "afterword",
+                  "acknowledgements",
+                  "appendix",
+                  "other",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subkind"
+          },
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          },
+          "text_sha256": {
+            "type": "string",
+            "title": "Text Sha256"
+          },
+          "bbox": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bbox"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "text_truncated": {
+            "type": "boolean",
+            "title": "Text Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "fragment_id",
+          "role",
+          "layer",
+          "start",
+          "end",
+          "text_sha256",
+          "text"
+        ],
+        "title": "SourceStructureFragment"
+      },
+      "SourceStructurePage": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "snapshot_sha256": {
+            "type": "string",
+            "title": "Snapshot Sha256"
+          },
+          "structure_version": {
+            "type": "integer",
+            "title": "Structure Version"
+          },
+          "page_count": {
+            "type": "integer",
+            "title": "Page Count"
+          },
+          "reviewed_pages": {
+            "type": "integer",
+            "title": "Reviewed Pages"
+          },
+          "pending_structure_pages": {
+            "type": "integer",
+            "title": "Pending Structure Pages",
+            "default": 0
+          },
+          "structure_task_state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "leased",
+                  "completed",
+                  "pending",
+                  "superseded"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structure Task State"
+          },
+          "processing_paused": {
+            "type": "boolean",
+            "title": "Processing Paused",
+            "default": false
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "reviewed",
+              "unreviewed",
+              "stale"
+            ],
+            "title": "Status"
+          },
+          "image": {
+            "type": "string",
+            "title": "Image"
+          },
+          "image_sha256": {
+            "type": "string",
+            "title": "Image Sha256"
+          },
+          "markdown_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Markdown Sha256"
+          },
+          "coverage": {
+            "items": {
+              "$ref": "#/components/schemas/SourceStructureCoverage"
+            },
+            "type": "array",
+            "title": "Coverage"
+          },
+          "fragments": {
+            "items": {
+              "$ref": "#/components/schemas/SourceStructureFragment"
+            },
+            "type": "array",
+            "title": "Fragments"
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/SourceStructureRelation"
+            },
+            "type": "array",
+            "title": "Relations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "snapshot_sha256",
+          "structure_version",
+          "page_count",
+          "reviewed_pages",
+          "page",
+          "status",
+          "image",
+          "image_sha256",
+          "markdown_sha256",
+          "coverage",
+          "fragments",
+          "relations"
+        ],
+        "title": "SourceStructurePage"
+      },
+      "SourceStructureRelation": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "note_of",
+              "caption_of",
+              "continues",
+              "reading_next",
+              "table_continues"
+            ],
+            "title": "Kind"
+          },
+          "from_fragment_id": {
+            "type": "string",
+            "title": "From Fragment Id"
+          },
+          "to_fragment_id": {
+            "type": "string",
+            "title": "To Fragment Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "unknown"
+            ],
+            "title": "Status"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "from_fragment_id",
+          "to_fragment_id",
+          "status",
+          "evidence"
+        ],
+        "title": "SourceStructureRelation"
       },
       "SourceValue": {
         "properties": {
@@ -17014,6 +18174,98 @@
         ],
         "title": "StructureItem"
       },
+      "StructureRecheck": {
+        "properties": {
+          "expected_snapshot_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Snapshot Sha256"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array",
+                "maxItems": 500,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_snapshot_sha256"
+        ],
+        "title": "StructureRecheck"
+      },
+      "StructureRecheckReceipt": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "queued_pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Queued Pages"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/StructureSkippedPage"
+            },
+            "type": "array",
+            "title": "Skipped"
+          },
+          "content_approval": {
+            "type": "boolean",
+            "title": "Content Approval"
+          },
+          "human_approval": {
+            "type": "boolean",
+            "title": "Human Approval"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "run_request": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Request"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "queued_pages",
+          "skipped",
+          "content_approval",
+          "human_approval",
+          "schema_version"
+        ],
+        "title": "StructureRecheckReceipt"
+      },
       "StructureReport": {
         "properties": {
           "policy": {
@@ -17038,6 +18290,29 @@
           "available"
         ],
         "title": "StructureReport"
+      },
+      "StructureSkippedPage": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "already_queued",
+              "already_reviewed",
+              "content_not_approved"
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "reason"
+        ],
+        "title": "StructureSkippedPage"
       },
       "StudyDate": {
         "properties": {

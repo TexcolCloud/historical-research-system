@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Header, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 from hrs.api.deps import EngineDep, LibraryDep, OutputsDep, ReviewDep, SettingsDep
 from hrs.api.schemas import (
@@ -13,6 +14,8 @@ from hrs.api.schemas import (
     RecoveryRequest,
     RunControlReceipt,
     RunSummary,
+    SourceStructurePage,
+    StructureRecheckReceipt,
     StructureReport,
 )
 from hrs.library import books
@@ -20,6 +23,33 @@ from hrs.library.errors import ServiceError
 from hrs.library.runs.recovery import retry_run
 
 router = APIRouter(tags=["runs"])
+
+
+class StructureRecheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_snapshot_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    pages: list[StrictInt] | None = Field(default=None, min_length=1, max_length=500)
+    force: StrictBool = False
+
+
+@router.get("/api/v2/runs/{run_id}/source-structure", response_model=SourceStructurePage)
+def source_structure(
+    settings: SettingsDep, engine: EngineDep, run_id: UUID, page: int = Query(1, ge=1)
+):
+    from hrs.library.source_structure import SourceStructure
+
+    return SourceStructure(settings, engine).page(run_id, page)
+
+
+@router.post(
+    "/api/v2/runs/{run_id}/source-structure/recheck", response_model=StructureRecheckReceipt
+)
+def recheck_structure(
+    settings: SettingsDep, engine: EngineDep, run_id: UUID, body: StructureRecheck
+):
+    from hrs.library.source_structure import SourceStructure
+
+    return SourceStructure(settings, engine).recheck(run_id, body)
 
 
 @router.get("/api/v2/runs/{run_id}/navigation", response_model=NavigationReport)

@@ -7,6 +7,7 @@ from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, Field
 from hrs.library.card_contracts import CardDraft
 from hrs.library.contracts import UploadSession as UploadSession
 from hrs.processing.review_contract import ReviewLocation
+from hrs.processing.source_structure import Layer, Presence, RelationKind, Role, Subkind
 
 
 class RuntimeStatus(BaseModel):
@@ -499,6 +500,70 @@ class Chapter(ChapterSummary):
     reading_segments: list[ReadingSegment] = Field(default_factory=list)
     toc_links: list[ReadingTocLink] = Field(default_factory=list)
     structure: list[StructureItem] = Field(default_factory=list)
+    source_structure: dict = Field(default_factory=dict)
+
+
+class SourceStructureCoverage(BaseModel):
+    role: Role
+    status: Presence
+    reason: str | None = None
+
+
+class SourceStructureFragment(BaseModel):
+    fragment_id: str
+    role: Role
+    layer: Layer
+    subkind: Subkind | None = None
+    start: int
+    end: int
+    text_sha256: str
+    bbox: list[float] | None = None
+    text: str
+    text_truncated: bool = False
+
+
+class SourceStructureRelation(BaseModel):
+    kind: RelationKind
+    from_fragment_id: str
+    to_fragment_id: str
+    status: Literal["verified", "unknown"]
+    evidence: str
+
+
+class SourceStructurePage(BaseModel):
+    document_id: str
+    snapshot_sha256: str
+    structure_version: int
+    page_count: int
+    reviewed_pages: int
+    pending_structure_pages: int = 0
+    structure_task_state: (
+        Literal["ready", "leased", "completed", "pending", "superseded"] | None
+    ) = None
+    processing_paused: bool = False
+    page: int
+    status: Literal["reviewed", "unreviewed", "stale"]
+    image: str
+    image_sha256: str
+    markdown_sha256: str | None
+    coverage: list[SourceStructureCoverage]
+    fragments: list[SourceStructureFragment]
+    relations: list[SourceStructureRelation]
+
+
+class StructureSkippedPage(BaseModel):
+    page: int
+    reason: Literal["already_queued", "already_reviewed", "content_not_approved"]
+
+
+class StructureRecheckReceipt(BaseModel):
+    document_id: str
+    queued_pages: list[int]
+    skipped: list[StructureSkippedPage]
+    content_approval: bool
+    human_approval: bool
+    schema_version: int
+    run_request: dict | None = None
 
 
 class ExecutionNode(BaseModel):
@@ -569,6 +634,32 @@ class CardDetail(CardSummary):
     quote_locations: list[CardQuoteLocation] = Field(default_factory=list)
 
 
+class SearchRange(BaseModel):
+    start: int
+    end: int
+    role: str = "unknown"
+    layer: str = "unknown"
+    source_scope: str = "content"
+    status: str = "unknown"
+    usage: Literal["primary", "context"] = "primary"
+    subkind: str | None = None
+    context_role: str | None = None
+    block_id: str | None = None
+
+
+class SnippetSegment(BaseModel):
+    text: str
+    start: int | None = None
+    end: int | None = None
+    synthetic: bool = False
+    transformation: str | None = None
+    role: str = "unknown"
+    layer: str = "unknown"
+    usage: Literal["primary", "context"] = "primary"
+    snippet_start: int | None = None
+    snippet_end: int | None = None
+
+
 class SearchContext(BaseModel):
     start: int
     end: int
@@ -578,9 +669,20 @@ class SearchContext(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     reading_target: ReadingTarget | None = None
     outside_scope: bool = False
+    source_role: str = "unknown"
+    layer: str = "unknown"
+    source_scope: str = "content"
+    ownership_status: Literal["ready", "unknown"] | None = None
+    context_hint: str | None = None
 
 
-class SearchHit(BaseModel):
+class SearchReadingTarget(ReadingTarget):
+    role: str = "unknown"
+    layer: str = "unknown"
+    usage: Literal["primary", "context"] = "primary"
+
+
+class SearchOccurrence(BaseModel):
     reading_target: ReadingTarget | None = None
     directory_links: list[ReadingTocLink] = Field(default_factory=list)
     toc_path: list[str] = Field(default_factory=list)
@@ -605,6 +707,20 @@ class SearchHit(BaseModel):
     context: list[SearchContext] = Field(default_factory=list)
     context_truncated: bool = False
     oversized: bool = False
+    snippet: str | None = None
+    snippet_segments: list[SnippetSegment] = Field(default_factory=list)
+    ranges: list[SearchRange] = Field(default_factory=list)
+    reading_targets: list[SearchReadingTarget] = Field(default_factory=list)
+    role: str = "unknown"
+    layer: str = "unknown"
+    source_scope: str = "content"
+    projection_rule: str | None = None
+    source_group_id: str | None = None
+    model_eligible: bool = True
+
+
+class SearchHit(SearchOccurrence):
+    occurrences: list[SearchOccurrence] = Field(default_factory=list)
 
 
 class RecoveryRequest(BaseModel):

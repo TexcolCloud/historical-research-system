@@ -23,6 +23,8 @@ NATIVE_COMMANDS = {
     "migrate-ledger",
     "configure-execution",
     "repair-structure",
+    "source-structure",
+    "backfill-structure",
 }
 MAINTENANCE_COMMANDS = {
     "api",
@@ -31,6 +33,7 @@ MAINTENANCE_COMMANDS = {
     "backup",
     "restore",
     "reindex",
+    "rollback-index",
     "amend-library",
     "evaluate",
     "evaluate-offline",

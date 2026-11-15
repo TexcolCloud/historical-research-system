@@ -20,6 +20,7 @@ from hrs.research.service import Research
 from hrs.research.sources import publication_snapshot
 from hrs.search.indexing import BookIndexer
 from hrs.storage import models as db
+from tests.integration.platform.index_stub import completed_index
 from tests.integration.platform.test_research import research_book as research_book
 
 CARD_ONLY_POLICY = deepcopy(research_policy.POLICY)
@@ -42,7 +43,7 @@ def index_again(book, monkeypatch):
     calls = []
 
     monkeypatch.setattr(BookIndexer, "__init__", lambda self, *args: None)
-    monkeypatch.setattr(BookIndexer, "index", lambda self, run_id: calls.append(run_id))
+    monkeypatch.setattr(BookIndexer, "index", completed_index(settings, engine, calls))
     monkeypatch.setattr(
         BookIndexer, "refresh_navigation", lambda self, run_id: calls.append(run_id)
     )

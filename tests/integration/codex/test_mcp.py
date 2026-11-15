@@ -13,6 +13,8 @@ from PIL import Image
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject
 
+from hrs.processing.source_structure import ROLES
+
 
 def server_parameters(root):
     return StdioServerParameters(
@@ -33,7 +35,85 @@ def value(result):
     )
 
 
+def test_stdio_source_structure_pages_are_bounded_and_arguments_require_strict_integers(tmp_path):
+    from tests.unit.processing.test_store import document
+
+    store, document_id = document(tmp_path, count=6)
+    snapshot = store.structure_snapshot(document_id)
+
+    async def scenario():
+        async with Client(
+            server_parameters(store.root), mode="legacy", read_timeout_seconds=15
+        ) as client:
+            first = value(await client.call_tool("source_structure", {"document_id": document_id}))
+            assert first["pages"] == snapshot["pages"][:4]
+            assert first["page_count"] == 6 and first["next_offset"] == 4
+            assert first["offset"] == 0 and first["limit"] == 4 and first["truncated"] is True
+            last = value(
+                await client.call_tool(
+                    "source_structure",
+                    {
+                        "document_id": document_id,
+                        "offset": first["next_offset"],
+                        "limit": 20,
+                    },
+                )
+            )
+            assert last["pages"] == snapshot["pages"][4:]
+            assert last["next_offset"] is None and last["truncated"] is True
+            assert (
+                last["snapshot_sha256"] == first["snapshot_sha256"] == snapshot["snapshot_sha256"]
+            )
+            assert last["structure_version"] == snapshot["structure_version"]
+            for arguments in (
+                {"offset": True},
+                {"offset": 1.0},
+                {"offset": "1"},
+                {"offset": -1},
+                {"offset": 6},
+                {"limit": False},
+                {"limit": 2.0},
+                {"limit": "2"},
+                {"limit": 0},
+                {"limit": 21},
+            ):
+                denied = await client.call_tool(
+                    "source_structure",
+                    {
+                        "document_id": document_id,
+                        **arguments,
+                    },
+                )
+                assert denied.is_error, arguments
+            for arguments in (
+                {"pages": [True]},
+                {"pages": [1.0]},
+                {"force": "false"},
+                {"force": 1},
+            ):
+                denied = await client.call_tool(
+                    "backfill_structure",
+                    {
+                        "document_id": document_id,
+                        **arguments,
+                    },
+                )
+                assert denied.is_error, arguments
+
+    asyncio.run(scenario())
+
+
 async def submit(client, doc_id, task, result):
+    if task["stage"] in {"review", "verify", "structure"}:
+        result = {
+            "source_structure": {
+                "schema_version": 1,
+                "coverage": [{"role": role, "status": "unknown"} for role in sorted(ROLES)],
+                "fragments": [],
+                "relations": [],
+            },
+            **result,
+        }
     return value(
         await client.call_tool(
             "submit_task",
@@ -53,7 +133,7 @@ async def claim(client, doc_id, stage, worker):
             "claim_task", {"document_id": doc_id, "stage": stage, "worker_id": worker}
         )
     )
-    if task is None or stage not in {"review", "verify"}:
+    if task is None or stage not in {"review", "verify", "structure"}:
         return task
     assert task["source_first_required"] is True
     assert "markdown" not in task["inputs"]
@@ -234,6 +314,29 @@ def test_stdio_tools_original_pixels_correction_and_publication(tmp_path):
                 )
             )
             assert transport["assignments"] == [] and transport["retired_sessions"] == []
+            structure = value(await client.call_tool("source_structure", {"document_id": doc_id}))
+            assert (
+                structure["schema_version"] == 1 and structure["pages"][0]["status"] == "reviewed"
+            )
+            assert {row["role"] for row in structure["pages"][0]["coverage"]} == ROLES
+            backfill = value(
+                await client.call_tool(
+                    "backfill_structure",
+                    {
+                        "document_id": doc_id,
+                        "pages": [1],
+                        "force": True,
+                    },
+                )
+            )
+            assert backfill["queued_pages"] == [1] and backfill["content_approval"] is False
+            inspection = await claim(client, doc_id, "structure", "independent-structure-sol")
+            await submit(client, doc_id, inspection, {"verdict": "complete"})
+            refreshed = value(await client.call_tool("source_structure", {"document_id": doc_id}))
+            assert refreshed["structure_version"] > structure["structure_version"]
+            assert (
+                refreshed["pages"][0]["markdown_sha256"] == structure["pages"][0]["markdown_sha256"]
+            )
         # A fresh subprocess reads the same evidence and completed state.
         async with Client(
             server_parameters(root), mode="legacy", read_timeout_seconds=15
@@ -290,7 +393,9 @@ def test_stdio_pending_pdf_cannot_publish_and_retry_retains_decision(tmp_path):
             assert human_queue[0]["unresolved_attempts"] == 1
             rejected = await client.call_tool("publish_document", {"document_id": doc_id})
             assert rejected.is_error
-            assert value(await client.call_tool("search_library", {"query": "无法辨认"}))["hits"] == []
+            assert (
+                value(await client.call_tool("search_library", {"query": "无法辨认"}))["hits"] == []
+            )
             assert await claim(client, doc_id, "organization", "fixture-organizer") is None
             retry = value(
                 await client.call_tool(

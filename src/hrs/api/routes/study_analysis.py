@@ -40,11 +40,18 @@ def search(
     topic_id: str | None = None,
     book_ids: list[str] | None = Query(default=None, max_length=100),
     semantic: bool = True,
+    source_scope: Literal["content", "metadata", "all"] = "content",
     limit: int = Query(12, ge=1, le=50),
 ):
     topic = StudyService(service).topic(topic_id) if topic_id else None
     return search_materials(
-        service, q, topic=topic, book_ids=book_ids, semantic=semantic, limit=limit
+        service,
+        q,
+        topic=topic,
+        book_ids=book_ids,
+        semantic=semantic,
+        limit=limit,
+        source_scope=source_scope,
     )
 
 

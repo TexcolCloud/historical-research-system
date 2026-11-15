@@ -71,9 +71,20 @@ def cached_content(storage, reference):
     return read_content(storage, reference)
 
 
-def chapter_content(settings, reference):
+def _load_content(settings, reference):
     storage = storage_identity(settings)
     key = json.dumps(reference, sort_keys=True)
     # Large chapters remain readable without monopolizing a bounded process cache.
     loader = cached_content if reference["byte_length"] <= MAX_CACHED_BYTES else read_content
-    return deepcopy(loader(storage, key))
+    return loader(storage, key)
+
+
+def chapter_content(settings, reference):
+    return deepcopy(_load_content(settings, reference))
+
+
+def source_content(settings, reference):
+    """Copy canonical source fields; Library attaches current book navigation."""
+    body = _load_content(settings, reference)
+    fields = {"text", "text_sha256", "parts", "structure", "footnotes"}
+    return deepcopy({key: value for key, value in body.items() if key in fields})

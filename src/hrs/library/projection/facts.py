@@ -108,7 +108,17 @@ def projection_input(doc, runtime_control=None):
     )
 
 
-def projection_state(run, doc, scheduling, pending, publication_sha, navigation_sha):
+def projection_state(
+    run,
+    doc,
+    scheduling,
+    pending,
+    publication_sha,
+    navigation_sha,
+    *,
+    reading_projection,
+    index_rules,
+):
     request = doc.get("run_request", {})
     runtime = runtime_control_for_document(doc, scheduling.get("runtime_control"))
     blocked = scheduling["automatic_work_remaining"] and (
@@ -122,6 +132,11 @@ def projection_state(run, doc, scheduling, pending, publication_sha, navigation_
         and run["result"].get("codex_indexed_publication_sha256") == publication_sha
         and run["result"].get("codex_indexed_projection_policy") == PROJECTION_POLICY
         and run["result"].get("codex_indexed_navigation_sha256") == navigation_sha
+        and run["result"].get("codex_indexed_chapters_sha256")
+        == reading_projection.get("chapters_sha256")
+        and run["result"].get("codex_indexed_structure_sha256")
+        == reading_projection.get("structure_sha256")
+        and (run["result"].get("retrieval_manifest") or {}).get("rules") == index_rules
         else "ready"
         if doc["state"] == "published"
         else "awaiting_review"

@@ -337,7 +337,7 @@ class Ledger:
                     "SELECT 1 FROM records t JOIN records r ON r.document_id=t.document_id "
                     "AND r.kind='field' AND r.key='run_request' WHERE t.kind='task' "
                     "AND json_extract(t.value,'$.value.state')='ready' "
-                    "AND json_extract(t.value,'$.value.stage') IN ('ocr','review','verify','organization','navigation') "
+                    "AND json_extract(t.value,'$.value.stage') IN ('ocr','review','verify','organization','navigation','structure') "
                     "AND json_extract(r.value,'$.state') IN ('pending','running','waiting_workers','retryable_error') "
                     "AND COALESCE(json_extract(r.value,'$.pause_requested'),0)=0 "
                     "AND COALESCE(json_extract(r.value,'$.cancel_requested'),0)=0 "

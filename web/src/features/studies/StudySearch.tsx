@@ -5,6 +5,11 @@ import type { components } from "@/client/schema";
 import { Button } from "@/components/ui/button";
 import { readingHref } from "@/features/library/reader-location";
 import { studies, studyKeys, studyRequest } from "./api";
+import {
+  SearchExcerpt,
+  SourceScopeSelect,
+  sourceScope,
+} from "@/features/search/SearchExcerpt";
 
 type Discovery = components["schemas"]["StudySearchResponse"];
 
@@ -14,6 +19,10 @@ export function GlobalSearchPage() {
   const [text, setText] = useState(params.get("q") ?? "");
   const [scope, setScope] = useState(params.get("topic") ?? "");
   const [semantic, setSemantic] = useState(params.get("semantic") !== "false");
+  const [contentScope, setContentScope] = useState(
+    sourceScope(params.get("source_scope")),
+  );
+  const requestedScope = sourceScope(params.get("source_scope"));
   const topics = useQuery({
     queryKey: studyKeys.topics(),
     queryFn: ({ signal }) => studies.topics(false, signal),
@@ -26,14 +35,22 @@ export function GlobalSearchPage() {
     setText(q);
     setScope(topic);
     setSemantic(useSemantic);
-  }, [q, topic, useSemantic]);
+    setContentScope(requestedScope);
+  }, [q, topic, useSemantic, requestedScope]);
   const results = useQuery({
-    queryKey: ["studies", "full-search", q, topic, params.get("semantic")],
+    queryKey: [
+      "studies",
+      "full-search",
+      q,
+      topic,
+      params.get("semantic"),
+      requestedScope,
+    ],
     enabled: !!q,
     retry: false,
     queryFn: ({ signal }) =>
       studyRequest<Discovery>(
-        `/search?${new URLSearchParams({ q, ...(topic ? { topic_id: topic } : {}), semantic: String(params.get("semantic") !== "false") })}`,
+        `/search?${new URLSearchParams({ q, ...(topic ? { topic_id: topic } : {}), semantic: String(params.get("semantic") !== "false" && requestedScope !== "all"), source_scope: requestedScope })}`,
         "GET",
         undefined,
         signal,
@@ -77,7 +94,8 @@ export function GlobalSearchPage() {
               ...(params.has("addTo")
                 ? { addTo: params.get("addTo") ?? "" }
                 : {}),
-              semantic: String(semantic),
+              semantic: String(semantic && contentScope !== "all"),
+              source_scope: contentScope,
             }),
           );
         }}
@@ -111,10 +129,12 @@ export function GlobalSearchPage() {
             ))}
           </select>
         </label>
+        <SourceScopeSelect value={contentScope} onChange={setContentScope} />
         <label className="study-checkbox">
           <input
             type="checkbox"
-            checked={semantic}
+            checked={semantic && contentScope !== "all"}
+            disabled={contentScope === "all"}
             onChange={(event) => setSemantic(event.target.checked)}
           />
           语义与关键词综合检索
@@ -204,7 +224,10 @@ export function GlobalSearchPage() {
             {hit.book_title} · PDF {hit.pages.join("、")} 页
           </p>
           <h2>{hit.title}</h2>
-          <blockquote>{hit.text}</blockquote>
+          <SearchExcerpt
+            hit={hit}
+            returnTo={`${location.pathname}${location.search}`}
+          />
           <div className="study-inline-actions">
             {hit.reading_target && (
               <Link

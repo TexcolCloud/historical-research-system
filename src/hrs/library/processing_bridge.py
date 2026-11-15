@@ -521,7 +521,7 @@ class CodexBridge:
             )
 
     def sync(self, run):
-        from hrs.search.chunks import CHUNK_RULE
+        from hrs.search.indexing import index_rules
 
         run = require_workspace(self.engine, run, self.store)
         if not self.due(run) or run["result"].get("codex_recovery", {}).get("state") in {
@@ -543,9 +543,12 @@ class CodexBridge:
             or run["result"].get("codex_indexed_projection_policy") != PROJECTION_POLICY
             or run["result"].get("codex_indexed_navigation_sha256")
             != snapshot.get("navigation", {}).get("sha256")
-            or run["result"].get("codex_indexed_chunk_rule") != CHUNK_RULE
+            or (run["result"].get("retrieval_manifest") or {}).get("rules")
+            != index_rules(self.settings)
             or run["result"].get("codex_indexed_chapters_sha256")
             != (run["result"].get("codex_reading_projection") or {}).get("chapters_sha256")
+            or run["result"].get("codex_indexed_structure_sha256")
+            != (run["result"].get("codex_reading_projection") or {}).get("structure_sha256")
         )
         if unchanged and not indexing and time.monotonic() - self.verified_at.get(doc_id, 0) < 60:
             return
@@ -559,13 +562,11 @@ class CodexBridge:
         else:
             doc = self.store.refresh_navigation(doc_id)
             self.verified_at[doc_id] = time.monotonic()
-        publication_sha = (doc.get("publication") or {}).get("markdown_sha256")
-        navigation_sha = doc.get("navigation", {}).get("sha256")
-        run = self.publication.index_if_needed(run, doc)
         if self.apply_decisions(run, doc):
             doc = self.store.status(doc_id)
             run = get_run(self.engine, run["id"])
         input_sha = projection_input(doc, self.store.runtime_control.snapshot())
+        publication_sha = (doc.get("publication") or {}).get("markdown_sha256")
         navigation_sha = doc.get("navigation", {}).get("sha256")
         scheduling = self.store.scheduling_snapshot(doc_id)
         page_progress = document_progress(doc)
@@ -587,34 +588,52 @@ class CodexBridge:
                 "request": doc.get("run_request", {}).get("state"),
             }
         )
-        if run["result"].get("codex_sync_sha256") == key and unchanged:
-            return
-        bundle, boundaries = self.artifacts.bundle(run, doc)
-        pending = [p for p in doc["pages"] if p["state"] == "pending"]
-        state, stage = projection_state(
-            run, doc, scheduling, pending, publication_sha, navigation_sha
-        )
-        publication_projection = (
-            self.publication.publish_chapters(run, doc) if doc["organization"] else None
-        )
-        prepared_issues = self.artifacts.issues(run, doc, pending, boundaries)
-        self.project_nodes(run, doc, state)
-        self.commit.apply(
-            run,
-            doc,
-            prepared_issues=prepared_issues,
-            pending=pending,
-            bundle=bundle,
-            state=state,
-            stage=stage,
-            key=key,
-            input_sha=input_sha,
-            page_progress=page_progress,
-            scheduling=scheduling,
-            publication_sha=publication_sha,
-            navigation_sha=navigation_sha,
-            publication_projection=publication_projection,
-        )
+        project = not (run["result"].get("codex_sync_sha256") == key and unchanged)
+        if project:
+            bundle, boundaries = self.artifacts.bundle(run, doc)
+            pending = [p for p in doc["pages"] if p["state"] == "pending"]
+            publication_projection = (
+                self.publication.publish_chapters(run, doc) if doc["organization"] else None
+            )
+            reading_projection = (
+                publication_projection["reading_projection"]
+                if publication_projection
+                else run["result"].get("codex_reading_projection") or {}
+            )
+            state, stage = projection_state(
+                run,
+                doc,
+                scheduling,
+                pending,
+                publication_sha,
+                navigation_sha,
+                reading_projection=reading_projection,
+                index_rules=index_rules(self.settings),
+            )
+            prepared_issues = self.artifacts.issues(run, doc, pending, boundaries)
+            if not self.commit.apply(
+                run,
+                doc,
+                prepared_issues=prepared_issues,
+                pending=pending,
+                bundle=bundle,
+                state=state,
+                stage=stage,
+                key=key,
+                input_sha=input_sha,
+                page_progress=page_progress,
+                scheduling=scheduling,
+                publication_sha=publication_sha,
+                navigation_sha=navigation_sha,
+                publication_projection=publication_projection,
+            ):
+                return
+            run = get_run(self.engine, run["id"])
+        # Index the newly committed reading snapshot in this same background sync.
+        # Failed builds leave that projection ready and retain the previous generation.
+        run = self.publication.index_if_needed(run, doc)
+        if project or indexing:
+            self.project_nodes(run, doc, run["state"])
 
     def project_nodes(self, run, doc, state):
         doc_id = doc["id"]

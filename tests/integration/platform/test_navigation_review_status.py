@@ -14,6 +14,7 @@ from hrs.library.catalog import Library
 from hrs.library.navigation import Navigation
 from hrs.library.processing_bridge import CodexBridge
 from hrs.storage import models as db
+from tests.integration.platform.index_stub import completed_index
 
 from .test_codex_bridge import finish
 
@@ -221,7 +222,7 @@ def test_old_persisted_zero_is_refreshed_without_reindex_or_source_changes(
     bridge.store.publish(identity)
     indexed = []
     monkeypatch.setattr(
-        "hrs.search.indexing.BookIndexer.index", lambda self, key: indexed.append(key)
+        "hrs.search.indexing.BookIndexer.index", completed_index(settings, engine, indexed)
     )
     bridge.sync(get_run(engine, run_id))
     bridge.sync(get_run(engine, run_id))
@@ -241,7 +242,6 @@ def test_old_persisted_zero_is_refreshed_without_reindex_or_source_changes(
         "codex_navigation_pending_count": 0,
         "codex_navigation_review_policy": "legacy-conflicts-only",
         "codex_projection_input": previous_input,
-        "retrieval_generation": "unchanged-generation",
     }
     with engine.begin() as conn:
         conn.execute(update(db.runs).where(db.runs.c.id == run_id).values(result=stale))
@@ -249,7 +249,7 @@ def test_old_persisted_zero_is_refreshed_without_reindex_or_source_changes(
     refreshed = get_run(engine, run_id)
     assert refreshed["result"]["codex_navigation_pending_count"] == 1
     assert refreshed["result"]["codex_navigation_review_policy"] == facts.NAVIGATION_REVIEW_POLICY
-    assert refreshed["result"]["retrieval_generation"] == "unchanged-generation"
+    assert refreshed["result"]["retrieval_generation"] == current["result"]["retrieval_generation"]
     assert refreshed["state"] == "completed"
     assert indexed == [run_id]
     assert digest(bridge.store.status(identity)) == source_hash

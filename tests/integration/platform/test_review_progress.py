@@ -13,6 +13,7 @@ from hrs.library.processing_bridge import CodexBridge
 from hrs.processing.application import prepare
 from hrs.processing.snapshots import atomic_json
 from hrs.storage import models as db
+from tests.integration.platform.index_stub import completed_index
 
 from .test_codex_bridge import finish
 
@@ -99,7 +100,9 @@ def test_terminal_review_coverage_survives_human_fallback_and_publication(
             {"articles": [{"title": "Synthetic", "pages": [1, 2]}]},
         )
         bridge.store.publish(identity)
-        monkeypatch.setattr("hrs.search.indexing.BookIndexer.index", lambda self, run_id: None)
+        monkeypatch.setattr(
+            "hrs.search.indexing.BookIndexer.index", completed_index(settings, engine)
+        )
         bridge.sync(get_run(engine, run))
         bridge.sync(get_run(engine, run))
         completed = client.get(f"/api/v2/runs/{run}").raise_for_status().json()

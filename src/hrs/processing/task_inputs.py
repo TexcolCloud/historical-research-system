@@ -4,7 +4,7 @@ from hrs.processing.hashing import digest
 
 
 def task_inputs(repository, doc: dict, task: dict) -> dict:
-    if task["stage"] == "navigation" and task.get("inputs"):
+    if task["stage"] in {"navigation", "structure"} and task.get("inputs"):
         return task["inputs"]
     if task["stage"] == "navigation" and task.get("verification_inputs"):
         from copy import deepcopy
@@ -34,6 +34,28 @@ def task_inputs(repository, doc: dict, task: dict) -> dict:
             image=str(repository.evidence_path(doc, page["image"])),
             image_sha256=page["image_sha256"],
         )
+        if task["stage"] == "structure":
+            text = page["approved"]
+            if task["structure_source"] != {
+                "image_sha256": page["image_sha256"],
+                "markdown_sha256": text["sha256"],
+            }:
+                raise ValueError(
+                    "Structure backfill source changed; explicitly queue a current recheck"
+                )
+            inputs.update(
+                markdown=text["markdown"],
+                markdown_sha256=text["sha256"],
+                prior_worker_id=text["worker_id"],
+                structure_policy=task["structure_policy"],
+            )
+            from hrs.processing.source_structure import structure_snapshot
+
+            inputs["relation_context"] = [
+                row
+                for row in structure_snapshot(doc)["pages"]
+                if abs(row["page"] - page["page"]) == 1 and row["markdown_sha256"]
+            ]
         if task["stage"] in {"review", "verify"}:
             text = page["candidate" if task["stage"] == "verify" else "ocr"]
             inputs.update(
@@ -68,6 +90,12 @@ def task_inputs(repository, doc: dict, task: dict) -> dict:
             if p["page"] in plan["pages"]
         ]
     else:
+        from hrs.processing.source_structure import structure_snapshot
+
+        if "inputs" not in task:
+            inputs["source_structure"] = structure_snapshot(doc)
+        elif "source_structure" in task["inputs"]:
+            inputs["source_structure"] = task["inputs"]["source_structure"]
         inputs["pages"] = [
             {
                 "page": p["page"],

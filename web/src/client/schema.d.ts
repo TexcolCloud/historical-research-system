@@ -158,6 +158,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/runs/{run_id}/source-structure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Source Structure */
+        get: operations["source_structure_api_v2_runs__run_id__source_structure_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/runs/{run_id}/source-structure/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recheck Structure */
+        post: operations["recheck_structure_api_v2_runs__run_id__source_structure_recheck_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/runs/{run_id}/navigation": {
         parameters: {
             query?: never;
@@ -2309,6 +2343,10 @@ export interface components {
             toc_links?: components["schemas"]["ReadingTocLink"][];
             /** Structure */
             structure?: components["schemas"]["StructureItem"][];
+            /** Source Structure */
+            source_structure?: {
+                [key: string]: unknown;
+            };
         };
         /** ChapterSummary */
         ChapterSummary: {
@@ -5106,6 +5144,40 @@ export interface components {
              * @default false
              */
             oversized: boolean;
+            /** Snippet */
+            snippet?: string | null;
+            /** Snippet Segments */
+            snippet_segments?: components["schemas"]["SnippetSegment"][];
+            /** Ranges */
+            ranges?: components["schemas"]["SearchRange"][];
+            /** Reading Targets */
+            reading_targets?: components["schemas"]["SearchReadingTarget"][];
+            /**
+             * Role
+             * @default unknown
+             */
+            role: string;
+            /**
+             * Layer
+             * @default unknown
+             */
+            layer: string;
+            /**
+             * Source Scope
+             * @default content
+             */
+            source_scope: string;
+            /** Projection Rule */
+            projection_rule?: string | null;
+            /** Source Group Id */
+            source_group_id?: string | null;
+            /**
+             * Model Eligible
+             * @default true
+             */
+            model_eligible: boolean;
+            /** Occurrences */
+            occurrences?: components["schemas"]["SearchOccurrence"][];
             /** Research Cards */
             research_cards?: components["schemas"]["ResearchTargetCardResponse"][];
             /**
@@ -5799,6 +5871,25 @@ export interface components {
              * @default false
              */
             outside_scope: boolean;
+            /**
+             * Source Role
+             * @default unknown
+             */
+            source_role: string;
+            /**
+             * Layer
+             * @default unknown
+             */
+            layer: string;
+            /**
+             * Source Scope
+             * @default content
+             */
+            source_scope: string;
+            /** Ownership Status */
+            ownership_status?: ("ready" | "unknown") | null;
+            /** Context Hint */
+            context_hint?: string | null;
         };
         /** SearchHit */
         SearchHit: {
@@ -5882,6 +5973,244 @@ export interface components {
              * @default false
              */
             oversized: boolean;
+            /** Snippet */
+            snippet?: string | null;
+            /** Snippet Segments */
+            snippet_segments?: components["schemas"]["SnippetSegment"][];
+            /** Ranges */
+            ranges?: components["schemas"]["SearchRange"][];
+            /** Reading Targets */
+            reading_targets?: components["schemas"]["SearchReadingTarget"][];
+            /**
+             * Role
+             * @default unknown
+             */
+            role: string;
+            /**
+             * Layer
+             * @default unknown
+             */
+            layer: string;
+            /**
+             * Source Scope
+             * @default content
+             */
+            source_scope: string;
+            /** Projection Rule */
+            projection_rule?: string | null;
+            /** Source Group Id */
+            source_group_id?: string | null;
+            /**
+             * Model Eligible
+             * @default true
+             */
+            model_eligible: boolean;
+            /** Occurrences */
+            occurrences?: components["schemas"]["SearchOccurrence"][];
+        };
+        /** SearchOccurrence */
+        SearchOccurrence: {
+            reading_target?: components["schemas"]["ReadingTarget"] | null;
+            /** Directory Links */
+            directory_links?: components["schemas"]["ReadingTocLink"][];
+            /** Toc Path */
+            toc_path?: string[];
+            /** Toc Entry Id */
+            toc_entry_id?: string | null;
+            /**
+             * Navigation Version
+             * @default 0
+             */
+            navigation_version: number;
+            /** Printed Pages */
+            printed_pages?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Doc Kind
+             * @default content
+             */
+            doc_kind: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Book Id
+             * Format: uuid
+             */
+            book_id: string;
+            /**
+             * Chapter Id
+             * Format: uuid
+             */
+            chapter_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Title */
+            title: string;
+            /** Text */
+            text: string;
+            /** Pages */
+            pages: number[];
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Score */
+            score: number;
+            /**
+             * Book Title
+             * @default
+             */
+            book_title: string;
+            /** Section Path */
+            section_path?: string[];
+            /** Table Scopes */
+            table_scopes?: {
+                [key: string]: unknown;
+            }[];
+            /** Sources */
+            sources?: {
+                [key: string]: unknown;
+            }[];
+            /** Context */
+            context?: components["schemas"]["SearchContext"][];
+            /**
+             * Context Truncated
+             * @default false
+             */
+            context_truncated: boolean;
+            /**
+             * Oversized
+             * @default false
+             */
+            oversized: boolean;
+            /** Snippet */
+            snippet?: string | null;
+            /** Snippet Segments */
+            snippet_segments?: components["schemas"]["SnippetSegment"][];
+            /** Ranges */
+            ranges?: components["schemas"]["SearchRange"][];
+            /** Reading Targets */
+            reading_targets?: components["schemas"]["SearchReadingTarget"][];
+            /**
+             * Role
+             * @default unknown
+             */
+            role: string;
+            /**
+             * Layer
+             * @default unknown
+             */
+            layer: string;
+            /**
+             * Source Scope
+             * @default content
+             */
+            source_scope: string;
+            /** Projection Rule */
+            projection_rule?: string | null;
+            /** Source Group Id */
+            source_group_id?: string | null;
+            /**
+             * Model Eligible
+             * @default true
+             */
+            model_eligible: boolean;
+        };
+        /** SearchRange */
+        SearchRange: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /**
+             * Role
+             * @default unknown
+             */
+            role: string;
+            /**
+             * Layer
+             * @default unknown
+             */
+            layer: string;
+            /**
+             * Source Scope
+             * @default content
+             */
+            source_scope: string;
+            /**
+             * Status
+             * @default unknown
+             */
+            status: string;
+            /**
+             * Usage
+             * @default primary
+             * @enum {string}
+             */
+            usage: "primary" | "context";
+            /** Subkind */
+            subkind?: string | null;
+            /** Context Role */
+            context_role?: string | null;
+            /** Block Id */
+            block_id?: string | null;
+        };
+        /** SearchReadingTarget */
+        SearchReadingTarget: {
+            /**
+             * Chapter Id
+             * Format: uuid
+             */
+            chapter_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Physical Page */
+            physical_page: number;
+            /**
+             * Start
+             * @description Canonical chapter Markdown offset in Unicode codepoints.
+             */
+            start: number;
+            /**
+             * End
+             * @description Exclusive canonical chapter Markdown offset in Unicode codepoints.
+             */
+            end: number;
+            /** Text Sha256 */
+            text_sha256: string;
+            /** Anchor */
+            anchor: string;
+            /**
+             * Image Sha256
+             * @default
+             */
+            image_sha256: string;
+            /**
+             * Role
+             * @default unknown
+             */
+            role: string;
+            /**
+             * Layer
+             * @default unknown
+             */
+            layer: string;
+            /**
+             * Usage
+             * @default primary
+             * @enum {string}
+             */
+            usage: "primary" | "context";
         };
         /** SelectionUpdate */
         SelectionUpdate: {
@@ -5891,6 +6220,42 @@ export interface components {
             decision?: ("saved" | "adopted" | "excluded") | null;
             /** Note */
             note?: string | null;
+        };
+        /** SnippetSegment */
+        SnippetSegment: {
+            /** Text */
+            text: string;
+            /** Start */
+            start?: number | null;
+            /** End */
+            end?: number | null;
+            /**
+             * Synthetic
+             * @default false
+             */
+            synthetic: boolean;
+            /** Transformation */
+            transformation?: string | null;
+            /**
+             * Role
+             * @default unknown
+             */
+            role: string;
+            /**
+             * Layer
+             * @default unknown
+             */
+            layer: string;
+            /**
+             * Usage
+             * @default primary
+             * @enum {string}
+             */
+            usage: "primary" | "context";
+            /** Snippet Start */
+            snippet_start?: number | null;
+            /** Snippet End */
+            snippet_end?: number | null;
         };
         /** SourceReference */
         SourceReference: {
@@ -5961,6 +6326,116 @@ export interface components {
             source_status: string;
             /** Evidence */
             evidence?: components["schemas"]["ResearchEvidenceResponse"][];
+        };
+        /** SourceStructureCoverage */
+        SourceStructureCoverage: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "body" | "heading" | "toc" | "index" | "bibliography" | "frontmatter" | "header" | "footer" | "page_number" | "note" | "table" | "figure" | "caption" | "watermark" | "stamp" | "marginalia" | "unknown";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "present" | "absent" | "unknown";
+            /** Reason */
+            reason?: string | null;
+        };
+        /** SourceStructureFragment */
+        SourceStructureFragment: {
+            /** Fragment Id */
+            fragment_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "body" | "heading" | "toc" | "index" | "bibliography" | "frontmatter" | "header" | "footer" | "page_number" | "note" | "table" | "figure" | "caption" | "watermark" | "stamp" | "marginalia" | "unknown";
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "source" | "author_note" | "editor_note" | "translator_note" | "annotation" | "capture" | "unknown";
+            /** Subkind */
+            subkind?: ("title_page" | "copyright" | "imprint" | "preface" | "foreword" | "afterword" | "acknowledgements" | "appendix" | "other" | "unknown") | null;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text Sha256 */
+            text_sha256: string;
+            /** Bbox */
+            bbox?: number[] | null;
+            /** Text */
+            text: string;
+            /**
+             * Text Truncated
+             * @default false
+             */
+            text_truncated: boolean;
+        };
+        /** SourceStructurePage */
+        SourceStructurePage: {
+            /** Document Id */
+            document_id: string;
+            /** Snapshot Sha256 */
+            snapshot_sha256: string;
+            /** Structure Version */
+            structure_version: number;
+            /** Page Count */
+            page_count: number;
+            /** Reviewed Pages */
+            reviewed_pages: number;
+            /**
+             * Pending Structure Pages
+             * @default 0
+             */
+            pending_structure_pages: number;
+            /** Structure Task State */
+            structure_task_state?: ("ready" | "leased" | "completed" | "pending" | "superseded") | null;
+            /**
+             * Processing Paused
+             * @default false
+             */
+            processing_paused: boolean;
+            /** Page */
+            page: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "reviewed" | "unreviewed" | "stale";
+            /** Image */
+            image: string;
+            /** Image Sha256 */
+            image_sha256: string;
+            /** Markdown Sha256 */
+            markdown_sha256: string | null;
+            /** Coverage */
+            coverage: components["schemas"]["SourceStructureCoverage"][];
+            /** Fragments */
+            fragments: components["schemas"]["SourceStructureFragment"][];
+            /** Relations */
+            relations: components["schemas"]["SourceStructureRelation"][];
+        };
+        /** SourceStructureRelation */
+        SourceStructureRelation: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "note_of" | "caption_of" | "continues" | "reading_next" | "table_continues";
+            /** From Fragment Id */
+            from_fragment_id: string;
+            /** To Fragment Id */
+            to_fragment_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "verified" | "unknown";
+            /** Evidence */
+            evidence: string;
         };
         /**
          * SourceValue
@@ -6049,6 +6524,37 @@ export interface components {
              */
             after: string;
         };
+        /** StructureRecheck */
+        StructureRecheck: {
+            /** Expected Snapshot Sha256 */
+            expected_snapshot_sha256: string;
+            /** Pages */
+            pages?: number[] | null;
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+        };
+        /** StructureRecheckReceipt */
+        StructureRecheckReceipt: {
+            /** Document Id */
+            document_id: string;
+            /** Queued Pages */
+            queued_pages: number[];
+            /** Skipped */
+            skipped: components["schemas"]["StructureSkippedPage"][];
+            /** Content Approval */
+            content_approval: boolean;
+            /** Human Approval */
+            human_approval: boolean;
+            /** Schema Version */
+            schema_version: number;
+            /** Run Request */
+            run_request?: {
+                [key: string]: unknown;
+            } | null;
+        };
         /** StructureReport */
         StructureReport: {
             /** Policy */
@@ -6057,6 +6563,16 @@ export interface components {
             available: boolean;
             /** Items */
             items?: components["schemas"]["StructureItem"][];
+        };
+        /** StructureSkippedPage */
+        StructureSkippedPage: {
+            /** Page */
+            page: number;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "already_queued" | "already_reviewed" | "content_not_approved";
         };
         /** StudyDate */
         StudyDate: {
@@ -6726,6 +7242,74 @@ export interface operations {
             };
         };
     };
+    source_structure_api_v2_runs__run_id__source_structure_get: {
+        parameters: {
+            query?: {
+                page?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceStructurePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recheck_structure_api_v2_runs__run_id__source_structure_recheck_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StructureRecheck"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StructureRecheckReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     navigation_api_v2_runs__run_id__navigation_get: {
         parameters: {
             query?: never;
@@ -7350,6 +7934,7 @@ export interface operations {
                 book_id?: string | null;
                 semantic?: boolean;
                 include_navigation?: boolean;
+                source_scope?: "content" | "metadata" | "all";
                 toc_entry_id?: string | null;
                 limit?: number;
                 candidate_limit?: number | null;
@@ -9336,6 +9921,7 @@ export interface operations {
                 topic_id?: string | null;
                 book_ids?: string[] | null;
                 semantic?: boolean;
+                source_scope?: "content" | "metadata" | "all";
                 limit?: number;
             };
             header?: never;

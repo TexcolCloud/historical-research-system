@@ -273,7 +273,9 @@ def test_search_api_reading_target_matches_the_shared_renderer_contract(platform
     )
     body = saved["chapter"]
     retrieval = object.__new__(Search)
-    retrieval.library = SimpleNamespace(chapter=lambda _: body)
+    retrieval.library = SimpleNamespace(
+        source_chapter=lambda _: body, toc_links=lambda chapter: chapter.get("toc_links", [])
+    )
 
     def search(*args, **kwargs):
         # Only result selection is fixed; source coordinates and response targets

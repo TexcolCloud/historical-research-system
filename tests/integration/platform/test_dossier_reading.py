@@ -18,6 +18,7 @@ from hrs.research.schemas import CardNotesUpdate
 from hrs.research.sources import publication_snapshot
 from hrs.search.indexing import BookIndexer
 from hrs.storage import models as db
+from tests.integration.platform.index_stub import seed_current_index
 from tests.integration.platform.test_card_only_auto import (
     card_book as card_book,
 )
@@ -28,6 +29,7 @@ from tests.integration.platform.test_card_only_auto import (
     index_again,
     service_app,
 )
+from tests.integration.platform.test_research import project_fixture_chapters
 from tests.integration.platform.test_research import research_book as research_book
 from tests.unit.research.test_dossier_cards import dossier
 
@@ -54,7 +56,7 @@ def dossier_book(research_book, monkeypatch):
     # The reused fixture intentionally installs v4; capture the current v7 at collection.
     assert DOSSIER_POLICY["version"] == 7 and DOSSIER_POLICY["dossier_cards"]
     monkeypatch.setattr(research_policy, "POLICY", deepcopy(DOSSIER_POLICY))
-    _, engine, bridge, _, _, chapter_id, first_page = research_book
+    settings, engine, bridge, _, source_run, chapter_id, first_page = research_book
     with engine.begin() as connection:
         content_ref = connection.scalar(
             select(db.chapters.c.content).where(db.chapters.c.id == chapter_id)
@@ -86,6 +88,8 @@ def dossier_book(research_book, monkeypatch):
                 codepoints=len(first_page) + len(tail),
             )
         )
+    project_fixture_chapters(engine, source_run)
+    seed_current_index(settings, engine, source_run)
     return research_book
 
 

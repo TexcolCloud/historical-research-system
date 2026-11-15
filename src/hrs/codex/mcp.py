@@ -9,6 +9,7 @@ from pathlib import Path
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import TextContent
+from pydantic import StrictBool, StrictInt
 
 from hrs.processing.application import prepare as prepare
 from hrs.processing.contracts import FailureCode
@@ -229,6 +230,23 @@ def create_server(root: Path) -> MCPServer:
         if include_content:
             return doc
         return compact_document(doc)
+
+    @server.tool()
+    @contract_errors
+    def source_structure(document_id: str, offset: StrictInt = 0, limit: StrictInt = 4) -> dict:
+        """Read up to 20 structure pages with global snapshot identity; follow next_offset."""
+        return store.structure_pages(document_id, offset=offset, limit=limit)
+
+    @server.tool()
+    @contract_errors
+    def backfill_structure(
+        document_id: str, pages: list[StrictInt] | None = None, force: StrictBool = False
+    ) -> dict:
+        """Explicitly queue native original-first structure inspection without changing content approval."""
+        result = store.backfill_structure(document_id, pages=pages, force=force)
+        if result["queued_pages"]:
+            result["run_request"] = store.request_run(document_id)
+        return result
 
     @server.tool()
     @contract_errors
@@ -561,26 +579,48 @@ def create_server(root: Path) -> MCPServer:
 
     @server.tool()
     @contract_errors
-    def search_library(query: str, limit: int = 20, book_id: str | None = None,
-                       semantic: bool = True, book_ids: list[str] | None = None) -> dict:
+    def search_library(
+        query: str,
+        limit: int = 20,
+        book_id: str | None = None,
+        semantic: bool = True,
+        book_ids: list[str] | None = None,
+        source_scope: str = "content",
+    ) -> dict:
         """Shared platform evidence search; unavailable infrastructure is explicitly labelled."""
+        if source_scope not in {"content", "metadata", "all"}:
+            raise ValueError("Unknown source scope")
         if book_id and book_ids:
             raise ValueError("Select a single book or a multi-book scope, not both")
         if book_ids is not None and (
-            len(book_ids) > 200 or any(not isinstance(value, str) or not value for value in book_ids)
+            len(book_ids) > 200
+            or any(not isinstance(value, str) or not value for value in book_ids)
         ):
             raise ValueError("Library lookup supports at most 200 explicit book IDs")
         try:
             return research_evidence().search(
-                query, book_id, book_ids=book_ids, semantic=semantic, limit=limit,
+                query,
+                book_id,
+                book_ids=book_ids,
+                semantic=semantic,
+                limit=limit,
+                source_scope=source_scope,
             )
         except Exception as error:  # noqa: BLE001 - direct standalone clients keep labelled literal lookup
             if book_id is not None or book_ids:
-                raise ToolError("Platform search is unavailable; book-scoped search requires its index") from error
-            return {"query": query, "backend": "local_literal_fallback", "available": False,
-                    "hits": store.search(query, limit=limit),
-                    "warning": "Hybrid retrieval is unavailable; these are local substring matches only",
-                    "error_type": type(error).__name__}
+                raise ToolError(
+                    "Platform search is unavailable; book-scoped search requires its index"
+                ) from error
+            from hrs.search.local_snapshot import search_published
+
+            return {
+                "query": query,
+                "backend": "local_literal_fallback",
+                "available": False,
+                "hits": search_published(store, query, limit, source_scope=source_scope),
+                "warning": "Hybrid retrieval is unavailable; these are local substring matches only",
+                "error_type": type(error).__name__,
+            }
 
     from hrs.codex.research_tools import register_research_tools
 

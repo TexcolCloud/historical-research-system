@@ -12,6 +12,7 @@ TOOLS = [
     "dispatch_work",
     "open_task_packet",
     "freeze_observations",
+    "source_structure",
     "navigation_candidates",
     "submit_packet",
     "finish_worker",
@@ -56,8 +57,17 @@ def account_route():
 
 
 def command(
-    executable, root, document_id, logs, model, project, *,
-    tools=None, roles=None, instructions=None, reasoning_effort=None,
+    executable,
+    root,
+    document_id,
+    logs,
+    model,
+    project,
+    *,
+    tools=None,
+    roles=None,
+    instructions=None,
+    reasoning_effort=None,
 ):
     from hrs.processing.runtime_control import effective_policy
 
@@ -80,7 +90,8 @@ def command(
         # Stdio MCP starts with a filtered environment. Forward names, never secret
         # values in CLI arguments, so its platform adapters use this same deployment.
         "mcp_servers.historical_research.env_vars": sorted(
-            name for name in os.environ
+            name
+            for name in os.environ
             if name.startswith(("HRS_", "PLATFORM_", "INGEST_")) or name == "PYTHONUTF8"
         ),
         "mcp_servers.historical_research.default_tools_approval_mode": "approve",
@@ -142,13 +153,15 @@ def command(
 
         path = runtime / f"{name}-{digest(role)[:16]}.toml"
         path.write_text(
-            "\n".join((
-                f"name = {json.dumps(name)}",
-                f"model = {json.dumps(role['model'])}",
-                f"model_reasoning_effort = {json.dumps(role['effort'])}",
-                f"developer_instructions = {json.dumps(role['instructions'])}",
-                "",
-            )),
+            "\n".join(
+                (
+                    f"name = {json.dumps(name)}",
+                    f"model = {json.dumps(role['model'])}",
+                    f"model_reasoning_effort = {json.dumps(role['effort'])}",
+                    f"developer_instructions = {json.dumps(role['instructions'])}",
+                    "",
+                )
+            ),
             encoding="utf-8",
         )
         arguments.extend(
@@ -161,6 +174,8 @@ def command(
         )
     return (
         arguments,
-        instructions if instructions is not None else coordinator_instructions(document_id, batch_pages=policy["batch_pages"]),
+        instructions
+        if instructions is not None
+        else coordinator_instructions(document_id, batch_pages=policy["batch_pages"]),
         runtime,
     )
