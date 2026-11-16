@@ -4,10 +4,14 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
 import { client } from "@/client/api.ts";
-import { readingHref } from "@/features/library/reader-location";
+import {
+  chapterHref as readingChapterHref,
+  readingHref,
+} from "@/features/library/reader-location";
 import { readingNavigationOptions } from "@/features/library/navigation-query";
 import { ArrowUpRight, Search, X } from "lucide-react";
 import { matchBasis } from "./match-basis";
+import { SearchExcerpt, SourceScopeSelect, sourceScope } from "./SearchExcerpt";
 export default function SearchPanel({
   bookId,
   onClose,
@@ -17,23 +21,25 @@ export default function SearchPanel({
 }) {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
+  const appliedScope = sourceScope(
+    params.get("source_scope") ??
+      (params.get("include_navigation") === "true" ? "all" : null),
+  );
   const request = {
     q: params.get("q") ?? "",
-    semantic: params.get("semantic") !== "false",
+    semantic: params.get("semantic") !== "false" && appliedScope !== "all",
     diverse: params.get("diverse") === "true",
-    include_navigation: params.get("include_navigation") === "true",
+    source_scope: appliedScope,
     toc_entry_id: params.get("toc_entry_id") || undefined,
   };
   const [text, setText] = useState(request.q),
-    [includeNavigation, setIncludeNavigation] = useState(
-      request.include_navigation,
-    ),
+    [contentScope, setContentScope] = useState(request.source_scope),
     [semantic, setSemantic] = useState(request.semantic),
     [diverse, setDiverse] = useState(request.diverse),
     [scope, setScope] = useState(request.toc_entry_id ?? "");
   useEffect(() => {
     setText(request.q);
-    setIncludeNavigation(request.include_navigation);
+    setContentScope(request.source_scope);
     setSemantic(request.semantic);
     setDiverse(request.diverse);
     setScope(request.toc_entry_id ?? "");
@@ -41,7 +47,7 @@ export default function SearchPanel({
     request.q,
     request.semantic,
     request.diverse,
-    request.include_navigation,
+    request.source_scope,
     request.toc_entry_id,
   ]);
   const navigation = useQuery(readingNavigationOptions(bookId));
@@ -66,14 +72,7 @@ export default function SearchPanel({
   returnParams.set("section", "search");
   const returnTo = `${location.pathname}?${returnParams}`;
   function chapterHref(book: string, chapter: string, page?: number) {
-    const next = new URLSearchParams({
-      tab: "reader",
-      section: "text",
-      chapter,
-      returnTo,
-    });
-    if (page != null) next.set("physicalPage", String(page));
-    return `/books/${book}?${next}`;
+    return readingChapterHref(book, chapter, { page, returnTo });
   }
   const results = useQuery({
     queryKey: ["platform", "search", bookId, request],
@@ -120,9 +119,10 @@ export default function SearchPanel({
           next.set("tab", "reader");
           next.set("section", "search");
           next.set("q", text.trim());
-          next.set("semantic", String(semantic));
+          next.set("semantic", String(semantic && contentScope !== "all"));
           next.set("diverse", String(diverse));
-          next.set("include_navigation", String(includeNavigation && !scope));
+          next.delete("include_navigation");
+          next.set("source_scope", contentScope);
           if (scope) next.set("toc_entry_id", scope);
           else next.delete("toc_entry_id");
           setParams(next, { state: { preserveReadingPosition: true } });
@@ -168,21 +168,14 @@ export default function SearchPanel({
               </Button>
             </p>
           )}
-          <label>
-            <input
-              type="checkbox"
-              checked={includeNavigation && !scope}
-              disabled={Boolean(scope)}
-              onChange={(e) => setIncludeNavigation(e.target.checked)}
-            />
-            包含原书目录
-          </label>
+          <SourceScopeSelect value={contentScope} onChange={setContentScope} />
           {scope && <p>限定目录后检索对应正文及关联注释。</p>}
           <label>
             检索方式
             <select
               aria-label="检索方式"
-              value={semantic ? "meaning" : "literal"}
+              value={semantic && contentScope !== "all" ? "meaning" : "literal"}
+              disabled={contentScope === "all"}
               onChange={(e) => setSemantic(e.target.value === "meaning")}
             >
               <option value="meaning">按意思查找</option>
@@ -249,7 +242,7 @@ export default function SearchPanel({
             <p className="search-result-provenance" aria-label="匹配依据">
               {matchBasis(hit, request.q)}
             </p>
-            <p className="search-result-excerpt">{hit.text}</p>
+            <SearchExcerpt hit={hit} returnTo={returnTo} />
             {hit.reading_target && (
               <Link
                 className="search-primary-link"
@@ -260,40 +253,6 @@ export default function SearchPanel({
                   : "阅读命中段落"}
                 <ArrowUpRight size={17} aria-hidden="true" />
               </Link>
-            )}
-            {(hit.context?.length ?? 0) > 0 && (
-              <details>
-                <summary>查看相关上下文、表头与注释</summary>
-                {hit.context?.map((part) => (
-                  <div key={`${part.start}:${part.end}`}>
-                    <p style={{ whiteSpace: "pre-wrap" }}>{part.text}</p>
-                    {part.outside_scope && (
-                      <p>关联上下文 · 位于所选目录范围外</p>
-                    )}
-                    {part.reading_target && (
-                      <Link
-                        to={readingHref(hit.book_id, part.reading_target, {
-                          returnTo,
-                        })}
-                      >
-                        阅读这段上下文
-                      </Link>
-                    )}
-                    <Link
-                      to={chapterHref(
-                        hit.book_id,
-                        hit.chapter_id,
-                        part.pages[0],
-                      )}
-                    >
-                      查看原件第 {part.pages.join("、")} 页
-                    </Link>
-                  </div>
-                ))}
-              </details>
-            )}
-            {hit.context_truncated && (
-              <p>部分上下文较长，请打开章节继续阅读。</p>
             )}
             {hit.doc_kind === "navigation" &&
               !hit.reading_target &&

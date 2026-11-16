@@ -74,7 +74,9 @@ def test_hybrid_retrieval_widens_candidates_but_bounds_reranking(monkeypatch):
         indices=SimpleNamespace(exists=lambda **_: True),
         search=lambda **kw: calls.append(kw["body"]) or {"hits": {"hits": rows}},
     )
-    search.library = SimpleNamespace(chapter=lambda _: source)
+    search.library = SimpleNamespace(
+        source_chapter=lambda _: source, toc_links=lambda chapter: chapter.get("toc_links", [])
+    )
     search.active_scope = lambda _: []
     search.runtime = SimpleNamespace(tokenizer=lambda _: None)
     monkeypatch.setattr(module, "query_vector", lambda *_: [0] * 1024)
@@ -185,7 +187,7 @@ def test_two_part_search_retains_each_clause_and_respects_shared_budget():
         {**next(retrieval_chunks(c, "书")), "score": 100 - i * 200} for i, c in enumerate(sources)
     ]
     search = object.__new__(Search)
-    search.library = SimpleNamespace(chapter={c["id"]: c for c in sources}.__getitem__)
+    search.library = SimpleNamespace(source_chapter={c["id"]: c for c in sources}.__getitem__)
     calls = []
 
     def single(query, book_id, **options):
@@ -222,7 +224,7 @@ def test_structured_table_windows_preserve_rowspans_and_long_notes_keep_owner():
         + "</table>"
     )
     source = chapter(text)
-    rows = list(bounded_chunks(source, retrieval_chunks(source, "书"), tokenizer, limit=160))
+    rows = list(bounded_chunks(source, retrieval_chunks(source, "书"), tokenizer, limit=80))
     assert len(rows) > 1
     assert all(r["text"].count("<tr>") == r["text"].count("</tr>") for r in rows)
     assert all("rowspan" not in r["text"] or "<tr><td>130</td></tr>" in r["text"] for r in rows)

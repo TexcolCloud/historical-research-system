@@ -18,7 +18,7 @@ class SourceImport:
     def __init__(self, context):
         self.context = context
 
-    def register_manifest(self, manifest: dict, title: str = "") -> dict:
+    def register_manifest(self, manifest: dict, title: str = "", *, processing_policy=None) -> dict:
         return self.register(
             Path(manifest["source"]["path"]),
             manifest["pages"],
@@ -26,6 +26,7 @@ class SourceImport:
             expected_source_sha256=manifest["source"]["sha256"],
             original_name=manifest["source"].get("original_name"),
             media_type=manifest["source"].get("media_type"),
+            processing_policy=processing_policy,
         )
 
     def register(
@@ -37,6 +38,7 @@ class SourceImport:
         expected_source_sha256: str | None = None,
         original_name: str | None = None,
         media_type: str | None = None,
+        processing_policy: dict | None = None,
     ) -> dict:
         self.context.repository.require_writable()
         source = Path(source).resolve()
@@ -105,6 +107,8 @@ class SourceImport:
                 "organization": None,
                 "publication": None,
             }
+            if processing_policy:
+                doc["processing_policy"] = dict(processing_policy)
             for page in doc["pages"]:
                 plan = page.get("extraction_plan", {})
                 if plan.get("route") != "native" or not plan.get("native_markdown", "").strip():

@@ -1,6 +1,28 @@
 """Small stage-specific runtime contracts; development skills never enter worker prompts."""
 
 from hrs.processing.review_contract import ISSUE_INSTRUCTIONS
+from hrs.processing.source_structure import LAYERS, RELATION_KINDS, ROLES, SUBKINDS
+
+STRUCTURE_INSTRUCTIONS = f"""For structure_contract_version=1 review/verify and every structure task,
+include source_structure={{schema_version:1,coverage:[{{role,status:'present|absent|unknown',reason?}}],
+fragments:[{{fragment_id:'pN:local-id',role,layer,subkind?,exact:literal Markdown span,prefix?:preceding literal,suffix?:following literal,bbox?}}],
+relations:[{{kind,from_fragment_id,to_fragment_id,status:'verified|unknown',evidence:literal source reasoning}}]}}.
+Coverage must explicitly list EVERY role exactly once: {", ".join(sorted(ROLES))}.
+Roles describe the SOURCE; layers identify ownership: {", ".join(sorted(LAYERS))}.
+Frontmatter fragments require subkind from {", ".join(sorted(SUBKINDS))}; preserve substantive prefaces,
+forewords/afterwords as source content. Notes must retain author/editor/translator ownership when visible;
+uncertain ownership is layer unknown. Do not infer capture watermarks, marginalia or running furniture
+from filenames, repetition, placement alone or PDF ordinal. Use original pixels as evidence.
+Cover every applicable source span, not representative samples. Present needs exact source fragments; absent means independently inspected absence; unknown means
+unresolved metadata and never creates a content-pending verdict. Every fragment is a unique literal span
+of the FULL current candidate (the corrected full Markdown for corrections). The server binds Unicode
+codepoint offsets and hashes; do not compute hashes. If a literal repeats, disambiguate it with exact preceding prefix/following suffix.
+If it cannot be uniquely located, keep that role unknown. Never trim, reorder or rewrite source text for structure.
+Relations use only {", ".join(sorted(RELATION_KINDS))}. Fragment IDs use physical page pN: prefixes.
+Use verified only after inspecting both related original source regions; uncertain relationships stay
+unknown and are never adopted. Do not invent note ownership, table continuations or reading order.
+Structure contains no retrieval exclusion, weights, purpose or historical credibility judgments.
+"""
 
 COMMON = """You are a native Codex worker, not the coordinator. Use only historical_research MCP.
 The supplied session_token owns a bounded stage session. Call open_task_packet(session_token, unique worker_id).
@@ -24,6 +46,17 @@ Do not import, resume, publish, spawn agents, or submit human review forms.
 """
 
 STAGE = {
+    "structure": """Inspect the FULL retained original independently before reading approved source text.
+Call freeze_observations with image_receipt/image_sha256 and nonempty literal observations, unresolved:[actual uncertainty],
+original_details as needed. Read every candidate_text range. This is explicit structure backfill; it
+grants no content approval and must never alter Markdown, article boundaries, source cards or frozen
+processing policies. Submit verdict='complete' with source_structure. Unclear structural facts use unknown
+coverage and relationships; they never become a fabricated content human-review issue. If you find an
+actual content error, retain the exact source observation and report it for the existing revision flow.
+Use a fresh Sol identity independent of the approved source author/reviewer. No extra author/verify pass.
+The frozen relation_context provides adjacent page fragment IDs. Open any related original_image with
+this task/lease before marking a cross-page relation verified. Optional structure_relations may link
+any two frozen context/current fragments after both originals were inspected; unknown stays unknown.""",
     "ocr": """Transcribe the FULL physical original to Markdown: result={markdown, input_sha256,
 original_details:[]}. Empty text only for a truly blank original. Mixed inputs include native text
 and image regions: assemble every visible region once, without duplicating native text. Preserve
@@ -67,7 +100,11 @@ page once in source order, preserving apparatus, tables and figures. Articles sh
 boundaries:[{page,start_text:unique literal article opening}] in source order. Do not split a running
 article at every page. Optional reading_structure={titles:[{page,title,level}],tables:[{pages,
 members:[{page,original_html}],merged_html}]} must preserve every cell, value and row/column owner.
-Unverifiable structure stays separate, or submit pending with precise issues. Never infer verified identity.""",
+Unverifiable structure stays separate, or submit pending with precise issues. Never infer verified identity.
+The frozen source_structure snapshot supplies exact page fragment IDs. Optional structure_relations use
+{kind:note_of|caption_of|continues|reading_next|table_continues,from_fragment_id,to_fragment_id,
+status:verified|unknown,evidence:source reasoning}. Open BOTH endpoint original_image pages with this
+task/lease before verified links. Preserve note ownership; ambiguous continuation/reading order stays unknown.""",
     "navigation": """Parse ONLY toc_candidate_pages: at most THREE core physical directory pages.
 The frozen approved_page_catalog contains only core pages and adjacent toc_context_pages (at most
 FIVE pages total). Context is for page-boundary fragments, not another full directory batch.
@@ -118,6 +155,7 @@ def worker_instructions(stage, mode=None):
             else STAGE[stage]
         )
         + ("\n" + ISSUE_INSTRUCTIONS if stage in {"review", "verify"} else "")
+        + ("\n" + STRUCTURE_INSTRUCTIONS if stage in {"review", "verify", "structure"} else "")
         + (
             "\nPage structure may include optional running_headers/running_footers: arrays of exact full "
             "first/last nonempty Markdown lines, including any printed folio. Inspect original pixels to "

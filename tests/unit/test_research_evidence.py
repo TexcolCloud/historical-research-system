@@ -260,3 +260,28 @@ def test_research_preview_preserves_empty_or_failed_search_status():
     preview = retrieval_preview(result)
     assert preview["available"] is False and preview["evidence_status"] == "no_published_sources"
     assert preview["hits"] == [] and preview["truncated"] is False
+
+
+def test_preview_keeps_discontinuous_source_ranges_instead_of_inventing_quote_offsets():
+    result = {
+        "query": "正文",
+        "available": True,
+        "hits": [
+            {
+                "id": "hit",
+                "text": "页眉正文页码注释",
+                "start": 10,
+                "end": 18,
+                "snippet": "正文\n注释",
+                "snippet_segments": [
+                    {"text": "正文", "start": 12, "end": 14, "synthetic": False},
+                    {"text": "\n", "start": None, "end": None, "synthetic": True},
+                    {"text": "注释", "start": 16, "end": 18, "synthetic": False},
+                ],
+            }
+        ],
+    }
+    hit = retrieval_preview(result)["hits"][0]
+    assert hit["preview"] == "正文\n注释"
+    assert hit["preview_start"] is None and hit["preview_end"] is None
+    assert [(r["start"], r["end"]) for r in hit["preview_ranges"]] == [(12, 14), (16, 18)]

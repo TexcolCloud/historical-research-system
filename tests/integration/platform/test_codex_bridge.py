@@ -16,6 +16,7 @@ from hrs.library.projection.facts import projection_input
 from hrs.library.projection.publication import article_groups
 from hrs.processing.workspace import identity as workspace_identity
 from hrs.storage import models as db
+from tests.integration.platform.index_stub import completed_index
 
 
 def test_platform_bridge_owns_executor_lifetime_instead_of_a_child_dashboard(
@@ -45,7 +46,39 @@ def test_platform_bridge_owns_executor_lifetime_instead_of_a_child_dashboard(
 
 
 def finish(store, doc_id, stage, result):
-    task = store.claim_task(doc_id, stage, "synthetic-" + stage)
+    task = store.claim_task(
+        doc_id,
+        stage,
+        "synthetic-" + stage + ("-" + uuid4().hex if stage == "structure" else ""),
+        **({"source_first": True} if "source_structure" in result else {}),
+    )
+    if task.get("source_first_required"):
+        original, _ = store.original_page(
+            doc_id, task["page"], task_id=task["task_id"], lease_token=task["lease_token"]
+        )
+        store.review_candidate(
+            doc_id,
+            task["task_id"],
+            task["lease_token"],
+            {
+                "image_receipt": original["image_receipt"],
+                "image_sha256": original["image_sha256"],
+                "observations": ["Synthetic original inspection; not real content acceptance"],
+                "unresolved": [],
+            },
+        )
+        if "source_structure" not in result:
+            from hrs.processing.source_structure import ROLES
+
+            result = {
+                **result,
+                "source_structure": {
+                    "schema_version": 1,
+                    "coverage": [{"role": role, "status": "unknown"} for role in sorted(ROLES)],
+                    "fragments": [],
+                    "relations": [],
+                },
+            }
     store.submit_task(
         doc_id,
         task["task_id"],
@@ -100,6 +133,10 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(
 ):
     settings, engine = platform
     settings = settings.model_copy(update={"codex_root": tmp_path / "native"})
+    indexed = []
+    monkeypatch.setattr(
+        "hrs.search.indexing.BookIndexer.index", completed_index(settings, engine, indexed)
+    )
     bridge = CodexBridge(settings, engine)
     source = tmp_path / "synthetic.png"
     Image.new("RGB", (60, 80), "white").save(source)
@@ -147,6 +184,7 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(
                     "issue": "Synthetic test handoff",
                     "candidate": "Synthetic",
                     "source_reading": "Original",
+                    "unlocated_reason": "Synthetic fixture has no trusted source text anchor",
                 }
             ],
         },
@@ -208,11 +246,6 @@ def test_native_pending_review_old_ui_confirmation_reader_and_export(
 
     # Completion is stable after indexing; a later erratum preserves the old reader
     # until the replacement has passed independent review and organization.
-    indexed = []
-    monkeypatch.setattr(
-        "hrs.search.indexing.BookIndexer.index",
-        lambda self, run_id: indexed.append(run_id),
-    )
     bridge.sync(get_run(engine, run_id))
     bridge.sync(get_run(engine, run_id))
     assert get_run(engine, run_id)["state"] == "completed" and indexed == [run_id]
@@ -353,11 +386,14 @@ def test_native_deletion_keeps_shared_workspace_until_last_owner_stops(platform,
     assert not (bridge.store.root / "platform-intake" / owners[1][1]).exists()
 
 
-def test_native_table_continuation_preserves_notes_and_original_offsets(platform, tmp_path):
+def test_native_table_continuation_preserves_notes_and_original_offsets(
+    platform, tmp_path, monkeypatch
+):
     from hrs.search.chunks import retrieval_chunks
 
     settings, engine = platform
     settings = settings.model_copy(update={"codex_root": tmp_path / "native"})
+    monkeypatch.setattr("hrs.search.indexing.BookIndexer.index", completed_index(settings, engine))
     bridge = CodexBridge(settings, engine)
     source = tmp_path / "synthetic.pdf"
     page = Image.new("RGB", (60, 80), "white")
@@ -496,7 +532,13 @@ def test_confirmation_receipt_commits_while_projection_prepares_objects(
             )
         )
     finish(bridge.store, doc_id, "ocr", {"markdown": "Synthetic retained page"})
-    issues = [{"location": "body", "issue": "Synthetic dispute"}]
+    issues = [
+        {
+            "location": "body",
+            "issue": "Synthetic dispute",
+            "unlocated_reason": "Synthetic fixture has no trusted source text anchor",
+        }
+    ]
     finish(bridge.store, doc_id, "review", {"verdict": "pending", "issues": issues})
     bridge.sync(get_run(engine, run_id))
     issue = bridge.review.get(bridge.review.list(run_id)[0]["id"])

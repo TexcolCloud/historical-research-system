@@ -17,6 +17,7 @@ from hrs.library.processing_bridge import CodexBridge
 from hrs.processing.application import prepare
 from hrs.processing.snapshots import atomic_json
 from hrs.storage import models as db
+from tests.integration.platform.index_stub import completed_index
 
 from .test_codex_bridge import finish
 
@@ -141,7 +142,7 @@ def test_test_publication_cannot_be_promoted_by_removing_workspace_permission(
     publication = bridge.store.publish(identity)
     assert publication["approval_type"] == "workflow_test"
     marker.unlink()
-    monkeypatch.setattr("hrs.search.indexing.BookIndexer.index", lambda self, run_id: None)
+    monkeypatch.setattr("hrs.search.indexing.BookIndexer.index", completed_index(settings, engine))
     replacement = CodexBridge(settings, engine)
     replacement.sync(get_run(engine, run))
     replacement.sync(get_run(engine, run))

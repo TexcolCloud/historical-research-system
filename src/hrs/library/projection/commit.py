@@ -53,7 +53,7 @@ class ProjectionCommit:
             )
             if current_revision != run["revision"]:
                 # A human decision arrived while objects were prepared. Retry from it next tick.
-                return
+                return False
             if publication_projection and publication_projection["chapter_rows"] is not None:
                 connection.execute(delete(db.chapters).where(db.chapters.c.run_id == run["id"]))
                 connection.execute(
@@ -235,3 +235,4 @@ class ProjectionCommit:
                     },
                 )
             )
+        return True

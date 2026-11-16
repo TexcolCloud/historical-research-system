@@ -4,7 +4,7 @@ import statistics
 import time
 from collections import Counter
 
-STAGES = ("ocr", "review", "verify", "navigation", "organization")
+STAGES = ("ocr", "review", "verify", "navigation", "organization", "structure")
 
 
 def ready_tasks(doc, *, now=None):
@@ -114,7 +114,7 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
     else:
         for stage in ("review", "ocr"):
             workers[stage] = min(capacity, work[stage])
-    for stage in ("verify", "navigation", "organization"):
+    for stage in ("verify", "navigation", "organization", "structure"):
         if not work[stage]:
             continue
         if sum(workers.values()) >= capacity:
@@ -131,7 +131,9 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
                 workers[donor] -= 1
         if sum(workers.values()) < capacity:
             workers[stage] = (
-                min(work[stage], capacity - sum(workers.values())) if stage == "verify" else 1
+                min(work[stage], capacity - sum(workers.values()))
+                if stage in {"verify", "structure"}
+                else 1
             )
     if (
         overlap_reading
@@ -147,7 +149,7 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
         selected = next(
             (
                 s
-                for s in ("verify", "review", "ocr", "navigation", "organization")
+                for s in ("verify", "review", "ocr", "structure", "navigation", "organization")
                 if eligible[s] or active[s]
             ),
             None,
@@ -163,7 +165,7 @@ def scheduling_plan(doc, *, now=None, capacity=7, batch_pages=2, overlap_reading
     ):
         desired = workers
         workers = {s: min(previous.get(s, 0), work[s]) for s in STAGES}
-        for stage in ("verify", "navigation", "organization", "review", "ocr"):
+        for stage in ("verify", "structure", "navigation", "organization", "review", "ocr"):
             workers[stage] += min(
                 max(0, desired[stage] - workers[stage]), max(0, capacity - sum(workers.values()))
             )

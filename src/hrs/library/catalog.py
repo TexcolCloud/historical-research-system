@@ -5,7 +5,7 @@ from uuid import UUID, uuid5
 from sqlalchemy import select
 
 from hrs.library.books import get_run
-from hrs.library.chapter_content import chapter_content
+from hrs.library.chapter_content import chapter_content, source_content
 from hrs.library.errors import ServiceError
 from hrs.library.review import Review, digest
 from hrs.library.runs.outputs import Outputs, fingerprint
@@ -283,6 +283,13 @@ class Library:
         raise ServiceError(409, "旧资料请先导入原生处理流程，再提交勘误修订。")
 
     def chapter(self, chapter_id):
+        return self._chapter(chapter_id, reader=True)
+
+    def source_chapter(self, chapter_id):
+        """Canonical retrieval source, without rendered-reader copies or TOC links."""
+        return self._chapter(chapter_id, reader=False)
+
+    def _chapter(self, chapter_id, *, reader):
         with self.engine.connect() as connection:
             row = (
                 connection.execute(select(db.chapters).where(db.chapters.c.id == str(chapter_id)))
@@ -291,24 +298,36 @@ class Library:
             )
         if not row:
             raise ServiceError(404, "章节尚未发布。")
-        chapter = {**row, **chapter_content(self.settings, row["content"])}
-        from hrs.library.navigation_projection import book_navigation
-        from hrs.library.reading_locations import toc_links
+        loader = chapter_content if reader else source_content
+        chapter = {**row, **loader(self.settings, row["content"])}
+        from hrs.library.navigation_projection import book_navigation, chapter_source_structure
 
         rows = self.chapters(row["book_id"])
-        navigation = book_navigation(self.settings, get_run(self.engine, str(row["run_id"])), rows)
+        run = get_run(self.engine, str(row["run_id"]))
+        navigation = book_navigation(self.settings, run, rows)
         chapter["navigation"] = navigation
+        chapter["source_structure"] = chapter_source_structure(
+            self.settings, run, rows, chapter["parts"]
+        )
+        if not reader:
+            return chapter
+        chapter["toc_links"] = self.toc_links(chapter)
+        return chapter
+
+    def toc_links(self, chapter):
+        """Reuse validated source text while resolving targets against current SQL locators."""
+        from hrs.library.reading_locations import toc_links
+
+        navigation = chapter["navigation"]
         if any(
             set(s.get("page") for s in e.get("source_spans", []))
             .union({e.get("source_page")})
             .intersection(chapter["pages"])
             for e in navigation.get("entries", [])
         ):
-            targets = self.navigation_targets(row["run_id"], navigation)
-            chapter["toc_links"] = toc_links(chapter, targets)
-        else:
-            chapter["toc_links"] = []
-        return chapter
+            targets = self.navigation_targets(chapter["run_id"], navigation)
+            return toc_links(chapter, targets)
+        return []
 
     def navigation_targets(self, run_id, navigation):
         """Resolve only targets supported by the currently published chapter objects."""

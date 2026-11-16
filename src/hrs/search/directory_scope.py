@@ -7,20 +7,13 @@ from hrs.library.errors import ServiceError
 from hrs.library.footnotes import resolve_footnotes
 from hrs.library.records import text_digest as digest
 from hrs.search.chunks import context_blocks, source_excerpt
-
-LINKED_CONTEXT = {
-    "footnote",
-    "note_owner",
-    "table_header",
-    "table_note",
-    "table_intro",
-    "section_intro",
-}
+from hrs.search.projection import LINKED_CONTEXT, project_hit
 
 
 @dataclass
 class DirectoryScope:
     ranges: dict[str, tuple[int, int]]
+    source_scope: str = "content"
 
     @classmethod
     def resolve(cls, library, book_id, entry_id):
@@ -46,7 +39,7 @@ class DirectoryScope:
             identity = str(target["chapter_id"])
             if identity not in identities:
                 raise ServiceError(409, "目录对应的正文版本已更新，请重新选择范围。")
-            body = library.chapter(identity)
+            body = library.source_chapter(identity)
             if (
                 str(body["book_id"]) != str(book_id)
                 or digest(body["text"]) != target["text_sha256"]
@@ -85,7 +78,7 @@ class DirectoryScope:
             right = (
                 end
                 if position == last and end is not None
-                else len(library.chapter(identity)["text"])
+                else len(library.source_chapter(identity)["text"])
             )
             if left < right:
                 ranges[identity] = (left, right)
@@ -144,24 +137,19 @@ class DirectoryScope:
                             for note in notes
                         ):
                             context.append(extra)
-                        elif role == "neighbor":
+                        elif role in {"neighbor", "unassigned_context"}:
                             context.append(extra)
                         # Table/section supplements are rebuilt from the clipped
                         # source by expand_hits, never inherited from excluded text.
                     item["context"] = context
-                item["retrieval_text"] = "\n".join(
-                    [
-                        item.get("book_title", ""),
-                        *item.get("toc_path", []),
-                        item["text"],
-                        *(
-                            extra["text"]
-                            for extra in item.get("context", [])
-                            if extra.get("role") in LINKED_CONTEXT
-                        ),
-                    ]
+                item = project_hit(
+                    chapter,
+                    item,
+                    source_scope=self.source_scope,
+                    purpose="lexical" if self.source_scope == "all" else "rerank",
                 )
-                result.append(item)
+                if any(r["usage"] == "primary" for r in item["ranges"]):
+                    result.append(item)
         return result
 
     def clip_results(self, rows, load_chapter):
@@ -188,5 +176,12 @@ class DirectoryScope:
                             "outside_scope": linked and outside,
                         }
                     )
-            row["context"] = context
+            row.update(
+                project_hit(
+                    chapter,
+                    {**row, "context": context},
+                    source_scope=self.source_scope,
+                    purpose="lexical" if self.source_scope == "all" else "vector",
+                )
+            )
         return result

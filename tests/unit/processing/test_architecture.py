@@ -18,7 +18,7 @@ def test_processing_does_not_import_transports_or_business_storage():
         "fastapi",
         "sqlalchemy",
     )
-    for path in root.glob("*.py"):
+    for path in root.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             names = (
                 [node.module or ""]
@@ -56,6 +56,7 @@ def test_domain_rules_do_not_depend_on_persistence_or_entrypoints():
         "navigation_spans",
         "navigation_coverage",
         "page_observation",
+        "source_structure",
         "organization",
         "review_locations",
         "review_contract",
@@ -70,16 +71,30 @@ def test_domain_rules_do_not_depend_on_persistence_or_entrypoints():
 
 def test_processing_module_dependencies_are_acyclic_even_inside_functions():
     root = Path(hrs.processing.__file__).parent
-    paths = {path.stem: path for path in root.glob("*.py") if path.name != "__init__.py"}
+    paths = {
+        "hrs.processing." + ".".join(path.relative_to(root).with_suffix("").parts): path
+        for path in root.rglob("*.py")
+        if path.name != "__init__.py"
+    }
     edges = {name: set() for name in paths}
     for name, path in paths.items():
         for node in ast.walk(ast.parse(path.read_text("utf-8"))):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-                "hrs.processing."
-            ):
-                target = node.module.split(".")[2]
-                if target in paths:
-                    edges[name].add(target)
+            if isinstance(node, ast.Import):
+                imports = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                package = name.rsplit(".", 1)[0]
+                base = (
+                    (
+                        ".".join(package.split(".")[: len(package.split(".")) - node.level + 1])
+                        + ("." + node.module if node.module else "")
+                    )
+                    if node.level
+                    else (node.module or "")
+                )
+                imports = [base, *(base + "." + alias.name for alias in node.names)]
+            else:
+                imports = []
+            edges[name].update(target for target in imports if target in paths)
     completed = set()
 
     def visit(name, chain):

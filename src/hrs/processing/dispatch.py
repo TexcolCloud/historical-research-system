@@ -13,6 +13,7 @@ ROLES = {
     "ocr": "historical_ocr",
     "review": "historical_review",
     "verify": "historical_review",
+    "structure": "historical_review",
     "navigation": "historical_organization",
     "organization": "historical_organization",
 }
@@ -78,7 +79,7 @@ class Dispatch:
             )
         assignments = []
         if not plan["paused"] and plan["cooldown_until"] <= time.time():
-            for stage in ("verify", "review", "ocr", "navigation", "organization"):
+            for stage in ("verify", "review", "ocr", "structure", "navigation", "organization"):
                 if not any(task["stage"] == stage for task in concrete):
                     continue
                 with self.store.lock:
@@ -457,6 +458,13 @@ class Dispatch:
                 raise ValueError("Session no longer owns this active task")
             if task["inputs"].get("prior_worker_id") == worker_id:
                 raise ValueError("Review requires a separate native worker identity")
+            if task["stage"] == "structure":
+                from hrs.processing.source_structure import prior_structure_workers
+
+                if worker_id in prior_structure_workers(doc, task["page"]):
+                    raise ValueError(
+                        "Structure inspection requires an independent native worker identity"
+                    )
             if session["state"] == "starting":
                 session.update(
                     startup_seconds=time.time() - session["reserved_at"], activated_at=time.time()

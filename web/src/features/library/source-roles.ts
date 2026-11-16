@@ -1,0 +1,31 @@
+/** Source role labels shared by inspection and search; no retrieval policy lives here. */
+export const sourceRoles: Record<string, string> = {
+  body: "正文",
+  heading: "标题",
+  toc: "目录",
+  index: "索引",
+  bibliography: "参考文献",
+  frontmatter: "书前书后材料",
+  header: "页眉",
+  footer: "页脚",
+  page_number: "页码",
+  note: "注释",
+  table: "表格",
+  figure: "插图",
+  caption: "图说",
+  watermark: "水印",
+  stamp: "印章",
+  marginalia: "页边批注",
+  unknown: "尚未分类",
+  mixed: "多种内容",
+};
+export const sourceLayers: Record<string, string> = {
+  source: "原文",
+  author_note: "作者注",
+  editor_note: "编者注",
+  translator_note: "译者注",
+  annotation: "批注",
+  capture: "采集附加内容",
+  unknown: "归属尚未识别",
+  mixed: "多种归属",
+};

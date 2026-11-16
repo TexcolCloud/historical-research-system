@@ -13,6 +13,7 @@ from hrs.processing.publication_workflow import PublicationWorkflow
 from hrs.processing.run_workflow import RunWorkflow
 from hrs.processing.snapshots import atomic_json as atomic_json
 from hrs.processing.source_import import SourceImport
+from hrs.processing.structure_workflow import StructureWorkflow
 from hrs.processing.task_inspection import TaskInspection
 from hrs.processing.task_workflow import TaskWorkflow
 from hrs.processing.workflow_context import WorkflowContext
@@ -36,6 +37,7 @@ class Store:
             self.context, self.navigation, self.publications, self.runs
         )
         self.source_import = SourceImport(self.context)
+        self.structures = StructureWorkflow(self.context)
         self.task_inspection = TaskInspection(self.context)
         self.tasks = TaskWorkflow(self.context, self.navigation)
         self.dispatch = Dispatch(self)
@@ -90,8 +92,10 @@ class Store:
             documents.append({key: doc[key] for key in ("id", "title", "state", "created_at")})
         return documents
 
-    def register_manifest(self, manifest: dict, title: str = ""):
-        return self.source_import.register_manifest(manifest, title)
+    def register_manifest(self, manifest: dict, title: str = "", *, processing_policy=None):
+        return self.source_import.register_manifest(
+            manifest, title, processing_policy=processing_policy
+        )
 
     def register(
         self,
@@ -192,6 +196,19 @@ class Store:
 
     def refresh_navigation(self, document_id: str):
         return self.navigation.refresh_navigation(document_id)
+
+    def structure_snapshot(self, document_id):
+        return self.structures.snapshot(document_id)
+
+    def structure_pages(self, document_id, *, offset=0, limit=4):
+        return self.structures.pages(document_id, offset=offset, limit=limit)
+
+    def backfill_structure(
+        self, document_id, *, pages=None, force=False, expected_snapshot_sha256=None
+    ):
+        return self.structures.backfill(
+            document_id, pages=pages, force=force, expected_snapshot_sha256=expected_snapshot_sha256
+        )
 
     def repair_structure(
         self, document_id: str, *, apply: bool = False, replan_navigation: bool = False

@@ -1,13 +1,13 @@
 ---
 name: historical-research
-description: 导入 PDF 或图片史料、继续处理任务、打开人工待审页面、检索已入库资料，或处理史料卡、实体事件证据与专题选材分析时使用。
+description: 导入 PDF 或图片史料、继续处理任务、打开人工待审页面、核查或补录来源结构、检索已入库资料，或处理史料卡、实体事件证据与专题选材分析时使用。
 ---
 
 # Historical research
 
 Use the `historical_research` MCP and native Codex subagents. Read
 `workflow_instructions` for the current processing contract; it is the single
-source for PDF routing, original-first review, publication and post-index source cards.
+source for PDF routing, original-first review, source structure, publication and post-index source cards.
 
 1. Call `workspace_status`. Keep its workspace ID for this request. The tools,
    dashboard and executor must use that same workspace; report a mismatch instead
@@ -39,6 +39,39 @@ source for PDF routing, original-first review, publication and post-index source
    never comprehensive evidence or proof of absence. Provide the retained
    Markdown and original-page evidence. A revision keeps the previous published
    version searchable until its replacement passes.
+
+For new imports, the frozen `structure_contract_version=1` sends strictly screened
+native PDF extraction candidates directly to independent Sol original-first review;
+mixed and scan/OCR routes use Terra before that review. Native extraction grants
+no approval. That existing review
+and any required correction verification produce `source_structure` in the same
+pass: complete fixed-role coverage, source-ownership layers, exact page Markdown
+fragments and source-supported relationships. Follow the packet's schema;
+`unknown` preserves uncertain structure, while `unreviewed` means no current
+complete inspection. Both remain conservatively available to content retrieval.
+Structure facts leave full source text, source approvals and frozen card policies
+intact. Structural uncertainty alone does not send a content page to humans.
+
+For an existing source's structure, read `document_status` and
+`source_structure(document_id,offset=0,limit=4)` first. Follow `next_offset` until
+null when a complete inspection is needed; integer limits range from 1 to 20.
+Keep the same global `snapshot_sha256` across slices and restart at offset zero
+if it changes. Inspect the returned physical-page image,
+source/Markdown hashes, coverage and fragment offsets. The workbench's structure
+view provides the same page inspection. When the user asks to fill missing facts,
+call `backfill_structure(document_id,pages?,force=false)`; for a directed recheck,
+pass the explicit physical `pages` with `force=true`. The native `structure` stage
+uses a fresh `historical_review` (Sol) child and the existing dispatch/open/freeze/
+submit path. It freezes original observations before approved text exposure,
+retains prior structure versions and never changes source content or approval.
+Verify both originals before adopting cross-page note, caption, continuation,
+reading-order or table links; uncertain/stale relationships remain unknown.
+Ordinary reindexing only rebuilds projections and never starts structure backfill.
+Respect pause/cancel and use `resume_document` only for explicit continuation;
+actual source-content errors use the existing reviewed revision/human handoff.
+CLI inspection is `python -m hrs --root <workspace> source-structure <document_id>`;
+backfill is `backfill-structure <document_id> [--pages N ...] [--force]` with the
+same root. Retained older imports keep their original processing and card policies.
 
 For source cards and entity/event evidence, open the workbench's card view and
 inspect `research_status(run_id)`. Matching published, indexed, content-verified

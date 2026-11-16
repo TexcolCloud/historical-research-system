@@ -12,17 +12,7 @@ from PIL import Image
 from hrs.codex.mcp import create_server, prepare
 from hrs.codex.workbench import create_review_server
 from hrs.processing.store import Store
-
-
-def complete(store, doc_id, stage, worker, result):
-    task = store.claim_task(doc_id, stage, worker)
-    store.submit_task(
-        doc_id,
-        task["task_id"],
-        task["lease_token"],
-        {"input_sha256": task["input_sha256"], **result},
-    )
-    return task
+from tests.unit.processing.test_store import complete
 
 
 def pending_document(tmp_path, pages=1):

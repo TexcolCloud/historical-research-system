@@ -9,6 +9,7 @@ from hrs.library.projection.facts import (
     runtime_control_for_document,
 )
 from hrs.library.runs.recovery import native_report
+from hrs.search.indexing import index_rules
 
 
 def control(state="cooldown", code="capacity"):
@@ -68,13 +69,26 @@ def test_only_relevant_blocking_pressure_requires_manual_recovery():
     pressure = control("blocked", "quota_exhausted")
     pressure["scopes"][0]["model"] = "gpt-6.1-terra"
     scheduling = {"automatic_work_remaining": True, "runtime_control": pressure}
+    publication_inputs = {
+        "reading_projection": {},
+        "index_rules": index_rules(SimpleNamespace(retrieval_device="cpu")),
+    }
     assert runtime_control_for_document(doc, pressure)["state"] == "normal"
-    assert projection_state({"result": {}}, doc, scheduling, [], None, None)[0] == "running"
+    assert (
+        projection_state({"result": {}}, doc, scheduling, [], None, None, **publication_inputs)[0]
+        == "running"
+    )
     pressure["scopes"][0]["model"] = "gpt-6.1-sol"
-    assert projection_state({"result": {}}, doc, scheduling, [], None, None)[0] == "failed"
+    assert (
+        projection_state({"result": {}}, doc, scheduling, [], None, None, **publication_inputs)[0]
+        == "failed"
+    )
     scheduling["technical_blocked"] = 1
     scheduling["runtime_control"] = None
-    assert projection_state({"result": {}}, doc, scheduling, [], None, None)[0] == "failed"
+    assert (
+        projection_state({"result": {}}, doc, scheduling, [], None, None, **publication_inputs)[0]
+        == "failed"
+    )
 
 
 def test_recovery_report_uses_current_blocking_scope_instead_of_generic_retry(

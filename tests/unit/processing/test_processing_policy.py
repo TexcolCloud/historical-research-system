@@ -8,13 +8,9 @@ from hrs.processing.store import Store, atomic_json
 
 
 def complete(store, doc_id, stage, result):
-    task = store.claim_task(doc_id, stage, "synthetic-" + stage)
-    return store.submit_task(
-        doc_id,
-        task["task_id"],
-        task["lease_token"],
-        {"input_sha256": task["input_sha256"], **result},
-    )
+    from tests.unit.processing.test_store import complete as complete_source
+
+    return complete_source(store, doc_id, stage, "synthetic-" + stage, result)
 
 
 def test_failed_sol_review_goes_to_human_and_test_release_is_not_content_acceptance(tmp_path):

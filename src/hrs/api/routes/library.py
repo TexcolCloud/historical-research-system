@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query
@@ -22,6 +23,7 @@ def search(
     book_id: UUID | None = None,
     semantic: bool = True,
     include_navigation: bool = False,
+    source_scope: Literal["content", "metadata", "all"] = "content",
     toc_entry_id: str | None = Query(default=None, min_length=1, max_length=200),
     limit: int = Query(default=8, ge=1, le=50),
     candidate_limit: int | None = Query(default=None, ge=1, le=100),
@@ -44,6 +46,7 @@ def search(
         diverse=diverse,
         include_navigation=include_navigation,
         toc_entry_id=toc_entry_id,
+        source_scope=source_scope,
     )
     response.headers["Server-Timing"] = ", ".join(
         f"{name.removesuffix('_ms')};dur={value:.3f}"

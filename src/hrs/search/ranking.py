@@ -1,6 +1,7 @@
 """Rank fusion and conservative query boosts, independent of storage and models."""
 
 import re
+from hashlib import sha256
 
 
 def multipart_queries(query):
@@ -16,25 +17,72 @@ def multipart_queries(query):
     return parts
 
 
-def lexical_query(query, scope):
+def lexical_query(query, scope, alias_query=None, *, raw=False):
     phrases = [
         query,
         *re.findall(r'[“"「](.+?)[”"」]', query),
         *re.findall(r"(?<!\d)\d{4}(?!\d)", query),
     ]
+    text_field, alias_field = (
+        ("raw_text_search", "raw_text_aliases") if raw else ("text_search", "text_aliases")
+    )
+    alternatives = [{"multi_match": {"query": query, "fields": ["title_search^2", text_field]}}]
+    if alias_query is not None:
+        alternatives.append(
+            {
+                "multi_match": {
+                    "query": alias_query,
+                    "fields": ["title_aliases^0.35", alias_field + "^0.2"],
+                }
+            }
+        )
     return {
         "bool": {
-            "must": [
-                {"multi_match": {"query": query, "fields": ["title_search^2", "text_search"]}}
-            ],
+            "must": [{"bool": {"should": alternatives, "minimum_should_match": 1}}],
             "should": [
                 {"match_phrase": {field: {"query": phrase, "boost": boost}}}
                 for phrase in dict.fromkeys(phrases)
-                for field, boost in [("title_search", 3), ("text_search", 2)]
+                for field, boost in [("title_search", 3), (text_field, 2)]
             ],
             "filter": scope,
         }
     }
+
+
+def group_exact_results(hits):
+    """Group exact source text, retaining all locations and the best single score."""
+    groups = {}
+    for hit in hits:
+        key = hit["text"]
+        if key not in groups:
+            groups[key] = {
+                **hit,
+                "source_group_id": sha256(key.encode()).hexdigest(),
+                "occurrences": [],
+            }
+        group = groups[key]
+        group["score"] = max(group["score"], hit["score"])
+        occurrences = hit.get("occurrences") or [
+            {k: v for k, v in hit.items() if k != "occurrences"}
+        ]
+        for occurrence in occurrences:
+
+            def location(row):
+                return tuple(
+                    row.get(k) for k in ("book_id", "run_id", "chapter_id", "start", "end")
+                )
+
+            previous = next(
+                (o for o in group["occurrences"] if location(o) == location(occurrence)), None
+            )
+            if previous is None:
+                group["occurrences"].append(occurrence)
+            elif occurrence.get("score", 0) > previous.get("score", 0):
+                previous.update(occurrence)
+    return [
+        {**group, "occurrences": group["occurrences"] if len(group["occurrences"]) > 1 else []}
+        for group in groups.values()
+    ]
 
 
 def fuse(*rankings, constant=60):

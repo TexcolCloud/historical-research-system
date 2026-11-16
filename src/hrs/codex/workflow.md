@@ -137,11 +137,14 @@ Do not turn a network/service error into an unreadable-source verdict. An execut
 ## PDF page routes
 
 Preparation probes each physical page and retains `extraction_plan` evidence.
-Native text is a deterministic extraction candidate, never a machine approval.
-Native pages already have independent review tasks. OCR workers claim only ready
-OCR tasks; scanning a native page again is unnecessary unless content review finds
-a concrete omission. A `blank_candidate` still requires original-image inspection
-before empty text is submitted or approved.
+New imports freeze `structure_contract_version=1`. Strictly screened `native`
+PDF text is retained as an extraction candidate and goes directly to independent
+Sol original-first review. It never grants approval or bypasses frozen original
+observations, complete candidate reading or required source structure. Mixed,
+scan/OCR and blank-candidate routes continue through Terra before that same review.
+The existing Sol review produces content decisions and source structure in one
+pass. Retained older imports keep their frozen policies and routes. A `blank_candidate` still requires
+original-image inspection before empty text is submitted or approved.
 
 For `mixed` pages the OCR task includes native text and normalized image regions.
 Inspect the full original and each missing-content region, then assemble the
@@ -337,7 +340,7 @@ from technical failures: use `report_task_failure` and `wait_for_work` for coold
 stop and report a technical failure after three repeated failures. Explicit pause
 stops owned execution and retains checkpoints; only explicit resume restarts it.
 
-Review and verification results use a structured `page_observation`:
+Retained review and verification results may use a structured `page_observation`:
 `{"kind":"toc|text|frontmatter|table|figure|unknown","printed_label":"exact printed label or null",
 "headings":["literal heading in approved Markdown"],"sequence":"source-supported numbering series"}`.
 Preserve printed labels in OCR Markdown; missing labels stay null. Sequences distinguish
@@ -347,6 +350,78 @@ receipts (`observations`, image receipts and reading hashes) are a separate cont
 never place that object in `page_observation`. Correction results retain a hash-bound
 structure proposal; successful independent verification binds valid structure to the
 approved text without discarding the earlier source evidence.
+
+New policy review/verify results also require `source_structure` schema version 1
+for every verdict. The fixed roles are `body`, `heading`, `toc`, `index`,
+`bibliography`, `frontmatter`, `header`, `footer`, `page_number`, `note`, `table`,
+`figure`, `caption`, `watermark`, `stamp`, `marginalia` and `unknown`. Source layers
+are `source`, `author_note`, `editor_note`, `translator_note`, `annotation`,
+`capture` and `unknown`. Frontmatter requires an explicit subkind: `title_page`,
+`copyright`, `imprint`, `preface`, `foreword`, `afterword`, `acknowledgements`,
+`appendix`, `other` or `unknown`. The packet repeats this schema at the write point.
+Provide `coverage` with every role exactly once and explicit `present`, `absent`
+or `unknown`; missing fields are technical contract errors. Unknown means inspected
+but unresolved structure. Snapshot page status `unreviewed` means that no current
+full structure inspection exists. Neither state grants content approval, and
+structural uncertainty alone never becomes a content human-review issue.
+`fragments` use globally unique physical-page IDs (`pN:local-id`), a fixed role,
+source-ownership layer and exact literal Markdown span, optionally disambiguated
+with literal `prefix`/`suffix`. The store derives Unicode codepoint offsets and
+text hashes and retains image/Markdown hashes and original-reading receipts.
+Inspected normalized `bbox` may locate the corresponding original region. Cover
+the actual source spans, not representative samples. Preserve substantive prefaces,
+forewords, afterwords and appendices with their explicit frontmatter subkind;
+distinguish copyright/imprint/title-page metadata. Note layers retain author,
+editor, translator, annotation or unknown ownership. The complete Markdown is
+never trimmed, reordered or rewritten to fit structure.
+
+Relations are `note_of`, `caption_of`, `continues`, `reading_next` or
+`table_continues`, with explicit verified/unknown status and source evidence.
+Verified cross-page relationships require exact current fragment/source bindings
+and original-image access receipts for both endpoints. Existing organization
+workers receive the frozen structure snapshot and may submit `structure_relations`
+after opening both originals. They use the existing Sol organization pass; no
+extra full-page author/verify pair is introduced. Unverified, missing or stale
+relations are never adopted by retrieval. Structure facts contain no retrieval
+weights, exclusion decisions, purposes or credibility grades.
+
+`source_structure(document_id,offset=0,limit=4)` reads a bounded slice of the
+current source-bound snapshot with coverage, offsets and page image hashes.
+`offset` is a zero-based page offset; both arguments require integers, with
+`offset >= 0` and `1 <= limit <= 20`. An offset outside the document is rejected.
+The response retains the full snapshot's `snapshot_sha256` and `structure_version`
+and reports `page_count`, `offset`, `limit`, `next_offset` and `truncated`.
+Follow `next_offset` until null; `truncated` means this response omits pages from
+the full snapshot, including preceding pages. Each read validates the original
+source and all returned pages' image/text hashes and native evidence receipts.
+Compare snapshot hashes across slices; reread from offset zero if the source
+structure changes. Open retained pixels with `original_image`. CLI inspection
+continues to export the complete snapshot:
+`python -m hrs --root <workspace> source-structure <document_id>`.
+Old `page_observation` values
+are adapted in this one read entrance; omitted old fields remain unknown and
+their page remains unreviewed. Existing approvals, publications and source-card
+policies are unchanged. `backfill_structure(document_id,pages?,force=false)` (CLI
+`python -m hrs --root <workspace> backfill-structure <document_id> [--pages N ...] [--force]`)
+explicitly queues only missing/stale pages in the same
+SQLite task ledger. A directed recheck requires physical `pages` and `force=true`.
+Ordinary reindexing never starts backfill. A fresh independent native Sol worker
+uses the existing original-first freeze/candidate coverage/submit receipt path;
+adjacent frozen fragment context supports source-checked relationships. Already
+queued pages are skipped; requests without force also skip current inspections.
+Packet replay returns the committed receipt. Structure revisions retain the
+previous facts and receipts. Pause,
+cancel, lease expiry and explicit resume use the existing document controls.
+Backfill never changes source text or source approval; actual content errors use
+the existing reviewed source-revision workflow.
+
+The workbench's page inspection uses
+`GET /api/v2/runs/{run_id}/source-structure?page=N`, scoped through the existing
+native workspace identity. It returns only approved source fragments, source
+hashes and the snapshot hash. Directed UI rechecks use
+`POST /api/v2/runs/{run_id}/source-structure/recheck` with
+`expected_snapshot_sha256`, physical `pages` and `force`; stale snapshots or paused
+sources return conflict without changing content or granting approval.
 
 An approved TOC queues `navigation`, using `historical_organization` (Sol), before
 whole-book organization. Claim its frozen approved-page snapshot; read

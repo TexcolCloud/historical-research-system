@@ -15,7 +15,7 @@ FailureCode = Literal[
 ]
 TECHNICAL_FAILURE_CODES = frozenset(get_args(FailureCode))
 
-MachineStage = Literal["ocr", "review", "verify", "navigation", "organization"]
+MachineStage = Literal["ocr", "review", "verify", "navigation", "organization", "structure"]
 TaskStage = MachineStage | Literal["extraction", "human_review", "machine_handoff"]
 TaskState = Literal["ready", "leased", "completed", "pending", "superseded"]
 PageState = Literal[

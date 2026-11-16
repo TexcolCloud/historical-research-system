@@ -66,6 +66,24 @@ def routed_document(tmp_path, route):
 def complete(store, doc_id, stage, worker, result):
     task = store.claim_task(doc_id, stage, worker)
     assert task is not None
+    if task.get("source_first_required"):
+        original, _ = store.original_page(
+            doc_id, task["page"], task_id=task["task_id"], lease_token=task["lease_token"]
+        )
+        store.review_candidate(
+            doc_id,
+            task["task_id"],
+            task["lease_token"],
+            {
+                "image_receipt": original["image_receipt"],
+                "image_sha256": original["image_sha256"],
+                "observations": [
+                    "Synthetic protocol fixture original observation; no real-source inference"
+                ],
+                "unresolved": [],
+            },
+        )
+    result = result_with_structure(store, doc_id, task, result)
     store.submit_task(
         doc_id,
         task["task_id"],
@@ -73,6 +91,26 @@ def complete(store, doc_id, stage, worker, result):
         {"input_sha256": task["input_sha256"], **result},
     )
     return task
+
+
+def result_with_structure(store, doc_id, task, result):
+    """Older protocol tests explicitly leave source structure unknown under the new contract."""
+    from hrs.processing.source_structure import ROLES
+
+    if (
+        task["stage"] in {"review", "verify"}
+        and store.status(doc_id).get("processing_policy", {}).get("structure_contract_version") == 1
+    ):
+        result = {
+            "source_structure": {
+                "schema_version": 1,
+                "coverage": [{"role": role, "status": "unknown"} for role in sorted(ROLES)],
+                "fragments": [],
+                "relations": [],
+            },
+            **result,
+        }
+    return result
 
 
 def test_document_is_reviewed_before_publication_and_search(tmp_path):

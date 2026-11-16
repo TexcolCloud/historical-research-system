@@ -4,7 +4,7 @@ import json
 import re
 from uuid import UUID, uuid5
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import select
 
 from hrs.library.books import get_run
 from hrs.library.navigation_projection import prepare_projection
@@ -153,98 +153,33 @@ class NativePublication:
         }
 
     def index_if_needed(self, run, doc):
-        from hrs.search.chunks import CHUNK_RULE
-        from hrs.search.inputs import INPUT_RULE
+        from hrs.search.indexing import BookIndexer, current_index_matches
 
-        publication_sha = (doc.get("publication") or {}).get("markdown_sha256")
-        navigation_sha = doc.get("navigation", {}).get("sha256")
-        chapter_sha = (run["result"].get("codex_reading_projection") or {}).get("chapters_sha256")
+        result = run["result"] or {}
+        projection = result.get("codex_reading_projection") or {}
+        publication = (doc.get("publication") or {}).get("markdown_sha256")
+        navigation = doc.get("navigation", {}).get("sha256")
         if (
             doc["state"] == "published"
-            and run["result"].get("published")
-            and run["result"].get("codex_publication_sha256") == publication_sha
-            and run["result"].get("codex_projection_policy") == PROJECTION_POLICY
-            and (
-                run["result"].get("codex_indexed_publication_sha256") != publication_sha
-                or run["result"].get("codex_indexed_projection_policy") != PROJECTION_POLICY
-                or run["result"].get("codex_indexed_navigation_sha256") != navigation_sha
-                or run["result"].get("codex_indexed_chunk_rule") != CHUNK_RULE
-                or run["result"].get("codex_indexed_chapters_sha256") != chapter_sha
-            )
-            and run["result"].get("codex_projected_navigation_sha256") == navigation_sha
-            and run["result"].get("codex_reading_projection")
+            and result.get("published")
+            and projection
+            and result.get("codex_publication_sha256") == publication
+            and result.get("codex_projection_policy") == PROJECTION_POLICY
+            and result.get("codex_projected_navigation_sha256") == navigation
         ):
-            from hrs.search.indexing import BookIndexer
-
-            indexer = BookIndexer(self.settings, self.engine)
-            if (
-                run["result"].get("codex_indexed_publication_sha256") == publication_sha
-                and run["result"].get("codex_indexed_projection_policy") == PROJECTION_POLICY
-                and run["result"].get("codex_indexed_chunk_rule") == CHUNK_RULE
-                and run["result"].get("retrieval_input_rule") == INPUT_RULE
-                and run["result"].get("codex_indexed_chapters_sha256") == chapter_sha
-            ):
-                indexer.refresh_navigation(run["id"])
-            else:
-                indexer.index(run["id"])
-            indexed = get_run(self.engine, run["id"])["result"]
-            with self.engine.begin() as connection:
-                connection.execute(
-                    update(db.runs)
-                    .where(db.runs.c.id == run["id"])
-                    .values(
-                        state="completed",
-                        stage="complete",
-                        revision=db.runs.c.revision + 1,
-                        updated_at=func.now(),
-                        error=None,
-                        result={
-                            **indexed,
-                            "codex_indexed_publication_sha256": publication_sha,
-                            "codex_indexed_projection_policy": PROJECTION_POLICY,
-                            "codex_indexed_navigation_sha256": navigation_sha,
-                            "codex_indexed_chunk_rule": CHUNK_RULE,
-                            "codex_indexed_chapters_sha256": chapter_sha,
-                            "bridge_failures": 0,
-                            "bridge_not_before": 0,
-                        },
-                    )
+            with self.engine.connect() as connection:
+                rows = list(
+                    connection.execute(
+                        select(db.chapters).where(db.chapters.c.book_id == run["book_id"])
+                    ).mappings()
                 )
-                connection.execute(
-                    insert(db.events).values(
-                        book_id=run["book_id"],
-                        run_id=run["id"],
-                        kind="run.changed",
-                        payload={
-                            "state": "completed",
-                            "stage": "complete",
-                            "revision": run["revision"] + 1,
-                        },
-                    )
+                title = connection.scalar(
+                    select(db.books.c.title).where(db.books.c.id == run["book_id"])
                 )
-                connection.execute(
-                    insert(db.events).values(
-                        book_id=run["book_id"],
-                        run_id=run["id"],
-                        kind="library.indexed",
-                        payload={
-                            "publication_sha256": publication_sha,
-                            "chapters_sha256": chapter_sha,
-                            "navigation_sha256": navigation_sha,
-                            "retrieval_generation": indexed.get("retrieval_generation"),
-                        },
-                    )
-                )
-                from hrs.research.bridge import enqueue_research_event
-
-                if run["result"].get("content_acceptance") != "workflow_test":
-                    enqueue_research_event(
-                        connection,
-                        run["id"],
-                        {
-                            "publication_sha256": publication_sha,
-                            "chapters_sha256": chapter_sha,
-                        },
-                    )
-            run = get_run(self.engine, run["id"])
+            if current_index_matches(self.settings, run, rows, title):
+                return run
+            # Index activation also commits indexed-source markers and the deduplicated
+            # card outbox event, so a later source change cannot certify an old index.
+            BookIndexer(self.settings, self.engine).index(run["id"])
+            return get_run(self.engine, run["id"])
         return run

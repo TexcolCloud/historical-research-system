@@ -50,6 +50,12 @@ class Evidence:
                 continue
             if files.sha(self.repository.evidence_path(doc, page["image"])) != page["image_sha256"]:
                 raise EvidenceMismatch(f"Original page {page['page']} image hash mismatch")
+            from hrs.processing.source_structure import verify_structure_records
+
+            try:
+                verify_structure_records(page, tasks)
+            except ValueError as error:
+                raise EvidenceMismatch(str(error)) from error
             for field in ("ocr", "candidate", "approved"):
                 text = page.get(field)
                 if text and digest(text["markdown"]) != text["sha256"]:
@@ -134,6 +140,12 @@ class Evidence:
                 raise EvidenceMismatch("Retained task result hash mismatch")
             if task.get("result") is not None:
                 self.verify_details(doc, task, task["result"], files)
+        from hrs.processing.source_structure import verify_relation_records
+
+        try:
+            verify_relation_records(doc, tasks)
+        except ValueError as error:
+            raise EvidenceMismatch(str(error)) from error
         organization = doc.get("organization")
         if organization and pages is None:
             task = next(t for t in doc["tasks"] if t["task_id"] == organization["task_id"])
@@ -142,6 +154,14 @@ class Evidence:
 
     def verify_details(self, doc: dict, task: dict, result: dict, files=None) -> None:
         files = files or EvidenceFiles(self.repository.directory(doc["id"]))
+        allowed_pages = (
+            {task["page"]}
+            | {row["page"] for row in task.get("inputs", {}).get("relation_context", [])}
+            if task.get("stage") == "structure"
+            else {task["page"]}
+            if task["page"] is not None
+            else {p["page"] for p in doc["pages"]}
+        )
         evidence = result.get("original_details", [])
         if not isinstance(evidence, list):
             raise EvidenceMismatch("Detail evidence must be a list")
@@ -164,7 +184,7 @@ class Evidence:
                 or detail.get("document_id") != doc["id"]
                 or detail.get("source_sha256") != doc["source"]["sha256"]
                 or detail.get("page") not in [p["page"] for p in doc["pages"]]
-                or (task["page"] is not None and detail.get("page") != task["page"])
+                or detail.get("page") not in allowed_pages
             ):
                 raise EvidenceMismatch("Detail evidence source/page mismatch")
             for field in ("image", "metadata"):

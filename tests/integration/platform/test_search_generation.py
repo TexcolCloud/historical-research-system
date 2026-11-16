@@ -174,7 +174,21 @@ def test_versioned_index_only_exposes_complete_generation_and_recovers_cached_ve
         assert second["generation"] != first["generation"]
         assert len(embeddings) == count_before_rebuild
         assert all(h["generation"] == second["generation"] for h in search.search("粮食", book))
-        assert search.client.count(index=settings.opensearch_index)["count"] == second["chunks"]
+        assert (
+            search.client.count(index=settings.opensearch_index)["count"]
+            == second["chunks"] + first["chunks"]
+        )
+        with engine.connect() as connection:
+            assert (
+                connection.scalar(select(db.runs.c.result).where(db.runs.c.id == run))[
+                    "retrieval_previous_generation"
+                ]
+                == first["generation"]
+            )
+        rolled_back = indexer.rollback_generation(run, second["generation"])
+        assert rolled_back["generation"] == first["generation"]
+        assert all(h["generation"] == first["generation"] for h in search.search("粮食", book))
+        assert indexer.index(run) == second
         search.client.indices.delete(index=settings.opensearch_index)
         assert indexer.index(run) == second
         assert len(embeddings) == count_before_rebuild

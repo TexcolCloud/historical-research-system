@@ -1,9 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Layers3 } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
 import { client } from "@/client/api.ts";
 import type { components } from "@/client/schema.d.ts";
+import SourceStructurePanel from "./SourceStructurePanel";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 type Item = components["schemas"]["StructureItem"];
 
@@ -19,6 +26,11 @@ export default function StructurePanel({
   onLocate?: (page: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  function locate(page: number) {
+    setOpen(false);
+    onLocate?.(page);
+  }
   const query = useQuery({
     queryKey: ["platform", "structure", runId, revision],
     enabled: open && items === undefined,
@@ -35,22 +47,36 @@ export default function StructurePanel({
   const rows = items ?? query.data?.items;
   const ready = rows?.filter((row) => row.status === "ready").length ?? 0;
   return (
-    <details
-      className="platform-structure"
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button
+        ref={trigger}
+        variant="ghost"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+      >
         <Layers3 size={18} aria-hidden="true" />
-        <span>结构整理结果</span>
-        {rows && (
-          <small>
-            {ready} 项可用于连续阅读 · {rows.length - ready} 项暂按原页显示
-          </small>
-        )}
-      </summary>
-      {open && (
+        结构整理结果
+      </Button>
+      <DialogContent
+        className="source-structure-dialog"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          trigger.current?.focus();
+        }}
+      >
+        <DialogTitle>结构整理结果</DialogTitle>
+        <DialogDescription>
+          {rows
+            ? `${ready} 项可用于连续阅读 · ${rows.length - ready} 项暂按原页显示`
+            : "原页结构与连续阅读关系"}
+        </DialogDescription>
         <div className="platform-structure-body">
+          <SourceStructurePanel
+            key={runId}
+            runId={runId}
+            onLocate={onLocate ? locate : undefined}
+          />
           <p>
             查看标题层级、跨页表格与续段关系。内容核对完成且来源一致的关系用于连续阅读；原文和出处始终保留。
           </p>
@@ -96,7 +122,7 @@ export default function StructurePanel({
                           key={page}
                           variant="outline"
                           size="sm"
-                          onClick={() => onLocate(page)}
+                          onClick={() => locate(page)}
                           aria-label={`查看原件第 ${page} 页`}
                         >
                           原件第 {page} 页
@@ -118,7 +144,7 @@ export default function StructurePanel({
             </ul>
           )}
         </div>
-      )}
-    </details>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -41,6 +41,18 @@ def apply_review(document, task, result, receipt):
     if stage == "verify" and verdict == "corrections":
         raise ValueError("Failed correction verification must remain pending")
     text = page["candidate" if stage == "verify" else "ocr"]
+    from hrs.processing.source_structure import retain_structure, validate_structure
+
+    if doc.get("processing_policy", {}).get("structure_contract_version") == 1:
+        if "source_structure" not in result:
+            raise ValueError(
+                "Frozen structure contract requires source_structure for every review verdict"
+            )
+    structure_text = (
+        result.get("markdown", text["markdown"]) if verdict == "corrections" else text["markdown"]
+    )
+    if "source_structure" in result:
+        validate_structure(result["source_structure"], structure_text, page=page["page"])
     if verdict == "approved":
         if result.get("markdown", text["markdown"]) != text["markdown"]:
             raise ValueError("Changed text requires corrections and separate verification")
@@ -119,9 +131,35 @@ def apply_review(document, task, result, receipt):
     from hrs.processing.page_observation import bind_proposal, retain_proposal
 
     retain_proposal(page, task, result, receipt)
+    retain_structure(page, task, result, receipt, structure_text)
+    if "source_structure" in result:
+        doc["structure_version"] = doc.get("structure_version", 0) + 1
     if page.get("approved"):
         bind_proposal(page)
     return result, automatic_verification
+
+
+def apply_structure(document, task, result, receipt):
+    """Metadata inspection never changes an approval or opens a content human queue."""
+    from hrs.processing.source_structure import retain_structure
+
+    if result.get("verdict") not in {None, "complete"}:
+        raise ValueError(
+            "Structure tasks use complete; uncertain metadata is explicit unknown coverage"
+        )
+    if "source_structure" not in result:
+        raise ValueError("Structure task requires source_structure")
+    page = document["pages"][task["page"] - 1]
+    if (
+        page["approved"]["sha256"] != task["inputs"]["markdown_sha256"]
+        or page["image_sha256"] != task["inputs"]["image_sha256"]
+    ):
+        raise ValueError("Structure source changed; explicitly queue a current recheck")
+    retain_structure(page, task, result, receipt, page["approved"]["markdown"])
+    document["structure_version"] = document.get("structure_version", 0) + 1
+    from hrs.processing.source_structure import retain_document_relations
+
+    retain_document_relations(document, task, result, receipt)
 
 
 def apply_navigation(document, task, result, receipt):
@@ -199,6 +237,9 @@ def apply_organization(document, task, result, receipt):
             from hrs.processing.organization import article_parts
 
             article_parts(doc["pages"], articles)
+        from hrs.processing.source_structure import retain_document_relations
+
+        retain_document_relations(doc, task, result, receipt)
         doc["organization"] = {
             **receipt,
             "articles": articles,

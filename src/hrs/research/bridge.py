@@ -189,6 +189,8 @@ class ResearchBridge:
             retained = self._retained_source(snapshot)
             if retained is not None:
                 return retained
+        if not self.index_is_current(run):
+            raise ServiceError(409, "当前原文结构与检索索引仍在同步，请稍后制卡。")
         if research_scope:
             snapshot["research_scope"] = research_scope
         status = self.workflow.enqueue(
@@ -210,6 +212,24 @@ class ResearchBridge:
                 return status
         return None
 
+    def index_is_current(self, run):
+        """Gate new card work while historical source/card reads remain available."""
+        from hrs.search.indexing import current_index_matches
+
+        current = get_run(self.engine, run["id"])
+        if indexed_version(current) != indexed_version(run):
+            return False
+        with self.engine.connect() as connection:
+            rows = list(
+                connection.execute(
+                    select(db.chapters).where(db.chapters.c.book_id == run["book_id"])
+                ).mappings()
+            )
+            title = connection.scalar(
+                select(db.books.c.title).where(db.books.c.id == run["book_id"])
+            )
+        return current_index_matches(self.settings, current, rows, title)
+
     def reconcile(self):
         with self.engine.connect() as connection:
             runs = (
@@ -227,7 +247,7 @@ class ResearchBridge:
             )
         with self.engine.begin() as connection:
             for run in runs:
-                if version := indexed_version(run):
+                if (version := indexed_version(run)) and self.index_is_current(run):
                     enqueue_research_event(connection, run["id"], version)
         self.reconcile_at = time.monotonic() + 60
 
@@ -266,6 +286,8 @@ class ResearchBridge:
                     snapshot["research_questions"] = []
                     snapshot["research_questions_omitted"] = 0
                     if self._retained_source(snapshot) is None:
+                        if not self.index_is_current(run):
+                            continue
                         self.workflow.enqueue(snapshot)
                 with self.engine.begin() as connection:
                     connection.execute(

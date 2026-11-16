@@ -7,7 +7,6 @@ non-overlapping units and validates complete chapter coverage independently.
 
 import re
 from functools import lru_cache
-from uuid import UUID, uuid5
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from markdown_it import MarkdownIt
@@ -15,63 +14,25 @@ from markdown_it import MarkdownIt
 from hrs.library.footnotes import resolve_footnotes
 from hrs.library.parsing import TableRows as TableRows
 from hrs.library.parsing import blocks as blocks
-from hrs.processing.navigation import fragment_navigation
+from hrs.search.projection import (
+    PROJECTION_RULE,
+    prepare_projection,
+    primary_ranges,
+    project_hit,
+    source_blocks,
+    source_excerpts,
+    source_relations,
+    visible_text,
+)
+from hrs.search.projection import (
+    source_excerpt as source_excerpt,
+)
 
-CHUNK_RULE = "structure-1400-160-v11-source-body"
-VECTOR_INPUT_RULE = "canonical-article-context-v1"
-IMAGE = re.compile(r"!\[([^\]\n]*)\]\((?:<[^>\n]*>|(?:[^()\n]|\([^()\n]*\))*)\)")
+CHUNK_RULE = "structure-1400-160-v12-source-facts"
+VECTOR_INPUT_RULE = PROJECTION_RULE
 
-
-def embedding_text(text):
-    """Drop image transport paths, retaining descriptive alt text and canonical evidence."""
-    return IMAGE.sub(lambda m: "" if m[1].strip().lower() in {"", "image"} else m[1], text)
-
-
-def source_excerpt(chapter, start, end):
-    if not 0 <= start < end <= len(chapter["text"]):
-        raise ValueError("Invalid immutable chapter range")
-    offset, sources = 0, []
-    for part in chapter["parts"]:
-        stop = offset + len(part["text"])
-        if offset < end and stop > start:
-            sources.append(
-                {
-                    "span_id": part["span_id"],
-                    "start": part["start"] + max(0, start - offset),
-                    "end": part["start"] + min(len(part["text"]), end - offset),
-                    "pages": part["source"]["pages"],
-                    "unit_start": max(offset, start) - start,
-                    "unit_end": min(stop, end) - start,
-                    "source_record": part["source"],
-                }
-            )
-        offset = stop
-    pages = sorted({p for s in sources for p in s["pages"]})
-    spans = [
-        (
-            s["source_record"].get("page", s["pages"][0]),
-            s["source_record"].get("original_start", 0)
-            + s["start"]
-            - next(p["start"] for p in chapter["parts"] if p["span_id"] == s["span_id"]),
-            s["source_record"].get("original_start", 0)
-            + s["end"]
-            - next(p["start"] for p in chapter["parts"] if p["span_id"] == s["span_id"]),
-        )
-        for s in sources
-    ]
-    return {
-        **fragment_navigation(chapter.get("navigation", {}), pages, spans),
-        "id": str(uuid5(UUID(chapter["id"]), f"{start}:{end}")),
-        "book_id": str(chapter["book_id"]),
-        "chapter_id": str(chapter["id"]),
-        "run_id": str(chapter["run_id"]),
-        "title": chapter["title"],
-        "text": chapter["text"][start:end],
-        "start": start,
-        "end": end,
-        "sources": sources,
-        "pages": pages,
-    }
+# Compatibility export for callers that clean arbitrary model text.
+embedding_text = visible_text
 
 
 def table_groups(text, block, size):
@@ -109,8 +70,13 @@ def table_groups(text, block, size):
 
 
 def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
-    text, structure = chapter["text"], blocks(chapter["text"])
-    notes = resolve_footnotes(text, chapter["parts"])
+    text = chapter["text"]
+    notes = chapter.get("footnotes")
+    if notes is None:
+        notes = resolve_footnotes(text, chapter["parts"])
+    plan = prepare_projection(chapter, footnotes=notes)
+    structure = source_blocks(chapter, plan=plan)
+    relations = source_relations(chapter, plan=plan)
     split_structure = []
     for block in structure:
         cuts = sorted(
@@ -162,6 +128,7 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
                 or (block["kind"] != "heading" and pending["section"] == block["section"])
             )
             and block["end"] - pending["start"] <= size
+            and pending.get("projection_scope") == block.get("projection_scope")
         ):
             pending["end"] = block["end"]
             pending["path"] = list(dict.fromkeys([*pending["path"], *block["path"]]))
@@ -230,7 +197,7 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
                             for ref in note["references"]
                         ):
                             additions.append((owner["start"], owner["end"], "note_owner"))
-            for relation in chapter.get("structure", []):
+            for relation in relations:
                 if relation["status"] != "ready" or not any(
                     m["start"] < b and m["end"] > a
                     for m in relation["members"]
@@ -240,11 +207,7 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
                     ]
                 ):
                     continue
-                if relation["kind"] == "continuation":
-                    additions.extend(
-                        (m["start"], m["end"], "continuation") for m in relation["members"]
-                    )
-                elif relation["kind"] == "table":
+                if relation["kind"] == "table":
                     first = relation["members"][0]
                     owner = next(
                         (
@@ -271,20 +234,18 @@ def retrieval_chunks(chapter, book_title, size=1400, overlap=160):
             ]
             # Mutable directory labels are lexical/rerank metadata, not vector inputs.
             path = list(dict.fromkeys([chapter["title"], *block["path"]]))
-            projection = embedding_text(
-                "\n".join(
-                    [book_title, " / ".join(path), hit["text"], *(c["text"] for c in context)]
-                )
+            yield project_hit(
+                chapter,
+                {
+                    **hit,
+                    "book_title": book_title,
+                    "section_path": path,
+                    "kind": block["kind"],
+                    "context": context,
+                    "oversized": end - start > size,
+                },
+                plan=plan,
             )
-            yield {
-                **hit,
-                "book_title": book_title,
-                "section_path": path,
-                "kind": block["kind"],
-                "retrieval_text": projection,
-                "context": context,
-                "oversized": end - start > size,
-            }
 
 
 @lru_cache(maxsize=16)
@@ -294,34 +255,9 @@ def context_blocks(text):
 
 
 def indexable_chunks(chapter, book_title):
-    """Keep source coverage intact; furniture is context, not a search candidate."""
+    """Use reviewed source facts, never page position or number/text heuristics."""
     for chunk in retrieval_chunks(chapter, book_title):
-        value = chunk["text"].strip()
-        if not value:
-            continue
-        # A heading-led chunk can also contain its following paragraphs. Only
-        # a wholly heading-only range is furniture; its body remains searchable.
-        if chunk["kind"] == "heading" and all(
-            b["kind"] == "heading" for b in blocks(chunk["text"])
-        ):
-            continue
-        folio = False
-        offset = 0
-        for part in chapter["parts"]:
-            source = part["source"]
-            label = next(
-                (
-                    p["label"]
-                    for p in chunk["printed_pages"]
-                    if source["pages"] == [p["physical_page"]]
-                ),
-                None,
-            )
-            if chunk["start"] == offset and source.get("original_start") == 0 and value == label:
-                folio = True
-                break
-            offset += len(part["text"])
-        if not folio:
+        if chunk["raw_text"].strip():
             yield chunk
 
 
@@ -405,6 +341,23 @@ def shared_table_scopes(text, structure, start, end):
     return scopes
 
 
+class _PendingCandidate:
+    """Keep source geometry cheap until merging or result budgets require context."""
+
+    def __init__(self, raw, materialize):
+        self.raw, self.materialize, self.value = raw, materialize, None
+
+    def ensure_context(self):
+        if self.value is None:
+            self.value = self.materialize()
+        return self.value
+
+    def merge(self, merged):
+        self.value = self.ensure_context()
+        self.value.update(merged)
+        self.raw = self.value
+
+
 def expand_hits(
     hits,
     load_chapter,
@@ -414,13 +367,17 @@ def expand_hits(
     *,
     diverse=False,
     metrics=None,
+    source_scope="all",
+    excerpt=None,
 ):
     """Merge intersecting evidence and spend a separate, bounded context budget."""
-    from hrs.search.ranking import diverse_order
+    from hrs.search.ranking import diverse_order, group_exact_results
 
     metrics = metrics if metrics is not None else {}
+    excerpt = source_excerpts() if excerpt is None else excerpt
+    purpose = "lexical" if source_scope == "all" else "vector"
     metrics.update(budget_rejected=0, duplicate_rejected=0)
-    selected, chapters, structures, introductions = [], {}, {}, {}
+    selected, chapters, structures, introductions, plans = [], {}, {}, {}, {}
     duplicates = set()
     ordered = (
         diverse_order(hits, relevance_window=limit * 2)
@@ -430,7 +387,8 @@ def expand_hits(
     for hit in ordered:
         duplicate = (
             hit["chapter_id"],
-            hit["text"],
+            hit["start"],
+            hit["end"],
             tuple((c["start"], c["end"], c["role"]) for c in hit.get("context", [])),
         )
         if duplicate in duplicates:
@@ -441,11 +399,11 @@ def expand_hits(
         if chapter_id not in chapters:
             chapters[chapter_id] = load_chapter(chapter_id)
             text = chapters[chapter_id]["text"]
-            structures[chapter_id] = (
-                context_blocks(text) if len(text) <= 1_000_000 else blocks(text)
-            )
+            plans[chapter_id] = prepare_projection(chapters[chapter_id])
+            structures[chapter_id] = source_blocks(chapters[chapter_id], plan=plans[chapter_id])
             introductions[chapter_id] = section_introductions(text, structures[chapter_id])
         chapter = chapters[chapter_id]
+        plan = plans[chapter_id]
         hit = {**hit, "context": list(hit.get("context", []))}
         structure, text = structures[chapter_id], chapter["text"]
         additions = []
@@ -454,7 +412,7 @@ def expand_hits(
                 additions.extend(introductions[chapter_id].get(b["section"], []))
                 if b["kind"] in {"table", "html_table"}:
                     additions.extend(table_support(text, structure, i))
-        for relation in chapter.get("structure", []):
+        for relation in source_relations(chapter, plan=plan):
             if (
                 relation["kind"] == "table"
                 and relation["status"] == "ready"
@@ -468,59 +426,115 @@ def expand_hits(
                 )
                 if index is not None:
                     additions.extend(table_support(text, structure, index))
-        hit["context"].extend(
-            dict(source_excerpt(chapter, a, b), role=role)
-            for a, b, role in dict.fromkeys(additions)
+        primary, _ = primary_ranges(
+            chapter, hit["start"], hit["end"], purpose=purpose, source_scope=source_scope, plan=plan
         )
+        supplement_ranges = tuple(dict.fromkeys(additions))
+
+        def materialize(hit=hit, chapter=chapter, plan=plan, additions=supplement_ranges):
+            hit["context"].extend(
+                dict(excerpt(chapter, a, b), role=role) for a, b, role in dict.fromkeys(additions)
+            )
+            return project_hit(
+                chapter,
+                hit,
+                source_scope=source_scope,
+                purpose=purpose,
+                plan=plan,
+                include_view=False,
+                excerpt=excerpt,
+            )
+
+        candidate = _PendingCandidate(hit, materialize)
+        # Preserve errors/ignores for malformed external contexts even beyond the
+        # result limit; valid source ranges need no semantic context yet.
+        ranges = [(c.get("start"), c.get("end")) for c in hit.get("context", [])]
+        ranges.extend(additions_pair[:2] for additions_pair in additions)
+        if any(
+            type(a) is not int or type(b) is not int or not 0 <= a < b <= len(text)
+            for a, b in ranges
+        ):
+            candidate.ensure_context()
+        if not primary:
+            continue
         overlaps = [
             h
             for h in selected
-            if h["chapter_id"] == chapter_id and hit["start"] < h["end"] and h["start"] < hit["end"]
+            if h.raw["chapter_id"] == chapter_id
+            and hit["start"] < h.raw["end"]
+            and h.raw["start"] < hit["end"]
         ]
         if overlaps:
-            start = min(hit["start"], *(h["start"] for h in overlaps))
-            end = max(hit["end"], *(h["end"] for h in overlaps))
+            hit = candidate.ensure_context()
+            overlap_hits = [h.ensure_context() for h in overlaps]
+            start = min(hit["start"], *(h["start"] for h in overlap_hits))
+            end = max(hit["end"], *(h["end"] for h in overlap_hits))
             supplements = {
                 (c["start"], c["end"]): c
-                for h in [hit, *overlaps]
+                for h in [hit, *overlap_hits]
                 for c in h.get("context", [])
-                if c["role"] != "neighbor" and not start <= c["start"] < c["end"] <= end
+                if c["role"] != "neighbor"
             }
-            merged_size = end - start + sum(len(c["text"]) for c in supplements.values())
+            merged = project_hit(
+                chapter,
+                {
+                    **hit,
+                    **excerpt(chapter, start, end),
+                    "context": list(supplements.values()),
+                },
+                source_scope=source_scope,
+                purpose=purpose,
+                plan=plan,
+                include_view=False,
+                excerpt=excerpt,
+            )
+            merged_size = sum(
+                r["end"] - r["start"]
+                for r in merged["ranges"]
+                if r.get("context_role") not in {"neighbor", "unassigned_context"}
+            )
             if merged_size <= min(context_chars, total_chars):
                 overlap = overlaps[0]
-                overlap.update(source_excerpt(chapter, start, end))
-                overlap["context"].extend(hit.get("context", []))
+                merged["score"] = max(hit["score"], *(h["score"] for h in overlap_hits))
+                overlap.merge(merged)
                 for other in overlaps[1:]:
-                    overlap["context"].extend(other.get("context", []))
                     selected.remove(other)
                 continue
-            if any(h["start"] <= hit["start"] < hit["end"] <= h["end"] for h in overlaps):
+            if any(h["start"] <= hit["start"] < hit["end"] <= h["end"] for h in overlap_hits):
                 continue
-        selected.append({**hit, "context": list(hit.get("context", []))})
-    retained, remaining = [], total_chars
-    for hit in selected:
-        if len(retained) >= limit:
-            break
+        selected.append(candidate)
+    retained, remaining, primary_texts = [], total_chars, set()
+    for candidate in selected:
+        hit = candidate.raw
+        if len(primary_texts) >= limit and hit["text"] not in primary_texts:
+            continue
+        hit = candidate.ensure_context()
         # Reserve source-linked constraints before spending on another primary hit.
         mandatory = {}
         for extra in hit["context"]:
-            if (
-                extra["role"] != "neighbor"
-                and not hit["start"] <= extra["start"] < extra["end"] <= hit["end"]
-            ):
+            if extra["role"] not in {"neighbor", "unassigned_context"}:
                 mandatory[(extra["start"], extra["end"])] = extra
-        needed = len(hit["text"]) + sum(len(c["text"]) for c in mandatory.values())
-        if needed <= remaining and needed <= context_chars:
-            retained.append((hit, needed - len(hit["text"])))
+        primary_size = sum(r["end"] - r["start"] for r in hit["ranges"] if r["usage"] == "primary")
+        duplicate_primary = hit["text"] in primary_texts
+        needed = (0 if duplicate_primary else primary_size) + sum(
+            len(c["text"]) for c in mandatory.values()
+        )
+        if (
+            needed <= remaining
+            and primary_size + sum(len(c["text"]) for c in mandatory.values()) <= context_chars
+        ):
+            retained.append((hit, sum(len(c["text"]) for c in mandatory.values())))
+            primary_texts.add(hit["text"])
             remaining -= needed
         else:
             metrics["budget_rejected"] += 1
     output = []
     for hit, reserved in retained:
-        available = min(max(0, context_chars - len(hit["text"])), remaining + reserved)
+        primary_size = sum(r["end"] - r["start"] for r in hit["ranges"] if r["usage"] == "primary")
+        available = min(max(0, context_chars - primary_size), remaining + reserved)
         remaining += reserved
         structure, chapter = structures[hit["chapter_id"]], chapters[hit["chapter_id"]]
+        plan = plans[hit["chapter_id"]]
         indexes = [
             i
             for i, b in enumerate(structure)
@@ -547,13 +561,22 @@ def expand_hits(
                     (max(b["start"], hit["end"]), b["end"]),
                 ]:
                     if start < end:
-                        additions.append(dict(source_excerpt(chapter, start, end), role="neighbor"))
+                        additions.append(dict(excerpt(chapter, start, end), role="neighbor"))
+        additions = project_hit(
+            chapter,
+            {**hit, "context": additions},
+            source_scope=source_scope,
+            purpose=purpose,
+            plan=plan,
+            include_view=False,
+            excerpt=excerpt,
+        )["context"]
         context, seen = [], set()
-        occupied = [(hit["start"], hit["end"])]
+        occupied = [(r["start"], r["end"]) for r in hit["ranges"] if r["usage"] == "primary"]
         truncated = False
         for extra in additions:
             key = (extra["start"], extra["end"])
-            if key in seen or hit["start"] <= key[0] < key[1] <= hit["end"]:
+            if key in seen:
                 continue
             seen.add(key)
             ranges = [key]
@@ -573,18 +596,26 @@ def expand_hits(
                 truncated = True
                 continue
             for a, b in ranges:
-                context.append(dict(source_excerpt(chapter, a, b), role=extra["role"]))
+                context.append({**extra, **excerpt(chapter, a, b), "role": extra["role"]})
                 occupied.append((a, b))
             available -= needed
             remaining -= needed
         output.append(
-            {
-                **hit,
-                "context": context,
-                "context_truncated": truncated,
-                "table_scopes": shared_table_scopes(
-                    chapter["text"], structure, hit["start"], hit["end"]
-                ),
-            }
+            project_hit(
+                chapter,
+                {
+                    **hit,
+                    "context": context,
+                    "context_truncated": truncated,
+                    "table_scopes": shared_table_scopes(
+                        chapter["text"], structure, hit["start"], hit["end"]
+                    ),
+                },
+                source_scope=source_scope,
+                purpose=purpose,
+                plan=plan,
+                excerpt=excerpt,
+                include_relations=False,
+            )
         )
-    return output
+    return group_exact_results(output)

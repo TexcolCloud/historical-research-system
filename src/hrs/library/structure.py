@@ -308,6 +308,90 @@ def project_structure(report, parts):
     return result
 
 
+def project_source_structure(snapshot, parts):
+    """Locate page facts in canonical chapter text; doubtful facts remain visible."""
+    pages = {page["page"]: page for page in snapshot.get("pages", [])}
+    located, fragments, offset = [], {}, 0
+    for part in parts:
+        source = part["source"]
+        physical = source.get("page")
+        if physical is None and len(source.get("pages", [])) == 1:
+            physical = source["pages"][0]
+        page = pages.get(physical, {})
+        origin = source.get("original_start")
+        if type(origin) is int:
+            stop = origin + len(part["text"])
+            bound = (
+                not snapshot.get("stale")
+                and page.get("status") == "reviewed"
+                and source.get("image_sha256") == page.get("image_sha256")
+                and source.get("markdown_sha256") == page.get("markdown_sha256")
+            )
+            for fragment in page.get("fragments", []):
+                a, b = max(origin, fragment["start"]), min(stop, fragment["end"])
+                if a >= b:
+                    continue
+                exact = (
+                    not (a == fragment["start"] and b == fragment["end"])
+                    or sha256(part["text"][a - origin : b - origin].encode()).hexdigest()
+                    == fragment["text_sha256"]
+                )
+                row = {
+                    "id": fragment["fragment_id"],
+                    "start": offset + a - origin,
+                    "end": offset + b - origin,
+                    "role": fragment["role"],
+                    "layer": fragment["layer"],
+                    **({"subkind": fragment["subkind"]} if "subkind" in fragment else {}),
+                    "status": "ready" if bound and exact else "unknown",
+                }
+                located.append(row)
+                fragments.setdefault(fragment["fragment_id"], []).append(
+                    (row, a, b, fragment["start"], fragment["end"])
+                )
+        offset += len(part["text"])
+    relations = []
+    for page in pages.values():
+        for relation in page.get("relations", []):
+            ends = [
+                fragments.get(relation[key], []) for key in ("from_fragment_id", "to_fragment_id")
+            ]
+            members = [
+                {
+                    "start": row["start"],
+                    "end": row["end"],
+                    "fragment_id": row["id"],
+                    "endpoint": endpoint,
+                }
+                for endpoint, end in zip(("from", "to"), ends, strict=True)
+                for row, *_ in end
+            ]
+            if not members:
+                continue
+            complete = all(
+                end
+                and sum(b - a for _, a, b, _, _ in end) == end[0][4] - end[0][3]
+                and all(row["status"] == "ready" for row, *_ in end)
+                for end in ends
+            )
+            relations.append(
+                {
+                    "kind": relation["kind"],
+                    "members": members,
+                    "status": "ready"
+                    if complete and relation["status"] == "verified"
+                    else "unknown",
+                }
+            )
+    return {
+        "schema_version": 1,
+        "structure_version": snapshot.get("structure_version", 0),
+        "snapshot_sha256": snapshot.get("snapshot_sha256"),
+        "blocks": located,
+        "relations": relations,
+    }
+
+
 def reading_view(chapter):
     text, replacements = chapter["text"], []
     for item in chapter.get("structure", []):
